@@ -57,7 +57,8 @@ public final class TableParams
         ADDITIONAL_WRITE_POLICY,
         CRC_CHECK_CHANCE,
         CDC,
-        READ_REPAIR;
+        READ_REPAIR,
+        SCHEMA_TYPE;
 
         @Override
         public String toString()
@@ -82,6 +83,7 @@ public final class TableParams
     public final MemtableParams memtable;
     public final ImmutableMap<String, ByteBuffer> extensions;
     public final boolean cdc;
+    public final SchemaType schemaType;
     public final ReadRepairStrategy readRepair;
 
     private TableParams(Builder builder)
@@ -104,6 +106,7 @@ public final class TableParams
         memtable = builder.memtable;
         extensions = builder.extensions;
         cdc = builder.cdc;
+        schemaType = builder.schemaType;
         readRepair = builder.readRepair;
     }
 
@@ -130,6 +133,7 @@ public final class TableParams
                             .additionalWritePolicy(params.additionalWritePolicy)
                             .extensions(params.extensions)
                             .cdc(params.cdc)
+                            .schemaType(params.schemaType)
                             .readRepair(params.readRepair);
     }
 
@@ -218,6 +222,7 @@ public final class TableParams
             && memtable.equals(p.memtable)
             && extensions.equals(p.extensions)
             && cdc == p.cdc
+            && schemaType == p.schemaType
             && readRepair == p.readRepair;
     }
 
@@ -261,6 +266,7 @@ public final class TableParams
                           .add(Option.MEMTABLE.toString(), memtable)
                           .add(Option.EXTENSIONS.toString(), extensions)
                           .add(Option.CDC.toString(), cdc)
+                          .add(Option.SCHEMA_TYPE.toString(), schemaType)
                           .add(Option.READ_REPAIR.toString(), readRepair)
                           .toString();
     }
@@ -286,6 +292,10 @@ public final class TableParams
                .newLine()
                .append("AND crc_check_chance = ").append(crcCheckChance)
                .newLine();
+
+        if (schemaType != SchemaType.TABLE)
+            builder.append("AND schema_type = ").appendWithSingleQuotes(schemaType.toString())
+                   .newLine();
 
         if (!isView)
         {
@@ -330,6 +340,7 @@ public final class TableParams
         private MemtableParams memtable = MemtableParams.DEFAULT;
         private ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of();
         private boolean cdc;
+        private SchemaType schemaType = SchemaType.TABLE;
         private ReadRepairStrategy readRepair = ReadRepairStrategy.BLOCKING;
 
         public Builder()
@@ -428,6 +439,12 @@ public final class TableParams
         public Builder cdc(boolean val)
         {
             cdc = val;
+            return this;
+        }
+
+        public Builder schemaType(SchemaType val)
+        {
+            schemaType = val;
             return this;
         }
 
