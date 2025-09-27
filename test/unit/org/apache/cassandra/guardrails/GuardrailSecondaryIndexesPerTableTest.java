@@ -20,6 +20,7 @@ package org.apache.cassandra.guardrails;
 
 
 import com.google.common.base.Strings;
+import org.apache.cassandra.index.StubIndex;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -56,7 +57,7 @@ public class GuardrailSecondaryIndexesPerTableTest extends GuardrailTester
         assertNumIndexes(1);
 
         // 2i guardrail won't affect custom index
-        assertValid("CREATE CUSTOM INDEX ON %s (v2) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+        assertValid(format("CREATE CUSTOM INDEX ON %%s(v2) USING '%s'", StubIndex.class.getName()));
         assertNumIndexes(2);
 
         // drop the first index, we should be able to create new index again
