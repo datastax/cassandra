@@ -138,7 +138,8 @@ public class MemtableIndexWriter implements PerIndexWriter
         catch (Throwable t)
         {
             logger.error(perIndexComponents.logMessage("Error while flushing index {}"), t.getMessage(), t);
-            indexContext().getIndexMetrics().memtableIndexFlushErrors.inc();
+            if (indexContext().getIndexMetrics() != null)
+                indexContext().getIndexMetrics().memtableIndexFlushErrors.inc();
 
             throw t;
         }
@@ -264,7 +265,8 @@ public class MemtableIndexWriter implements PerIndexWriter
     {
         perIndexComponents.markComplete();
 
-        indexContext().getIndexMetrics().memtableIndexFlushCount.inc();
+        if (indexContext().getIndexMetrics() != null)
+            indexContext().getIndexMetrics().memtableIndexFlushCount.inc();
 
         long elapsedTime = stopwatch.elapsed(TimeUnit.MILLISECONDS);
 
@@ -274,6 +276,7 @@ public class MemtableIndexWriter implements PerIndexWriter
                      elapsedTime - startTime,
                      elapsedTime);
 
-        indexContext().getIndexMetrics().memtableFlushCellsPerSecond.update((long) (cellCount * 1000.0 / Math.max(1, elapsedTime - startTime)));
+        if (indexContext().getIndexMetrics() != null)
+            indexContext().getIndexMetrics().memtableFlushCellsPerSecond.update((long) (cellCount * 1000.0 / Math.max(1, elapsedTime - startTime)));
     }
 }

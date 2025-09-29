@@ -352,7 +352,8 @@ public class SSTableIndexWriter implements PerIndexWriter
             logger.error("Failed to build index for SSTable {}", perIndexComponents.descriptor(), t);
             perIndexComponents.forceDeleteAllComponents();
 
-            indexContext.getIndexMetrics().segmentFlushErrors.inc();
+            if (indexContext.getIndexMetrics() != null)
+                indexContext.getIndexMetrics().segmentFlushErrors.inc();
 
             throw t;
         }
