@@ -84,6 +84,12 @@ public interface IndexRegistry
         }
 
         @Override
+        public Collection<Index> listNotExcludedIndexes(IndexHints hints)
+        {
+            return Collections.emptyList();
+        }
+
+        @Override
         public Collection<Index.Group> listIndexGroups()
         {
             return Collections.emptySet();
@@ -296,6 +302,14 @@ public interface IndexRegistry
         }
 
         @Override
+        public Collection<Index> listNotExcludedIndexes(IndexHints hints)
+        {
+            return hints.excludes(index)
+                   ? Collections.emptyList()
+                   : Collections.singletonList(index);
+        }
+
+        @Override
         public Collection<Index.Group> listIndexGroups()
         {
             return Collections.singletonList(group);
@@ -331,10 +345,7 @@ public interface IndexRegistry
      * @param hints the index hints with the indexes to exclude.
      * @return the indexes in this registry that are not excluded by the hints.
      */
-    default Collection<Index> listNotExcludedIndexes(IndexHints hints)
-    {
-        return hints.notExcluded(listIndexes());
-    }
+    Collection<Index> listNotExcludedIndexes(IndexHints hints);
 
     default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value, IndexHints hints)
     {

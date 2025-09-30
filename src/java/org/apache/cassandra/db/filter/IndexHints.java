@@ -42,6 +42,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.String.format;
 
@@ -72,12 +73,6 @@ public class IndexHints
         }
 
         @Override
-        public Set<Index> includedIn(Collection<Index> indexes)
-        {
-            return Collections.emptySet();
-        }
-
-        @Override
         public boolean includesAnyOf(Collection<Index> indexes)
         {
             return false;
@@ -93,12 +88,6 @@ public class IndexHints
         public boolean excludes(String indexName)
         {
             return false;
-        }
-
-        @Override
-        public <T extends Index> Set<T> notExcluded(Iterable<T> indexes)
-        {
-            return Sets.newHashSet(indexes);
         }
 
         @Override
@@ -157,23 +146,6 @@ public class IndexHints
     }
 
     /**
-     * Returns the indexes in the specified collection of indexes that are included by these hints.
-     *
-     * @param indexes a collection of indexes
-     * @return the indexes that are included by these hints
-     */
-    public Set<Index> includedIn(Collection<Index> indexes)
-    {
-        Set<Index> result = new HashSet<>();
-        for (Index index : indexes)
-        {
-            if (includes(index))
-                result.add(index);
-        }
-        return result;
-    }
-
-    /**
      * @param indexes a collection of indexes
      * @return {@code true} if any of the indexes is included, {@code false} otherwise
      */
@@ -208,21 +180,6 @@ public class IndexHints
                 return true;
         }
         return false;
-    }
-
-    /**
-     * @param indexes a set of indexes
-     * @return the indexes that are not excluded by these hints
-     */
-    public <T extends Index> Set<T> notExcluded(Iterable<T> indexes)
-    {
-        Set<T> result = new HashSet<>();
-        for (T index : indexes)
-        {
-            if (!excludes(index))
-                result.add(index);
-        }
-        return result;
     }
 
     /**
@@ -628,14 +585,14 @@ public class IndexHints
             int n = indexes.size();
             assert n < Short.MAX_VALUE : TOO_MANY_INDEXES_ERROR + n;
 
-            out.writeShort(n);
+            out.writeVInt(n);
             for (IndexMetadata index : indexes)
                 IndexMetadata.serializer.serialize(index, out, version);
         }
 
         private Set<IndexMetadata> deserialize(DataInputPlus in, int version, TableMetadata table) throws IOException
         {
-            short n = in.readShort();
+            int n = (int) in.readVInt();
             Set<IndexMetadata> indexes = new HashSet<>(n);
             for (short i = 0; i < n; i++)
             {
@@ -650,8 +607,7 @@ public class IndexHints
             if (indexes.isEmpty())
                 return 0;
 
-            long size = 0;
-            size += TypeSizes.SHORT_SIZE; // number of indexes
+            long size = VIntCoding.computeVIntSize(indexes.size());
             for (IndexMetadata index : indexes)
                 size += IndexMetadata.serializer.serializedSize(index, version);
             return size;
