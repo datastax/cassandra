@@ -48,9 +48,11 @@ import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
+import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
+import io.github.jbellis.jvector.quantization.NVQuantization;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
@@ -64,6 +66,7 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -101,6 +104,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
         V1, // includes unit vector calculation
     }
 
+    /** Whether to use NVQ when writing indexes (assuming all other conditions are met) */
+    private static final boolean ENABLE_NVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean();
+
     /** minimum number of rows to perform PQ codebook generation */
     public static final int MIN_PQ_ROWS = 1024;
 
@@ -126,6 +132,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
     // we don't need to explicitly close these since only on-heap resources are involved
     private final ThreadLocal<GraphSearcherAccessManager> searchers;
+
+    private final boolean writeNvq;
 
     /**
      * @param forSearching if true, vectorsByKey will be initialized and populated with vectors as they are added
@@ -159,6 +167,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
         allVectorsAreUnitLength = true;
 
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
+        // NVQ is only written during compaction to save on compute costs
+        writeNvq = ENABLE_NVQ && jvectorVersion >= 4 && !forSearching;
+
         // This is only a warning since it's not a fatal error to write without hierarchy
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
@@ -439,6 +450,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         OrdinalMapper ordinalMapper = remappedPostings.ordinalMapper;
 
+        // Write the NVQ feature, optimize when https://github.com/datastax/jvector/pull/549 is merged
+        NVQuantization nvq = writeNvq ? NVQuantization.compute(vectorValues, 2) : null;
+
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
         var indexFile = termsDataComponent.file();
         long termsOffset = SAICodecUtils.headerSize();
@@ -450,7 +464,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                .withStartOffset(termsOffset)
                                .withVersion(perIndexComponents.version().onDiskFormat().jvectorFileFormatVersion())
                                .withMapper(ordinalMapper)
-                               .with(new InlineVectors(vectorValues.dimension()))
+                               .with(nvq != null ? new NVQ(nvq) : new InlineVectors(vectorValues.dimension()))
                                .build())
         {
             SAICodecUtils.writeHeader(pqOutput);
@@ -483,8 +497,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
             // write the graph
             var start = System.nanoTime();
-            var suppliers = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
-            indexWriter.write(suppliers);
+            var supplier = nvq != null
+                            ? Feature.singleStateFactory(FeatureId.NVQ_VECTORS, nodeId -> new NVQ.State(nvq.encode(vectorValues.getVector(nodeId))))
+                            : Feature.singleStateFactory(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
+            indexWriter.write(supplier);
             SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
             logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
             long termsLength = indexWriter.getOutput().position() - termsOffset;

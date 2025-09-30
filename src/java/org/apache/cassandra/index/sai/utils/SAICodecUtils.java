@@ -72,6 +72,10 @@ public class SAICodecUtils
         return 7;
     }
 
+    public static int footerSize() {
+        return 16;
+    }
+
     public static void writeFooter(IndexOutput out) throws IOException
     {
         writeBEInt(out, FOOTER_MAGIC);
