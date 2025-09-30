@@ -96,7 +96,11 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public int compareTo(PrimaryKey o)
     {
-        if (o instanceof PrimaryKeyWithSource)
+        // Quick path to avoid loading full primary key when possible.
+        // This optimisation is valid only when both primary keys have clustering components.
+        // We must not compare by rowId when the clustering is empty, because two keys
+        // from the same partition may have different rowIds, yet they should be considered equal in that case.
+        if (o instanceof PrimaryKeyWithSource && !hasEmptyClustering() && !o.hasEmptyClustering())
         {
             var other = (PrimaryKeyWithSource) o;
             if (sourceSstableId.equals(other.sourceSstableId))
@@ -108,10 +112,14 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public boolean equals(Object o)
     {
-        if (o instanceof PrimaryKeyWithSource)
+        // Quick path to avoid loading full primary key when possible.
+        // This optimisation is valid only when both primary keys have clustering components.
+        // We must not compare by rowId when the clustering is empty, because two keys
+        // from the same partition may have different rowIds, yet they should be considered equal in that case.
+        if (o instanceof PrimaryKeyWithSource && !hasEmptyClustering())
         {
             var other = (PrimaryKeyWithSource) o;
-            if (sourceSstableId.equals(other.sourceSstableId))
+            if (!other.hasEmptyClustering() && sourceSstableId.equals(other.sourceSstableId))
                 return sourceRowId == other.sourceRowId;
         }
         return primaryKey.equals(o);
