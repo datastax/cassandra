@@ -114,18 +114,29 @@ public class TOCComponent
         {
             try
             {
-                SSTableWatcher.instance.discoverComponents(descriptor);
-                return TOCComponent.loadTOC(descriptor);
+                // Try loading TOC first without discovering components or checking file existence.
+                return TOCComponent.loadTOC(descriptor, false);
             }
             catch (FileNotFoundException | NoSuchFileException e)
             {
-                Set<Component> components = descriptor.discoverComponents();
-                if (components.isEmpty())
-                    return components; // sstable doesn't exist yet
+                SSTableWatcher.instance.discoverComponents(descriptor);
 
-                components.add(Components.TOC);
-                TOCComponent.appendTOC(descriptor, components);
-                return components;
+                // Try loading TOC again after discovering components, still without existence checks
+                try
+                {
+                    return TOCComponent.loadTOC(descriptor, false);
+                }
+                catch (FileNotFoundException | NoSuchFileException e2)
+                {
+                    // Still no TOC, create it from discovered components
+                    Set<Component> components = descriptor.discoverComponents();
+                    if (components.isEmpty())
+                        return components; // sstable doesn't exist yet
+
+                    components.add(Components.TOC);
+                    TOCComponent.appendTOC(descriptor, components);
+                    return components;
+                }
             }
         }
         catch (IOException e)
