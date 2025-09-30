@@ -19,11 +19,7 @@
 package org.apache.cassandra.index.sai;
 
 import java.nio.ByteBuffer;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -139,6 +135,7 @@ public class IndexContext
     private final ConcurrentMap<Memtable, MemtableIndex> liveMemtables = new ConcurrentHashMap<>();
 
     private final IndexViewManager viewManager;
+    @Nullable
     private final IndexMetrics indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
@@ -234,9 +231,9 @@ public class IndexContext
         return clusteringComparator;
     }
 
-    public IndexMetrics getIndexMetrics()
+    public Optional<IndexMetrics> getIndexMetrics()
     {
-        return indexMetrics;
+        return Optional.ofNullable(indexMetrics);
     }
 
     public ColumnQueryMetrics getColumnQueryMetrics()

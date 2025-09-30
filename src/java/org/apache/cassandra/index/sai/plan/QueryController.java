@@ -379,8 +379,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return Plan.ControlFlow.Continue;
         });
         queriedIndexesContexts.forEach(indexContext -> {
-            if (indexContext.getIndexMetrics() != null)
-                indexContext.getIndexMetrics().queriesCount.inc();
+            indexContext.getIndexMetrics().ifPresent(m -> m.queriesCount.inc());
         });
     }
 
