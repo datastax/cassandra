@@ -50,7 +50,10 @@ public class LargePartitionsTest extends SAITester.Versioned
             }
         }
 
-        beforeAndAfterFlush( () -> {
+        // Compaction produces sstables differently than flush, so it is necessary to test sstables written by
+        // compaction as well. (For example, AA indexes are written as if they were row aware in compaction, but not
+        // when flushed from the memtable, and that produced the bug fixed in this commit.)
+        runThenFlushThenCompact( () -> {
 
             // test filtering with single partition queries
             int numExpectedRows = LARGE_PARTITION_SIZE / 2;
