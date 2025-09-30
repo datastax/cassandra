@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.util.Objects;
+import java.util.function.LongFunction;
 import java.util.function.Supplier;
 
 import io.github.jbellis.jvector.util.RamUsageEstimator;
@@ -39,34 +40,46 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
     public PrimaryKey createTokenOnly(Token token)
     {
         assert token != null;
-        return new PartitionAwarePrimaryKey(token, null, null);
+        return new PartitionAwarePrimaryKey(token, null);
     }
 
     @Override
-    public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
+    public PrimaryKey createDeferred(long sstableRowId, LongFunction<Token> rowIdToToken, LongFunction<PrimaryKey> primaryKeySupplier)
     {
-        assert token != null;
-        return new PartitionAwarePrimaryKey(token, null, primaryKeySupplier);
+        return new PartitionAwarePrimaryKey(sstableRowId, rowIdToToken, primaryKeySupplier);
     }
 
     @Override
     public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
     {
         assert partitionKey != null;
-        return new PartitionAwarePrimaryKey(partitionKey.getToken(), partitionKey, null);
+        return new PartitionAwarePrimaryKey(partitionKey.getToken(), partitionKey);
     }
 
     private class PartitionAwarePrimaryKey implements PrimaryKey
     {
-        private final Token token;
+        private Token token;
         private DecoratedKey partitionKey;
-        private Supplier<PrimaryKey> primaryKeySupplier;
+        private long sstableRowId;
+        private LongFunction<Token> rowIdToToken;
+        private LongFunction<PrimaryKey> rowIdToPrimaryKey;
 
-        private PartitionAwarePrimaryKey(Token token, DecoratedKey partitionKey, Supplier<PrimaryKey> primaryKeySupplier)
+        private PartitionAwarePrimaryKey(Token token, DecoratedKey partitionKey)
         {
             this.token = token;
             this.partitionKey = partitionKey;
-            this.primaryKeySupplier = primaryKeySupplier;
+            this.sstableRowId = -1;
+            this.rowIdToToken = null;
+            this.rowIdToPrimaryKey = null;
+        }
+
+        private PartitionAwarePrimaryKey(long sstableRowId, LongFunction<Token> rowIdToToken, LongFunction<PrimaryKey> rowIdToPrimaryKey)
+        {
+            this.token = null;
+            this.partitionKey = null;
+            this.sstableRowId = sstableRowId;
+            this.rowIdToToken = rowIdToToken;
+            this.rowIdToPrimaryKey = rowIdToPrimaryKey;
         }
 
         @Override
@@ -76,6 +89,12 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
             {
                 this.partitionKey = primaryKeySupplier.get().partitionKey();
                 primaryKeySupplier = null;
+            }
+            else if (rowIdToPrimaryKey != null && partitionKey == null)
+            {
+                PrimaryKey pk = rowIdToPrimaryKey.apply(sstableRowId);
+                this.partitionKey = pk.partitionKey();
+                rowIdToPrimaryKey = null;
             }
             return this;
         }
@@ -89,6 +108,11 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public Token token()
         {
+            if (token == null && rowIdToToken != null)
+            {
+                token = rowIdToToken.apply(sstableRowId);
+                rowIdToToken = null;
+            }
             return this.token;
         }
 

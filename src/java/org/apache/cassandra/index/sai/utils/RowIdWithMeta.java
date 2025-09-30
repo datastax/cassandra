@@ -44,7 +44,7 @@ public abstract class RowIdWithMeta
                                                             PrimaryKeyMap primaryKeyMap,
                                                             long segmentRowIdOffset)
     {
-        var pk = primaryKeyMap.primaryKeyFromRowId(segmentRowIdOffset + segmentRowId);
+        var pk = primaryKeyMap.deferredPrimaryKeyFromRowId(segmentRowIdOffset + segmentRowId);
         return wrapPrimaryKey(indexContext, sstableId, pk);
     }
 

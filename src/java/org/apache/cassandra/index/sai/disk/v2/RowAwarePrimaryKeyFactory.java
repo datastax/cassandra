@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v2;
 
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.function.LongFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -52,34 +53,32 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
     @Override
     public PrimaryKey createTokenOnly(Token token)
     {
-        return new RowAwarePrimaryKey(token, null, null, null);
+        return new RowAwarePrimaryKey(token, null, null);
     }
 
     @Override
-    public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
+    public PrimaryKey createDeferred(long sstableRowId, LongFunction<Token> rowIdToToken, LongFunction<PrimaryKey> rowIdToPrimaryKey)
     {
-        return new RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
+        return new DeferredRowAwarePrimaryKey(sstableRowId, rowIdToToken, rowIdToPrimaryKey);
     }
 
     @Override
     public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
     {
-        return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
+        return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering);
     }
 
     private class RowAwarePrimaryKey implements PrimaryKey
     {
-        private Token token;
-        private DecoratedKey partitionKey;
-        private Clustering clustering;
-        private Supplier<PrimaryKey> primaryKeySupplier;
+        private final Token token;
+        private final DecoratedKey partitionKey;
+        private final Clustering clustering;
 
-        private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
+        private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering)
         {
             this.token = token;
             this.partitionKey = partitionKey;
             this.clustering = clustering;
-            this.primaryKeySupplier = primaryKeySupplier;
         }
 
         @Override
@@ -97,28 +96,13 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public DecoratedKey partitionKey()
         {
-            loadDeferred();
             return partitionKey;
         }
 
         @Override
         public Clustering clustering()
         {
-            loadDeferred();
             return clustering;
-        }
-
-        @Override
-        public PrimaryKey loadDeferred()
-        {
-            if (primaryKeySupplier != null && partitionKey == null)
-            {
-                PrimaryKey deferredPrimaryKey = primaryKeySupplier.get();
-                this.partitionKey = deferredPrimaryKey.partitionKey();
-                this.clustering = deferredPrimaryKey.clustering();
-                primaryKeySupplier = null;
-            }
-            return this;
         }
 
         @Override
@@ -141,12 +125,6 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 
         private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
         {
-            // We need to make sure that the key is loaded before returning a
-            // byte comparable representation. If we don't we won't get a correct
-            // comparison because we potentially won't be using the partition key
-            // and clustering for the lookup
-            loadDeferred();
-
             ByteSource tokenComparable = token.asComparableBytes(version);
             ByteSource keyComparable = partitionKey == null ? null
                                                             : ByteSource.of(partitionKey.getKey(), version);
@@ -179,7 +157,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             // Otherwise if this key has no deferred loader and it's partition key is null
             // or the other partition key is null then one or both of the keys
             // are token only so we can only compare tokens
-            if ((cmp != 0) || (primaryKeySupplier == null && partitionKey == null) || o.partitionKey() == null)
+            if ((cmp != 0) || partitionKey == null || o.partitionKey() == null)
                 return cmp;
 
             // Next compare the partition keys. If they are not equal or
@@ -237,4 +215,107 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             return size;
         }
     }
+
+    private static class DeferredRowAwarePrimaryKey implements PrimaryKey
+    {
+        private final long sstableRowId;
+        private final LongFunction<Token> rowIdToToken;
+        private final LongFunction<PrimaryKey> primaryKeySupplier;
+
+        private Token token = null;
+        private PrimaryKey primaryKey = null;
+
+        private DeferredRowAwarePrimaryKey(long sstableRowId, LongFunction<Token> rowIdToToken, LongFunction<PrimaryKey> primaryKeySupplier)
+        {
+            this.sstableRowId = sstableRowId;
+            this.rowIdToToken = rowIdToToken;
+            this.primaryKeySupplier = primaryKeySupplier;
+        }
+
+        @Override
+        public Token token()
+        {
+            if (token == null)
+                token = rowIdToToken.apply(sstableRowId);
+            return token;
+        }
+
+        private PrimaryKey primaryKey()
+        {
+            // Any caller of this method needs the fully resolved key. We need to make sure that the key is loaded
+            // before returning a byte comparable representation. If we don't we won't get a correct
+            // comparison because we potentially won't be using the partition key
+            // and clustering for the lookup
+            if (primaryKey == null)
+                primaryKey = primaryKeySupplier.apply(sstableRowId);
+            return primaryKey;
+        }
+
+        @Override
+        public DecoratedKey partitionKey()
+        {
+            return primaryKey().partitionKey();
+        }
+
+        @Override
+        public Clustering clustering()
+        {
+            return primaryKey().clustering();
+        }
+
+        @Override
+        public ByteSource asComparableBytes(ByteComparable.Version version)
+        {
+            return primaryKey().asComparableBytes(version);
+        }
+
+        @Override
+        public ByteSource asComparableBytesMinPrefix(ByteComparable.Version version)
+        {
+            return primaryKey().asComparableBytesMinPrefix(version);
+        }
+
+        @Override
+        public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
+        {
+            return primaryKey().asComparableBytesMaxPrefix(version);
+        }
+
+        @Override
+        public int compareTo(PrimaryKey o)
+        {
+            int cmp = token().compareTo(o.token());
+            if (cmp != 0)
+                return cmp;
+            return primaryKey().compareTo(o);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return primaryKey().hashCode();
+        }
+
+        @Override
+        public boolean equals(Object obj)
+        {
+            return primaryKey().equals(obj);
+        }
+
+        @Override
+        public String toString()
+        {
+            return primaryKey().toString();
+        }
+
+        @Override
+        public long ramBytesUsed()
+        {
+            // Object header + 3 references (sstableRowId, rowIdToToken, primaryKeySupplier) + implicit outer reference
+            return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER +
+                   4L * RamUsageEstimator.NUM_BYTES_OBJECT_REF +
+                   Long.BYTES;
+        }
+    }
+
 }

@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.function.Supplier;
+import java.util.function.LongFunction;
 
 import io.github.jbellis.jvector.util.Accountable;
 import org.apache.cassandra.db.Clustering;
@@ -82,7 +82,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
          * @param primaryKeySupplier the supplier of the full key
          * @return a {@link PrimaryKey} the token and a primary key supplier
          */
-        PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier);
+        PrimaryKey createDeferred(long sstableRowId, LongFunction<Token> rowIdToToken, LongFunction<PrimaryKey> primaryKeySupplier);
 
         /**
          * Creates a {@link PrimaryKey} that is fully represented by partition key
@@ -150,14 +150,6 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
     {
         return clustering() == null || clustering().isEmpty();
     }
-
-    /**
-     * Load the primary key from the {@link Supplier<PrimaryKey>} (if one
-     * is available) and fully populate the primary key.
-     *
-     * @return the fully populated {@link PrimaryKey}
-     */
-    PrimaryKey loadDeferred();
 
     /**
      * Returns the {@link PrimaryKey} as a {@link ByteSource} byte comparable representation.

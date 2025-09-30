@@ -119,7 +119,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             try
             {
                 return new RowAwarePrimaryKeyMap(rowIdToToken,
-                                                 sortedTermsReader,
                                                  sortedTermsReader.openCursor(),
                                                  partitioner,
                                                  primaryKeyFactory,
@@ -146,7 +145,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     private final LongArray rowIdToToken;
-    private final SortedTermsReader sortedTermsReader;
     private final SortedTermsReader.Cursor cursor;
     private final IPartitioner partitioner;
     private final PrimaryKey.Factory primaryKeyFactory;
@@ -154,7 +152,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     private final SSTableId<?> sstableId;
 
     private RowAwarePrimaryKeyMap(LongArray rowIdToToken,
-                                  SortedTermsReader sortedTermsReader,
                                   SortedTermsReader.Cursor cursor,
                                   IPartitioner partitioner,
                                   PrimaryKey.Factory primaryKeyFactory,
@@ -162,7 +159,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                   SSTableId<?> sstableId)
     {
         this.rowIdToToken = rowIdToToken;
-        this.sortedTermsReader = sortedTermsReader;
         this.cursor = cursor;
         this.partitioner = partitioner;
         this.primaryKeyFactory = primaryKeyFactory;
@@ -182,10 +178,18 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
-    public PrimaryKey primaryKeyFromRowId(long sstableRowId)
+    public PrimaryKey eagerPrimaryKeyFromRowId(long sstableRowId)
     {
-        long token = rowIdToToken.get(sstableRowId);
-        return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromLongValue(token), () -> supplier(sstableRowId));
+        return primaryKeyFromSSTableRowId(sstableRowId);
+    }
+
+    @Override
+    public PrimaryKey deferredPrimaryKeyFromRowId(long sstableRowId)
+    {
+        // Because we don't pass state to the two functions, they are only allocated once, not per call to this
+        // method, which helps reduce allocations. We defer token creation because it is a read from disk and
+        // even though it is relatively cheap, there are cases where we don't need to read it.
+        return primaryKeyFactory.createDeferred(sstableRowId, this::tokenFromSSTableRowId, this::primaryKeyFromSSTableRowId);
     }
 
     private long skinnyExactRowIdOrInvertedCeiling(PrimaryKey key)
@@ -254,7 +258,12 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         FileUtils.closeQuietly(cursor, rowIdToToken);
     }
 
-    private PrimaryKey supplier(long sstableRowId)
+    private Token tokenFromSSTableRowId(long sstableRowId)
+    {
+        return partitioner.getTokenFactory().fromLongValue(rowIdToToken.get(sstableRowId));
+    }
+
+    private PrimaryKey primaryKeyFromSSTableRowId(long sstableRowId)
     {
         try
         {
@@ -265,6 +274,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                                                             TypeUtil.BYTE_COMPARABLE_VERSION);
             byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
 
+            // TODO do we actually have cases where we only write the token to this primary key trie?
             if (keyBytes == null)
                 return primaryKeyFactory.createTokenOnly(token);
 
@@ -292,7 +302,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         while (rowId + 1 < rowIdToToken.length() && primaryKey.token().getLongValue() == rowIdToToken.get(rowId + 1))
         {
             // If we had a collision then see if the partition key for this row is >= to the lookup partition key
-            if (primaryKeyFromRowId(rowId).compareTo(primaryKey) >= 0)
+            if (deferredPrimaryKeyFromRowId(rowId).compareTo(primaryKey) >= 0)
                 return rowId;
 
             rowId++;

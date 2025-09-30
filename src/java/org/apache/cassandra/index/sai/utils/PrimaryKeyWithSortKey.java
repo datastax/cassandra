@@ -129,11 +129,11 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
         return primaryKey.clustering();
     }
 
-    @Override
-    public PrimaryKey loadDeferred()
-    {
-        return primaryKey.loadDeferred();
-    }
+//    @Override
+//    public PrimaryKey loadDeferred()
+//    {
+//        return primaryKey.loadDeferred();
+//    }
 
     @Override
     public ByteSource asComparableBytes(ByteComparable.Version version)

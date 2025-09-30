@@ -179,8 +179,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             try (var pkm = sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
             {
                 // We need to load eagerly to allow us to close the partition key map.
-                min = pkm.primaryKeyFromRowId(minSSTableRowId).loadDeferred();
-                max = pkm.primaryKeyFromRowId(maxSSTableRowId).loadDeferred();
+                min = pkm.eagerPrimaryKeyFromRowId(minSSTableRowId);
+                max = pkm.eagerPrimaryKeyFromRowId(maxSSTableRowId);
             }
 
             this.minKey = new PrimaryKeyWithSource(min, sstableContext.sstable.getId(), minSSTableRowId, min, max);

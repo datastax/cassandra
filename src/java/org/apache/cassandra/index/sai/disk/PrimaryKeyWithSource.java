@@ -58,7 +58,7 @@ public class PrimaryKeyWithSource implements PrimaryKey
     private PrimaryKey primaryKey()
     {
         if (delegatePrimaryKey == null)
-            delegatePrimaryKey = primaryKeyMap.primaryKeyFromRowId(sourceRowId);
+            delegatePrimaryKey = primaryKeyMap.deferredPrimaryKeyFromRowId(sourceRowId);
 
         return delegatePrimaryKey;
     }

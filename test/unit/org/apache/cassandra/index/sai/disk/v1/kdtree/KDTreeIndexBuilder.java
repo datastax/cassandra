@@ -86,7 +86,7 @@ public class KDTreeIndexBuilder
         }
 
         @Override
-        public PrimaryKey primaryKeyFromRowId(long sstableRowId)
+        public PrimaryKey deferredPrimaryKeyFromRowId(long sstableRowId)
         {
             return primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(sstableRowId));
         }

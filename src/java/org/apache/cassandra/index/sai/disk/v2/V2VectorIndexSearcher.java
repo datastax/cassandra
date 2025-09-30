@@ -551,7 +551,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
                         // The next greatest primary key is greater than all the primary keys in this segment
                         break;
                     }
-                    var ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
+                    var ceilingPrimaryKey = primaryKeyMap.deferredPrimaryKeyFromRowId(ceilingRowId);
 
                     boolean ceilingPrimaryKeyMatchesKeyInRange = false;
                     // adaptively choose either seq scan or bsearch to skip ahead in keysInRange until

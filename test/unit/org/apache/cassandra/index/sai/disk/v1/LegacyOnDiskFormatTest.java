@@ -159,7 +159,7 @@ public class LegacyOnDiskFormatTest
 
         PrimaryKey expected = pkFactory.createTokenOnly(Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(23)).getToken());
 
-        PrimaryKey primaryKey = primaryKeyMap.primaryKeyFromRowId(0);
+        PrimaryKey primaryKey = primaryKeyMap.deferredPrimaryKeyFromRowId(0);
 
         assertEquals(expected, primaryKey);
     }

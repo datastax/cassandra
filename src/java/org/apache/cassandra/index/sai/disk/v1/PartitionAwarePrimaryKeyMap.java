@@ -19,12 +19,12 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -156,10 +156,16 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
-    public PrimaryKey primaryKeyFromRowId(long sstableRowId)
+    public PrimaryKey eagerPrimaryKeyFromRowId(long sstableRowId)
     {
-        long token = rowIdToToken.get(sstableRowId);
-        return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromLongValue(token), () -> supplier(sstableRowId));
+        return primaryKeyFromSSTableRowId(sstableRowId);
+    }
+
+    @Override
+    public PrimaryKey deferredPrimaryKeyFromRowId(long sstableRowId)
+    {
+        // Note that we are careful about unnecessary object creation here
+        return primaryKeyFactory.createDeferred(sstableRowId, this::tokenFromSSTableRowId, this::primaryKeyFromSSTableRowId);
     }
 
     @Override
@@ -198,7 +204,12 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         FileUtils.closeQuietly(rowIdToToken, rowIdToOffset, reader);
     }
 
-    private PrimaryKey supplier(long sstableRowId)
+    private Token tokenFromSSTableRowId(long sstableRowId)
+    {
+        return partitioner.getTokenFactory().fromLongValue(rowIdToToken.get(sstableRowId));
+    }
+
+    private PrimaryKey primaryKeyFromSSTableRowId(long sstableRowId)
     {
         return primaryKeyFactory.createPartitionKeyOnly(keyFetcher.apply(reader, rowIdToOffset.get(sstableRowId)));
     }

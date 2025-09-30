@@ -45,8 +45,8 @@ public class PostingListKeyRangeIteratorTest
         @SuppressWarnings("resource")
         var postingList = new IntArrayPostingList(new int[]{ 1, 1, 2, 2, 3});
         var mockIndexContext = mock(IndexContext.class);
-        var indexContext = new IndexSearcherContext(pkm.primaryKeyFromRowId(1),
-                                                    pkm.primaryKeyFromRowId(3),
+        var indexContext = new IndexSearcherContext(pkm.deferredPrimaryKeyFromRowId(1),
+                                                    pkm.deferredPrimaryKeyFromRowId(3),
                                                     0,
                                                     3,
                                                     0,
@@ -54,9 +54,9 @@ public class PostingListKeyRangeIteratorTest
                                                     postingList);
         try (var iterator = new PostingListKeyRangeIterator(mockIndexContext, pkm, indexContext))
         {
-            assertEquals(pkm.primaryKeyFromRowId(1), iterator.next());
-            assertEquals(pkm.primaryKeyFromRowId(2), iterator.next());
-            assertEquals(pkm.primaryKeyFromRowId(3), iterator.next());
+            assertEquals(pkm.deferredPrimaryKeyFromRowId(1), iterator.next());
+            assertEquals(pkm.deferredPrimaryKeyFromRowId(2), iterator.next());
+            assertEquals(pkm.deferredPrimaryKeyFromRowId(3), iterator.next());
             assertFalse(iterator.hasNext());
         }
     }
@@ -76,18 +76,18 @@ public class PostingListKeyRangeIteratorTest
         var plri2 = new PostingListKeyRangeIterator(mockIndexContext, pkm, indexContext2);
         try (var union = KeyRangeUnionIterator.builder().add(plri1).add(plri2).build();)
         {
-            union.skipTo(pkm.primaryKeyFromRowId(2));
+            union.skipTo(pkm.deferredPrimaryKeyFromRowId(2));
             assertTrue(union.hasNext());
             union.next();
-            union.skipTo(pkm.primaryKeyFromRowId(3));
+            union.skipTo(pkm.deferredPrimaryKeyFromRowId(3));
             assertFalse(union.hasNext());
         }
     }
 
     private IndexSearcherContext buildIndexContext(int minRowId, int maxRowId, PostingList list) throws IOException
     {
-        return new IndexSearcherContext(pkm.primaryKeyFromRowId(minRowId),
-                                        pkm.primaryKeyFromRowId(maxRowId),
+        return new IndexSearcherContext(pkm.deferredPrimaryKeyFromRowId(minRowId),
+                                        pkm.deferredPrimaryKeyFromRowId(maxRowId),
                                         minRowId,
                                         maxRowId,
                                         0,

@@ -77,12 +77,21 @@ public interface PrimaryKeyMap extends Closeable
     SSTableId<?> getSSTableId();
 
     /**
+     * Returns a {@link PrimaryKey} for a row Id. The returned {@link PrimaryKey} is eager in that it does not
+     * use deferred loading.
+     *
+     * @param sstableRowId the row Id to lookup
+     * @return the {@link PrimaryKey} associated with the row Id
+     */
+    PrimaryKey eagerPrimaryKeyFromRowId(long sstableRowId);
+
+    /**
      * Returns a {@link PrimaryKey} for a row Id
      *
      * @param sstableRowId the row Id to lookup
      * @return the {@link PrimaryKey} associated with the row Id
      */
-    PrimaryKey primaryKeyFromRowId(long sstableRowId);
+    PrimaryKey deferredPrimaryKeyFromRowId(long sstableRowId);
 
     /**
      * Returns a row Id for a {@link PrimaryKey}. If there is no such term, returns the `-(next row id) - 1` where

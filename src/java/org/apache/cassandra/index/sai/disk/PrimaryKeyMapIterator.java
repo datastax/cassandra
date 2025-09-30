@@ -90,8 +90,8 @@ public final class PrimaryKeyMapIterator extends KeyRangeIterator
         PrimaryKey.Factory pkFactory = ctx.primaryKeyFactory();
         Token minToken = keyRange.left.getToken();
         PrimaryKey minKeyBound = pkFactory.createTokenOnly(minToken);
-        PrimaryKey sstableMinKey = keys.primaryKeyFromRowId(0);
-        PrimaryKey sstableMaxKey = keys.primaryKeyFromRowId(count - 1);
+        PrimaryKey sstableMinKey = keys.deferredPrimaryKeyFromRowId(0);
+        PrimaryKey sstableMaxKey = keys.deferredPrimaryKeyFromRowId(count - 1);
         PrimaryKey minKey = (minKeyBound.compareTo(sstableMinKey) > 0)
                             ? minKeyBound
                             : sstableMinKey;
@@ -110,7 +110,7 @@ public final class PrimaryKeyMapIterator extends KeyRangeIterator
     {
         while (currentRowId >= 0 && currentRowId < keys.count())
         {
-            PrimaryKey key = keys.primaryKeyFromRowId(currentRowId++);
+            PrimaryKey key = keys.deferredPrimaryKeyFromRowId(currentRowId++);
             if (filter == KeyFilter.KEYS_WITH_CLUSTERING && key.hasEmptyClustering())
                 continue;
             return key;

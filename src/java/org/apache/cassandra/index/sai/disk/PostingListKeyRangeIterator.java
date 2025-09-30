@@ -41,7 +41,7 @@ import org.apache.cassandra.utils.Throwables;
  * <ol>
  *   <li> fetch next unique segment row id from posting list or skip to specific segment row id if {@link #skipTo(PrimaryKey)} is called </li>
  *   <li> add segmentRowIdOffset to obtain the sstable row id </li>
- *   <li> produce a {@link PrimaryKey} from {@link PrimaryKeyMap#primaryKeyFromRowId(long)} which is used
+ *   <li> produce a {@link PrimaryKey} from {@link PrimaryKeyMap#deferredPrimaryKeyFromRowId(long)} which is used
  *       to avoid fetching duplicated keys due to partition-level indexing on wide partition schema.
  *       <br/>
  *       Note: in order to reduce disk access in multi-index query, partition keys will only be fetched for intersected tokens
