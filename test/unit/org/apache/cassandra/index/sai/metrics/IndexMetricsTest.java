@@ -20,13 +20,11 @@ package org.apache.cassandra.index.sai.metrics;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.assertj.core.api.Assertions;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.utils.Throwables;
 
-import javax.management.InstanceNotFoundException;
 import javax.management.ObjectName;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
