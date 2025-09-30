@@ -30,6 +30,10 @@ import javax.management.ObjectName;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.*;
 
+import org.apache.cassandra.inject.Injection;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.index.sai.disk.v1.MemtableIndexWriter;
+
 public class IndexMetricsTest extends AbstractMetricsTest
 {
 
@@ -250,5 +254,39 @@ public class IndexMetricsTest extends AbstractMetricsTest
         assertIndexQueryCount(indexV1, 4L);
         assertIndexQueryCount(indexV2, 2L);
         assertIndexQueryCount(indexV3, 1L);
+    }
+
+    @Test
+    public void testMemtableIndexFlushErrorIncrementsMetric() throws Throwable
+    {
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        // Write some data to ensure there is something to flush
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+
+        assertEquals(0L, getMetricValue(objectName("MemtableIndexFlushErrors", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Inject a failure at the entry of MemtableIndexWriter#flush(...) to force a flush error
+        Injection failure = newFailureOnEntry("sai_memtable_flush_error", MemtableIndexWriter.class, "flush", RuntimeException.class);
+        Injections.inject(failure);
+
+        try
+        {
+            // Trigger a flush, which should hit the injected failure
+            flush(KEYSPACE, table);
+        }
+        catch (Throwable ignored)
+        {
+            // Expected due to injected failure
+        }
+        finally
+        {
+            failure.disable();
+        }
+
+        // Verify the memtable index flush error metric is incremented
+        assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushErrors", KEYSPACE, table, index, "IndexMetrics")));
     }
 }

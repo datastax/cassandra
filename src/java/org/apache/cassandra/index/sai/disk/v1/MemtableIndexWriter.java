@@ -24,7 +24,6 @@ import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Stopwatch;
-import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
