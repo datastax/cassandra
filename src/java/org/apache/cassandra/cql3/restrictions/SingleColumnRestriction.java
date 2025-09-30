@@ -96,9 +96,14 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     @Override
     public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
     {
-        for (Index index : indexGroup.getNotExcludedIndexes(indexHints))
+        for (Index index : indexGroup.getIndexes())
+        {
+            if (indexHints.excludes(index))
+                continue;
+
             if (isSupportedBy(index))
                 return false;
+        }
 
         return true;
     }
