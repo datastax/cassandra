@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Stopwatch;
+import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -138,8 +139,7 @@ public class MemtableIndexWriter implements PerIndexWriter
         catch (Throwable t)
         {
             logger.error(perIndexComponents.logMessage("Error while flushing index {}"), t.getMessage(), t);
-            if (indexContext().getIndexMetrics() != null)
-                indexContext().getIndexMetrics().memtableIndexFlushErrors.inc();
+            indexContext().getIndexMetrics().ifPresent(m -> m.memtableIndexFlushErrors.inc());
 
             throw t;
         }
@@ -265,8 +265,7 @@ public class MemtableIndexWriter implements PerIndexWriter
     {
         perIndexComponents.markComplete();
 
-        if (indexContext().getIndexMetrics() != null)
-            indexContext().getIndexMetrics().memtableIndexFlushCount.inc();
+        indexContext().getIndexMetrics().ifPresent(m -> m.memtableIndexFlushCount.inc());
 
         long elapsedTime = stopwatch.elapsed(TimeUnit.MILLISECONDS);
 
@@ -276,7 +275,7 @@ public class MemtableIndexWriter implements PerIndexWriter
                      elapsedTime - startTime,
                      elapsedTime);
 
-        if (indexContext().getIndexMetrics() != null)
-            indexContext().getIndexMetrics().memtableFlushCellsPerSecond.update((long) (cellCount * 1000.0 / Math.max(1, elapsedTime - startTime)));
+        indexContext().getIndexMetrics()
+                .ifPresent(m -> m.memtableFlushCellsPerSecond.update((long) (cellCount * 1000.0 / Math.max(1, elapsedTime - startTime))));
     }
 }
