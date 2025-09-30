@@ -147,9 +147,14 @@ public abstract class MultiColumnRestriction implements SingleRestriction
 
     private boolean isSupportedBy(Index.Group indexGroup, IndexHints indexHints, ColumnMetadata column)
     {
-        for (Index index : indexGroup.getNotExcludedIndexes(indexHints))
+        for (Index index : indexGroup.getIndexes())
+        {
+            if (indexHints.excludes(index))
+                continue;
+
             if (isSupportedBy(index, column))
                 return true;
+        }
 
         return false;
     }
@@ -680,7 +685,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
             throw new UnsupportedOperationException("Secondary indexes do not support IS NOT NULL restrictions");
         }
     }
-    
+
     @Override
     public String toString()
     {
