@@ -348,8 +348,6 @@ public class MetadataSerializer implements IMetadataSerializer
         }
         
         File compressionFile = desc.fileFor(Components.COMPRESSION_INFO);
-        if (!compressionFile.exists())
-            return null;
 
         try
         {
@@ -364,10 +362,12 @@ public class MetadataSerializer implements IMetadataSerializer
                 return compressor.encryptionOnly();
             return null;
         }
-        catch (Exception e)
+        catch (Throwable t)
         {
-            // If we can't read the compression metadata, assume no encryption
-            logger.debug("Could not read compression metadata for {}: {}", desc, e.getMessage());
+            // If we can't read the compression metadata, assume no encryption.
+            // During flush, the compression file may not be accessible yet in some implementations
+            // causing FSReadError. Catch Throwable to handle both Exception and Error.
+            logger.debug("Could not read compression metadata for {}: {}", desc, t.getMessage());
             return null;
         }
     }
