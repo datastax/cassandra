@@ -359,7 +359,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 if (key == null)
                     break;
 
-                if (!controller.selects(key) || key.equals(lastKey))
+                if (!controller.selects(key) || isEqualToLastKey(key))
                     continue;
 
                 nextPrimaryKeys.add(key);
@@ -388,7 +388,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 if (firstKey == null)
                     return Collections.emptyList();
             }
-            while (!controller.selects(firstKey) || firstKey.equals(lastKey));
+            while (!controller.selects(firstKey) || isEqualToLastKey(firstKey));
 
             lastKey = firstKey;
             threadLocalNextKeys.add(firstKey);
