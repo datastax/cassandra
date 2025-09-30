@@ -61,7 +61,9 @@ public class IndexViewManager
     IndexViewManager(IndexContext context, Collection<SSTableIndex> indices)
     {
         this.context = context;
-        this.viewRef.set(new View(context, indices));
+        // A view starts our as non-queryable because C* subsequently creates this IndexViewManager before completing
+        // the index build. Once the build is done, it replaces the view with a queryable one.
+        this.viewRef.set(new View(context, indices, false));
     }
 
     public View getView()
@@ -128,7 +130,7 @@ public class IndexViewManager
                 referencedSSTableIndexes.add(sstableIndex);
             }
 
-            newView = new View(context, referencedSSTableIndexes);
+            newView = new View(context, referencedSSTableIndexes, indexes.right.isEmpty());
         }
         while (newView == null || !viewRef.compareAndSet(currentView, newView));
 
@@ -187,7 +189,9 @@ public class IndexViewManager
                 }
             }
 
-            newView = new View(context, newIndexes);
+            // View is still queryable if we kept all the old indexes.
+            boolean isQueryable = oldView.getIndexes().size() == newIndexes.size();
+            newView = new View(context, newIndexes, isQueryable);
         }
         while (newView == null || !viewRef.compareAndSet(oldView, newView));
         oldView.release();
@@ -203,7 +207,7 @@ public class IndexViewManager
     public void invalidate(boolean indexWasDropped)
     {
         // No need to loop here because we don't use the old view when building the new view.
-        var oldView = viewRef.getAndSet(new View(context, Collections.emptySet()));
+        var oldView = viewRef.getAndSet(new View(context, Collections.emptySet(), false));
         if (indexWasDropped)
             oldView.markIndexWasDropped();
         else
