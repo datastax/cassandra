@@ -924,8 +924,8 @@ public interface CQL3Type
             @Override
             public boolean isDateRange()
             {
-                return "DateRangeType".equals(className) ||
-                       "org.apache.cassandra.db.marshal.DateRangeType".equals(className);
+                return DateRangeType.class.getSimpleName().equals(className) ||
+                       DateRangeType.class.getCanonicalName().equals(className);
             }
 
             @Override
