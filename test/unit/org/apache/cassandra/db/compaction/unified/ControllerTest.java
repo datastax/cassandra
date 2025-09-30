@@ -18,6 +18,7 @@ package org.apache.cassandra.db.compaction.unified;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -52,6 +53,7 @@ import org.mockito.internal.creation.MockSettingsImpl;
 
 import static junit.framework.TestCase.assertNull;
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -708,5 +710,162 @@ public abstract class ControllerTest
 
         Map<String, String> uncheckedOptions = CompactionStrategyOptions.validateOptions(options);
         assertNotNull(uncheckedOptions);
+    }
+
+    @Test
+    public void testFactorizedShardGrowth()
+    {
+        // Test factorization-based growth for num_shards=1000 (5^3 * 2^3)
+        Map<String, String> options = new HashMap<>();
+        options.put(Controller.NUM_SHARDS_OPTION, "1000");
+        options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "1GiB");
+        mockFlushSize(100);
+        Controller controller = Controller.fromOptions(cfs, options);
+
+        // Verify shard count is set
+        assertEquals(1.0, controller.sstableGrowthModifier, 0.0);
+        assertTrue(controller.useFactorizationShardCountGrowth());
+
+        // Test the smooth progression sequence: 1, 5, 25, 125, 250, 500, 1000
+        assertEquals(1, controller.getNumShards(0));    // 0 GiB → 1 shard
+        assertEquals(1, controller.getNumShards(Math.scalb(1.5, 30)));    // 1.5 GiB → 1 shard
+        assertEquals(5, controller.getNumShards(Math.scalb(6.0, 30)));    // 6 GiB → 5 shards
+        assertEquals(25, controller.getNumShards(Math.scalb(30.0, 30)));  // 30 GiB → 25 shards
+        assertEquals(125, controller.getNumShards(Math.scalb(130.0, 30))); // 130 GiB → 125 shards
+        assertEquals(250, controller.getNumShards(Math.scalb(300.0, 30))); // 300 GiB → 250 shards
+        assertEquals(500, controller.getNumShards(Math.scalb(600.0, 30))); // 600 GiB → 500 shards
+        assertEquals(1000, controller.getNumShards(Math.scalb(1000.0, 30))); // 1000 GiB → 1000 shards
+
+        // Test boundary cases
+        assertEquals(1, controller.getNumShards(Math.scalb(4.9, 30)));    // Just below 5
+        assertEquals(5, controller.getNumShards(Math.scalb(5.0, 30)));    // Exactly 5
+        assertEquals(5, controller.getNumShards(Math.scalb(24.9, 30)));   // Just below 25
+        assertEquals(25, controller.getNumShards(Math.scalb(25.0, 30)));  // Exactly 25
+
+        // Test very large values
+        assertEquals(1000, controller.getNumShards(Double.POSITIVE_INFINITY));
+    }
+
+    @Test
+    public void testFactorizedShardGrowthPowerOfTwo()
+    {
+        // Test with a power of 2 (should behave similarly to old logic)
+        Map<String, String> options = new HashMap<>();
+        options.put(Controller.NUM_SHARDS_OPTION, "1024"); // 2^10
+        options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "1GiB");
+        mockFlushSize(100);
+        Controller controller = Controller.fromOptions(cfs, options);
+
+        // Should give smooth power-of-2 progression: 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024
+        assertEquals(1, controller.getNumShards(Math.scalb(1.5, 30)));
+        assertEquals(2, controller.getNumShards(Math.scalb(2.5, 30)));
+        assertEquals(4, controller.getNumShards(Math.scalb(5.0, 30)));
+        assertEquals(8, controller.getNumShards(Math.scalb(10.0, 30)));
+        assertEquals(16, controller.getNumShards(Math.scalb(20.0, 30)));
+        assertEquals(32, controller.getNumShards(Math.scalb(40.0, 30)));
+        assertEquals(64, controller.getNumShards(Math.scalb(80.0, 30)));
+        assertEquals(128, controller.getNumShards(Math.scalb(150.0, 30)));
+        assertEquals(256, controller.getNumShards(Math.scalb(300.0, 30)));
+        assertEquals(512, controller.getNumShards(Math.scalb(600.0, 30)));
+        assertEquals(1024, controller.getNumShards(Math.scalb(1024.0, 30)));
+    }
+
+    @Test
+    public void testFactorizedShardGrowthPrimeTarget()
+    {
+        // Test with a prime number (should stay at 1 until reaching the target)
+        Map<String, String> options = new HashMap<>();
+        options.put(Controller.NUM_SHARDS_OPTION, "17"); // Prime number
+        options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "1GiB");
+        mockFlushSize(100);
+        Controller controller = Controller.fromOptions(cfs, options);
+
+        // Since 17 is prime, sequence should be just: 1, 17
+        assertEquals(1, controller.getNumShards(Double.NaN));
+        assertEquals(1, controller.getNumShards(Math.scalb(1.5, 30)));
+        assertEquals(1, controller.getNumShards(Math.scalb(5.0, 30)));
+        assertEquals(1, controller.getNumShards(Math.scalb(10.0, 30)));
+        assertEquals(1, controller.getNumShards(Math.scalb(16.9, 30)));
+        assertEquals(17, controller.getNumShards(Math.scalb(17.0, 30)));
+        assertEquals(17, controller.getNumShards(Math.scalb(100.0, 30)));
+    }
+
+    @Test
+    public void testFactorizedShardSequence()
+    {
+        // Test small numbers
+        assertEquals(Arrays.asList(1), Controller.factorizedSmoothShardSequence(1));
+        assertEquals(Arrays.asList(1, 2), Controller.factorizedSmoothShardSequence(2));
+        assertEquals(Arrays.asList(1, 3), Controller.factorizedSmoothShardSequence(3));
+        assertEquals(Arrays.asList(1, 2, 4), Controller.factorizedSmoothShardSequence(4));
+
+        // Test perfect squares
+        assertEquals(Arrays.asList(1, 3, 9), Controller.factorizedSmoothShardSequence(9));
+        assertEquals(Arrays.asList(1, 2, 4, 8, 16), Controller.factorizedSmoothShardSequence(16));
+
+        // Test primes
+        assertEquals(Arrays.asList(1, 7), Controller.factorizedSmoothShardSequence(7));
+        assertEquals(Arrays.asList(1, 11), Controller.factorizedSmoothShardSequence(11));
+
+        // Test composite numbers
+        List<Integer> sequence12 = Controller.factorizedSmoothShardSequence(12);
+        assertEquals(Arrays.asList(1, 3, 6, 12), sequence12);
+
+        // Test 1000 = 5^3 * 2^3
+        List<Integer> sequence1000 = Controller.factorizedSmoothShardSequence(1000);
+        List<Integer> expected1000 = Arrays.asList(1, 5, 25, 125, 250, 500, 1000);
+        assertEquals(expected1000, sequence1000);
+
+        // Test 3200 = 5^2 * 2^7
+        List<Integer> sequence3200 = Controller.factorizedSmoothShardSequence(3200);
+        List<Integer> expected3200 = Arrays.asList(1, 5, 25, 50, 100, 200, 400, 800, 1600, 3200);
+        assertEquals(expected3200, sequence3200);
+    }
+
+    @Test
+    public void testFactorizedShardSequenceInputValidation()
+    {
+        assertThatThrownBy(() -> Controller.factorizedSmoothShardSequence(0)).hasMessageContaining("must be positive");
+        assertThatThrownBy(() -> Controller.factorizedSmoothShardSequence(-5)).hasMessageContaining("must be positive");
+    }
+
+    @Test
+    public void testPrimeFactors()
+    {
+        // Test small numbers
+        assertEquals(Arrays.asList(2), Controller.primeFactors(2));
+        assertEquals(Arrays.asList(3), Controller.primeFactors(3));
+        assertEquals(Arrays.asList(2, 2), Controller.primeFactors(4));
+
+        // Test larger numbers
+        assertEquals(Arrays.asList(2, 2, 2, 5, 5, 5), Controller.primeFactors(1000));
+        assertEquals(Arrays.asList(2, 2, 2, 2, 2, 2, 2, 5, 5), Controller.primeFactors(3200));
+
+        // Test primes
+        assertEquals(Arrays.asList(7), Controller.primeFactors(7));
+        assertEquals(Arrays.asList(97), Controller.primeFactors(97));
+    }
+
+    @Test
+    public void testPrimeFactorsInputValidation()
+    {
+        assertThatThrownBy(() -> Controller.primeFactors(0)).hasMessageContaining("greater than 1");
+        assertThatThrownBy(() -> Controller.primeFactors(1)).hasMessageContaining("greater than 1");
+        assertThatThrownBy(() -> Controller.primeFactors(-10)).hasMessageContaining("greater than 1");
+    }
+
+    @Test
+    public void testFactorizedShardGrowthDisabledFlag()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(Controller.BASE_SHARD_COUNT_OPTION, "4");
+        options.put(Controller.TARGET_SSTABLE_SIZE_OPTION, "1GiB");
+        options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "100MiB");
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0.0"); // Dynamic mode
+        mockFlushSize(100);
+        Controller controller = Controller.fromOptions(cfs, options);
+
+        // Should NOT use factorization (dynamic mode)
+        assertFalse(controller.useFactorizationShardCountGrowth());
     }
 }

@@ -17,8 +17,10 @@
 package org.apache.cassandra.db.compaction.unified;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -316,6 +318,19 @@ public abstract class Controller
     static final String MAX_SSTABLES_PER_SHARD_FACTOR_OPTION = "max_sstables_per_shard_factor";
     static final double DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR = Double.parseDouble(getSystemProperty(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION, "10"));
 
+    /**
+     * Whether to use factorization-based shard count growth for smoother progression when num_shards is set.
+     * When enabled (default: true), instead of using power-of-two jumps like 1→2→8→1000, the system will
+     * use prime factorization to create smooth sequences like 1→5→25→125→250→500→1000 for num_shards=1000.
+     * This prevents the large jumps that can cause data loss issues (e.g., HCD-130).
+     * <p>
+     * Only applies when num_shards is explicitly configured
+     * <p>
+     */
+    static final boolean USE_FACTORIZATION_SHARD_COUNT_GROWTH = Boolean.parseBoolean(getSystemProperty("use_factorization_shard_count_growth", "true"));
+
+    /** Cache for factorized shard sequences to avoid repeated calculations for the same target values */
+    private static final Map<Integer, List<Integer>> shardSequenceCache = new ConcurrentHashMap<>();
 
     protected final MonotonicClock clock;
     protected final Environment env;
@@ -523,10 +538,19 @@ public abstract class Controller
             // Note: the minimum size cannot be larger than the target size's minimum.
             if (!(count >= baseShardCount)) // also true for count == NaN
             {
-                // Make it a power of two, rounding down so that sstables are greater in size than the min.
-                // Setting the bottom bit to 1 ensures the result is at least 1.
-                // If baseShardCount is not a power of 2, split only to powers of two that are divisors of baseShardCount so boundaries match higher levels
-                shards = Math.min(Integer.highestOneBit((int) count | 1), baseShardCount & -baseShardCount);
+                // Use factorization-based growth for smoother progression when shard count is set
+                if (useFactorizationShardCountGrowth())
+                {
+                    shards = getLargestFactorizedShardCount(baseShardCount, count);
+                }
+                else
+                {
+                    // Keep original power-of-two logic for dynamic growth mode
+                    // Make it a power of two, rounding down so that sstables are greater in size than the min.
+                    // Setting the bottom bit to 1 ensures the result is at least 1.
+                    // If baseShardCount is not a power of 2, split only to powers of two that are divisors of baseShardCount so boundaries match higher levels
+                    shards = Math.min(Integer.highestOneBit((int) count | 1), baseShardCount & -baseShardCount);
+                }
                 if (logger.isDebugEnabled())
                     logger.debug("Shard count {} for density {}, {} times min size {}",
                                  shards,
@@ -1563,6 +1587,123 @@ public abstract class Controller
                 return Integer.compare(a1.bucketIndex(), a2.bucketIndex());
         });
         return aggregates;
+    }
+
+    /**
+     * Check if num_shards was explicitly set (shard count is fixed) and USE_FACTORIZATION_SHARD_COUNT_GROWTH is true
+     */
+    @VisibleForTesting
+    boolean useFactorizationShardCountGrowth()
+    {
+        return USE_FACTORIZATION_SHARD_COUNT_GROWTH && sstableGrowthModifier == 1.0 && baseShardCount > 0;
+    }
+
+    /**
+     * Compute a smooth shard count sequence based on prime factorization and find the largest shard count that is not larger
+     * than current shard count.
+     *
+     * For num_shards=1000 (5^3 * 2^3), returns the appropriate shard count
+     * based on current density to achieve smooth growth: 1, 5, 25, 125, 250, 500, 1000
+     *
+     * @param targetShards the final target number of shards
+     * @param currentCountBasedOnDensity the current count based on density
+     * @return the best shard count for the current density
+     */
+    private int getLargestFactorizedShardCount(int targetShards, double currentCountBasedOnDensity)
+    {
+        if (currentCountBasedOnDensity >= targetShards)
+            return targetShards;
+
+        // Use cached shard sequence for performance
+        List<Integer> shardSequence = getCachedShardSequence(targetShards);
+
+        // Find the largest value in sequence that's <= currentCount
+        int result = 1;
+        for (int shards : shardSequence)
+        {
+            if (shards <= currentCountBasedOnDensity)
+                result = shards;
+            else
+                break;
+        }
+
+        return result;
+    }
+    /**
+     * Get cached shard sequence for the given target, computing it if not already cached.
+     * This avoids repeated expensive sequence computation for the same shard counts.
+     */
+    private static List<Integer> getCachedShardSequence(int targetShards)
+    {
+        return shardSequenceCache.computeIfAbsent(targetShards, Controller::factorizedSmoothShardSequence);
+    }
+
+    /**
+     * Generate a factorized shard sequence for smooth shard count growth.
+     * Uses prime factorization with largest factors first to create a cumulative sequence.
+     *
+     * For example: 1000 (5³×2³) → [1, 5, 25, 125, 250, 500, 1000]
+     * This provides much smoother growth than power-of-2 jumps.
+     */
+    @VisibleForTesting
+    static List<Integer> factorizedSmoothShardSequence(int target)
+    {
+        if (target <= 0) throw new IllegalArgumentException("target must be positive");
+        if (target == 1) return Collections.singletonList(1);
+
+        // 1) Factorize targeShards into list of prime factors.
+        List<Integer> primes = primeFactors(target);
+
+        // 2) Sort factors in descending order
+        primes.sort(Comparator.reverseOrder());
+
+        // 3) Cumulative product to form the chain.
+        List<Integer> divisors = new ArrayList<>();
+        int cur = 1;
+        divisors.add(cur);
+        for (int p : primes)
+        {
+            cur *= p;
+            divisors.add(cur);
+        }
+        return divisors;
+    }
+
+    /**
+     * Prime factorization for shard count (usually small) to produce a list of prime factors
+     * For example: 1000 -> [2, 2, 2, 5, 5, 5]
+     */
+    @VisibleForTesting
+    static List<Integer> primeFactors(int num)
+    {
+        if (num <= 1)
+            throw new IllegalArgumentException("num must be greater than 1, got: " + num);
+
+        List<Integer> result = new ArrayList<>();
+
+        // Factor out 2 using more readable modulo check
+        while (num % 2 == 0)
+        {
+            result.add(2);
+            num /= 2;
+        }
+
+        // Check odd factors up to sqrt(num)
+        int sqrtNum = (int) Math.sqrt(num);
+        for (int factor = 3; factor <= sqrtNum; factor += 2)
+        {
+            while (num % factor == 0)
+            {
+                result.add(factor);
+                num /= factor;
+            }
+        }
+
+        // If num is still > 1, then it's a prime factor
+        if (num > 1)
+            result.add(num);
+
+        return result;
     }
 
     static final class Metrics
