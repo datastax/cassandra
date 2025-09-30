@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.metrics;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.assertj.core.api.Assertions;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
@@ -158,13 +159,13 @@ public class IndexMetricsTest extends AbstractMetricsTest
     {
         // Set the property before creating any indexes
         CassandraRelevantProperties.SAI_INDEX_METRICS_ENABLED.setBoolean(metricsEnabled);
-        
+
         try
         {
             String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
                                        "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
             String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
-            
+
             // Test all Gauge metrics
             assertMetricExistsIfEnabled(metricsEnabled, "SSTableCellCount", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "LiveMemtableIndexWriteCount", table, index);
@@ -172,20 +173,20 @@ public class IndexMetricsTest extends AbstractMetricsTest
             assertMetricExistsIfEnabled(metricsEnabled, "MemtableOnHeapIndexBytes", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "MemtableOffHeapIndexBytes", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "IndexFileCacheBytes", table, index);
-            
+
             // Test all Counter metrics
             assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCount", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "CompactionCount", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushErrors", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentFlushErrors", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "QueriesCount", table, index);
-            
+
             // Test all Histogram metrics
             assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCellsPerSecond", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "SegmentsPerCompaction", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentCellsPerSecond", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentBytesPerSecond", table, index);
-            
+
             // Test Timer metrics
             assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
         }
@@ -199,40 +200,11 @@ public class IndexMetricsTest extends AbstractMetricsTest
     private void assertMetricExistsIfEnabled(boolean shouldExist, String metricName, String table, String index)
     {
         ObjectName name = objectName(metricName, KEYSPACE, table, index, "IndexMetrics");
-        
+
         if (shouldExist)
-            assertMetricExists(name, metricName);
+            assertMetricExists(name);
         else
-            assertMetricDoesNotExist(name, metricName);
-    }
-
-    private void assertMetricExists(ObjectName name, String metricName)
-    {
-        try
-        {
-            getMetricValue(name);
-            // If we get here without exception, the metric exists - that's what we want
-        }
-        catch (Exception e)
-        {
-            fail("Expected metric " + metricName + " to be registered when metrics are enabled, but got: " + e.getMessage());
-        }
-    }
-
-    private void assertMetricDoesNotExist(ObjectName name, String metricName)
-    {
-        try
-        {
-            getMetricValue(name);
-            fail("Expected metric " + metricName + " to not be registered when metrics are disabled");
-        }
-        catch (Exception e)
-        {
-            // Expected - metrics should not be accessible when disabled
-            assertTrue("Expected InstanceNotFoundException for " + metricName + " but got: " + e.getClass().getSimpleName(),
-                      e.getCause() instanceof InstanceNotFoundException ||
-                      e instanceof InstanceNotFoundException);
-        }
+            assertMetricDoesNotExist(name);
     }
 
     private void assertIndexQueryCount(String index, long expectedCount)
