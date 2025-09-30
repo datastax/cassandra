@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
@@ -365,6 +366,17 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return key;
         }
 
+        private boolean isEqualToLastKey(PrimaryKey key)
+        {
+            // We don't want key.equals(lastKey) because some PrimaryKey implementations consider more than just
+            // partition key and clustering for equality. This can break lastKey skipping, which is necessary for
+            // correctness when PrimaryKey doesn't have a clustering (as otherwise, the same partition may get
+            // filtered and considered as a result multiple times).
+            return lastKey != null &&
+                   Objects.equals(lastKey.partitionKey(), key.partitionKey()) &&
+                   Objects.equals(lastKey.clustering(), key.clustering());
+        }
+
         private void fillNextSelectedKeysInPartition(DecoratedKey partitionKey, List<PrimaryKey> nextPrimaryKeys)
         {
             while (operation.hasNext()
@@ -376,7 +388,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 if (key == null)
                     break;
 
-                if (!controller.selects(key) || key.equals(lastKey))
+                if (!controller.selects(key) || isEqualToLastKey(key))
                     continue;
 
                 nextPrimaryKeys.add(key);
@@ -405,7 +417,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 if (firstKey == null)
                     return Collections.emptyList();
             }
-            while (!controller.selects(firstKey) || firstKey.equals(lastKey));
+            while (!controller.selects(firstKey) || isEqualToLastKey(firstKey));
 
             lastKey = firstKey;
             threadLocalNextKeys.add(firstKey);
