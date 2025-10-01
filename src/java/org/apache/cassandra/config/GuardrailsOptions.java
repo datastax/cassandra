@@ -76,6 +76,7 @@ public class GuardrailsOptions implements GuardrailsConfig
     public GuardrailsOptions(Config config)
     {
         this.config = config;
+        validate();
     }
 
     /**
