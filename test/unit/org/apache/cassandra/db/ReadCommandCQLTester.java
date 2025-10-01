@@ -39,11 +39,11 @@ public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTes
     {
         T command = parseCommand(query);
 
-        String actualClearCQL = command.toCQLString(false);
+        String actualClearCQL = command.toUnredactedCQLString();
         Assertions.assertThat(actualClearCQL)
                   .isEqualTo(formatQuery(expectedClearCQL));
 
-        String actualRedactedCQL = command.toCQLString(true);
+        String actualRedactedCQL = command.toRedactedCQLString();
         Assertions.assertThat(actualRedactedCQL)
                   .isEqualTo(formatQuery(expectedRedactedCQL));
 

@@ -284,11 +284,19 @@ abstract public class Plan
     protected abstract double estimateSelectivity();
 
     /**
-     * Formats the whole plan as a pretty tree
+     * Formats the whole plan as a pretty tree, redacting the queried column values.
      */
-    public final String toStringRecursive()
+    public final String toRedactedStringRecursive()
     {
         return toStringRecursive(true);
+    }
+
+    /**
+     * Formats the whole plan as a pretty tree, redacting the queried column values.
+     */
+    public final String toUnredactedStringRecursive()
+    {
+        return toStringRecursive(false);
     }
 
     /**
@@ -296,19 +304,20 @@ abstract public class Plan
      *
      * @param redact whether to redact the queried column values.
      */
-    public final String toStringRecursive(boolean redact)
+    private final String toStringRecursive(boolean redact)
     {
         TreeFormatter<Plan> formatter = new TreeFormatter<>(plan -> plan.toString(redact), Plan::subplans);
         return formatter.format(this);
     }
 
     /**
-     * Returns the string representation of this node only
+     * Returns the string representation of this node only, without redacting the queried column values.
+     * @see #toString(boolean)
      */
     @Override
     public final String toString()
     {
-        return toString(true);
+        return toString(false);
     }
 
     /**
@@ -327,7 +336,7 @@ abstract public class Plan
 
     /**
      * Returns additional information specific to the node displayed in the first line.
-     * The information is included in the output of {@link #toString()} and {@link #toStringRecursive()}.
+     * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
      * It is up to subclasses to implement it.
      */
     protected String title(boolean redact)
@@ -337,7 +346,7 @@ abstract public class Plan
 
     /**
      * Returns additional information specific to the node, displayed below the title.
-     * The information is included in the output of {@link #toString()} and {@link #toStringRecursive()}.
+     * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
      * It is up to subclasses to implement it.
      */
     protected String description()
@@ -366,7 +375,7 @@ abstract public class Plan
     public final Plan optimize()
     {
         if (logger.isTraceEnabled())
-            logger.trace("Optimizing plan:\n{}", toStringRecursive());
+            logger.trace("Optimizing plan:\n{}", toRedactedStringRecursive());
 
         Plan bestPlanSoFar = this;
         List<Leaf> leaves = nodesOfType(Leaf.class);
@@ -381,14 +390,14 @@ abstract public class Plan
 
             Plan candidate = bestPlanSoFar.removeRestriction(leaf.id);
             if (logger.isTraceEnabled())
-                logger.trace("Candidate query plan:\n{}", candidate.toStringRecursive());
+                logger.trace("Candidate query plan:\n{}", candidate.toRedactedStringRecursive());
 
             if (candidate.fullCost() <= bestPlanSoFar.fullCost())
                 bestPlanSoFar = candidate;
         }
 
         if (logger.isTraceEnabled())
-            logger.trace("Optimized plan:\n{}", bestPlanSoFar.toStringRecursive());
+            logger.trace("Optimized plan:\n{}", bestPlanSoFar.toRedactedStringRecursive());
         return bestPlanSoFar;
     }
 
