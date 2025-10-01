@@ -25,9 +25,9 @@ public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTes
     protected void assertToCQLString(String query, String expectedClearCQL, String expectedRedactedCQL)
     {
         T command = parseCommand(query);
-        Assertions.assertThat(command.toCQLString(false))
+        Assertions.assertThat(command.toUnredactedCQLString())
                   .isEqualTo(formatQuery(expectedClearCQL));
-        Assertions.assertThat(command.toCQLString(true))
+        Assertions.assertThat(command.toRedactedCQLString())
                   .isEqualTo(formatQuery(expectedRedactedCQL));
     }
 }

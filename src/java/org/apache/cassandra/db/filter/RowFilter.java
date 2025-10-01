@@ -1425,17 +1425,16 @@ public class RowFilter
         private String likeToCQLString(String pattern, AbstractType<?> type, boolean redact)
         {
             if (redact)
-                return String.format("%s LIKE ?", column.name);
+                return String.format("%s LIKE ?", column.name.toCQLString());
 
             String stringValue = String.format(pattern, type.getString(value));
-            return String.format("%s LIKE %s", column.name, truncateValue(stringValue));
+            return String.format("%s LIKE %s", column.name.toCQLString(), truncateValue(stringValue));
         }
 
         private static String truncateValue(String value)
         {
             return value.length() > 9 ? value.substring(0, 6) + "..." : value;
         }
-
 
         @Override
         protected Kind kind()
