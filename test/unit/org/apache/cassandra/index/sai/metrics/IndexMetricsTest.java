@@ -191,6 +191,14 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
             // Test Timer metrics
             assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
+
+            // Test indexing operations to ensure null indexMetrics is handled gracefully
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '1')");
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 2, '2')");
+
+            // Verify MemtableIndexWriteLatency metric behavior after indexing operations
+            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
         }
         finally
         {
