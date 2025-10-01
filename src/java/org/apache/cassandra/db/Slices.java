@@ -611,7 +611,7 @@ public abstract class Slices implements Iterable<Slice>
                     if (values.size() == 1)
                     {
                         sb.append(" = ").append(column.type.toCQLString(first.startValue));
-                        rowFilter = rowFilter.without(column, Operator.EQ, first.startValue);
+                        rowFilter = rowFilter.withoutFirstLevelExpression(column, Operator.EQ, first.startValue);
                     }
                     else
                     {
@@ -620,7 +620,7 @@ public abstract class Slices implements Iterable<Slice>
                         for (ByteBuffer value : values)
                         {
                             sb.append(j++ == 0 ? "" : ", ").append(column.type.toCQLString(value));
-                            rowFilter = rowFilter.without(column, Operator.EQ, value);
+                            rowFilter = rowFilter.withoutFirstLevelExpression(column, Operator.EQ, value);
                         }
                         sb.append(')');
                     }
@@ -644,7 +644,7 @@ public abstract class Slices implements Iterable<Slice>
                             operator = first.startInclusive ? Operator.GTE : Operator.GT;
                         sb.append(' ').append(operator).append(' ')
                           .append(column.type.toCQLString(first.startValue));
-                        rowFilter = rowFilter.without(column, operator, first.startValue);
+                        rowFilter = rowFilter.withoutFirstLevelExpression(column, operator, first.startValue);
                     }
                     if (first.endValue != null)
                     {
@@ -658,11 +658,11 @@ public abstract class Slices implements Iterable<Slice>
                             operator = first.endInclusive ? Operator.LTE : Operator.LT;
                         sb.append(' ').append(operator).append(' ')
                           .append(column.type.toCQLString(first.endValue));
-                        rowFilter = rowFilter.without(column, operator, first.endValue);
+                        rowFilter = rowFilter.withoutFirstLevelExpression(column, operator, first.endValue);
                     }
                 }
             }
-            rowFilter = rowFilter.without(metadata.clusteringColumns().get(0), Operator.IN);
+            rowFilter = rowFilter.withoutFirstLevelExpression(metadata.clusteringColumns().get(0), Operator.IN);
 
             // Append the row filter.
             if (!rowFilter.isEmpty())

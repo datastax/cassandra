@@ -594,7 +594,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         StringBuilder sb = new StringBuilder();
         sb.append(defs.next().name.toCQLString());
         while (defs.hasNext())
-            sb.append(", ").append(defs.next().name);
+            sb.append(", ").append(defs.next().name.toCQLString());
         return sb.toString();
     }
 

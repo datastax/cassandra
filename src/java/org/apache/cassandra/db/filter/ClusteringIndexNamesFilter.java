@@ -186,10 +186,10 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
               .append(isSingleColumn ? "" : ')');
 
             for (int j = 0; j < clustering.size(); j++)
-                rowFilter = rowFilter.without(metadata.clusteringColumns().get(j), Operator.EQ, clustering.bufferAt(j));
+                rowFilter = rowFilter.withoutFirstLevelExpression(metadata.clusteringColumns().get(j), Operator.EQ, clustering.bufferAt(j));
         }
         sb.append(isSingleClustering ? "" : ")");
-        rowFilter = rowFilter.without(metadata.clusteringColumns().get(0), Operator.IN);
+        rowFilter = rowFilter.withoutFirstLevelExpression(metadata.clusteringColumns().get(0), Operator.IN);
 
         if (!rowFilter.isEmpty())
         {

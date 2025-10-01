@@ -285,8 +285,8 @@ public class RowFilter
     }
 
     /**
-     * Returns this filter but without the provided expression. This method
-     * *assumes* that the filter contains the provided expression.
+     * Returns this filter but without the provided expression. This method *assumes* that the filter contains the
+     * provided expression, and it looks in all the levels of the filter tree.
      */
     public RowFilter without(Expression expression)
     {
@@ -298,19 +298,19 @@ public class RowFilter
     }
 
     /**
-     * Returns a copy of this filter but without the provided first level expressions.
-     * If this filter doesn't contain the specified expression this method will just return an identical copy of this filter.
+     * Returns a copy of this filter but without first level expressions with the provided column, operator and value.
+     * If this filter doesn't contain the specified expressions this method will just return an identical copy of this filter.
      */
-    public RowFilter without(ColumnMetadata column, Operator op, ByteBuffer value)
+    public RowFilter withoutFirstLevelExpression(ColumnMetadata column, Operator op, ByteBuffer value)
     {
         return restrictFirstLevel(e -> !(e.column.equals(column) && e.operator == op && e.value.equals(value)));
     }
 
     /**
-     * Returns a copy of this filter but without the provided first level expressions.
-     * If this filter doesn't contain the specified expression this method will just return an identical copy of this filter.
+     * Returns a copy of this filter but without first level expressions with the provided column and operator.
+     * If this filter doesn't contain the specified expressions this method will just return an identical copy of this filter.
      */
-    public RowFilter without(ColumnMetadata column, Operator op)
+    public RowFilter withoutFirstLevelExpression(ColumnMetadata column, Operator op)
     {
         return restrictFirstLevel(e -> !(e.column.equals(column) && e.operator == op));
     }
