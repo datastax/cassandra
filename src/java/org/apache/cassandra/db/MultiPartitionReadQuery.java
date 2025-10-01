@@ -56,7 +56,7 @@ public interface MultiPartitionReadQuery extends ReadQuery
     {
         List<DataRange> ranges = ranges();
         boolean hasRangeRestrictions = false;
-        if (ranges().size() == 1)
+        if (ranges.size() == 1)
         {
             String rangeString = ranges.get(0).toCQLString(metadata());
             if (!rangeString.isEmpty())
