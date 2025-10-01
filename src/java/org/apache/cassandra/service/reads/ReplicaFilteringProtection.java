@@ -199,7 +199,7 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
                     String message = String.format("Replica filtering protection has cached up to %d rows during query %s, " +
                                                    "which is over the warning threshold of %d rows defined by " +
                                                    "'cached_replica_rows_warn_threshold' in cassandra.yaml.",
-                                                   maxRowsCached, command.toCQLString(), cachedRowsWarnThreshold);
+                                                   maxRowsCached, command.toRedactedCQLString(), cachedRowsWarnThreshold);
 
                     ClientWarn.instance.warn(message);
                     oneMinuteLogger.warn(message);
@@ -289,7 +289,7 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
             String message = String.format("Replica filtering protection has cached %d rows during query %s, " +
                                            "which is over the failure threshold of %d rows defined by " +
                                            "'cached_replica_rows_fail_threshold' in cassandra.yaml.",
-                                           currentRowsCached, command.toCQLString(), cachedRowsFailThreshold);
+                                           currentRowsCached, command.toRedactedCQLString(), cachedRowsFailThreshold);
 
             logger.error(message);
             Tracing.trace(message);
