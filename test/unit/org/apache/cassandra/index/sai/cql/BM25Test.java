@@ -793,7 +793,7 @@ public class BM25Test extends SAITester
         analyzeDataset("climate");
         analyzeDataset("health");
 
-        beforeAndAfterFlush(
+        runThenFlushThenCompact(
         () -> {
             executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
