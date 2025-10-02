@@ -872,18 +872,18 @@ public class SecondaryIndexTest extends CQLTester
 
         forcePreparedValues();
         // prefix mode indexes support prefix/contains/matches
-        assertInvalidMessage("c1 LIKE '%<term>' abc is only supported on properly indexed columns",
+        assertInvalidMessage("c1 LIKE '%abc' is only supported on properly indexed columns",
                              "SELECT * FROM %s WHERE c1 LIKE ?",
                              "%abc");
-        assertInvalidMessage("c1 LIKE '%<term>%' abc is only supported on properly indexed columns",
+        assertInvalidMessage("c1 LIKE '%abc%' is only supported on properly indexed columns",
                              "SELECT * FROM %s WHERE c1 LIKE ?",
                              "%abc%");
         execute("SELECT * FROM %s WHERE c1 LIKE ?", "abc%");
         execute("SELECT * FROM %s WHERE c1 LIKE ?", "abc");
-        assertInvalidMessage("v1 LIKE '%<term>' abc is only supported on properly indexed columns",
+        assertInvalidMessage("v1 LIKE '%abc' is only supported on properly indexed columns",
                              "SELECT * FROM %s WHERE v1 LIKE ?",
                              "%abc");
-        assertInvalidMessage("v1 LIKE '%<term>%' abc is only supported on properly indexed columns",
+        assertInvalidMessage("v1 LIKE '%abc%' is only supported on properly indexed columns",
                              "SELECT * FROM %s WHERE v1 LIKE ?",
                              "%abc%");
         execute("SELECT * FROM %s WHERE v1 LIKE ?", "abc%");
