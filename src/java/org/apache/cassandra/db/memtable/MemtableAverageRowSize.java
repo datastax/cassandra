@@ -18,11 +18,15 @@
 
 package org.apache.cassandra.db.memtable;
 
+import java.util.function.Consumer;
+
 import org.apache.cassandra.db.DataRange;
+import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.tries.Trie;
 
 class MemtableAverageRowSize
 {
@@ -31,6 +35,35 @@ class MemtableAverageRowSize
     public final long rowSize;
     public final long operations;
 
+    public MemtableAverageRowSize(Memtable memtable, Trie<?> trie)
+    {
+        // If this is a trie-based memtable, get the row sizes from the trie elements. This achieves two things:
+        // - makes sure the size used is the size reflected in the memtable's dataSize
+        //   (which e.g. excludes clustering keys)
+        // - avoids the conversion to Row, which has non-trivial cost
+
+        class SizeCalculator implements Trie.ValueConsumer<Object>
+        {
+            long totalSize = 0;
+            long count = 0;
+
+            @Override
+            public void accept(Object o)
+            {
+                if (o instanceof IDataSize)
+                {
+                    totalSize += ((IDataSize) o).dataSize();
+                    ++count;
+                }
+            }
+        }
+
+        SizeCalculator sizeCalculator = new SizeCalculator();
+        trie.forEachValue(sizeCalculator);
+
+        this.rowSize = sizeCalculator.count > 0 ? sizeCalculator.totalSize / sizeCalculator.count : 0;
+        this.operations = memtable.getOperations();
+    }
 
     public MemtableAverageRowSize(Memtable memtable)
     {

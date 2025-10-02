@@ -51,7 +51,7 @@ import org.apache.cassandra.utils.memory.Cloner;
  * it's own data. For instance, a {@code Row} cannot contains a cell that is deleted by its own
  * row deletion.
  */
-public interface Row extends Unfiltered, Iterable<ColumnData>
+public interface Row extends Unfiltered, Iterable<ColumnData>, IDataSize
 {
     /**
      * The clustering values for this row.
