@@ -22,6 +22,12 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.SecondaryIndexManager;
+import org.assertj.core.api.Assertions;
 
 import static java.lang.String.format;
 import static org.junit.Assert.assertFalse;
@@ -57,6 +63,29 @@ public class SASIIndexTest extends CQLTester
             assertInvalidMessage(errorMessage, select);
             assertFalse(execute(select + " ALLOW FILTERING").isEmpty());
         }
+
+        // Test no-op and unreachable methods
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        SecondaryIndexManager sim = cfs.getIndexManager();
+        Index index = sim.getIndexByName(indexName);
+        Assertions.assertThat(index).isNotNull().isInstanceOf(SASIIndex.class);
+        SASIIndex sasiIndex = (SASIIndex) index;
+        Assertions.assertThat(sasiIndex.getInitializationTask()).isNull();
+        Assertions.assertThat(sasiIndex.getMetadataReloadTask(null)).isNull();
+        Assertions.assertThat(sasiIndex.getBlockingFlushTask()).isEqualTo(SASIIndex.NO_OP_TASK);
+        Assertions.assertThat(sasiIndex.getInvalidateTask()).isEqualTo(SASIIndex.NO_OP_TASK);
+        Assertions.assertThat(sasiIndex.getTruncateTask(0)).isEqualTo(SASIIndex.NO_OP_TASK);
+        Assertions.assertThat(sasiIndex.shouldBuildBlocking()).isTrue();
+        Assertions.assertThat(sasiIndex.getBackingTable()).isEmpty();
+        Assertions.assertThat(sasiIndex.supportsExpression(null, null)).isFalse();
+        Assertions.assertThat(sasiIndex.customExpressionValueType()).isNull();
+        Assertions.assertThat(sasiIndex.getEstimatedResultRows()).isEqualTo(Long.MAX_VALUE);
+        Assertions.assertThatNoException().isThrownBy(() -> sasiIndex.validate((PartitionUpdate) null));
+        Assertions.assertThatNoException().isThrownBy(() -> sasiIndex.indexerFor(null, null, 0, null, null, null));
+        Assertions.assertThatThrownBy(() -> sasiIndex.searcherFor(null)).isInstanceOf(UnsupportedOperationException.class);
+        Assertions.assertThatNoException().isThrownBy(() -> sasiIndex.handleNotification(null, null));
+        RowFilter rowFilter = parseReadCommand("SELECT * FROM %s WHERE v = 2 ALLOW FILTERING").rowFilter();
+        Assertions.assertThat(sasiIndex.getPostIndexQueryFilter(rowFilter)).isSameAs(rowFilter);
 
         // drop the index and verify that we can still write, flush and query
         dropIndex("DROP INDEX %s." + indexName);

@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,7 +56,8 @@ public class SASIIndex implements Index, INotificationConsumer
     private final static String UNSUPPORTED_MESSAGE = "SASI index %s.%s is not supported anymore. " +
                                                       "It will ignore writes and reject any query. " +
                                                       "Please drop it and/or use a Storage Attached Index (SAI) instead.";
-    private final static Callable<?> NO_OP_TASK = () -> null;
+    @VisibleForTesting
+    final static Callable<?> NO_OP_TASK = () -> null;
 
     private static final Logger logger = LoggerFactory.getLogger(SASIIndex.class);
 
