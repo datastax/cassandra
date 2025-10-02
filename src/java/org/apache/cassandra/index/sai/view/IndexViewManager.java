@@ -179,6 +179,8 @@ public class IndexViewManager
             if (iterations++ > 1000)
                 throw new IllegalStateException("Failed to prepare index view after 1000 iterations");
 
+            // Iff we keep all the indexes, then we can stay queryable.
+            boolean retainedAllIndexes = true;
             for (var index : oldView.getIndexes())
             {
                 if (!toRemove.contains(index.getSSTable()))
@@ -187,11 +189,13 @@ public class IndexViewManager
                         continue outer;
                     newIndexes.add(index);
                 }
+                else
+                {
+                    retainedAllIndexes = false;
+                }
             }
 
-            // View is still queryable if we kept all the old indexes.
-            boolean isQueryable = oldView.getIndexes().size() == newIndexes.size();
-            newView = new View(context, newIndexes, isQueryable);
+            newView = new View(context, newIndexes, retainedAllIndexes);
         }
         while (newView == null || !viewRef.compareAndSet(oldView, newView));
         oldView.release();
