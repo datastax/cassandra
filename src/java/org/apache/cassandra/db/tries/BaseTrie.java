@@ -78,25 +78,25 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     }
 
     /// Call the given consumer on all content values in the trie in order.
-    default void forEachValue(ValueConsumer<T> consumer)
+    default void forEachValue(ValueConsumer<? super T> consumer)
     {
         process(Direction.FORWARD, consumer);
     }
 
     /// Call the given consumer on all content values in the trie in order.
-    default void forEachValue(Direction direction, ValueConsumer<T> consumer)
+    default void forEachValue(Direction direction, ValueConsumer<? super T> consumer)
     {
         process(direction, consumer);
     }
 
     /// Call the given consumer on all (path, content) pairs with non-null content in the trie in order.
-    default void forEachEntry(BiConsumer<ByteComparable.Preencoded, T> consumer)
+    default void forEachEntry(BiConsumer<ByteComparable.Preencoded, ? super T> consumer)
     {
         forEachEntry(Direction.FORWARD, consumer);
     }
 
     /// Call the given consumer on all (path, content) pairs with non-null content in the trie in order.
-    default void forEachEntry(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
+    default void forEachEntry(Direction direction, BiConsumer<ByteComparable.Preencoded, ? super T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
         cursor.process(new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
@@ -111,14 +111,14 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     }
 
     /// Process the trie using the given [ValueConsumer], skipping all branches below the top content-bearing node.
-    default void forEachValueSkippingBranches(Direction direction, ValueConsumer<T> consumer)
+    default void forEachValueSkippingBranches(Direction direction, ValueConsumer<? super T> consumer)
     {
         processSkippingBranches(direction, consumer);
     }
 
     /// Call the given consumer on all `(path, content)` pairs with non-null content in the trie in order, skipping all
     /// branches below the top content-bearing node.
-    default void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
+    default void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, ? super T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
         cursor.processSkippingBranches(new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
@@ -127,7 +127,7 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     }
 
     /// Process the trie using the given [Cursor.Walker], skipping all branches below the top content-bearing node.
-    default <R> R processSkippingBranches(Direction direction, Cursor.Walker<T, R> walker)
+    default <R> R processSkippingBranches(Direction direction, Cursor.Walker<? super T, R> walker)
     {
         return cursor(direction).processSkippingBranches(walker);
     }
