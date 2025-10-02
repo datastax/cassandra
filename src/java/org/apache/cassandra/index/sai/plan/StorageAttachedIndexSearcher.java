@@ -60,7 +60,6 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
@@ -190,10 +189,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 // Throwing IOError here because we want the coordinator to handle it as any other serious storage error
                 // and report it up to the user as failed query. It is better to fail than to return an incomplete
                 // result set.
-                if (e.isQueryable)
-                    throw new IOError(e);
-                else
-                    throw new IndexNotAvailableException(e.indexName, e);
+                throw new IOError(e);
             }
             catch (Throwable t)
             {

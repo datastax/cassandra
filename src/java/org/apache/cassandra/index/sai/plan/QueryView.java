@@ -34,6 +34,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
+import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -103,31 +104,19 @@ public class QueryView implements AutoCloseable
         {
             final boolean isDropped;
             final String indexName;
-            final boolean isQueryable;
 
             private MissingIndexException(IndexContext context)
-            {
-                this(context, true);
-            }
-
-            private MissingIndexException(IndexContext context, boolean isQueryable)
             {
                 super();
                 this.isDropped = context.isDropped();
                 this.indexName = context.getIndexName();
-                this.isQueryable = isQueryable;
             }
 
             @Override
             public String getMessage()
             {
-                // Dropped implies not queryable, so we check for that first.
-                if (isDropped)
-                    return "Index " + indexName + " was dropped.";
-                else if (!isQueryable)
-                    return "Index " + indexName + " is not queryable.";
-                else
-                    return "Unable to acquire lock on index view: " + indexName + '.';
+                return isDropped ? "Index " + indexName + " was dropped."
+                                 : "Unable to acquire lock on index view: " + indexName + '.';
             }
         }
 
@@ -152,8 +141,11 @@ public class QueryView implements AutoCloseable
                     throw new MissingIndexException(indexContext);
 
                 // Now that we referenced a view, need to confirm that the view we referenced isn't somehow invalid.
-                if (!indexContext.isIndexed() || !saiView.isQueryable())
-                    throw new MissingIndexException(indexContext, saiView.isQueryable());
+                if (!indexContext.isIndexed())
+                    throw new MissingIndexException(indexContext);
+
+                if (!saiView.isQueryable())
+                    throw new IndexNotAvailableException(indexContext.getIndexName());
 
                 var sstableReaders = new ArrayList<SSTableReader>(saiView.size());
                 // These are already referenced because they are referenced by the same view we just referenced.
