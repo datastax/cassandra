@@ -121,7 +121,7 @@ class DepthAdjustedCursor<T, C extends Cursor<T>> implements Cursor<T>
     }
 
     @Override
-    public <R> R processSkippingBranches(Walker<T, R> walker)
+    public <R> R processSkippingBranches(Walker<? super T, R> walker)
     {
         throw new AssertionError("Depth-adjusted cursors cannot be walked directly.");
     }
