@@ -771,6 +771,18 @@ public abstract class ControllerTest
     }
 
     @Test
+    public void testNoFactorizedShardGrowthWithPowerOfTwo()
+    {
+        // Test no factorization-based growth for num_shards=128
+        Map<String, String> options = new HashMap<>();
+        options.put(Controller.NUM_SHARDS_OPTION, "128");
+        options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "1GiB");
+        Controller controller = Controller.fromOptions(cfs, options);
+
+        assertFalse(controller.useFactorizationShardCountGrowth());
+    }
+
+    @Test
     public void testFactorizedShardGrowthPrimeTarget()
     {
         // Test with a prime number (should stay at 1 until reaching the target)
@@ -794,32 +806,29 @@ public abstract class ControllerTest
     public void testFactorizedShardSequence()
     {
         // Test small numbers
-        assertEquals(Arrays.asList(1), Controller.factorizedSmoothShardSequence(1));
-        assertEquals(Arrays.asList(1, 2), Controller.factorizedSmoothShardSequence(2));
-        assertEquals(Arrays.asList(1, 3), Controller.factorizedSmoothShardSequence(3));
-        assertEquals(Arrays.asList(1, 2, 4), Controller.factorizedSmoothShardSequence(4));
+        assertArrayEquals(new int[]{ 1 }, Controller.factorizedSmoothShardSequence(1));
+        assertArrayEquals(new int[]{ 1, 2 }, Controller.factorizedSmoothShardSequence(2));
+        assertArrayEquals(new int[]{ 1, 3 }, Controller.factorizedSmoothShardSequence(3));
+        assertArrayEquals(new int[]{ 1, 2, 4 }, Controller.factorizedSmoothShardSequence(4));
 
         // Test perfect squares
-        assertEquals(Arrays.asList(1, 3, 9), Controller.factorizedSmoothShardSequence(9));
-        assertEquals(Arrays.asList(1, 2, 4, 8, 16), Controller.factorizedSmoothShardSequence(16));
+        assertArrayEquals(new int[]{ 1, 3, 9 }, Controller.factorizedSmoothShardSequence(9));
+        assertArrayEquals(new int[]{ 1, 2, 4, 8, 16 }, Controller.factorizedSmoothShardSequence(16));
 
         // Test primes
-        assertEquals(Arrays.asList(1, 7), Controller.factorizedSmoothShardSequence(7));
-        assertEquals(Arrays.asList(1, 11), Controller.factorizedSmoothShardSequence(11));
+        assertArrayEquals(new int[]{ 1, 7 }, Controller.factorizedSmoothShardSequence(7));
+        assertArrayEquals(new int[]{ 1, 11 }, Controller.factorizedSmoothShardSequence(11));
 
         // Test composite numbers
-        List<Integer> sequence12 = Controller.factorizedSmoothShardSequence(12);
-        assertEquals(Arrays.asList(1, 3, 6, 12), sequence12);
+        assertArrayEquals(new int[]{ 1, 3, 6, 12 }, Controller.factorizedSmoothShardSequence(12));
 
         // Test 1000 = 5^3 * 2^3
-        List<Integer> sequence1000 = Controller.factorizedSmoothShardSequence(1000);
-        List<Integer> expected1000 = Arrays.asList(1, 5, 25, 125, 250, 500, 1000);
-        assertEquals(expected1000, sequence1000);
+        int[] expected1000 = new int[]{ 1, 5, 25, 125, 250, 500, 1000 };
+        assertArrayEquals(expected1000, Controller.factorizedSmoothShardSequence(1000));
 
         // Test 3200 = 5^2 * 2^7
-        List<Integer> sequence3200 = Controller.factorizedSmoothShardSequence(3200);
-        List<Integer> expected3200 = Arrays.asList(1, 5, 25, 50, 100, 200, 400, 800, 1600, 3200);
-        assertEquals(expected3200, sequence3200);
+        int[] expected3200 = new int[]{ 1, 5, 25, 50, 100, 200, 400, 800, 1600, 3200 };
+        assertArrayEquals(expected3200, Controller.factorizedSmoothShardSequence(3200));
     }
 
     @Test
@@ -844,6 +853,7 @@ public abstract class ControllerTest
         // Test primes
         assertEquals(Arrays.asList(7), Controller.primeFactors(7));
         assertEquals(Arrays.asList(97), Controller.primeFactors(97));
+        assertEquals(Arrays.asList(Integer.MAX_VALUE), Controller.primeFactors(Integer.MAX_VALUE));
     }
 
     @Test
@@ -855,17 +865,50 @@ public abstract class ControllerTest
     }
 
     @Test
-    public void testFactorizedShardGrowthDisabledFlag()
+    public void testGetLargestFactorizedShardCount()
     {
+        // Test with num_shards=1000 to get sequence: [1, 5, 25, 125, 250, 500, 1000]
         Map<String, String> options = new HashMap<>();
-        options.put(Controller.BASE_SHARD_COUNT_OPTION, "4");
-        options.put(Controller.TARGET_SSTABLE_SIZE_OPTION, "1GiB");
-        options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "100MiB");
-        options.put(Controller.SSTABLE_GROWTH_OPTION, "0.0"); // Dynamic mode
+        options.put(Controller.NUM_SHARDS_OPTION, "1000");
+        options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "1GiB");
         mockFlushSize(100);
         Controller controller = Controller.fromOptions(cfs, options);
 
-        // Should NOT use factorization (dynamic mode)
-        assertFalse(controller.useFactorizationShardCountGrowth());
+        // Test exact matches
+        assertEquals(1, controller.getLargestFactorizedShardCount(1.0));
+        assertEquals(5, controller.getLargestFactorizedShardCount(5.0));
+        assertEquals(25, controller.getLargestFactorizedShardCount(25.0));
+        assertEquals(125, controller.getLargestFactorizedShardCount(125.0));
+        assertEquals(250, controller.getLargestFactorizedShardCount(250.0));
+        assertEquals(500, controller.getLargestFactorizedShardCount(500.0));
+        assertEquals(1000, controller.getLargestFactorizedShardCount(1000.0));
+
+        // Test values between sequence elements (should return largest ≤ input)
+        assertEquals(1, controller.getLargestFactorizedShardCount(1.5));
+        assertEquals(1, controller.getLargestFactorizedShardCount(4.9));
+        assertEquals(5, controller.getLargestFactorizedShardCount(5.1));
+        assertEquals(5, controller.getLargestFactorizedShardCount(24.9));
+        assertEquals(25, controller.getLargestFactorizedShardCount(25.1));
+        assertEquals(25, controller.getLargestFactorizedShardCount(124.9));
+        assertEquals(125, controller.getLargestFactorizedShardCount(125.1));
+        assertEquals(125, controller.getLargestFactorizedShardCount(249.9));
+        assertEquals(250, controller.getLargestFactorizedShardCount(250.1));
+        assertEquals(250, controller.getLargestFactorizedShardCount(499.9));
+        assertEquals(500, controller.getLargestFactorizedShardCount(500.1));
+        assertEquals(500, controller.getLargestFactorizedShardCount(999.9));
+
+        // Test edge cases
+        assertEquals(1, controller.getLargestFactorizedShardCount(0.0));
+        assertEquals(1, controller.getLargestFactorizedShardCount(0.5));
+        assertEquals(1000, controller.getLargestFactorizedShardCount(1000.1));
+        assertEquals(1000, controller.getLargestFactorizedShardCount(2000.0));
+        assertEquals(1000, controller.getLargestFactorizedShardCount(Double.POSITIVE_INFINITY));
+
+        // Test NaN
+        assertEquals(1, controller.getLargestFactorizedShardCount(Double.NaN));
+
+        // Test negative values (should return first element)
+        assertEquals(1, controller.getLargestFactorizedShardCount(-1.0));
+        assertEquals(1, controller.getLargestFactorizedShardCount(-100.0));
     }
 }
