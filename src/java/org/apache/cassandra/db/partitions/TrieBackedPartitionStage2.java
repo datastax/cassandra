@@ -31,6 +31,7 @@ import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.MutableDeletionInfo;
 import org.apache.cassandra.db.RangeTombstone;
@@ -98,7 +99,7 @@ public class TrieBackedPartitionStage2 implements Partition
      *
      * The methods toRow and copyToOnHeapRow combine this with a clustering for the represented Row.
      */
-    public static class RowData
+    public static class RowData implements IDataSize
     {
         final Object[] columnsBTree;
         final LivenessInfo livenessInfo;

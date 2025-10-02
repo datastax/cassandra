@@ -30,6 +30,7 @@ import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.Slice;
@@ -113,7 +114,7 @@ public class TrieBackedPartition implements Partition
     /// The representation of a row stored at the leaf of a trie. Does not contain the row key.
     ///
     /// The method [#toRow] combines this with a clustering for the represented [Row].
-    public static class RowData
+    public static class RowData implements IDataSize
     {
         final Object[] columnsBTree;
         final LivenessInfo livenessInfo;
