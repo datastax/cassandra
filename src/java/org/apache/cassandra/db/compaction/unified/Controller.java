@@ -319,12 +319,10 @@ public abstract class Controller
     static final double DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR = Double.parseDouble(getSystemProperty(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION, "10"));
 
     /**
-     * Whether to use factorization-based shard count growth for smoother progression when num_shards is set.
+     * Whether to use factorization-based shard count growth for smoother progression when base_shard_count is not power of 2.
      * When enabled (default: true), instead of using power-of-two jumps like 1→2→8→1000, the system will
      * use prime factorization to create smooth sequences like 1→5→25→125→250→500→1000 for num_shards=1000.
-     * This prevents the large jumps that can cause data loss issues (e.g., HCD-130).
-     * <p>
-     * Only applies when num_shards is explicitly configured
+     * This prevents the large jumps that were involved in the data loss incident caused by HCD-130
      * <p>
      */
     static final boolean USE_FACTORIZATION_SHARD_COUNT_GROWTH = Boolean.parseBoolean(getSystemProperty("use_factorization_shard_count_growth", "true"));
@@ -1623,6 +1621,7 @@ public abstract class Controller
 
         // insertion point
         int insertionPoint = -idx - 1;
+        // we need the value before insertion point or 0 if insertion point is 0
         int candidateIndex = Math.max(0, insertionPoint - 1);
         return sequence[candidateIndex];
     }
@@ -1674,7 +1673,7 @@ public abstract class Controller
             num /= 2;
         }
 
-        for (int factor = 3; factor <= num / factor; factor += 2)
+        for (int factor = 3; (long) factor * factor <= num; factor += 2)
         {
             while (num % factor == 0)
             {

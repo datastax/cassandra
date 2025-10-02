@@ -829,6 +829,9 @@ public abstract class ControllerTest
         // Test 3200 = 5^2 * 2^7
         int[] expected3200 = new int[]{ 1, 5, 25, 50, 100, 200, 400, 800, 1600, 3200 };
         assertArrayEquals(expected3200, Controller.factorizedSmoothShardSequence(3200));
+
+        // Test Max Int
+        assertArrayEquals(new int[]{ 1, Integer.MAX_VALUE }, Controller.factorizedSmoothShardSequence(Integer.MAX_VALUE));
     }
 
     @Test
