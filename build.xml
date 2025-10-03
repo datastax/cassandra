@@ -168,7 +168,6 @@
         </and>
     </condition>
 
-    <property name="jflex.version" value="1.8.2"/>
     <property name="jamm.version" value="0.4.0"/>
     <property name="ecj.version" value="3.33.0"/>
     <!-- When updating ASM, please, do consider whether you might need to update also FBUtilities#ASM_BYTECODE_VERSION
@@ -592,15 +591,6 @@
         </exec>
     </target>
 
-    <!--
-        Generates Java sources for tokenization support from jflex
-        grammar files
-    -->
-    <target name="generate-jflex-java" description="Generate Java from jflex grammar">
-        <taskdef classname="jflex.anttask.JFlexTask" classpathref="jflex.classpath" name="jflex" />
-        <jflex file="${build.src.java}/org/apache/cassandra/index/sasi/analyzer/StandardTokenizerImpl.jflex" destdir="${build.src.gen-java}/" />
-    </target>
-
     <!-- create properties file with C version -->
     <target name="_createVersionPropFile" depends="_get-git-sha,set-cqlsh-version">
       <taskdef name="propertyfile" classname="org.apache.tools.ant.taskdefs.optional.PropertyFile"/>
@@ -650,7 +640,7 @@
         </javac>
     </target>
 
-    <target depends="init,gen-cql3-grammar,generate-cql-html,generate-jflex-java"
+    <target depends="init,gen-cql3-grammar,generate-cql-html,generate-snyk-file"
             name="build-project">
         <echo message="${ant.project.name}: ${ant.file}"/>
         <!-- Order matters! -->
@@ -830,7 +820,6 @@
             <filter token="ecj.version" value="${ecj.version}"/>
             <filter token="asm.version" value="${asm.version}"/>
             <filter token="jacoco.version" value="${jacoco.version}"/>
-            <filter token="jflex.version" value="${jflex.version}"/>
         </filterset>
 
         <copy file=".build/cassandra-deps-template.xml" tofile="${build.dir}/${final.name}.pom">
@@ -983,7 +972,6 @@
         <fileset dir="doc">
           <include name="cql3/CQL.html" />
           <include name="cql3/CQL.css" />
-          <include name="SASI.md" />
         </fileset>
       </copy>
       <copy todir="${dist.dir}/doc/html" failonerror="false">
@@ -2181,7 +2169,7 @@
   </target>
 
   <!-- Generate IDEA project description files -->
-  <target name="generate-idea-files" depends="init,resolver-dist-lib,gen-cql3-grammar,generate-jflex-java,_createVersionPropFile" description="Generate IDEA files">
+  <target name="generate-idea-files" depends="init,resolver-dist-lib,gen-cql3-grammar,_createVersionPropFile" description="Generate IDEA files">
     <delete dir=".idea"/>
     <delete file="${eclipse.project.name}.iml"/>
     <mkdir dir=".idea"/>

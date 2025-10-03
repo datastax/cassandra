@@ -73,12 +73,12 @@ public class GuardrailSecondaryIndexTest extends GuardrailTester
     {
         // 2i guardrail will also affect custom indexes
         setGuardrail(false);
-        assertFails(format("CREATE CUSTOM INDEX ON %%s (%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'", "v4"),
+        assertFails(format("CREATE CUSTOM INDEX ON %%s (%s) USING 'org.apache.cassandra.index.StubIndex'", "v4"),
                     format("Creating secondary indexes", currentTable())
         );
 
         // Confirm custom creation will work on flip
         setGuardrail(true);
-        assertValid(format("CREATE CUSTOM INDEX ON %%s (%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'", "v4"));
+        assertValid(format("CREATE CUSTOM INDEX ON %%s (%s) USING 'org.apache.cassandra.index.StubIndex'", "v4"));
     }
 }
