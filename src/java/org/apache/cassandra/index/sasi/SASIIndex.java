@@ -53,11 +53,11 @@ import org.apache.cassandra.schema.TableMetadata;
  */
 public class SASIIndex implements Index, INotificationConsumer
 {
-    private final static String UNSUPPORTED_MESSAGE = "SASI index %s.%s is not supported anymore. " +
+    private static final String UNSUPPORTED_MESSAGE = "SASI index %s.%s is not supported anymore. " +
                                                       "It will ignore writes and reject any query. " +
                                                       "Please drop it and/or use a Storage Attached Index (SAI) instead.";
     @VisibleForTesting
-    final static Callable<?> NO_OP_TASK = () -> null;
+    static final Callable<?> NO_OP_TASK = () -> null;
 
     private static final Logger logger = LoggerFactory.getLogger(SASIIndex.class);
 
@@ -194,5 +194,7 @@ public class SASIIndex implements Index, INotificationConsumer
 
     @Override
     public void handleNotification(INotification notification, Object sender)
-    {}
+    {
+        // Nothing to handle here since we don't index anything
+    }
 }
