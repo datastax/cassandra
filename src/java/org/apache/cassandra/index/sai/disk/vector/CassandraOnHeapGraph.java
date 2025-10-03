@@ -96,6 +96,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.StringHelper;
 
+import static io.github.jbellis.jvector.graph.disk.OnDiskSequentialGraphIndexWriter.FOOTER_MAGIC;
+
 public class CassandraOnHeapGraph<T> implements Accountable
 {
     // Cassandra's PQ features, independent of JVector's
@@ -478,7 +480,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             var start = System.nanoTime();
             var suppliers = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
             indexWriter.write(suppliers);
-            SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
+//            SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
             logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
             long termsLength = indexWriter.getOutput().position() - termsOffset;
 

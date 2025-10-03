@@ -41,6 +41,7 @@ import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
@@ -67,6 +68,7 @@ import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -88,6 +90,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
 
+import static io.github.jbellis.jvector.graph.disk.OnDiskSequentialGraphIndexWriter.FOOTER_MAGIC;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
@@ -108,6 +111,8 @@ public class CompactionGraph implements Closeable, Accountable
 
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
+
+    private static boolean ENABLE_FUSED_PQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED_PQ.getBoolean();
 
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
@@ -225,12 +230,14 @@ public class CompactionGraph implements Closeable, Accountable
 
     private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper) throws IOException
     {
-        return new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
+        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                .withStartOffset(termsOffset)
                .with(new InlineVectors(dimension))
                .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion())
-               .withMapper(ordinalMapper)
-               .build();
+               .withMapper(ordinalMapper);
+        if (ENABLE_FUSED_PQ)
+            writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
+        return writerBuilder.build();
     }
 
     @Override
@@ -453,10 +460,19 @@ public class CompactionGraph implements Closeable, Accountable
 
             // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();
-            // Required becuase jvector 3 wrote the fused adc map here. We no longer write jvector 3, but we still
-            // write out the empty map.
-            writer.write(Map.of());
-            SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
+            if (writer.getFeatureSet().contains(FeatureId.FUSED_PQ))
+            {
+                try (var view = builder.getGraph().getView())
+                {
+                    var supplier = Feature.singleStateFactory(FeatureId.FUSED_PQ, ordinal -> new FusedPQ.State(view, (PQVectors) compressedVectors, ordinal));
+                    writer.write(supplier);
+                }
+            }
+            else
+            {
+                writer.write(Map.of());
+            }
+//            SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
             logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
             long termsLength = writer.getOutput().position() - termsOffset;
 

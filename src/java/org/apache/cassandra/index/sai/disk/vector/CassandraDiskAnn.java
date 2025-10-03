@@ -117,7 +117,7 @@ public class CassandraDiskAnn
             }
 
             VectorCompression.CompressionType compressionType = VectorCompression.CompressionType.values()[reader.readByte()];
-            if (features.contains(FeatureId.FUSED_ADC))
+            if (features.contains(FeatureId.FUSED_PQ))
             {
                 assert compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
                 compressedVectors = null;
@@ -233,9 +233,7 @@ public class CassandraDiskAnn
         {
             var view = (GraphIndex.ScoringView) searcher.getView();
             SearchScoreProvider ssp;
-            // FusedADC can no longer be written due to jvector upgrade. However, it's possible these index files
-            // still exist, so we have to support them.
-            if (features.contains(FeatureId.FUSED_ADC))
+            if (features.contains(FeatureId.FUSED_PQ))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
                 var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);
