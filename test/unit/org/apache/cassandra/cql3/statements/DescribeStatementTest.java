@@ -232,21 +232,21 @@ public class DescribeStatementTest extends CQLTester
     @Test
     public void testDescribeVirtualTables() throws Throwable
     {
-        assertRowsNet(executeDescribeNet("DESCRIBE ONLY KEYSPACE system_virtual_schema;"), 
+        assertRowsNet(executeDescribeNet("DESCRIBE ONLY KEYSPACE system_virtual_schema;"),
                       row("system_virtual_schema",
                           "keyspace",
                           "system_virtual_schema",
-                          "/*\n" + 
+                          "/*\n" +
                           "Warning: Keyspace system_virtual_schema is a virtual keyspace and cannot be recreated with CQL.\n" +
                           "Structure, for reference:\n" +
                           "VIRTUAL KEYSPACE system_virtual_schema;\n" +
                           "*/"));
 
-        assertRowsNet(executeDescribeNet("DESCRIBE TABLE system_virtual_schema.columns;"), 
+        assertRowsNet(executeDescribeNet("DESCRIBE TABLE system_virtual_schema.columns;"),
                       row("system_virtual_schema",
                           "table",
                           "columns",
-                          "/*\n" + 
+                          "/*\n" +
                           "Warning: Table system_virtual_schema.columns is a virtual table and cannot be recreated with CQL.\n" +
                           "Structure, for reference:\n" +
                           "VIRTUAL TABLE system_virtual_schema.columns (\n" +
@@ -645,7 +645,7 @@ public class DescribeStatementTest extends CQLTester
             execute("DROP MATERIALIZED VIEW " + KEYSPACE_PER_TEST + ".mv");
         }
     }
-    
+
     @Test
     public void testDescribeMissingKeyspace() throws Throwable
     {
@@ -696,12 +696,12 @@ public class DescribeStatementTest extends CQLTester
 
             assertRowsNet(executeDescribeNet(KEYSPACE_PER_TEST, "DESCRIBE TYPE " + type2),
                           row(KEYSPACE_PER_TEST, "type", type2, "CREATE TYPE " + KEYSPACE_PER_TEST + "." + type2 + " (\n" +
-                                                       "    x text,\n" + 
+                                                       "    x text,\n" +
                                                        "    y text\n" +
                                                        ");"));
             assertRowsNet(executeDescribeNet(KEYSPACE_PER_TEST, "DESCRIBE TYPE " + type1),
                           row(KEYSPACE_PER_TEST, "type", type1, "CREATE TYPE " + KEYSPACE_PER_TEST + "." + type1 + " (\n" +
-                                                       "    a int,\n" + 
+                                                       "    a int,\n" +
                                                        "    b frozen<" + type3 + ">\n" +
                                                        ");"));
 
@@ -710,15 +710,15 @@ public class DescribeStatementTest extends CQLTester
                                                           " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}" +
                                                           "  AND durable_writes = true;"),
                           row(KEYSPACE_PER_TEST, "type", type2, "CREATE TYPE " + KEYSPACE_PER_TEST + "." + type2 + " (\n" +
-                                                       "    x text,\n" + 
+                                                       "    x text,\n" +
                                                        "    y text\n" +
                                                        ");"),
                           row(KEYSPACE_PER_TEST, "type", type3, "CREATE TYPE " + KEYSPACE_PER_TEST + "." + type3 + " (\n" +
-                                                       "    a text,\n" + 
+                                                       "    a text,\n" +
                                                        "    b frozen<" + type2 + ">\n" +
                                                        ");"),
                           row(KEYSPACE_PER_TEST, "type", type1, "CREATE TYPE " + KEYSPACE_PER_TEST + "." + type1 + " (\n" +
-                                                       "    a int,\n" + 
+                                                       "    a int,\n" +
                                                        "    b frozen<" + type3 + ">\n" +
                                                        ");"));
         }
@@ -808,8 +808,8 @@ public class DescribeStatementTest extends CQLTester
     public void testDescribeWithCustomIndex() throws Throwable
     {
         String table = createTable(KEYSPACE_PER_TEST, "CREATE TABLE %s (id int PRIMARY KEY, value text);");
-        String indexWithoutOptions = createIndex(KEYSPACE_PER_TEST, "CREATE CUSTOM INDEX ON %s(value) USING 'org.apache.cassandra.index.sasi.SASIIndex';");
-        String indexWithOptions = createIndex(KEYSPACE_PER_TEST, "CREATE CUSTOM INDEX ON %s(value) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'is_literal': 'false'};");
+        String indexWithoutOptions = createIndex(KEYSPACE_PER_TEST, "CREATE CUSTOM INDEX ON %s(value) USING 'org.apache.cassandra.index.StubIndex';");
+        String indexWithOptions = createIndex(KEYSPACE_PER_TEST, "CREATE CUSTOM INDEX ON %s(value) USING 'org.apache.cassandra.index.StubIndex' WITH OPTIONS = {'is_literal': 'false'};");
 
         String expectedKeyspaceStmt = "CREATE KEYSPACE " + KEYSPACE_PER_TEST +
                                       " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}" +
@@ -820,8 +820,8 @@ public class DescribeStatementTest extends CQLTester
                                    "    value text\n" +
                                    ") WITH " + tableParametersCql();
 
-        String expectedIndexStmtWithoutOptions = "CREATE CUSTOM INDEX " + indexWithoutOptions + " ON " + KEYSPACE_PER_TEST + "." + table + " (value) USING 'org.apache.cassandra.index.sasi.SASIIndex';";
-        String expectedIndexStmtWithOptions = "CREATE CUSTOM INDEX " + indexWithOptions + " ON " + KEYSPACE_PER_TEST + "." + table + " (value) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'is_literal': 'false'};";
+        String expectedIndexStmtWithoutOptions = "CREATE CUSTOM INDEX " + indexWithoutOptions + " ON " + KEYSPACE_PER_TEST + "." + table + " (value) USING 'org.apache.cassandra.index.StubIndex';";
+        String expectedIndexStmtWithOptions = "CREATE CUSTOM INDEX " + indexWithOptions + " ON " + KEYSPACE_PER_TEST + "." + table + " (value) USING 'org.apache.cassandra.index.StubIndex' WITH OPTIONS = {'is_literal': 'false'};";
 
         assertRowsNet(executeDescribeNet("DESCRIBE KEYSPACE " + KEYSPACE_PER_TEST),
                       row(KEYSPACE_PER_TEST, "keyspace", KEYSPACE_PER_TEST, expectedKeyspaceStmt),

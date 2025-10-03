@@ -1476,7 +1476,9 @@ report_unconfirmed_repaired_data_mismatches: false
 enable_materialized_views: false
 
 # Enables SASI index creation on this node.
-# SASI indexes are considered experimental and are not recommended for production use.
+# SASI indexes are not supported anymore. If enabled, they will ignore writes and reject any query.
+# They should be dropped and replaced by an equivalent Storage Attached Index (SAI).
+# This flag is only provided for schema compatibility, in case they were created in a previous version.
 enable_sasi_indexes: false
 
 # Enables creation of transiently replicated keyspaces on this node.

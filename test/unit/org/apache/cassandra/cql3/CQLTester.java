@@ -181,6 +181,7 @@ import static com.datastax.driver.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_MIL
 import static com.datastax.driver.core.SocketOptions.DEFAULT_READ_TIMEOUT_MILLIS;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.index.sai.SAITester.vector;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -1493,7 +1494,7 @@ public abstract class CQLTester
         {
             session.close();
         }
-        
+
         Cluster cluster = clusters.remove(key);
         if (cluster != null)
         {
@@ -1654,10 +1655,10 @@ public abstract class CQLTester
     }
 
     private UntypedResultSet executeFormattedQuery(String query, boolean useCoordinator, Object... values)
-    {        
+    {
         if (useCoordinator)
             requireNetworkWithoutDriver();
-        
+
         UntypedResultSet rs;
         if (usePrepared)
         {
@@ -2117,6 +2118,35 @@ public abstract class CQLTester
                 assertMessageContains(errorMessage, e);
             }
         }
+    }
+
+    protected void assertClientWarning(String warningMessage,
+                                       String query,
+                                       Object... values) throws Throwable
+    {
+        assertClientWarning(getDefaultVersion(), warningMessage, query, values);
+    }
+
+    protected void assertClientWarning(ProtocolVersion protocolVersion,
+                                       String warningMessage,
+                                       String query,
+                                       Object... values) throws Throwable
+    {
+        assertClientWarning(protocolVersion, Collections.emptyList(), warningMessage, query, values);
+    }
+
+    protected void assertClientWarning(ProtocolVersion protocolVersion,
+                                       List<String> ignoredWarnings,
+                                       String warningMessage,
+                                       String query,
+                                       Object... values)
+    {
+        ResultSet rs = executeNet(protocolVersion, query, values);
+        List<String> warnings = warningsFromResultSet(ignoredWarnings, rs);
+        assertNotNull("Expecting one warning but got none", warnings);
+        assertEquals("Expecting one warning but got " + warnings.size(), 1, warnings.size());
+        assertTrue("Expecting warning message to contains " + warningMessage + " but was: " + warnings.get(0),
+                   warnings.get(0).contains(warningMessage));
     }
 
     public static List<String> warningsFromResultSet(List<String> ignoredWarnings, ResultSet rs)

@@ -42,6 +42,7 @@ import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
@@ -69,6 +70,11 @@ public class StatementRestrictions
 
     public static final String HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_MULTI =
     "Columns %s have indexes but do not support the operators specified in the query. " +
+    "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING";
+
+    public static final String HAS_UNSUPPORTED_SASI_INDEX_RESTRICTION_MESSAGE =
+    "Column '%s' has a SASI index but SASI is not supported anymore. " +
+    "This index should removed and probably replaced by an equivalent Storage Attached Index (SAI). " +
     "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING";
 
     public static final String INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE = "Index on column %s does not support LIKE restrictions.";
@@ -1302,7 +1308,11 @@ public class StatementRestrictions
                     for (ColumnMetadata column : restriction.getColumnDefs())
                     {
                         if (index.dependsOn(column))
+                        {
+                            if (index instanceof SASIIndex)
+                                throw invalidRequest(String.format(StatementRestrictions.HAS_UNSUPPORTED_SASI_INDEX_RESTRICTION_MESSAGE, column));
                             builder.add(column);
+                        }
                     }
                 }
             }
