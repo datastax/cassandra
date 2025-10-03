@@ -56,7 +56,7 @@ public class NumericIndexMixedVersionTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Note that we do not test the multi-version path where compaction produces different sstables, which is
-        // the norm in CNDB. If we had a way to compact individual sstables, we could.
+        // the norm in CNDB. If we had a way to compnact individual sstables, we could.
         disableCompaction();
 
         SAIUtil.setCurrentVersion(Version.AA);

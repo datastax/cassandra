@@ -345,7 +345,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // filtered and considered as a result multiple times).
             return lastKey != null &&
                    Objects.equals(lastKey.partitionKey(), key.partitionKey()) &&
-                   Objects.equals(lastKey.clustering(), key.clustering());
+                   (!controller.indexFeatureSet().isRowAware() || Objects.equals(lastKey.clustering(), key.clustering()));
         }
 
         private void fillNextSelectedKeysInPartition(DecoratedKey partitionKey, List<PrimaryKey> nextPrimaryKeys)
@@ -392,7 +392,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
             lastKey = firstKey;
             threadLocalNextKeys.add(firstKey);
-            fillNextSelectedKeysInPartition(firstKey.partitionKey(), threadLocalNextKeys);
+            // Only makes sense to pull in keys when we're row aware. Notably, we also modified isEqualToLastKey so
+            // that the behavior branches when row aware or not.
+            if (controller.indexFeatureSet().isRowAware())
+                fillNextSelectedKeysInPartition(firstKey.partitionKey(), threadLocalNextKeys);
             return threadLocalNextKeys;
         }
 
