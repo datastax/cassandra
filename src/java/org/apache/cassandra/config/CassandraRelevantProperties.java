@@ -1012,6 +1012,16 @@ public enum CassandraRelevantProperties
     /** Set this property to true in order to use DSE-like histogram bucket boundaries and behaviour */
     USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES("cassandra.use_dse_compatible_histogram_boundaries", "false"),
     USE_DYNAMIC_SNITCH_FOR_COUNTER_LEADER("cassandra.counter_leader.use_dynamic_snitch", "false"),
+
+    /**
+     * Whether to use factorization-based shard count growth for smoother progression when base_shard_count is not power of 2.
+     * When enabled (default: true), instead of using power-of-two jumps like 1→2→8→1000, the system will
+     * use prime factorization to create smooth sequences like 1→5→25→125→250→500→1000 for num_shards=1000.
+     * This prevents the large jumps that were involved in the data loss incident caused by HCD-130
+     * <p>
+     */
+    USE_FACTORIZATION_SHARD_COUNT_GROWTH("use_factorization_shard_count_growth", "true"),
+
     /** Set this property to true in order to switch to micrometer metrics */
     USE_MICROMETER("cassandra.use_micrometer_metrics", "false"),
     /** When enabled, recursive directory deletion will be executed using a unix command `rm -rf` instead of traversing
