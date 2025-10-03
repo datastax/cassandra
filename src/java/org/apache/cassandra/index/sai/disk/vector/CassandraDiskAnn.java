@@ -80,6 +80,7 @@ public class CassandraDiskAnn
     private final ProductQuantization pq;
     private final VectorCompression compression;
     final boolean pqUnitVectors;
+    private final long claimedPQBytes;
 
     private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
@@ -121,6 +122,7 @@ public class CassandraDiskAnn
             {
                 assert compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
                 compressedVectors = null;
+                claimedPQBytes = 0;
                 // don't load full PQVectors, all we need is the metadata from the PQ at the start
                 pq = ProductQuantization.load(reader);
                 compression = new VectorCompression(VectorCompression.CompressionType.PRODUCT_QUANTIZATION,
@@ -131,6 +133,20 @@ public class CassandraDiskAnn
             {
                 if (compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION)
                 {
+                    // We only measure the raw size of the pq vectors because those have a linear memory overhead.
+                    long numVectors = graph.size(0);
+                    int dimension = rawGraph.getDimension();
+                    long compressedSize = context.getIndexWriterConfig().getSourceModel().compressionProvider.apply(dimension).getCompressedSize();
+                    claimedPQBytes = numVectors * compressedSize;
+
+                    if (!PQMemoryLimiter.instance.tryAcquireBytes(claimedPQBytes))
+                    {
+                        logger.error("Not enough memory to load PQ vectors. Needed {} bytes. Skipping load for {}.", claimedPQBytes,
+                                     sstableContext.sstable().getFilename());
+                        FileUtils.close(graph, graphHandle);
+                        throw new RuntimeException("Not enough memory to load PQ vectors. Needed " + claimedPQBytes + " bytes.");
+                    }
+
                     compressedVectors = PQVectors.load(reader, reader.getFilePointer());
                     pq = ((PQVectors) compressedVectors).getCompressor();
                     compression = new VectorCompression(compressionType,
@@ -139,6 +155,7 @@ public class CassandraDiskAnn
                 }
                 else if (compressionType == VectorCompression.CompressionType.BINARY_QUANTIZATION)
                 {
+                    claimedPQBytes = 0;
                     compressedVectors = BQVectors.load(reader, reader.getFilePointer());
                     pq = null;
                     compression = new VectorCompression(compressionType,
@@ -147,6 +164,7 @@ public class CassandraDiskAnn
                 }
                 else
                 {
+                    claimedPQBytes = 0;
                     compressedVectors = null;
                     pq = null;
                     compression = VectorCompression.NO_COMPRESSION;
@@ -304,6 +322,7 @@ public class CassandraDiskAnn
         columnQueryMetrics.onGraphClosed(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
                                          ordinalsMap.cachedBytesUsed(),
                                          graph.size(0));
+        PQMemoryLimiter.instance.release(claimedPQBytes);
     }
 
     public OrdinalsView getOrdinalsView()
