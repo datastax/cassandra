@@ -102,6 +102,7 @@ import org.apache.cassandra.db.rows.RowDiffListener;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index.IndexBuildingSupport;
 import org.apache.cassandra.index.internal.CassandraIndex;
@@ -132,6 +133,7 @@ import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.config.CassandraRelevantProperties.FORCE_DEFAULT_INDEXING_PAGE_SIZE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE;
 import static org.apache.cassandra.utils.ExecutorUtils.awaitTermination;
 import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
 
@@ -286,7 +288,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             try
             {
-                if (!index.shouldSkipInitialization()) 
+                if (!index.shouldSkipInitialization())
                 {
                     Callable<?> call = index.getInitializationTask();
                     if (call != null)
@@ -949,6 +951,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return indexes.get(indexName);
     }
 
+    @Nullable
     private Index createInstance(IndexMetadata indexDef)
     {
         Index newIndex;
@@ -961,7 +964,27 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
             try
             {
-                Class<? extends Index> indexClass = FBUtilities.classForName(className, "Index");
+                Class<? extends Index> indexClass;
+                try
+                {
+                    indexClass = FBUtilities.classForName(className, "Index");
+                }
+                catch (ConfigurationException e)
+                {
+                    // ConfigurationException can only be thrown from FBUtilities.classForName(…)
+                    //  anything from the index constructor will get wrapped in an InvocationTargetException
+                    if (INDEX_UNKNOWN_IGNORE.getBoolean())
+                    {
+                        logger.error("Cannot find index type {}, but '{}' is true so creating noop index {}",
+                                     className, INDEX_UNKNOWN_IGNORE.getKey(), indexDef.name);
+
+                        indexClass = NoopIndex.class;
+                    }
+                    else
+                    {
+                        throw e;
+                    }
+                }
                 Constructor<? extends Index> ctor = indexClass.getConstructor(ColumnFamilyStore.class, IndexMetadata.class);
                 newIndex = ctor.newInstance(baseCfs, indexDef);
             }
@@ -1275,7 +1298,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      *     <li>If it's a contains restriction, then a non-analyzed index is better. See CNDB-13925 for details.</li>
      *     <li>An index more selective according to {@link Index#getEstimatedResultRows()} is better. This is done
      *     accordingly to the {@link Index.QueryPlan#getEstimatedResultRows()} method. Please note that some index
-     *     implementations (SASI and SAI) will always return -1 for that method to prioritize themselves. Third party
+     *     implementations (SAI) will always return -1 for that method to prioritize themselves. Third party
      *     implementations can also return similar fixed values. See CNDB-14764 for details.</li>
      * </ol>
      * <p>

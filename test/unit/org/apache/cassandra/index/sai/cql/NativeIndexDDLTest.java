@@ -83,13 +83,16 @@ import org.apache.cassandra.utils.Throwables;
 import org.mockito.Mockito;
 
 import static java.util.Collections.singletonList;
+
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_ENCRYPTION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+
 import static org.mockito.Mockito.when;
 
 @SuppressLeakCheck(jira="STAR-974")
@@ -432,33 +435,6 @@ public class NativeIndexDDLTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         assertEquals(1, NDI_CREATION_COUNTER.get());
-    }
-
-    /**
-     * Verify SASI can be created and queries with NDI dependencies.
-     * Not putting in {@link MixedIndexImplementationsTest} because it uses CQLTester which doesn't load NDI dependency.
-     */
-    @Test
-    public void shouldCreateSASI()
-    {
-        createTable(CREATE_TABLE_TEMPLATE);
-
-        createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'mode': 'CONTAINS',\n" +
-                    "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer',\n" +
-                    "'tokenization_enable_stemming': 'true',\n" +
-                    "'tokenization_locale': 'en',\n" +
-                    "'tokenization_skip_stop_words': 'true',\n" +
-                    "'analyzed': 'true',\n" +
-                    "'tokenization_normalize_lowercase': 'true'};");
-
-        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
-
-        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
-        assertEquals(1, rows.all().size());
-
-        rows = executeNet("SELECT id1 FROM %s WHERE v2 like '0'");
-        assertEquals(1, rows.all().size());
     }
 
     @Test

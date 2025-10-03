@@ -502,6 +502,9 @@ public enum CassandraRelevantProperties
     INDEX_GUARDRAILS_TABLE_FAILURE_THRESHOLD("cassandra.index.guardrails.table_failure_threshold"),
     INDEX_GUARDRAILS_TOTAL_FAILURE_THRESHOLD("cassandra.index.guardrails.total_failure_threshold"),
     INDEX_SUMMARY_EXPECTED_KEY_SIZE("cassandra.index_summary_expected_key_size", "64"),
+    /** Set to true for `create custom index` cql statements on unknown index classes to be ignored rather than error,
+     * and for existing entries in `system_schema.index` of unknown index classes to silently use the NoopIndex. */
+    INDEX_UNKNOWN_IGNORE("cassandra.index.unknown_custom_class.ignore"),
     INITIAL_TOKEN("cassandra.initial_token"),
     INTERNODE_EVENT_THREADS("cassandra.internode-event-threads"),
     IO_NETTY_EVENTLOOP_THREADS("io.netty.eventLoopThreads"),
