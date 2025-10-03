@@ -233,8 +233,6 @@ public class CassandraDiskAnn
         {
             var view = (GraphIndex.ScoringView) searcher.getView();
             SearchScoreProvider ssp;
-            // FusedADC can no longer be written due to jvector upgrade. However, it's possible these index files
-            // still exist, so we have to support them.
             if (features.contains(FeatureId.FUSED_ADC))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);

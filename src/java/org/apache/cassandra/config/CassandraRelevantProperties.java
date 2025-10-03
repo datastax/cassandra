@@ -406,6 +406,8 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.vector_flush_threshold_max_rows", "-1"),
     // Use non-positive value to disable it. Period in millis to trigger a flush for SAI vector memtable index.
     SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
+    // Whether compaction should build vector indexes using fused adc
+    SAI_VECTOR_ENABLE_FUSED_ADC("cassandra.sai.vector.enable_fused_adc", "true"),
     /**
      * Whether to disable auto-compaction
      */
