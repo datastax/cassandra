@@ -54,7 +54,6 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.guardrails.GuardrailEvent.GuardrailEventType;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.diag.DiagnosticEventService;
-import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
@@ -476,7 +475,6 @@ public abstract class GuardrailTester extends CQLTester
                ? Collections.emptyList()
                : warnings.stream()
                          .filter(w -> !w.equals(View.USAGE_WARNING) 
-                                 && !w.equals(SASIIndex.USAGE_WARNING)
                                  && !w.startsWith(SelectStatement.USAGE_WARNING_PAGE_WEIGHT))
                          .collect(Collectors.toList());
     }
