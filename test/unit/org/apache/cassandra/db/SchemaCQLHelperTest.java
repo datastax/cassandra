@@ -18,24 +18,7 @@
 
 package org.apache.cassandra.db;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.io.Files;
 
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.statements.schema.IndexTarget;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.index.internal.CassandraIndex;
-import org.apache.cassandra.index.sasi.SASIIndex;
-import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JsonUtils;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
@@ -44,16 +27,33 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.io.Files;
+import org.assertj.core.api.Assertions;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+
+
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.FieldIdentifier;
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.index.StubIndex;
+import org.apache.cassandra.index.internal.CassandraIndex;
+import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompressionParams;
@@ -63,7 +63,9 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.schema.Types;
-import org.assertj.core.api.Assertions;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JsonUtils;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
@@ -441,12 +443,12 @@ public class SchemaCQLHelperTest extends CQLTester
                    Collections.singletonList(new IndexTarget(reg1, IndexTarget.Type.KEYS_AND_VALUES)),
                    "indexName4",
                    IndexMetadata.Kind.CUSTOM,
-                   Collections.singletonMap(IndexTarget.CUSTOM_INDEX_OPTION_NAME, SASIIndex.class.getName())),
+                   Collections.singletonMap(IndexTarget.CUSTOM_INDEX_OPTION_NAME, StubIndex.class.getName())),
                    IndexMetadata.fromIndexTargets(
                    Collections.singletonList(new IndexTarget(reg1, IndexTarget.Type.KEYS_AND_VALUES)),
                    "indexName5",
                    IndexMetadata.Kind.CUSTOM,
-                   ImmutableMap.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME,SASIIndex.class.getName(),
+                   ImmutableMap.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME, StubIndex.class.getName(),
                                    "is_literal", "false"))
                    ));
 
@@ -458,8 +460,8 @@ public class SchemaCQLHelperTest extends CQLTester
         assertEquals(ImmutableList.of("CREATE INDEX \"indexName\" ON cql_test_keyspace_3.test_table_3 (values(reg1));",
                                       "CREATE INDEX \"indexName2\" ON cql_test_keyspace_3.test_table_3 (keys(reg1));",
                                       "CREATE INDEX \"indexName3\" ON cql_test_keyspace_3.test_table_3 (entries(reg1));",
-                                      "CREATE CUSTOM INDEX \"indexName4\" ON cql_test_keyspace_3.test_table_3 (entries(reg1)) USING 'org.apache.cassandra.index.sasi.SASIIndex';",
-                                      "CREATE CUSTOM INDEX \"indexName5\" ON cql_test_keyspace_3.test_table_3 (entries(reg1)) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'is_literal': 'false'};"),
+                                      "CREATE CUSTOM INDEX \"indexName4\" ON cql_test_keyspace_3.test_table_3 (entries(reg1)) USING 'org.apache.cassandra.index.StubIndex';",
+                                      "CREATE CUSTOM INDEX \"indexName5\" ON cql_test_keyspace_3.test_table_3 (entries(reg1)) USING 'org.apache.cassandra.index.StubIndex' WITH OPTIONS = {'is_literal': 'false'};"),
                      SchemaCQLHelper.getIndexesAsCQL(cfs.metadata(), false).collect(Collectors.toList()));
     }
 

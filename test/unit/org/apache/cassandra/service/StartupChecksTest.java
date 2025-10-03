@@ -18,36 +18,29 @@
 package org.apache.cassandra.service;
 
 import java.io.IOException;
-import java.nio.file.FileStore;
-import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.spi.FileSystemProvider;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
 import org.slf4j.LoggerFactory;
 
-import com.vdurmont.semver4j.Semver;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.Config.DiskAccessMode;
 import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.StartupChecksOptions;
@@ -60,30 +53,24 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.StartupException;
-import org.apache.cassandra.io.filesystem.ForwardingFileSystem;
-import org.apache.cassandra.io.filesystem.ForwardingFileSystemProvider;
-import org.apache.cassandra.io.filesystem.ForwardingPath;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.DataResurrectionCheck.Heartbeat;
 import org.apache.cassandra.utils.Clock;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.Collections.singletonList;
+
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_INVALID_LEGACY_SSTABLE_ROOT;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_TESTTAG;
 import static org.apache.cassandra.io.util.FileUtils.createTempFile;
 import static org.apache.cassandra.service.DataResurrectionCheck.HEARTBEAT_FILE_CONFIG_PROPERTY;
 import static org.apache.cassandra.service.StartupChecks.StartupCheckType.check_data_resurrection;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 public class StartupChecksTest
 {
@@ -252,104 +239,6 @@ public class StartupChecksTest
         verifyFailure(startupChecks, "Invalid tables: abc.def");
     }
 
-    @Test
-    public void testKernelBug1057843Check() throws Exception
-    {
-        Assume.assumeTrue(DatabaseDescriptor.getCommitLogCompression() == null); // we would not be able to enable direct io otherwise
-        testKernelBug1057843Check("ext4", DiskAccessMode.direct, new Semver("6.1.63.1-generic"), false);
-        testKernelBug1057843Check("ext4", DiskAccessMode.direct, new Semver("6.1.64.1-generic"), true);
-        testKernelBug1057843Check("ext4", DiskAccessMode.direct, new Semver("6.1.65.1-generic"), true);
-        testKernelBug1057843Check("ext4", DiskAccessMode.direct, new Semver("6.1.66.1-generic"), false);
-        testKernelBug1057843Check("tmpfs", DiskAccessMode.direct, new Semver("6.1.64.1-generic"), false);
-        testKernelBug1057843Check("ext4", DiskAccessMode.mmap, new Semver("6.1.64.1-generic"), false);
-    }
-
-    private <R> void withPathOverriddingFileSystem(Map<String, String> pathOverrides, Callable<? extends R> callable) throws Exception
-    {
-        Map<String, FileStore> fileStores = Set.copyOf(pathOverrides.values()).stream().collect(Collectors.toMap(s -> s, s -> {
-            FileStore fs = mock(FileStore.class);
-            when(fs.type()).thenReturn(s);
-            return fs;
-        }));
-        FileSystem savedFileSystem = File.unsafeGetFilesystem();
-        try
-        {
-            ForwardingFileSystemProvider fsp = new ForwardingFileSystemProvider(savedFileSystem.provider())
-            {
-                @Override
-                public FileStore getFileStore(Path path) throws IOException
-                {
-                    String override = pathOverrides.get(path.toString());
-                    if (override != null)
-                        return fileStores.get(override);
-
-                    return super.getFileStore(path);
-                }
-            };
-
-            ForwardingFileSystem fs = new ForwardingFileSystem(File.unsafeGetFilesystem())
-            {
-                private final FileSystem thisFileSystem = this;
-
-                @Override
-                public FileSystemProvider provider()
-                {
-                    return fsp;
-                }
-
-                @Override
-                protected Path wrap(Path p)
-                {
-                    return new ForwardingPath(p)
-                    {
-                        @Override
-                        public FileSystem getFileSystem()
-                        {
-                            return thisFileSystem;
-                        }
-                    };
-                }
-            };
-            File.unsafeSetFilesystem(fs);
-            callable.call();
-        }
-        finally
-        {
-            File.unsafeSetFilesystem(savedFileSystem);
-        }
-    }
-
-    private void testKernelBug1057843Check(String fsType, DiskAccessMode diskAccessMode, Semver kernelVersion, boolean expectToFail) throws Exception
-    {
-        File commitLogLocation =new File(Files.createTempDirectory("testKernelBugCheck"));
-
-        File savedCommitLogLocation = DatabaseDescriptor.getCommitLogLocation();
-        DiskAccessMode savedCommitLogWriteDiskAccessMode = DatabaseDescriptor.getCommitLogWriteDiskAccessMode();
-        Semver savedKernelVersion = FBUtilities.getKernelVersion();
-        try
-        {
-            DatabaseDescriptor.setCommitLogLocation(commitLogLocation);
-            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(diskAccessMode);
-            DatabaseDescriptor.initializeCommitLogDiskAccessMode();
-            assertThat(DatabaseDescriptor.getCommitLogWriteDiskAccessMode()).isEqualTo(diskAccessMode);
-            FBUtilities.setKernelVersionSupplier(() -> kernelVersion);
-            withPathOverriddingFileSystem(Map.of(commitLogLocation.path(), fsType), () -> {
-                if (expectToFail)
-                    assertThatExceptionOfType(StartupException.class).isThrownBy(() -> StartupChecks.checkKernelBug1057843.execute(options));
-                else
-                    StartupChecks.checkKernelBug1057843.execute(options);
-                return null;
-            });
-        }
-        finally
-        {
-            DatabaseDescriptor.setCommitLogLocation(savedCommitLogLocation);
-            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(savedCommitLogWriteDiskAccessMode);
-            DatabaseDescriptor.initializeCommitLogDiskAccessMode();
-            FBUtilities.setKernelVersionSupplier(() -> savedKernelVersion);
-        }
-    }
-
     private void copyInvalidLegacySSTables(Path targetDir) throws IOException
     {
         File legacySSTableRoot = new File(Paths.get(TEST_INVALID_LEGACY_SSTABLE_ROOT.getString(),
@@ -382,6 +271,26 @@ public class StartupChecksTest
         {
             startupChecks = startupChecks.withTest(StartupChecks.checkYamlConfig);
             startupChecks.verify(options);
+        }
+    }
+
+    @Test(expected = StartupException.class)
+    public void yamlConfigFailOnSASI() throws Exception
+    {
+        try
+        {
+            DatabaseDescriptor.setTransientReplicationEnabledUnsafe(false);
+            DatabaseDescriptor.getRawConfig().sasi_indexes_enabled = true;
+            try (WithProperties properties = new WithProperties().clear(TEST_CASSANDRA_TESTTAG))
+            {
+                startupChecks = startupChecks.withTest(StartupChecks.checkYamlConfig);
+                startupChecks.verify(options);
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setTransientReplicationEnabledUnsafe(true);
+            DatabaseDescriptor.getRawConfig().sasi_indexes_enabled = false;
         }
     }
 
@@ -447,7 +356,6 @@ public class StartupChecksTest
             assertWarningLogged("Not using murmur3 partitioner (org.apache.cassandra.dht.ByteOrderedPartitioner).");
             assertWarningLogged("num_tokens 17 too high. Values over 16 poorly impact repairs and node bootstrapping/decommissioning.");
             assertWarningLogged("Materialised Views should not be enabled.");
-            assertWarningLogged("SASI should not be enabled, use SAI instead.");
             assertWarningLogged("Using `DROP COMPACT STORAGE` on tables should not be enabled.");
             assertWarningLogged("Guardrails value 100001 for tombstone_failure_threshold is too high (>100000).");
             assertWarningLogged("Guardrails value 641 for batch_size_fail_threshold_in_kb is too high (>640).");
@@ -525,12 +433,10 @@ public class StartupChecksTest
             DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
             QueryProcessor.executeInternal("CREATE KEYSPACE IF NOT EXISTS startupcheckstest WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
             QueryProcessor.executeInternal("CREATE TABLE startupcheckstest.c2(pk int, ck int, v int, PRIMARY KEY(pk, ck)) WITH compaction={'class': 'SizeTieredCompactionStrategy'}");
-            QueryProcessor.executeInternal("CREATE CUSTOM INDEX ON startupcheckstest.c2(v) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
             QueryProcessor.executeInternal("CREATE TABLE startupcheckstest.c3(pk int PRIMARY KEY, v int) WITH COMPACT STORAGE");
             startupChecks = startupChecks.withTest(StartupChecks.checkTableSettings);
             startupChecks.verify(options);
             assertWarningLogged("The following tables using STCS and LCS should be altered to use UnifiedCompactionStrategy (UCS): startupcheckstest.c2");
-            assertWarningLogged("The following tables with non-SAI indexes should be altered to use SAI: startupcheckstest.c2");
             assertWarningLogged("The following tables are `WITH COMPACT STORAGE` and need to be manually migrated to normal tables (Avoid using `DROP COMPACT STORAGE`): startupcheckstest.c3");
         }
         finally

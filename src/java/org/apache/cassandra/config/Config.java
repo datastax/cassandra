@@ -615,6 +615,7 @@ public class Config
     @Replaces(oldName = "enable_transient_replication", converter = Converters.IDENTITY, deprecated = true)
     public boolean transient_replication_enabled = false;
 
+    @Deprecated(since = "CC5") // SASI has been removed altogether, StartupChecks fail if this is true
     @Replaces(oldName = "enable_sasi_indexes", converter = Converters.IDENTITY, deprecated = true)
     public boolean sasi_indexes_enabled = false;
 

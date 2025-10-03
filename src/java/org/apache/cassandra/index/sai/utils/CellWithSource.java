@@ -239,6 +239,12 @@ public class CellWithSource<T> extends Cell<T>
         return cell.minTimestamp();
     }
 
+    @Override
+    public int liveDataSize(long nowInSec)
+    {
+        return cell.liveDataSize(nowInSec);
+    }
+
     private Cell<?> wrapIfNew(Cell<?> maybeNewCell)
     {
         if (maybeNewCell == null)

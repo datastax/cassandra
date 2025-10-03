@@ -779,20 +779,9 @@ public class IndexHintsTest extends CQLTester
     @Test
     public void testLegacy()
     {
-        testSingletonIndex("CREATE INDEX %s ON %%s(%s)");
-    }
-
-    @Test
-    public void testSASI()
-    {
-        testSingletonIndex("CREATE CUSTOM INDEX %s ON %%s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
-    }
-
-    private void testSingletonIndex(String createIndexQuery)
-    {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int)");
-        String idx1 = createIndex(format(createIndexQuery, "idx1", "v1"));
-        String idx2 = createIndex(format(createIndexQuery, "idx2", "v2"));
+        String idx1 = createIndex("CREATE INDEX idx1 ON %s(v1)");
+        String idx2 = createIndex("CREATE INDEX idx2 ON %s(v2)");
 
         String insert = "INSERT INTO %s (k, v1, v2) VALUES (?, ?, ?)";
         Object[] row1 = new Object[]{ 1, 0, 0 };
@@ -960,48 +949,6 @@ public class IndexHintsTest extends CQLTester
     }
 
     @Test
-    public void testMultipleIndexesOnSameColumnLegacyAndSASI()
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
-        String sasi = createIndex("CREATE CUSTOM INDEX sasi ON %s(v) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
-        String legacy = createIndex("CREATE INDEX legacy ON %s(v)");
-
-        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
-        Object[] row1 = new Object[]{ 1, 1 };
-        Object[] row2 = new Object[]{ 2, 2 };
-        Object[] row3 = new Object[]{ 3, 3 };
-        execute(insert, row1);
-        execute(insert, row2);
-        execute(insert, row3);
-
-        // without any hints
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0").selectsAnyOf(legacy, sasi);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1", row1).selectsAnyOf(legacy, sasi);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v>1", row2, row3).selects(sasi); // legacy doesn't support >
-
-        // including SASI
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH included_indexes={sasi}").selects(sasi);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1 WITH included_indexes={sasi}", row1).selects(sasi);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v>1 WITH included_indexes={sasi}", row2, row3).selects(sasi);
-
-        // including legacy
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH included_indexes={legacy}").selects(legacy);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1 WITH included_indexes={legacy}", row1).selects(legacy);
-        assertNonIncludableIndexesError("SELECT * FROM %s WHERE v>1 WITH included_indexes={legacy}"); // legacy doesn't support >
-
-        // excluding SASI
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={sasi}").selects(legacy);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1 WITH excluded_indexes={sasi}", row1).selects(legacy);
-        assertIndexDoesNotSupportOperator("SELECT * FROM %s WHERE v>1 WITH excluded_indexes={sasi}", "v"); // legacy doesn't support >
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v>1 ALLOW FILTERING WITH excluded_indexes={sasi}", row2, row3).selectsNone();
-
-        // excluding legacy
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={legacy}").selects(sasi);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1 WITH excluded_indexes={legacy}", row1).selects(sasi);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v>1 WITH excluded_indexes={legacy}", row2, row3).selects(sasi); // legacy doesn't support >
-    }
-
-    @Test
     public void testMultipleIndexesOnSameColumnLegacyAndSAI()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
@@ -1022,29 +969,6 @@ public class IndexHintsTest extends CQLTester
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={legacy}", row1).selects(sai);
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={sai,legacy}");
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 ALLOW FILTERING WITH excluded_indexes={sai,legacy}", row1).selectsNone();
-    }
-
-    @Test
-    public void testMultipleIndexesOnSameColumnSAIAndSASI()
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
-        String sai = createIndex("CREATE CUSTOM INDEX sai ON %s(v) USING 'StorageAttachedIndex'");
-        String sasi = createIndex("CREATE CUSTOM INDEX sasi ON %s(v) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
-
-        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
-        Object[] row1 = new Object[]{ 1, 0 };
-        Object[] row2 = new Object[]{ 2, 1 };
-        execute(insert, row1);
-        execute(insert, row2);
-
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0", row1).selectsAnyOf(sai, sasi); // SAI and SASI have the same selectivity
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH included_indexes={sai}", row1).selects(sai);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH included_indexes={sasi}", row1).selects(sasi);
-        assertNonIncludableIndexesError("SELECT * FROM %s WHERE v=0 WITH included_indexes={sai,sasi}");
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={sai}", row1).selects(sasi);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={sasi}", row1).selects(sai);
-        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={sai,sasi}");
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 ALLOW FILTERING WITH excluded_indexes={sai,sasi}", row1).selectsNone();
     }
 
     @Test
@@ -1331,23 +1255,18 @@ public class IndexHintsTest extends CQLTester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
         String idx1 = createIndex("CREATE INDEX idx1 ON %s(v1)");
         String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
-        String idx3 = createIndex("CREATE CUSTOM INDEX idx3 ON %s(v3) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
 
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 WITH included_indexes={idx1,idx1}").selects(idx1);
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v2=0 WITH included_indexes={idx2,idx2}").selects(idx2);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v3=0 WITH included_indexes={idx3,idx3}").selects(idx3);
 
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes={idx1,idx1}");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes={idx2,idx2}");
-        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH excluded_indexes={idx3,idx3}");
 
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1,idx1}").selectsNone();
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx2,idx2}").selectsNone();
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx3,idx3}").selectsNone();
 
         assertConflictingHints("SELECT * FROM %s WHERE v1=0 WITH included_indexes={idx1} AND excluded_indexes={idx1}", "idx1");
         assertConflictingHints("SELECT * FROM %s WHERE v2=0 WITH included_indexes={idx2} AND excluded_indexes={idx2}", "idx2");
-        assertConflictingHints("SELECT * FROM %s WHERE v3=0 WITH included_indexes={idx3} AND excluded_indexes={idx3}", "idx3");
     }
 
     /**
