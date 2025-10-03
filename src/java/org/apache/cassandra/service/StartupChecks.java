@@ -142,8 +142,7 @@ public class StartupChecks
     // The default set of pre-flight checks to run. Order is somewhat significant in that we probably
     // always want the system keyspace check run last, as this actually loads the schema for that
     // keyspace. All other checks should not require any schema initialization.
-    private final List<StartupCheck> DEFAULT_TESTS = ImmutableList.of(checkKernelBug1057843,
-                                                                      checkJemalloc,
+    private final List<StartupCheck> DEFAULT_TESTS = ImmutableList.of(checkJemalloc,
                                                                       checkLz4Native,
                                                                       checkValidLaunchDate,
                                                                       checkJMXPorts,
@@ -204,64 +203,6 @@ public class StartupChecks
             }
         }
     }
-
-    // https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1057843
-    public static final StartupCheck checkKernelBug1057843 = new StartupCheck()
-    {
-        @Override
-        public void execute(StartupChecksOptions startupChecksOptions) throws StartupException
-        {
-            if (startupChecksOptions.isDisabled(getStartupCheckType()))
-                return;
-
-            if (!FBUtilities.isLinux)
-                return;
-
-            Set<Path> directIOWritePaths = new HashSet<>();
-            if (DatabaseDescriptor.getCommitLogWriteDiskAccessMode() == Config.DiskAccessMode.direct)
-                directIOWritePaths.add(DatabaseDescriptor.getCommitLogLocation().toPath());
-            // TODO: add data directories when direct IO is supported for flushing and compaction
-
-            if (!directIOWritePaths.isEmpty() && IGNORE_KERNEL_BUG_1057843_CHECK.getBoolean())
-            {
-                logger.info("Ignoring check for the kernel bug 1057843 against the following paths configured to be accessed with Direct IO: {}", directIOWritePaths);
-                return;
-            }
-
-            Set<String> affectedFileSystemTypes = Set.of("ext4");
-            Set<Path> affectedPaths = new HashSet<>();
-            for (Path path : directIOWritePaths)
-            {
-                try
-                {
-                    if (affectedFileSystemTypes.contains(Files.getFileStore(path).type().toLowerCase()))
-                        affectedPaths.add(path);
-                }
-                catch (IOException e)
-                {
-                    throw new StartupException(StartupException.ERR_WRONG_MACHINE_STATE, "Failed to determine file system type for path " + path, e);
-                }
-            }
-
-            if (affectedPaths.isEmpty())
-                return;
-
-            Range<Semver> affectedKernels = Range.closedOpen(new Semver("6.1.64", Semver.SemverType.LOOSE),
-                                                             new Semver("6.1.66", Semver.SemverType.LOOSE));
-
-            Semver kernelVersion = FBUtilities.getKernelVersion();
-            if (!affectedKernels.contains(kernelVersion.withClearedSuffixAndBuild()))
-                return;
-
-            throw new StartupException(StartupException.ERR_WRONG_MACHINE_STATE,
-                                       String.format("Detected kernel version %s with affected file system types %s and direct IO enabled for paths %s. " +
-                                                     "This combination is known to cause data corruption. To start Cassandra in this environment, " +
-                                                     "you have to disable direct IO for the affected paths. If you are sure the verification provided " +
-                                                     "a false positive result, you can suppress it by setting '" + IGNORE_KERNEL_BUG_1057843_CHECK.getKey() + "' system property to 'true'. " +
-                                                     "Please see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1057843 for more information.",
-                                                     kernelVersion, affectedFileSystemTypes, affectedPaths));
-        }
-    };
 
     public static final StartupCheck checkJemalloc = new StartupCheck()
     {

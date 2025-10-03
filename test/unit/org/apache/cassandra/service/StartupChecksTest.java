@@ -252,104 +252,6 @@ public class StartupChecksTest
         verifyFailure(startupChecks, "Invalid tables: abc.def");
     }
 
-    @Test
-    public void testKernelBug1057843Check() throws Exception
-    {
-        Assume.assumeTrue(DatabaseDescriptor.getCommitLogCompression() == null); // we would not be able to enable direct io otherwise
-        testKernelBug1057843Check("ext4", DiskAccessMode.direct, new Semver("6.1.63.1-generic"), false);
-        testKernelBug1057843Check("ext4", DiskAccessMode.direct, new Semver("6.1.64.1-generic"), true);
-        testKernelBug1057843Check("ext4", DiskAccessMode.direct, new Semver("6.1.65.1-generic"), true);
-        testKernelBug1057843Check("ext4", DiskAccessMode.direct, new Semver("6.1.66.1-generic"), false);
-        testKernelBug1057843Check("tmpfs", DiskAccessMode.direct, new Semver("6.1.64.1-generic"), false);
-        testKernelBug1057843Check("ext4", DiskAccessMode.mmap, new Semver("6.1.64.1-generic"), false);
-    }
-
-    private <R> void withPathOverriddingFileSystem(Map<String, String> pathOverrides, Callable<? extends R> callable) throws Exception
-    {
-        Map<String, FileStore> fileStores = Set.copyOf(pathOverrides.values()).stream().collect(Collectors.toMap(s -> s, s -> {
-            FileStore fs = mock(FileStore.class);
-            when(fs.type()).thenReturn(s);
-            return fs;
-        }));
-        FileSystem savedFileSystem = File.unsafeGetFilesystem();
-        try
-        {
-            ForwardingFileSystemProvider fsp = new ForwardingFileSystemProvider(savedFileSystem.provider())
-            {
-                @Override
-                public FileStore getFileStore(Path path) throws IOException
-                {
-                    String override = pathOverrides.get(path.toString());
-                    if (override != null)
-                        return fileStores.get(override);
-
-                    return super.getFileStore(path);
-                }
-            };
-
-            ForwardingFileSystem fs = new ForwardingFileSystem(File.unsafeGetFilesystem())
-            {
-                private final FileSystem thisFileSystem = this;
-
-                @Override
-                public FileSystemProvider provider()
-                {
-                    return fsp;
-                }
-
-                @Override
-                protected Path wrap(Path p)
-                {
-                    return new ForwardingPath(p)
-                    {
-                        @Override
-                        public FileSystem getFileSystem()
-                        {
-                            return thisFileSystem;
-                        }
-                    };
-                }
-            };
-            File.unsafeSetFilesystem(fs);
-            callable.call();
-        }
-        finally
-        {
-            File.unsafeSetFilesystem(savedFileSystem);
-        }
-    }
-
-    private void testKernelBug1057843Check(String fsType, DiskAccessMode diskAccessMode, Semver kernelVersion, boolean expectToFail) throws Exception
-    {
-        File commitLogLocation =new File(Files.createTempDirectory("testKernelBugCheck"));
-
-        File savedCommitLogLocation = DatabaseDescriptor.getCommitLogLocation();
-        DiskAccessMode savedCommitLogWriteDiskAccessMode = DatabaseDescriptor.getCommitLogWriteDiskAccessMode();
-        Semver savedKernelVersion = FBUtilities.getKernelVersion();
-        try
-        {
-            DatabaseDescriptor.setCommitLogLocation(commitLogLocation);
-            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(diskAccessMode);
-            DatabaseDescriptor.initializeCommitLogDiskAccessMode();
-            assertThat(DatabaseDescriptor.getCommitLogWriteDiskAccessMode()).isEqualTo(diskAccessMode);
-            FBUtilities.setKernelVersionSupplier(() -> kernelVersion);
-            withPathOverriddingFileSystem(Map.of(commitLogLocation.path(), fsType), () -> {
-                if (expectToFail)
-                    assertThatExceptionOfType(StartupException.class).isThrownBy(() -> StartupChecks.checkKernelBug1057843.execute(options));
-                else
-                    StartupChecks.checkKernelBug1057843.execute(options);
-                return null;
-            });
-        }
-        finally
-        {
-            DatabaseDescriptor.setCommitLogLocation(savedCommitLogLocation);
-            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(savedCommitLogWriteDiskAccessMode);
-            DatabaseDescriptor.initializeCommitLogDiskAccessMode();
-            FBUtilities.setKernelVersionSupplier(() -> savedKernelVersion);
-        }
-    }
-
     private void copyInvalidLegacySSTables(Path targetDir) throws IOException
     {
         File legacySSTableRoot = new File(Paths.get(TEST_INVALID_LEGACY_SSTABLE_ROOT.getString(),
@@ -525,12 +427,10 @@ public class StartupChecksTest
             DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
             QueryProcessor.executeInternal("CREATE KEYSPACE IF NOT EXISTS startupcheckstest WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
             QueryProcessor.executeInternal("CREATE TABLE startupcheckstest.c2(pk int, ck int, v int, PRIMARY KEY(pk, ck)) WITH compaction={'class': 'SizeTieredCompactionStrategy'}");
-            QueryProcessor.executeInternal("CREATE CUSTOM INDEX ON startupcheckstest.c2(v) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
             QueryProcessor.executeInternal("CREATE TABLE startupcheckstest.c3(pk int PRIMARY KEY, v int) WITH COMPACT STORAGE");
             startupChecks = startupChecks.withTest(StartupChecks.checkTableSettings);
             startupChecks.verify(options);
             assertWarningLogged("The following tables using STCS and LCS should be altered to use UnifiedCompactionStrategy (UCS): startupcheckstest.c2");
-            assertWarningLogged("The following tables with non-SAI indexes should be altered to use SAI: startupcheckstest.c2");
             assertWarningLogged("The following tables are `WITH COMPACT STORAGE` and need to be manually migrated to normal tables (Avoid using `DROP COMPACT STORAGE`): startupcheckstest.c3");
         }
         finally

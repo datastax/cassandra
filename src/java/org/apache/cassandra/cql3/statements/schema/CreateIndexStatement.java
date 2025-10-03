@@ -44,7 +44,6 @@ import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
-import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -161,9 +160,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         Guardrails.createSecondaryIndexesEnabled.ensureEnabled("Creating secondary indexes", state);
 
-        if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()) && !DatabaseDescriptor.getSASIIndexesEnabled())
-            throw new InvalidRequestException(SASI_INDEX_DISABLED);
-
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
         if (null == keyspace)
             throw ire(KEYSPACE_DOES_NOT_EXIST, keyspaceName);
@@ -255,9 +251,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     @Override
     Set<String> clientWarnings(KeyspacesDiff diff)
     {
-        if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()))
-            return ImmutableSet.of(SASIIndex.USAGE_WARNING);
-
         if (isDseIndexCreateStatement())
             return ImmutableSet.of(String.format(DSE_INDEX_WARNING, indexName, attrs.customClass));
 
