@@ -46,7 +46,6 @@
     <allocation-instrumenter.version>@allocation-instrumenter.version@</allocation-instrumenter.version>
     <ecj.version>@ecj.version@</ecj.version>
     <jacoco.version>@jacoco.version@</jacoco.version>
-    <jflex.version>@jflex.version@</jflex.version>
   </properties>
   <developers>
     <developer>
@@ -1060,17 +1059,6 @@
         <groupId>com.carrotsearch</groupId>
         <artifactId>hppc</artifactId>
         <version>0.8.1</version>
-      </dependency>
-      <dependency>
-        <groupId>de.jflex</groupId>
-        <artifactId>jflex</artifactId>
-        <version>${jflex.version}</version>
-        <exclusions>
-          <exclusion>
-            <artifactId>ant</artifactId>
-            <groupId>org.apache.ant</groupId>
-          </exclusion>
-        </exclusions>
       </dependency>
       <dependency>
         <groupId>com.googlecode.concurrent-trees</groupId>
