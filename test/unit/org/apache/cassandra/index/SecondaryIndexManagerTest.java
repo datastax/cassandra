@@ -22,6 +22,7 @@ import java.net.SocketException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -29,19 +30,21 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.collect.Sets;
-import org.apache.cassandra.db.memtable.Memtable;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -80,18 +83,6 @@ public class SecondaryIndexManagerTest extends CQLTester
     public void after()
     {
         TestingIndex.clear();
-    }
-
-    @Test
-    public void createSasiAfterSai()
-    {
-        createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
-        createIndex("CREATE INDEX idx0 ON %s (val) USING 'sai'");
-        execute("INSERT INTO %s (id, val) VALUES (1, 'a')");
-        execute("SELECT * FROM %s WHERE val = 'a'");
-        flush();
-        createIndex("CREATE CUSTOM INDEX idx1 ON %s (val) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
-        execute("SELECT * FROM %s WHERE val = 'a'");
     }
 
     @Test
@@ -797,6 +788,32 @@ public class SecondaryIndexManagerTest extends CQLTester
             JVMStabilityInspector.replaceKiller(originalKiller);
             TestingIndex.shouldFailBuild = false;
             TestingIndex.failedBuildTrowable = null;
+        }
+    }
+
+    @Test
+    public void unknownCustomIndexIgnored() throws Throwable
+    {
+        Boolean previous = CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.setBoolean(true);
+        try
+        {
+            createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+            ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+
+            IndexMetadata indexMetadata = IndexMetadata
+                    .fromSchemaMetadata("index_name",
+                                        IndexMetadata.Kind.CUSTOM,
+                                        Map.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME, "org.apache.cassandra.index.sasi.SASIIndex",
+                                               IndexTarget.TARGET_OPTION_NAME, "c"));
+
+            cfs.indexManager.addIndex(indexMetadata, true);
+        }
+        finally
+        {
+            if (null != previous)
+                CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.setBoolean((boolean)previous);
+            else
+                CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.reset();
         }
     }
 
