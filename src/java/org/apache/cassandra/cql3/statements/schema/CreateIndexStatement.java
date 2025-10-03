@@ -29,6 +29,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
@@ -42,9 +45,9 @@ import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.guardrails.Threshold;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
-import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -56,13 +59,16 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static com.google.common.collect.Iterables.transform;
 import static com.google.common.collect.Iterables.tryFind;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE;
 
 public final class CreateIndexStatement extends AlterSchemaStatement
 {
-    public static final String SASI_INDEX_DISABLED = "SASI indexes are disabled. Enable in cassandra.yaml to use.";
+    private static final Logger logger = LoggerFactory.getLogger(CreateIndexStatement.class);
+
     public static final String KEYSPACE_DOES_NOT_EXIST = "Keyspace '%s' doesn't exist";
     public static final String TABLE_DOES_NOT_EXIST = "Table '%s' doesn't exist";
     public static final String COUNTER_TABLES_NOT_SUPPORTED = "Secondary indexes on counter tables aren't supported";
@@ -101,6 +107,9 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
     private ClientState state;
     private static final String DSE_INDEX_WARNING = "Index %s was not created. DSE custom index (%s) is not " +
+                                                    "supported. Consult the docs on alternatives (SAI indexes, " +
+                                                    "Secondary Indexes).";
+    private static final String UNKNOWN_INDEX_WARNING = "Index %s was not created. Unknown custom index (%s) is not " +
                                                     "supported. Consult the docs on alternatives (SAI indexes, " +
                                                     "Secondary Indexes).";
 
@@ -161,9 +170,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         Guardrails.createSecondaryIndexesEnabled.ensureEnabled("Creating secondary indexes", state);
 
-        if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()) && !DatabaseDescriptor.getSASIIndexesEnabled())
-            throw new InvalidRequestException(SASI_INDEX_DISABLED);
-
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
         if (null == keyspace)
             throw ire(KEYSPACE_DOES_NOT_EXIST, keyspaceName);
@@ -216,6 +222,13 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options);
 
         String className = index.getIndexClassName();
+        if (isUnknownCustomIndexCreateStatement() && INDEX_UNKNOWN_IGNORE.getBoolean())
+        {
+            logger.error("Cannot find index type {}, but '{}' is true so ignoring index {} creation",
+                         className, INDEX_UNKNOWN_IGNORE.getKey(), indexName);
+            return schema;
+        }
+
         IndexGuardrails guardRails = IndexGuardrails.forClassName(className);
         String indexDescription = indexName == null ? String.format("on table %s", table.name) : String.format("%s on table %s", indexName, table.name);
 
@@ -255,11 +268,10 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     @Override
     Set<String> clientWarnings(KeyspacesDiff diff)
     {
-        if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()))
-            return ImmutableSet.of(SASIIndex.USAGE_WARNING);
-
         if (isDseIndexCreateStatement())
             return ImmutableSet.of(String.format(DSE_INDEX_WARNING, indexName, attrs.customClass));
+        if (isUnknownCustomIndexCreateStatement() && INDEX_UNKNOWN_IGNORE.getBoolean())
+            return ImmutableSet.of(String.format(UNKNOWN_INDEX_WARNING, indexName, attrs.customClass));
 
         return ImmutableSet.of();
     }
@@ -267,6 +279,21 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private boolean isDseIndexCreateStatement()
     {
         return DSE_INDEXES.contains(attrs.customClass);
+    }
+
+    private boolean isUnknownCustomIndexCreateStatement()
+    {
+        try
+        {
+            // mimic what IndexMetadata.validate(..) does
+            if (attrs.isCustom)
+                FBUtilities.classForName(attrs.customClass, "custom indexer");
+            return false;
+        }
+        catch (ConfigurationException ex)
+        {
+            return true;
+        }
     }
 
     private void validateIndexTarget(TableMetadata table, IndexMetadata.Kind kind, IndexTarget target)
@@ -415,7 +442,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     {
         LEGACY(Guardrails.secondaryIndexesPerTable, null),
         SAI(Guardrails.saiIndexesPerTable, Guardrails.saiIndexesTotal),
-        SASI(Guardrails.sasiIndexesPerTable, null),
         UNKNOWN(null, null);
 
         final Threshold perTableThreshold;
@@ -443,8 +469,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             {
                 case "org.apache.cassandra.index.internal.CassandraIndex":
                     return IndexGuardrails.LEGACY;
-                case "org.apache.cassandra.index.sasi.SASIIndex":
-                    return IndexGuardrails.SASI;
                 case "org.apache.cassandra.index.sai.StorageAttachedIndex":
                     return IndexGuardrails.SAI;
                 default:

@@ -191,7 +191,7 @@ public class IndexHints
      *     <li>If it's a contains restriction, then a non-analyzed index is better. See CNDB-13925 for details.</li>
      *     <li>An index more selective according to {@link Index#getEstimatedResultRows()} is better. This is done
      *     accordingly to the {@link Index.QueryPlan#getEstimatedResultRows()} method. Please note that some index
-     *     implementations (SASI and SAI) will always return -1 for that method to prioritize themselves. Third party
+     *     implementations (SAI) will always return -1 for that method to prioritize themselves. Third party
      *     implementations can also return similar fixed values. See CNDB-14764 for details.</li>
      * </ol>
      *
@@ -258,7 +258,7 @@ public class IndexHints
     /**
      * Returns the index with the best selectivity from the specified collection of indexes.
      * </p>
-     * The selectivity is determined by the {@link Index#getEstimatedResultRows()} method. Please note that SAI and SASI
+     * The selectivity is determined by the {@link Index#getEstimatedResultRows()} method. Please note that SAI indexes
      * will always return -1 for that method, to force their selection. They will later use their own internal planning
      * when queried. The index selectivity will still be used for legacy indexes, and potentially for 3rd party
      * implementations.

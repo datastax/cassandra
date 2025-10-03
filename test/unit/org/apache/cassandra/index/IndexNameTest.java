@@ -42,7 +42,6 @@ public class IndexNameTest extends CQLTester
     {
         return List.of(
         new Object[]{ "CREATE INDEX %s ON %s(%s)" },
-        new Object[]{ "CREATE CUSTOM INDEX %s ON %s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'" },
         new Object[]{ "CREATE CUSTOM INDEX %s ON %s(%s) USING 'StorageAttachedIndex'" }
         );
     }

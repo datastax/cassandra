@@ -70,6 +70,7 @@ import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.NoopIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
@@ -1434,7 +1435,11 @@ public class StatementRestrictions
                     for (ColumnMetadata column : restriction.getColumnDefs())
                     {
                         if (index.dependsOn(column))
+                        {
+                            if (index instanceof NoopIndex)
+                                throw invalidRequest(((NoopIndex) index).getUnsupportedMessage());
                             builder.add(column);
+                        }
                     }
                 }
             }

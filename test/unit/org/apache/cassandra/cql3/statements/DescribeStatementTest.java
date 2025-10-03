@@ -816,8 +816,8 @@ public class  DescribeStatementTest extends CQLTester
     public void testDescribeWithCustomIndex() throws Throwable
     {
         String table = createTable(KEYSPACE_PER_TEST, "CREATE TABLE %s (id int PRIMARY KEY, value text);");
-        String indexWithoutOptions = createIndex(KEYSPACE_PER_TEST, "CREATE CUSTOM INDEX ON %s(value) USING 'org.apache.cassandra.index.sasi.SASIIndex';");
-        String indexWithOptions = createIndex(KEYSPACE_PER_TEST, "CREATE CUSTOM INDEX ON %s(value) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'is_literal': 'false'};");
+        String indexWithoutOptions = createIndex(KEYSPACE_PER_TEST, "CREATE CUSTOM INDEX ON %s(value) USING 'org.apache.cassandra.index.StubIndex';");
+        String indexWithOptions = createIndex(KEYSPACE_PER_TEST, "CREATE CUSTOM INDEX ON %s(value) USING 'org.apache.cassandra.index.StubIndex' WITH OPTIONS = {'is_literal': 'false'};");
 
         String expectedKeyspaceStmt = "CREATE KEYSPACE " + KEYSPACE_PER_TEST +
                                       " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}" +
@@ -828,8 +828,8 @@ public class  DescribeStatementTest extends CQLTester
                                    "    value text\n" +
                                    ") WITH " + tableParametersCql();
 
-        String expectedIndexStmtWithoutOptions = "CREATE CUSTOM INDEX " + indexWithoutOptions + " ON " + KEYSPACE_PER_TEST + "." + table + " (value) USING 'org.apache.cassandra.index.sasi.SASIIndex';";
-        String expectedIndexStmtWithOptions = "CREATE CUSTOM INDEX " + indexWithOptions + " ON " + KEYSPACE_PER_TEST + "." + table + " (value) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'is_literal': 'false'};";
+        String expectedIndexStmtWithoutOptions = "CREATE CUSTOM INDEX " + indexWithoutOptions + " ON " + KEYSPACE_PER_TEST + "." + table + " (value) USING 'org.apache.cassandra.index.StubIndex';";
+        String expectedIndexStmtWithOptions = "CREATE CUSTOM INDEX " + indexWithOptions + " ON " + KEYSPACE_PER_TEST + "." + table + " (value) USING 'org.apache.cassandra.index.StubIndex' WITH OPTIONS = {'is_literal': 'false'};";
 
         assertRowsNet(executeDescribeNet("DESCRIBE KEYSPACE " + KEYSPACE_PER_TEST),
                       row(KEYSPACE_PER_TEST, "keyspace", KEYSPACE_PER_TEST, expectedKeyspaceStmt),
