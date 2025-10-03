@@ -23,6 +23,8 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.assertj.core.api.Assertions;
 
+import java.util.Arrays;
+
 public class LargePartitionsTest extends SAITester.Versioned
 {
     public static final int NUM_PARTITIONS = 10;
@@ -57,33 +59,42 @@ public class LargePartitionsTest extends SAITester.Versioned
 
             // test filtering with single partition queries
             int numExpectedRows = LARGE_PARTITION_SIZE / 2;
-            Assertions.assertThat(execute("SELECT * FROM %s WHERE k = 2 AND n = 1").size()).isEqualTo(numExpectedRows);
-            Assertions.assertThat(execute("SELECT * FROM %s WHERE k = 2 AND t = 't_1'").size()).isEqualTo(numExpectedRows);
-            Assertions.assertThat(execute("SELECT * FROM %s WHERE k = 2 AND a = 'a_1'").size()).isEqualTo(numExpectedRows);
+            assertNumRows("SELECT * FROM %s WHERE k = 2 AND n = 1", numExpectedRows);
+            assertNumRows("SELECT * FROM %s WHERE k = 2 AND t = 't_1'", numExpectedRows);
+            assertNumRows("SELECT * FROM %s WHERE k = 2 AND a = 'a_1'", numExpectedRows);
 
             // test filtering with range queries
             numExpectedRows = NUM_PARTITIONS * LARGE_PARTITION_SIZE / 2;
-            Assertions.assertThat(execute("SELECT * FROM %s WHERE n = 1").size()).isEqualTo(numExpectedRows);
-            Assertions.assertThat(execute("SELECT * FROM %s WHERE t = 't_1'").size()).isEqualTo(numExpectedRows);
-            Assertions.assertThat(execute("SELECT * FROM %s WHERE a = 'a_1'").size()).isEqualTo(numExpectedRows);
+            assertNumRows("SELECT * FROM %s WHERE n = 1", numExpectedRows);
+            assertNumRows("SELECT * FROM %s WHERE t = 't_1'", numExpectedRows);
+            assertNumRows("SELECT * FROM %s WHERE a = 'a_1'", numExpectedRows);
 
             // the generic ORDER BY
             if (version.after(Version.AA))
             {
-                Assertions.assertThat(execute("SELECT * FROM %s WHERE k = 2 ORDER BY n LIMIT " + LARGE_PARTITION_SIZE).size()).isEqualTo(LARGE_PARTITION_SIZE);
-                Assertions.assertThat(execute("SELECT * FROM %s WHERE k = 2 ORDER BY t LIMIT " + LARGE_PARTITION_SIZE).size()).isEqualTo(LARGE_PARTITION_SIZE);
+                assertNumRows("SELECT * FROM %s WHERE k = 2 ORDER BY n LIMIT " + LARGE_PARTITION_SIZE, LARGE_PARTITION_SIZE);
+                assertNumRows("SELECT * FROM %s WHERE k = 2 ORDER BY t LIMIT " + LARGE_PARTITION_SIZE, LARGE_PARTITION_SIZE);
 
-                Assertions.assertThat(execute("SELECT * FROM %s ORDER BY n LIMIT " + LARGE_PARTITION_SIZE).size()).isEqualTo(LARGE_PARTITION_SIZE);
-                Assertions.assertThat(execute("SELECT * FROM %s ORDER BY t LIMIT " + LARGE_PARTITION_SIZE).size()).isEqualTo(LARGE_PARTITION_SIZE);
+                assertNumRows("SELECT * FROM %s ORDER BY n LIMIT " + LARGE_PARTITION_SIZE, LARGE_PARTITION_SIZE);
+                assertNumRows("SELECT * FROM %s ORDER BY t LIMIT " + LARGE_PARTITION_SIZE, LARGE_PARTITION_SIZE);
             }
 
             // test ANN
             if (version.onOrAfter(Version.JVECTOR_EARLIEST))
             {
                 int limit = CassandraRelevantProperties.SAI_PARTITION_ROW_BATCH_SIZE.getInt() + 1;
-                Assertions.assertThat(execute("SELECT * FROM %s WHERE k = 2 ORDER BY v ANN OF [1, 1] LIMIT " + limit).size()).isEqualTo(limit);
-                Assertions.assertThat(execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT " + limit).size()).isEqualTo(limit);
+                assertNumRows("SELECT * FROM %s WHERE k = 2 ORDER BY v ANN OF [1, 1] LIMIT " + limit, limit);
+                assertNumRows("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT " + limit, limit);
             }
         });
+    }
+
+    private void assertNumRows(String query, int expected)
+    {
+        Assertions.assertThat(execute(query).size()).isEqualTo(expected);
+        for (int pageSize : Arrays.asList(1, 2, 3, expected - 1, expected, expected + 1))
+        {
+            Assertions.assertThat(executeNetWithPaging(query, pageSize).all()).hasSize(expected);
+        }
     }
 }
