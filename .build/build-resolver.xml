@@ -138,12 +138,6 @@
             </dependencies>
             <path refid="cql3-grammar.classpath" classpath="runtime"/>
         </resolve>
-        <resolve>
-            <dependencies>
-                <dependency groupId="de.jflex" artifactId="jflex" version="${jflex.version}" />
-            </dependencies>
-            <path refid="jflex.classpath" classpath="runtime"/>
-        </resolve>
 
         <macrodef name="install">
             <attribute name="pomFile"/>

@@ -28,7 +28,6 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sasi.SASIIndex;
 
 import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.INDEX_DOES_NOT_SUPPORT_DISJUNCTION;
 import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE;
@@ -54,7 +53,6 @@ public class AllIndexImplementationsTest extends CQLTester
         List<Object[]> parameters = new LinkedList<>();
         parameters.add(new Object[]{ "none", null, null });
         parameters.add(new Object[]{ "legacy", CassandraIndex.class, "CREATE INDEX ON %%s(%s)" });
-        parameters.add(new Object[]{ "SASI", SASIIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'" });
         parameters.add(new Object[]{ "SAI", StorageAttachedIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'" });
         return parameters;
     }

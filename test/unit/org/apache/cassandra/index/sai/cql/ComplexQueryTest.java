@@ -274,7 +274,7 @@ public class ComplexQueryTest extends SAITester
     public void indexNotSupportingDisjunctionTest()
     {
         createTable("CREATE TABLE %s (pk int, a int, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+        createIndex("CREATE INDEX ON %s(a)");
 
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 1, 1);
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 2, 2);
