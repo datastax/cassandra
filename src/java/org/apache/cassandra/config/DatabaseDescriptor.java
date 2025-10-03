@@ -4489,14 +4489,10 @@ public class DatabaseDescriptor
         conf.materialized_views_on_repair_enabled = val;
     }
 
+    @Deprecated(since = "CC5") // SASI has been removed altogether, StartupChecks fail if this is true
     public static boolean getSASIIndexesEnabled()
     {
         return conf.sasi_indexes_enabled;
-    }
-
-    public static void setSASIIndexesEnabled(boolean enableSASIIndexes)
-    {
-        conf.sasi_indexes_enabled = enableSASIIndexes;
     }
 
     public static String getDefaultSecondaryIndex()

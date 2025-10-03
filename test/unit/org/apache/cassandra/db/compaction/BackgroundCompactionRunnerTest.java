@@ -27,11 +27,13 @@ import java.util.concurrent.*;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+
 import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
 import org.apache.cassandra.concurrent.WrappedExecutorPlus;
 import org.apache.cassandra.config.Config;
@@ -47,6 +49,7 @@ import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 import org.apache.cassandra.utils.concurrent.Promise;
+
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -539,11 +542,11 @@ public class BackgroundCompactionRunnerTest
     public void handleOOMError()
     {
         JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
-        Consumer<Throwable> originalGlobalErrorHandler = JVMStabilityInspector.getGlobalErrorHandler();
+        BiConsumer<Throwable,Boolean> originalGlobalErrorHandler = JVMStabilityInspector.getGlobalErrorHandler();
         try
         {
             AtomicReference<Throwable> globalErrorEncountered = new AtomicReference<>();
-            JVMStabilityInspector.setGlobalErrorHandler(err -> {
+            JVMStabilityInspector.setGlobalErrorHandler((err,bool) -> {
                 Preconditions.checkArgument(globalErrorEncountered.get() == null, "Expect only one exception");
                 globalErrorEncountered.set(err);
             });
@@ -699,7 +702,7 @@ public class BackgroundCompactionRunnerTest
     public void handDiskFullErrors()
     {
         JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
-        Consumer<Throwable> originalGlobalErrorHandler = JVMStabilityInspector.getGlobalErrorHandler();
+        BiConsumer<Throwable,Boolean> originalGlobalErrorHandler = JVMStabilityInspector.getGlobalErrorHandler();
         try
         {
             long before = CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount();

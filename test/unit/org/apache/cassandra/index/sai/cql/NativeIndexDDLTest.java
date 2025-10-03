@@ -20,11 +20,10 @@
  */
 package org.apache.cassandra.index.sai.cql;
 
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -33,7 +32,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
-import com.google.common.collect.ImmutableMap;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -44,22 +42,18 @@ import com.datastax.driver.core.exceptions.InvalidConfigurationInQueryException;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.restrictions.IndexRestrictions;
-import org.apache.cassandra.cql3.statements.schema.CreateIndexStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -84,31 +78,31 @@ import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
-import org.assertj.core.api.Assertions;
 import org.mockito.Mockito;
 
 import static java.util.Collections.singletonList;
+
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_ENCRYPTION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+
 import static org.mockito.Mockito.when;
 
 @SuppressLeakCheck(jira="STAR-974")
 public class NativeIndexDDLTest extends SAITester
 {
-    private static final Injections.Counter saiCreationCounter = Injections.newCounter("IndexCreationCounter")
-                                                                           .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class).onMethod("register"))
-                                                                           .build();
+    private static final Injections.Counter NDI_CREATION_COUNTER = Injections.newCounter("IndexCreationCounter")
+                                                                             .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class).onMethod("register"))
+                                                                             .build();
 
-    private static final Injection failSAIInitialializaion = Injections.newCustom("fail_sai_initialization")
+    private static final Injection failNDIInitialializaion = Injections.newCustom("fail_ndi_initialization")
                                                                        .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndexBuilder.class).onMethod("build"))
                                                                        .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
                                                                        .build();
@@ -138,13 +132,6 @@ public class NativeIndexDDLTest extends SAITester
                                                                          .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
                                                                          .build();
 
-    private static final EnumSet<IndexComponent> PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponent.ROW_TO_PARTITION,
-                                                                                     IndexComponent.PARTITION_TO_SIZE,
-                                                                                     IndexComponent.PARTITION_KEY_BLOCKS,
-                                                                                     IndexComponent.PARTITION_KEY_BLOCK_OFFSETS,
-                                                                                     IndexComponent.CLUSTERING_KEY_BLOCKS,
-                                                                                     IndexComponent.CLUSTERING_KEY_BLOCK_OFFSETS);
-
     private static final Injection pauseSAIWriterComplete = Injections.newPause("pause_sai_writer_complete", 10_000)
                                                                       .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndexWriter.class).onMethod("complete"))
                                                                       .build();
@@ -160,10 +147,14 @@ public class NativeIndexDDLTest extends SAITester
     {
         requireNetwork();
 
-        Injections.inject(saiCreationCounter, indexBuildCounter, FAIL_INDEX_GC_TRANSACTION);
+        startJMXServer();
 
-        saiCreationCounter.reset();
-        indexBuildCounter.reset();
+        createMBeanServerConnection();
+
+        Injections.inject(NDI_CREATION_COUNTER, INDEX_BUILD_COUNTER, FAIL_INDEX_GC_TRANSACTION);
+
+        NDI_CREATION_COUNTER.reset();
+        INDEX_BUILD_COUNTER.reset();
     }
 
     @After
@@ -187,14 +178,14 @@ public class NativeIndexDDLTest extends SAITester
 
             try
             {
-                executeNet(String.format("CREATE INDEX ON %%s(%s) USING 'sai'", cql3Type));
+                executeNet(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", cql3Type));
                 assertTrue("Index creation on unsupported type " + cql3Type + " should have failed.", supported);
             }
             catch (RuntimeException e)
             {
                 assertFalse("Index creation on supported type " + cql3Type + " should have succeeded.", supported);
-                // InvalidConfigurationInQueryException is subclass of InvalidQueryException
-                assertTrue(Throwables.isCausedBy(e, InvalidQueryException.class::isInstance));
+                // InvalidConfigurationInQueryException is sub-class of InvalidQueryException
+                assertTrue(Throwables.isCausedBy(e, InvalidQueryException.class));
             }
         }
     }
@@ -203,9 +194,9 @@ public class NativeIndexDDLTest extends SAITester
     public void shouldFailCreationOnPartitionKey()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-        assertThatThrownBy(() -> executeNet("CREATE INDEX ON %s(id) USING 'sai'"))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessageContaining(String.format(CreateIndexStatement.ONLY_PARTITION_KEY, "id"));
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(id) USING 'StorageAttachedIndex'"))
+                .isInstanceOf(InvalidQueryException.class)
+                .hasMessageContaining("Cannot create secondary index on the only partition key column id");
     }
 
     @Test
@@ -213,8 +204,8 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> executeNet("CREATE INDEX ON %s(val) USING 'sai' " +
-                                            "WITH OPTIONS = { 'mode' : 'CONTAINS' }")).isInstanceOf(InvalidConfigurationInQueryException.class);
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING " +
+                                            "'StorageAttachedIndex' WITH OPTIONS = { 'mode' : 'CONTAINS' }")).isInstanceOf(InvalidConfigurationInQueryException.class);
     }
 
     @Test
@@ -222,10 +213,10 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> executeNet("CREATE INDEX ON %s(val) " +
-                                            "USING 'sai' " +
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) " +
+                                            "USING 'StorageAttachedIndex' " +
                                             "WITH OPTIONS = { 'analyzer_class' : 'org.apache.cassandra.index.sai.analyzer.NonTokenizingAnalyzer' }"))
-        .isInstanceOf(InvalidConfigurationInQueryException.class);
+                .isInstanceOf(InvalidConfigurationInQueryException.class);
     }
 
     @Test
@@ -233,8 +224,8 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> executeNet("CREATE INDEX ON %s(val) " +
-                                            "USING 'sai' " +
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) " +
+                                            "USING 'StorageAttachedIndex' " +
                                             "WITH OPTIONS = { 'case-sensitive' : true }")).isInstanceOf(InvalidConfigurationInQueryException.class);
     }
 
@@ -243,8 +234,8 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
 
-        assertThatThrownBy(() -> executeNet("CREATE INDEX ON %s(val) " +
-                                            "USING 'sai' " +
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) " +
+                                            "USING 'StorageAttachedIndex' " +
                                             "WITH OPTIONS = { 'case_sensitive' : false }")).isInstanceOf(InvalidQueryException.class);
     }
 
@@ -253,8 +244,8 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val int)");
 
-        assertThatThrownBy(() -> executeNet("CREATE INDEX ON %s(val) " +
-                                            "USING 'sai' " +
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) " +
+                                            "USING 'StorageAttachedIndex' " +
                                             "WITH OPTIONS = { 'normalize' : true }")).isInstanceOf(InvalidQueryException.class);
     }
 
@@ -286,57 +277,12 @@ public class NativeIndexDDLTest extends SAITester
     public void shouldCreateIndexIfExists()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-        createIndex("CREATE INDEX IF NOT EXISTS ON %s(val) USING 'sai' ");
-        createIndexAsync("CREATE INDEX IF NOT EXISTS ON %s(val) USING 'sai' ");
 
-        assertEquals(1, saiCreationCounter.get());
-    }
+        createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s(val) USING 'StorageAttachedIndex' ");
 
-    @Test
-    public void shouldCreateIndexCaseInsensitive()
-    {
-        createTable("CREATE TABLE %s (id text PRIMARY KEY, val1 text, val2 text)");
-        createIndex("CREATE INDEX mixed_case_val ON %s(val1) USING 'Sai' ");
-        createIndex("CREATE INDEX upper_case_val ON %s(val2) USING 'SAI' ");
+        createIndexAsync("CREATE CUSTOM INDEX IF NOT EXISTS ON %s(val) USING 'StorageAttachedIndex' ");
 
-        assertEquals(2, saiCreationCounter.get());
-    }
-
-    @Test
-    public void shouldCreateIndexWithClassName()
-    {
-        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-        createIndex("CREATE INDEX ON %s(val) USING 'StorageAttachedIndex' ");
-        assertEquals(1, saiCreationCounter.get());
-    }
-
-    @Test
-    public void shouldCreateIndexWithDefault()
-    {
-        DatabaseDescriptor.setDefaultSecondaryIndex(StorageAttachedIndex.NAME);
-        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-        createIndex("CREATE INDEX ON %s(val)");
-        assertEquals(1, saiCreationCounter.get());
-    }
-
-    @Test
-    public void shouldFailWithDefaultIndexDisabled()
-    {
-        DatabaseDescriptor.setDefaultSecondaryIndex(StorageAttachedIndex.NAME);
-        boolean original = DatabaseDescriptor.getDefaultSecondaryIndexEnabled();
-
-        try
-        {
-            DatabaseDescriptor.setDefaultSecondaryIndexEnabled(false);
-            createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-            assertThatThrownBy(() -> createIndex("CREATE INDEX ON %s(val)")).hasRootCauseInstanceOf(InvalidRequestException.class)
-                                                                            .hasRootCauseMessage(CreateIndexStatement.MUST_SPECIFY_INDEX_IMPLEMENTATION);
-            assertEquals(0, saiCreationCounter.get());
-        }
-        finally
-        {
-            DatabaseDescriptor.setDefaultSecondaryIndexEnabled(original);
-        }
+        assertEquals(1, NDI_CREATION_COUNTER.get());
     }
 
     @Test
@@ -344,7 +290,7 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE INDEX ON %s(val) USING 'sai'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
@@ -360,7 +306,7 @@ public class NativeIndexDDLTest extends SAITester
 
         // Case sensitive search is the default, and as such, it does not make the SAI qualify as "analyzed".
         // The queries below use '=' and not ':' because : is limited to analyzed indexes.
-        createIndex("CREATE INDEX ON %s(val) USING 'sai' WITH OPTIONS = { 'case_sensitive' : true }");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : true }");
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
@@ -374,7 +320,7 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE INDEX ON %s(val) USING 'sai' WITH OPTIONS = { 'case_sensitive' : false }");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false }");
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
@@ -387,7 +333,7 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE INDEX ON %s(val) USING 'sai'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
@@ -404,7 +350,7 @@ public class NativeIndexDDLTest extends SAITester
 
         // Normalize search is disabled by default, and as such, it does not make the SAI qualify as "analyzed".
         // The queries below use '=' and not ':' because : is limited to analyzed indexes.
-        createIndex("CREATE INDEX ON %s(val) USING 'sai' WITH OPTIONS = { 'normalize' : false }");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'normalize' : false }");
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
@@ -419,7 +365,7 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE INDEX ON %s(val) USING 'sai' WITH OPTIONS = { 'normalize' : true }");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'normalize' : true }");
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
@@ -431,7 +377,7 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE INDEX ON %s(val) USING 'sai' WITH OPTIONS = { 'normalize' : true, 'case_sensitive' : false}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'normalize' : true, 'case_sensitive' : false}");
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
@@ -443,7 +389,7 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE INDEX ON %s(val) USING 'sai' WITH OPTIONS = { 'ascii' : true, 'case_sensitive' : false}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'ascii' : true, 'case_sensitive' : false}");
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Éppinger')");
 
@@ -451,45 +397,23 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldRejectAnalysisOnPrimaryKeyColumns()
-    {
-        createTable("CREATE TABLE %s (k1 text, k2 text, c1 text, c2 text, PRIMARY KEY((k1, k2), c1, c2))");
-
-        for (String column : Arrays.asList("k1", "k2", "c1", "c2"))
-        {
-            for (String enabled : Arrays.asList("true", "false"))
-            {
-                assertRejectsAnalysisOnPrimaryKeyColumns(column, ImmutableMap.of(NonTokenizingOptions.NORMALIZE, enabled));
-                assertRejectsAnalysisOnPrimaryKeyColumns(column, ImmutableMap.of(NonTokenizingOptions.CASE_SENSITIVE, enabled));
-                assertRejectsAnalysisOnPrimaryKeyColumns(column, ImmutableMap.of(NonTokenizingOptions.ASCII, enabled));
-                assertRejectsAnalysisOnPrimaryKeyColumns(column, ImmutableMap.of(NonTokenizingOptions.NORMALIZE, enabled,
-                                                                                 NonTokenizingOptions.CASE_SENSITIVE, enabled,
-                                                                                 NonTokenizingOptions.ASCII, enabled));
-            }
-        }
-    }
-
-    private void assertRejectsAnalysisOnPrimaryKeyColumns(String column, Map<String, String> optionsMap)
-    {
-        String options = new CqlBuilder().append(optionsMap).toString();
-        Assertions.assertThatThrownBy(() -> createIndex("CREATE INDEX ON %s(" + column + ") USING 'sai' WITH OPTIONS = " + options))
-                  .hasRootCauseInstanceOf(InvalidRequestException.class)
-                  .hasRootCauseMessage(StorageAttachedIndex.ANALYSIS_ON_KEY_COLUMNS_MESSAGE + options);
-    }
-
-    @Test
     public void shouldCreateIndexOnReversedType()
     {
-        createTable("CREATE TABLE %s (id text, ck1 text, val text, PRIMARY KEY (id,ck1)) WITH CLUSTERING ORDER BY (ck1 desc)");
+        createTable("CREATE TABLE %s (id text, ck1 text, ck2 int, val text, PRIMARY KEY (id,ck1,ck2)) WITH CLUSTERING ORDER BY (ck1 desc, ck2 desc)");
 
-        String indexNameCk1 = createIndex("CREATE INDEX ON %s(ck1) USING 'sai'");
+        String indexNameCk1 = createIndex("CREATE CUSTOM INDEX ON %s(ck1) USING 'StorageAttachedIndex'");
+        String indexNameCk2 = createIndex("CREATE CUSTOM INDEX ON %s(ck2) USING 'StorageAttachedIndex'");
 
-        execute("insert into %s(id, ck1, val) values('1', '2', '3')");
-        execute("insert into %s(id, ck1, val) values('1', '3', '4')");
+        execute("insert into %s(id, ck1, ck2, val) values('1', '2', 3, '3')");
+        execute("insert into %s(id, ck1, ck2, val) values('1', '3', 4, '4')");
         assertEquals(1, executeNet("SELECT * FROM %s WHERE ck1='3'").all().size());
+        assertEquals(2, executeNet("SELECT * FROM %s WHERE ck2>=0").all().size());
+        assertEquals(2, executeNet("SELECT * FROM %s WHERE ck2<=4").all().size());
 
         flush();
         assertEquals(1, executeNet("SELECT * FROM %s WHERE ck1='2'").all().size());
+        assertEquals(2, executeNet("SELECT * FROM %s WHERE ck2>=3").all().size());
+        assertEquals(2, executeNet("SELECT * FROM %s WHERE ck2<=4").all().size());
 
         SecondaryIndexManager sim = getCurrentColumnFamilyStore().indexManager;
         StorageAttachedIndex index = (StorageAttachedIndex) sim.getIndexByName(indexNameCk1);
@@ -504,39 +428,13 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldCreateIndexWithFullClassName()
+    public void shouldCreateIndexWithAlias()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
 
-        assertEquals(1, saiCreationCounter.get());
-    }
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
-    /**
-     * Verify SASI can be created and queries with SAI dependencies.
-     * Not putting in {@link MixedIndexImplementationsTest} because it uses CQLTester which doesn't load SAI dependency.
-     */
-    @Test
-    public void shouldCreateSASI()
-    {
-        createTable(CREATE_TABLE_TEMPLATE);
-
-        createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'mode': 'CONTAINS',\n" +
-                    "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer',\n" +
-                    "'tokenization_enable_stemming': 'true',\n" +
-                    "'tokenization_locale': 'en',\n" +
-                    "'tokenization_skip_stop_words': 'true',\n" +
-                    "'analyzed': 'true',\n" +
-                    "'tokenization_normalize_lowercase': 'true'};");
-
-        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
-
-        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
-        assertEquals(1, rows.all().size());
-
-        rows = executeNet("SELECT id1 FROM %s WHERE v2 like '0'");
-        assertEquals(1, rows.all().size());
+        assertEquals(1, NDI_CREATION_COUNTER.get());
     }
 
     @Test
@@ -625,9 +523,9 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val1 text, val2 text)");
 
-        assertThatThrownBy(() -> executeNet("CREATE INDEX ON %s(val1, val2) USING 'sai'"))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessageContaining("storage-attached index cannot be created over multiple columns");
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val1, val2) USING 'StorageAttachedIndex'"))
+                .isInstanceOf(InvalidQueryException.class)
+                .hasMessageContaining("storage-attached index cannot be created over multiple columns");
     }
 
     @Test
@@ -641,14 +539,14 @@ public class NativeIndexDDLTest extends SAITester
         waitForTableIndexesQueryable();
 
         // same name
-        assertThatThrownBy(() -> executeNet("CREATE INDEX index_1 ON %s(v1) USING 'sai'"))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessageContaining(String.format(CreateIndexStatement.INDEX_ALREADY_EXISTS, "index_1"));
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX index_1 ON %s(v1) USING 'StorageAttachedIndex'"))
+                .isInstanceOf(InvalidQueryException.class)
+                .hasMessageContaining("Index 'index_1' already exists");
 
         // different name, same option
-        assertThatThrownBy(() -> executeNet("CREATE INDEX index_2 ON %s(v1) USING 'sai'"))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessageContaining(String.format(CreateIndexStatement.INDEX_DUPLICATE_OF_EXISTING, "index_2", "index_1"));
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX index_2 ON %s(v1) USING 'StorageAttachedIndex'"))
+                .isInstanceOf(InvalidQueryException.class)
+                .hasMessageContaining("Index index_2 is a duplicate of existing index index_1");
 
         // different name, different option, same target.
         assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : true }"))
@@ -669,7 +567,6 @@ public class NativeIndexDDLTest extends SAITester
             execute("INSERT INTO %s (id1, v1, v2) VALUES ('" + i + "', " + i + ", '0')");
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForTableIndexesQueryable();
 
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(rowCount, rows.all().size());
@@ -682,9 +579,9 @@ public class NativeIndexDDLTest extends SAITester
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
         Injections.Barrier delayInitializationTask =
-        Injections.newBarrier("delayInitializationTask", 2, false)
-                  .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class).onMethod("startInitialBuild"))
-                  .build();
+                Injections.newBarrier("delayInitializationTask", 2, false)
+                          .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class).onMethod("startInitialBuild"))
+                          .build();
 
         // Create the index, but do not allow the initial index build to begin:
         Injections.inject(delayInitializationTask);
@@ -696,12 +593,11 @@ public class NativeIndexDDLTest extends SAITester
         // Allow the initialization task, which builds the index, to continue:
         delayInitializationTask.countDown();
 
-        waitForTableIndexesQueryable();
-
         ResultSet rows = executeNet("SELECT id FROM %s WHERE val = 'Camel'");
         assertEquals(1, rows.all().size());
 
-        assertZeroSegmentBuilderUsage();
+        assertEquals("Segment memory limiter should revert to zero.", 0L, getSegmentBufferUsedBytes());
+        assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
     }
 
     @Test
@@ -730,9 +626,9 @@ public class NativeIndexDDLTest extends SAITester
             execute("INSERT INTO %s (id1, v1, v2) VALUES ('" + i + "', " + i + ", '0')");
         flush();
 
-        Injections.inject(failSAIInitialializaion);
+        Injections.inject(failNDIInitialializaion);
         createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForAssert(() -> assertEquals(1, indexBuildCounter.get()));
+        waitForAssert(() -> assertEquals(1, INDEX_BUILD_COUNTER.get()));
         waitForCompactions();
 
         assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0")).isInstanceOf(ReadFailureException.class);
@@ -815,7 +711,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldCreateIndexFilesAfterMultipleConcurrentIndexCreation()
+    public void shouldCreateIndexFilesAfterMultipleConcurrentIndexCreation() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
         verifyNoIndexFiles();
@@ -841,7 +737,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldCreateIndexFilesAfterMultipleSequentialIndexCreation()
+    public void shouldCreateIndexFilesAfterMultipleSequentialIndexCreation() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
         verifyNoIndexFiles();
@@ -871,7 +767,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldReleaseIndexFilesAfterCompaction()
+    public void shouldReleaseIndexFilesAfterCompaction() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
         disableCompaction(KEYSPACE);
@@ -909,28 +805,25 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void truncateWithBuiltIndexes()
+    public void truncateWithBuiltIndexes() throws Throwable
     {
         verifyTruncateWithIndex(false);
     }
 
     @Test
-    public void concurrentTruncateWithIndexBuilding()
+    public void concurrentTruncateWithIndexBuilding() throws Throwable
     {
         verifyTruncateWithIndex(true);
     }
 
-    private void verifyTruncateWithIndex(boolean concurrentTruncate)
+    private void verifyTruncateWithIndex(boolean concurrentTruncate) throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
 
-        IndexIdentifier numericIndexIdentifier = null;
-        IndexIdentifier literalIndexIdentifier = null;
-
         if (!concurrentTruncate)
         {
-            numericIndexIdentifier = createIndexIdentifier(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
-            literalIndexIdentifier = createIndexIdentifier(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2")));
+            createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
         }
 
         // create 100 rows, half in sstable and half in memtable
@@ -944,10 +837,9 @@ public class NativeIndexDDLTest extends SAITester
 
         if (concurrentTruncate)
         {
-            numericIndexIdentifier = createIndexIdentifier(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1")));
-            literalIndexIdentifier = createIndexIdentifier(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2")));
+            createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2"));
             truncate(true);
-            waitForTableIndexesQueryable();
         }
         else
         {
@@ -957,8 +849,8 @@ public class NativeIndexDDLTest extends SAITester
         waitForAssert(this::verifyNoIndexFiles);
 
         // verify index-view-manager has been cleaned up
-        verifySSTableIndexes(numericIndexIdentifier, 0);
-        verifySSTableIndexes(literalIndexIdentifier, 0);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V1_COLUMN_IDENTIFIER), 0);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V2_COLUMN_IDENTIFIER), 0);
 
         assertEquals("Segment memory limiter should revert to zero after truncate.", 0L, getSegmentBufferUsedBytes());
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
@@ -1172,8 +1064,8 @@ public class NativeIndexDDLTest extends SAITester
     {
         // prepare schema and data
         createTable(CREATE_TABLE_TEMPLATE);
-        IndexIdentifier numericIndexIdentifier = createIndexIdentifier(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
-        IndexIdentifier literalIndexIdentifier = createIndexIdentifier(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2")));
+        String numericIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        String stringIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
 
         execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
         execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
@@ -1181,16 +1073,16 @@ public class NativeIndexDDLTest extends SAITester
 
         for (CorruptionType corruptionType : CorruptionType.values())
         {
-            verifyRebuildCorruptedFiles(numericIndexIdentifier, literalIndexIdentifier, corruptionType, false);
-            verifyRebuildCorruptedFiles(numericIndexIdentifier, literalIndexIdentifier, corruptionType, true);
+            verifyRebuildCorruptedFiles(numericIndexName, stringIndexName, corruptionType, false);
+            verifyRebuildCorruptedFiles(numericIndexName, stringIndexName, corruptionType, true);
         }
 
         assertEquals("Segment memory limiter should revert to zero following rebuild.", 0L, getSegmentBufferUsedBytes());
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
     }
 
-    private void verifyRebuildCorruptedFiles(IndexIdentifier numericIndexIdentifier,
-                                             IndexIdentifier literalIndexIdentifier,
+    private void verifyRebuildCorruptedFiles(String numericIndexName,
+                                             String stringIndexName,
                                              CorruptionType corruptionType,
                                              boolean rebuild) throws Throwable
     {
@@ -1216,7 +1108,9 @@ public class NativeIndexDDLTest extends SAITester
                                              boolean failedNumericIndex,
                                              boolean rebuild) throws Throwable
     {
-        // The completion markers are valid if they exist on the file system, so we only need to test
+        boolean encrypted = TEST_ENCRYPTION.getBoolean();
+
+        // The completion markers are valid if they exist on the file system so we only need to test
         // their removal. If we are testing with encryption then we don't want to test any components
         // that are encryptable unless they have been removed because encrypted components aren't
         // checksum validated.
@@ -1371,7 +1265,7 @@ public class NativeIndexDDLTest extends SAITester
             // Create a new index, which will actuate a build compaction and fail, but leave the node running...
             IndexContext numericIndexContext = createIndexContext(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
             // two index builders running in different compaction threads because of parallelised index initial build
-            waitForAssert(() -> assertEquals(2, indexBuildCounter.get()));
+            waitForAssert(() -> assertEquals(2, INDEX_BUILD_COUNTER.get()));
             waitForCompactionsFinished();
 
             // Only token/offset files for the first SSTable in the compaction task should exist, while column-specific files are blown away:
@@ -1387,7 +1281,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void verifyCleanupFailedPrimaryKeyFiles() throws Throwable
+    public void verifyCleanupFailedTokenOffsetFiles() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
         disableCompaction(KEYSPACE);
@@ -1406,7 +1300,7 @@ public class NativeIndexDDLTest extends SAITester
             // Create a new index, which will actuate a build compaction and fail, but leave the node running...
             createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
             // two index builders running in different compaction threads because of parallelised index initial build
-            waitForAssert(() -> assertEquals(2, indexBuildCounter.get()));
+            waitForAssert(() -> assertEquals(2, INDEX_BUILD_COUNTER.get()));
             waitForAssert(() -> assertEquals(0, getCompactionTasks()));
 
             // SSTable-level token/offset file(s) should be removed, while column-specific files never existed:
@@ -1422,7 +1316,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void verifyFlushAndCompactEmptyIndex()
+    public void verifyFlushAndCompactEmptyIndex() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
         disableCompaction(KEYSPACE);
@@ -1458,7 +1352,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void verifyFlushAndCompactNonIndexableRows()
+    public void verifyFlushAndCompactNonIndexableRows() throws Throwable
     {
         // valid row ids, but no valid indexable content
         Runnable populateData = () -> {
@@ -1481,7 +1375,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void verifyFlushAndCompactTombstones()
+    public void verifyFlushAndCompactTombstones() throws Throwable
     {
         // no valid row ids
         Runnable populateData = () -> {
@@ -1502,10 +1396,11 @@ public class NativeIndexDDLTest extends SAITester
         verifyFlushAndCompactEmptyIndexes(populateData);
     }
 
-    private void verifyFlushAndCompactEmptyIndexes(Runnable populateData)
+    private void verifyFlushAndCompactEmptyIndexes(Runnable populateData) throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
         disableCompaction(KEYSPACE);
+
 
         IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
         IndexContext literalIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2")), UTF8Type.instance);
@@ -1553,10 +1448,10 @@ public class NativeIndexDDLTest extends SAITester
                                                                    .build();
 
         Injections.inject(delayIndexBuilderCompletion);
-        IndexIdentifier indexIdentifier = createIndexIdentifier(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
+        String indexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         waitForAssert(() -> assertEquals(1, delayIndexBuilderCompletion.getCount()));
 
-        dropIndex(indexIdentifier);
+        dropIndex("DROP INDEX %s." + indexName);
 
         // let blocked builders to continue
         delayIndexBuilderCompletion.countDown();
@@ -1564,20 +1459,18 @@ public class NativeIndexDDLTest extends SAITester
 
         delayIndexBuilderCompletion.disable();
 
-        assertNull(getCurrentIndexGroup());
-        assertFalse("Expect index not built", SystemKeyspace.isIndexBuilt(KEYSPACE, indexIdentifier.indexName));
+        verifySSTableIndexes(indexName, 0);
+        assertFalse("Expect index not built", SystemKeyspace.isIndexBuilt(KEYSPACE, indexName));
 
         // create index again, it should succeed
-        indexIdentifier = createIndexIdentifier(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
-        waitForTableIndexesQueryable();
-        verifySSTableIndexes(indexIdentifier, 1);
+        indexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        verifySSTableIndexes(indexName, 1);
 
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(num, rows.all().size());
     }
 
     @Test
-    @SuppressWarnings("BusyWait")
     public void nodetoolStopInitialIndexBuild() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
@@ -1652,40 +1545,6 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldMarkQueryableInInitializationTask() throws Throwable
-    {
-        createTable(CREATE_TABLE_TEMPLATE);
-        disableCompaction(KEYSPACE);
-        IndexIdentifier idxIdentifier = createIndexIdentifier(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1")));
-
-        // create 10 SSTables
-        for (int i = 0; i < 10; i++)
-        {
-            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, ?, ?)", String.valueOf(i), i, String.valueOf(i));
-            flush();
-        }
-
-        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 5");
-        assertEquals(5, rows.all().size());
-
-        // Make the index artificially non-queryable:
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        Index index = cfs.indexManager.getIndexByName(idxIdentifier.indexName);
-        cfs.indexManager.makeIndexNonQueryable(index, Index.Status.BUILD_FAILED);
-
-        // Query should fail with the index in an artificially non-queryable state:
-        assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1 >= 5")).isInstanceOf(ReadFailureException.class);
-
-        // Node must be in STARTING mode for it to be necessary for the initialization task to pre-emptively validate:
-        StorageService.instance.setStartingModeUnsafe();
-        // Simply getting the initialization task (and not running it) will validate and mark the index queryable again:
-        cfs.indexManager.buildIndex(index);
-        StorageService.instance.setNormalModeUnsafe();
-        rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 5");
-        assertEquals(5, rows.all().size());
-    }
-
-    @Test
     public void shouldRejectQueriesWithCustomExpressions()
     {
         createTable(CREATE_TABLE_TEMPLATE);
@@ -1693,8 +1552,8 @@ public class NativeIndexDDLTest extends SAITester
         String index = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
         assertThatThrownBy(() -> executeNet(String.format("SELECT * FROM %%s WHERE expr(%s, 0)", index)))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessage(String.format(IndexRestrictions.CUSTOM_EXPRESSION_NOT_SUPPORTED, index));
+                .isInstanceOf(InvalidQueryException.class)
+                .hasMessage(String.format(IndexRestrictions.CUSTOM_EXPRESSION_NOT_SUPPORTED, index));
     }
 
     @Test
@@ -1768,27 +1627,6 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals(Arrays.asList(2L, 1L), toSize.apply(iterator.next()));
     }
 
-
-    @Test
-    public void multiSegmentVectorIndexPassesChecksumValidation()
-    {
-        createTable("CREATE TABLE %s (pk int, val vector<float, 3>, PRIMARY KEY(pk))");
-
-        int vectorCount = 100;
-        for (int pk = 0; pk < vectorCount; pk++)
-            execute("INSERT INTO %s (pk, val) VALUES (" + pk + ", [" + pk + ".0, " + (pk + 1) + ".0, " + (pk + 2) + ".0])");
-
-        flush();
-
-        SegmentBuilder.updateLastValidSegmentRowId(17); // 17 rows per segment -> multi-segment build
-        IndexIdentifier vectorIndexIdentifier = createIndexIdentifier(createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'"));
-        IndexTermType vectorIndexTermType = createIndexTermType(VectorType.getInstance(FloatType.instance, 3));
-
-        // A vector index writes CompressedVectors.db, TermsData.db, and PostingLists.db in append
-        // mode with one SAI codec footer per segment (see OnHeapGraph.writeData). Multi-segment
-        // builds therefore need segment-aware checksum validation.
-        assertTrue(verifyChecksum(vectorIndexTermType, vectorIndexIdentifier));
-    }
 
     @Test
     public void shouldRejectLargeStringTerms()
@@ -1865,11 +1703,5 @@ public class NativeIndexDDLTest extends SAITester
 //        .hasMessageContaining("An index of vector<float, 4097> will produce terms of 16.004KiB, " +
 //                              "exceeding the max vector term size of 16.000KiB. " +
 //                              "That sets an implicit limit of 4096 dimensions for float vectors.");
-    }
-
-    private void assertZeroSegmentBuilderUsage()
-    {
-        assertEquals("Segment memory limiter should revert to zero.", 0L, getSegmentBufferUsedBytes());
-        assertEquals("There should be no segment builders in progress.", 0, getColumnIndexBuildsInProgress());
     }
 }

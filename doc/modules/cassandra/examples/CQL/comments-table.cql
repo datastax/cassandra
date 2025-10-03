@@ -25,7 +25,7 @@ DROP INDEX IF EXISTS cycling.fn_sparse;
 // tag::fn_sparse[]
 CREATE CUSTOM INDEX IF NOT EXISTS fn_sparse
 ON cycling.comments (created_at)
-USING 'org.apache.cassandra.index.sasi.SASIIndex'
+USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'
 WITH OPTIONS = { 'mode': 'SPARSE' };
 // end::fn_sparse[]
 
