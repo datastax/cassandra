@@ -33,7 +33,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IOOptions;
 import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -61,13 +60,7 @@ public abstract class SSTableReaderLoadingBuilder<R extends SSTableReader, B ext
     public SSTableReaderLoadingBuilder(SSTable.Builder<?, ?> builder)
     {
         this.descriptor = builder.descriptor;
-
-        Set<Component> ssTableComponents;
-        if (builder.getComponents() != null)
-            ssTableComponents = ImmutableSet.copyOf(builder.getComponents());
-        else
-            ssTableComponents = TOCComponent.loadOrCreate(this.descriptor);
-        this.components = SSTableWatcher.instance.discoverComponents(descriptor, ssTableComponents);
+        this.components = builder.getComponents() != null ? ImmutableSet.copyOf(builder.getComponents()) : TOCComponent.loadOrCreate(this.descriptor);
 
         this.tableMetadataRef = builder.getTableMetadataRef() != null ? builder.getTableMetadataRef() : resolveTableMetadataRef();
         this.ioOptions = builder.getIOOptions() != null ? builder.getIOOptions() : IOOptions.fromDatabaseDescriptor();
@@ -79,10 +72,9 @@ public abstract class SSTableReaderLoadingBuilder<R extends SSTableReader, B ext
 
     public R build(SSTable.Owner owner, boolean validate, boolean online)
     {
-
         checkArgument(components.contains(Components.DATA), "Data component is missing for sstable %s", descriptor);
         if (validate)
-            checkArgument(components.containsAll(descriptor.getFormat().primaryComponents()), "Some required components (%s) are missing for sstable %s", Sets.difference(descriptor.getFormat().primaryComponents(), this.components), descriptor);
+            checkArgument(this.components.containsAll(descriptor.getFormat().primaryComponents()), "Some required components (%s) are missing for sstable %s", Sets.difference(descriptor.getFormat().primaryComponents(), this.components), descriptor);
 
         B builder = (B) descriptor.getFormat().getReaderFactory().builder(descriptor);
         builder.setOpenReason(NORMAL);
