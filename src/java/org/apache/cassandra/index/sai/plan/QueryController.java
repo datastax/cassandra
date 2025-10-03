@@ -844,7 +844,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         "PrimaryKey " + firstKey + " clustering does not match table. There should be a clustering of size " + cfs.metadata().comparator.size();
 
         ClusteringIndexFilter clusteringIndexFilter = command.clusteringIndexFilter(firstKey.partitionKey());
-        if (cfs.metadata().comparator.size() == 0 || firstKey.hasEmptyClustering())
+        if (cfs.metadata().comparator.size() == 0 || firstKey.hasEmptyClustering() || !indexFeatureSet.isRowAware())
         {
             return clusteringIndexFilter;
         }
