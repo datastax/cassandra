@@ -210,6 +210,7 @@ import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.TABLE;
 import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.TYPE;
 import static org.apache.cassandra.index.sai.SAITester.vector;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -1907,10 +1908,10 @@ public abstract class CQLTester
     }
 
     private UntypedResultSet executeFormattedQuery(String query, boolean useCoordinator, Object... values)
-    {        
+    {
         if (useCoordinator)
             requireNetworkWithoutDriver();
-        
+
         UntypedResultSet rs;
         if (usePrepared)
         {
@@ -2501,6 +2502,35 @@ public abstract class CQLTester
                 assertMessageContains(errorMessage, e);
             }
         }
+    }
+
+    protected void assertClientWarning(String warningMessage,
+                                       String query,
+                                       Object... values) throws Throwable
+    {
+        assertClientWarning(getDefaultVersion(), warningMessage, query, values);
+    }
+
+    protected void assertClientWarning(ProtocolVersion protocolVersion,
+                                       String warningMessage,
+                                       String query,
+                                       Object... values) throws Throwable
+    {
+        assertClientWarning(protocolVersion, Collections.emptyList(), warningMessage, query, values);
+    }
+
+    protected void assertClientWarning(ProtocolVersion protocolVersion,
+                                       List<String> ignoredWarnings,
+                                       String warningMessage,
+                                       String query,
+                                       Object... values)
+    {
+        ResultSet rs = executeNet(protocolVersion, query, values);
+        List<String> warnings = warningsFromResultSet(ignoredWarnings, rs);
+        assertNotNull("Expecting one warning but got none", warnings);
+        assertEquals("Expecting one warning but got " + warnings.size(), 1, warnings.size());
+        assertTrue("Expecting warning message to contains " + warningMessage + " but was: " + warnings.get(0),
+                   warnings.get(0).contains(warningMessage));
     }
 
     public static List<String> warningsFromResultSet(List<String> ignoredWarnings, ResultSet rs)
