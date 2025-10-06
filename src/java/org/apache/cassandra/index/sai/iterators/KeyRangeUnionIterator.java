@@ -29,6 +29,8 @@ import org.apache.cassandra.io.util.FileUtils;
 
 /**
  * Range Union Iterator is used to return sorted stream of elements from multiple KeyRangeIterator instances.
+ * Keys are sorted by natural order of PrimaryKey, however if two keys are equal by their natural order,
+ * the one with an empty clustering always wins.
  */
 @SuppressWarnings("resource")
 public class KeyRangeUnionIterator extends KeyRangeIterator
@@ -59,7 +61,31 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
             {
                 int cmp = candidate.peek().compareTo(range.peek());
                 if (cmp == 0)
-                    range.next();
+                {
+                    // Due to the way how we compare PrimaryKeys with empty clusterings which is hard to change now,
+                    // the fact that two primary keys compare the same doesn't guarantee they have the same clustering.
+                    // The clustering information is ignored if one key has empty clustering, so a key with an empty
+                    // clustering will match any key with a non-empty clustering (as long as the partition keys are the same).
+                    // So we may end up in a situation when one or more ranges have empty clustering and the others
+                    // have non-empty. This situation is likely if we mix row-aware (DC, EC, ...) indexes with older
+                    // non-row-aware (AA) indexes.
+                    // In that case we absolutely *must* pick the key with an empty clustering,
+                    // as it matches all rows in the partition
+                    // (and hence, it includes all the rows matched by the keys from the other candidates).
+                    // Thanks to postfiltering, we are allowed to return more rows than necessary in SAI, but not less.
+                    // If we chose one of the specific keys with non-empty clustering (e.g. pick the first one we see),
+                    // we may miss rows matched by the non-row-aware index, as well as the rows matched by
+                    // the other row-aware indexes.
+                    if (range.peek().hasEmptyClustering() && !candidate.peek().hasEmptyClustering())
+                    {
+                        candidate.next();  // throw it away as this key is covered by the new candidate
+                        candidate = range;
+                    }
+                    else
+                    {
+                        range.next();   // truly equal by partition and clustering, so we can just get rid of one
+                    }
+                }
                 else if (cmp > 0)
                     candidate = range;
             }
