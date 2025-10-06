@@ -32,6 +32,7 @@ public class ClientRequestsMetrics
     public final CASClientWriteRequestMetrics casWriteMetrics;
     public final CASClientRequestMetrics casReadMetrics;
     public final ViewWriteMetrics viewWriteMetrics;
+    public final AllRequestsMetrics allRequestsMetrics;
     private final Map<ConsistencyLevel, ClientRequestMetrics> readMetricsMap;
     private final Map<ConsistencyLevel, ClientWriteRequestMetrics> writeMetricsMap;
 
@@ -52,6 +53,7 @@ public class ClientRequestsMetrics
         casWriteMetrics = new CASClientWriteRequestMetrics("CASWrite", namePrefix);
         casReadMetrics = new CASClientRequestMetrics("CASRead", namePrefix);
         viewWriteMetrics = new ViewWriteMetrics("ViewWrite", namePrefix);
+        allRequestsMetrics = new AllRequestsMetrics("All", namePrefix);
         readMetricsMap = new EnumMap<>(ConsistencyLevel.class);
         writeMetricsMap = new EnumMap<>(ConsistencyLevel.class);
         for (ConsistencyLevel level : ConsistencyLevel.values())
