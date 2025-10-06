@@ -200,7 +200,35 @@ public class CommitLogReplayer implements CommitLogReadHandler
             cfPersisted.put(cfs.metadata.id, filter);
         }
         CommitLogPosition globalPosition = firstNotCovered(cfPersisted.values());
-        logger.debug("Global replay position is {} from columnfamilies {}", globalPosition, FBUtilities.toString(cfPersisted));
+
+        // Limit the amount of column family data logged to prevent massive log lines
+        if (logger.isDebugEnabled())
+        {
+            int maxColumnFamiliesToLog = 10;
+            int cfCount = cfPersisted.size();
+            if (cfCount <= maxColumnFamiliesToLog)
+            {
+                logger.debug("Global replay position is {} from {} columnfamilies: {}",
+                            globalPosition, cfCount, FBUtilities.toString(cfPersisted));
+            }
+            else
+            {
+                // For large numbers of column families, just log the count and a sample
+                Map<TableId, IntervalSet<CommitLogPosition>> sample = new HashMap<>();
+                int count = 0;
+                for (Map.Entry<TableId, IntervalSet<CommitLogPosition>> entry : cfPersisted.entrySet())
+                {
+                    if (count++ >= maxColumnFamiliesToLog)
+                        break;
+                    sample.put(entry.getKey(), entry.getValue());
+                }
+                logger.debug("Global replay position is {} from {} columnfamilies (showing first {}): {}",
+                            globalPosition, cfCount, maxColumnFamiliesToLog, FBUtilities.toString(sample));
+                logger.debug("Use TRACE level to see all {} columnfamilies", cfCount);
+                logger.trace("Full columnfamilies list: {}", FBUtilities.toString(cfPersisted));
+            }
+        }
+
         return new CommitLogReplayer(commitLog, globalPosition, cfPersisted, replayFilter);
     }
 
@@ -459,7 +487,25 @@ public class CommitLogReplayer implements CommitLogReadHandler
 
         if (!skippedSSTables.isEmpty()) {
             logger.warn("Origin of {} sstables is unknown or doesn't match the local node; commitLogIntervals for them were ignored", skippedSSTables.size());
-            logger.debug("Ignored commitLogIntervals from the following sstables: {}", skippedSSTables);
+
+            // Limit the number of SSTable names logged to prevent massive log lines
+            int maxSSTablesToLog = 100;
+            if (skippedSSTables.size() <= maxSSTablesToLog) {
+                logger.debug("Ignored commitLogIntervals from the following sstables: {}", skippedSSTables);
+            } else {
+                List<String> sample = new ArrayList<>();
+                int count = 0;
+                for (String sstable : skippedSSTables)
+                {
+                    if (count++ >= maxSSTablesToLog)
+                        break;
+                    sample.add(sstable);
+                }
+                logger.debug("Ignored commitLogIntervals from {} sstables (showing first {}): {}",
+                            skippedSSTables.size(), maxSSTablesToLog, sample);
+                logger.debug("Use TRACE level to see all {} skipped sstables", skippedSSTables.size());
+                logger.trace("Full list of ignored sstables: {}", skippedSSTables);
+            }
         }
 
         if (truncatedAt != null)
