@@ -90,7 +90,6 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
 
-import static io.github.jbellis.jvector.graph.disk.OnDiskSequentialGraphIndexWriter.FOOTER_MAGIC;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
@@ -112,7 +111,7 @@ public class CompactionGraph implements Closeable, Accountable
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
 
-    private static boolean ENABLE_FUSED_PQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED_PQ.getBoolean();
+    private static boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
 
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
@@ -235,8 +234,18 @@ public class CompactionGraph implements Closeable, Accountable
                .with(new InlineVectors(dimension))
                .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion())
                .withMapper(ordinalMapper);
-        if (ENABLE_FUSED_PQ)
-            writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
+        if (ENABLE_FUSED)
+        {
+            if (Version.current().onDiskFormat().jvectorFileFormatVersion() >= 6)
+            {
+                assert compressor instanceof ProductQuantization; // todo revisit this
+                writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
+            }
+            else
+            {
+                logger.warn("Fused ADC enabled, but will not be used because on disk version is {}.", Version.current());
+            }
+        }
         return writerBuilder.build();
     }
 

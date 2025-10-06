@@ -407,7 +407,7 @@ public enum CassandraRelevantProperties
     // Use non-positive value to disable it. Period in millis to trigger a flush for SAI vector memtable index.
     SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
     // Whether compaction should build vector indexes using fused adc
-    SAI_VECTOR_ENABLE_FUSED_PQ("cassandra.sai.vector.enable_fused_pq", "true"),
+    SAI_VECTOR_ENABLE_FUSED("cassandra.sai.vector.enable_fused", "true"),
     /**
      * Whether to disable auto-compaction
      */
