@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.iterators;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -397,4 +398,71 @@ public class KeyRangeIntersectionIteratorTest extends AbstractKeyRangeIteratorTe
         IntStream.range(1, ranges.length).forEach(i -> expectedSet.retainAll(toSet(ranges[i])));
         return Pair.create(builder.build(), expectedSet.stream().mapToLong(Long::longValue).sorted().toArray());
     }
+
+    @Test
+    public void testRandomized() throws Throwable
+    {
+        for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
+        {
+            for (int i = 0; i < 500; i++)
+            {
+                var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
+                for (int j = 0; j < iteratorCount; j++)
+                    inputs.add(randomPrimaryKeys(i / 10, i / 10));
+
+                testMergeAndValidate(inputs,
+                                     KeyRangeIntersectionIteratorTest::intersectionMerge,
+                                     KeyRangeIntersectionIteratorTest::validateIntersectionResults);
+            }
+        }
+    }
+
+    private static ArrayList<PrimaryKey> intersectionMerge(List<List<PrimaryKey>> inputs)
+    {
+        var builder = KeyRangeIntersectionIterator.builder();
+        for (List<PrimaryKey> input : inputs)
+            builder.add(PrimaryKeyListIterator.create(input));
+
+        var intersection = builder.build();
+        var result = new ArrayList<PrimaryKey>();
+        while (intersection.hasNext())
+            result.add(intersection.next());
+        return result;
+    }
+
+
+    private static void validateIntersectionResults(List<List<PrimaryKey>> inputs, List<PrimaryKey> result)
+    {
+        // Check for order and duplicates:
+        assertIncreasing(result);
+
+        // Index the keys we got for faster search:
+        ArrayList<PrimaryKeySet> inputSets = new ArrayList<>(inputs.size());
+        for (List<PrimaryKey> input : inputs)
+            inputSets.add(new PrimaryKeySet(input));
+
+        // Check if all keys are present:
+        PrimaryKeySet resultSet = new PrimaryKeySet(result);
+        for (List<PrimaryKey> keys : inputs)
+        {
+            for (PrimaryKey key : keys)
+            {
+                if (!inputSets.stream().allMatch(input -> input.contains(key)))
+                    continue;
+
+                assertTrue("Missing key in intersection result:\n" + key, resultSet.contains(key));
+            }
+        }
+
+        // Check if we inluded only the rows that are present in all inputs;
+        // excessive rows are likely not a correctness issue, but they may degrade performance:
+        for (int i = 0; i < inputs.size(); i++)
+        {
+            for (PrimaryKey key : result)
+                assertTrue("Unexpected key in intersection result, not covered by input " + i +
+                           ":\n" + key, inputSets.get(i).contains(key));
+        }
+
+    }
+
 }
