@@ -423,9 +423,14 @@ public class KeyRangeIntersectionIteratorTest extends AbstractKeyRangeIteratorTe
         for (List<PrimaryKey> input : inputs)
             builder.add(PrimaryKeyListIterator.create(input));
 
+        // Limit the size of the result to avoid test timeouts.
+        // We don't need to throw, because excessive results will be checked by validation logic
+        // and that way we get better diagnostics. If we threw an assertion error here, the results wouldn't be printed.
+        var sizeLimit = inputs.stream().mapToInt(List::size).max().orElse(0) + 10;
+
         var intersection = builder.build();
         var result = new ArrayList<PrimaryKey>();
-        while (intersection.hasNext())
+        while (intersection.hasNext() && result.size() < sizeLimit)
             result.add(intersection.next());
         return result;
     }

@@ -539,9 +539,14 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
         for (List<PrimaryKey> input : inputs)
             builder.add(PrimaryKeyListIterator.create(input));
 
+        // Limit the size of the result to avoid test timeouts.
+        // We don't need to throw, because excessive results will be checked by validation logic
+        // and that way we get better diagnostics. If we threw an assertion error here, the results wouldn't be printed.
+        var sizeLimit = inputs.stream().mapToInt(List::size).sum() + 10;
+
         var union = builder.build();
         var result = new ArrayList<PrimaryKey>();
-        while (union.hasNext())
+        while (union.hasNext() && result.size() < sizeLimit)
             result.add(union.next());
         return result;
     }
