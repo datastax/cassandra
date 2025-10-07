@@ -99,7 +99,8 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     @Override
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
-        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
+        assert primaryKeyFactory instanceof RowAwarePrimaryKeyFactory;
+        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, (RowAwarePrimaryKeyFactory) primaryKeyFactory, sstable);
     }
 
     @Override
