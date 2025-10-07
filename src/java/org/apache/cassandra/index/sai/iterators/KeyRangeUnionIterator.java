@@ -24,6 +24,7 @@ import java.util.List;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -77,22 +78,40 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
                     // we may miss rows matched by the non-row-aware index, as well as the rows matched by
                     // the other row-aware indexes.
                     if (range.peek().hasEmptyClustering() && !candidate.peek().hasEmptyClustering())
-                    {
-                        candidate.next();  // throw it away as this key is covered by the new candidate
                         candidate = range;
-                    }
                     else
-                    {
                         range.next();   // truly equal by partition and clustering, so we can just get rid of one
-                    }
                 }
                 else if (cmp > 0)
+                {
                     candidate = range;
+                }
             }
         }
+
         if (candidate == null)
             return endOfData();
-        return candidate.next();
+
+        var result = candidate.next();
+
+        // If the winning candidate has an empty clustering, this means it selects the whole partition, so
+        // advance all other ranges to the end of this partition to avoid duplicates:
+        if (result.hasEmptyClustering())
+            skipToEndOfPartition(result.partitionKey());
+
+        return result;
+    }
+
+    private void skipToEndOfPartition(DecoratedKey partitionKey)
+    {
+        for (KeyRangeIterator range : ranges)
+            skipToEndOfPartition(range, partitionKey);
+    }
+
+    private void skipToEndOfPartition(KeyRangeIterator iterator, DecoratedKey partitionKey)
+    {
+        while (iterator.hasNext() && iterator.peek().partitionKey() != null && iterator.peek().partitionKey().compareTo(partitionKey) <= 0)
+            iterator.next();
     }
 
     protected void performSkipTo(PrimaryKey nextKey)
