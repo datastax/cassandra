@@ -45,7 +45,6 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -534,12 +533,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             {
                 // turn the pk back into a row id, with a fast path for the case where the pk is from this sstable
                 PrimaryKey primaryKey = keysInRange.get(i);
-                long sstableRowId;
-                if (primaryKey instanceof PrimaryKeyWithSource
-                    && ((PrimaryKeyWithSource) primaryKey).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
-                    sstableRowId = ((PrimaryKeyWithSource) primaryKey).getSourceRowId();
-                else
-                    sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
+                long sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
 
                 if (sstableRowId < 0)
                 {
