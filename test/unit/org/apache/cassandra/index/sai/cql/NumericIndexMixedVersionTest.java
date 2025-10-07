@@ -28,6 +28,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.junit.Assert.assertEquals;
 
@@ -143,4 +144,37 @@ public class NumericIndexMixedVersionTest extends SAITester
         });
     }
 
+
+    @Test
+    public void testMultiVersionCompatibilityWithClustringColumnsIntersection() throws Throwable
+    {
+        QueryController.QUERY_OPT_LEVEL = 0;
+        SAIUtil.setCurrentVersion(Version.AA);
+
+        createTable("CREATE TABLE %s (pk int, ck int, val1 int, val2 int, PRIMARY KEY(pk, ck))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex'");
+        disableCompaction();
+
+        // Insert rows so that all have v1 == 1. Index has AA version, and don't compact to get the AA version where we
+        // get a single primary key per partition in the internal iterator.
+        for (int j = 0; j < 500; j++)
+        {
+            execute("INSERT INTO %s (pk, ck, val1) VALUES (-1, ?, 1)", j);
+            execute("INSERT INTO %s (pk, ck, val1) VALUES (?, ?, ?)", j, j, j);
+        }
+        flush();
+
+        // Now, create rows with v2 values and index with all versions
+        SAIUtil.setCurrentVersion(Version.DB);
+        createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex'");
+
+
+        flush(); // force new memtable classes to get version
+        for (int j = 0; j < 10; j++)
+            execute("INSERT INTO %s (pk, ck, val2) VALUES (-1, ?, ?)", j, j);
+
+        beforeAndAfterFlush(() -> {
+            assertNumRows(10, "SELECT ck FROM %%s WHERE val1 = 1 AND val2 >= 0 LIMIT 1000");
+        });
+    }
 }
