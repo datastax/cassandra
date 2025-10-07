@@ -16,18 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk;
+package org.apache.cassandra.index.sai.disk.v2;
 
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
-public class PrimaryKeyWithSource implements PrimaryKey
+class PrimaryKeyWithSource implements PrimaryKey
 {
     private final PrimaryKey primaryKey;
     private final SSTableId<?> sourceSstableId;
