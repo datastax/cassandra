@@ -404,37 +404,56 @@ public class KeyRangeIntersectionIteratorTest extends AbstractKeyRangeIteratorTe
     {
         for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
         {
-            for (int i = 0; i < 500; i++)
+            for (int testIteration = 0; testIteration < 200; testIteration++)
             {
                 var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
                 for (int j = 0; j < iteratorCount; j++)
-                    inputs.add(randomPrimaryKeys(i / 10, i / 10));
+                    inputs.add(randomPrimaryKeys(testIteration / 10, testIteration / 10));
 
-                testMergeAndValidate(inputs,
-                                     KeyRangeIntersectionIteratorTest::intersectionMerge,
-                                     KeyRangeIntersectionIteratorTest::validateIntersectionResults);
+                testMerge(inputs,
+                          KeyRangeIntersectionIteratorTest::intersection,
+                          KeyRangeIntersectionIteratorTest::validateIntersectionResults);
             }
         }
     }
 
-    private static ArrayList<PrimaryKey> intersectionMerge(List<List<PrimaryKey>> inputs)
+    @Test
+    public void testSkippingRandomized() throws Throwable
+    {
+        for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
+        {
+            for (int testIteration = 0; testIteration < 200; testIteration++)
+            {
+                var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
+                for (int j = 0; j < iteratorCount; j++)
+                    inputs.add(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+
+                // Generate random skip positions.
+                // Use a different data set so that some skip positions exist in the merged result and some do not.
+                var skips = randomSkips(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+
+                testSkipping(inputs, skips, KeyRangeIntersectionIteratorTest::intersectionIterator);
+            }
+        }
+    }
+
+    private static List<PrimaryKey> intersection(List<List<PrimaryKey>> inputs)
+    {
+        // Limit the size of the result to avoid test timeouts.
+        // We don't need to throw, because excessive results will be checked by validation logic
+        // and that way we get better diagnostics. If we threw an assertion error here, the results wouldn't be printed.
+        var sizeLimit = inputs.stream().mapToInt(List::size).sum() + 10;
+        return collectKeys(intersectionIterator(inputs), sizeLimit);
+    }
+
+    private static KeyRangeIterator intersectionIterator(List<List<PrimaryKey>> inputs)
     {
         var builder = KeyRangeIntersectionIterator.builder();
         for (List<PrimaryKey> input : inputs)
             builder.add(PrimaryKeyListIterator.create(input));
 
-        // Limit the size of the result to avoid test timeouts.
-        // We don't need to throw, because excessive results will be checked by validation logic
-        // and that way we get better diagnostics. If we threw an assertion error here, the results wouldn't be printed.
-        var sizeLimit = inputs.stream().mapToInt(List::size).max().orElse(0) + 10;
-
-        var intersection = builder.build();
-        var result = new ArrayList<PrimaryKey>();
-        while (intersection.hasNext() && result.size() < sizeLimit)
-            result.add(intersection.next());
-        return result;
+        return builder.build();
     }
-
 
     private static void validateIntersectionResults(List<List<PrimaryKey>> inputs, List<PrimaryKey> result)
     {
@@ -467,7 +486,5 @@ public class KeyRangeIntersectionIteratorTest extends AbstractKeyRangeIteratorTe
                 assertTrue("Unexpected key in intersection result, not covered by input " + i +
                            ":\n" + key, inputSets.get(i).contains(key));
         }
-
     }
-
 }

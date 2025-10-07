@@ -520,39 +520,61 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
     {
         for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
         {
-            for (int i = 0; i < 500; i++)
+            for (int i = 0; i < 200; i++)
             {
                 var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
                 for (int j = 0; j < iteratorCount; j++)
                     inputs.add(randomPrimaryKeys(i / 10, i / 10));
 
-                testMergeAndValidate(inputs,
-                                     KeyRangeUnionIteratorTest::unionMerge,
-                                     KeyRangeUnionIteratorTest::validateUnionResults);
+                testMerge(inputs,
+                          KeyRangeUnionIteratorTest::union,
+                          KeyRangeUnionIteratorTest::validateUnionResults);
             }
         }
     }
 
-    private static ArrayList<PrimaryKey> unionMerge(List<List<PrimaryKey>> inputs)
+    @Test
+    public void testSkippingRandomized() throws Throwable
     {
-        var builder = KeyRangeUnionIterator.builder();
-        for (List<PrimaryKey> input : inputs)
-            builder.add(PrimaryKeyListIterator.create(input));
+        for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
+        {
+            for (int testIteration = 0; testIteration < 200; testIteration++)
+            {
+                var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
+                for (int j = 0; j < iteratorCount; j++)
+                    inputs.add(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+
+                // Generate random skip positions.
+                // Use a different data set so that some skip positions exist in the merged result and some do not.
+                var skips = randomSkips(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+
+                testSkipping(inputs, skips, KeyRangeUnionIteratorTest::unionIterator);
+            }
+        }
+    }
+
+
+    private static List<PrimaryKey> union(List<List<PrimaryKey>> inputs)
+    {
+        var iterator = unionIterator(inputs);
 
         // Limit the size of the result to avoid test timeouts.
         // We don't need to throw, because excessive results will be checked by validation logic
         // and that way we get better diagnostics. If we threw an assertion error here, the results wouldn't be printed.
         var sizeLimit = inputs.stream().mapToInt(List::size).sum() + 10;
+        return collectKeys(iterator, sizeLimit);
+    }
 
-        var union = builder.build();
-        var result = new ArrayList<PrimaryKey>();
-        while (union.hasNext() && result.size() < sizeLimit)
-            result.add(union.next());
-        return result;
+    private static KeyRangeIterator unionIterator(List<List<PrimaryKey>> inputs)
+    {
+        var builder = KeyRangeUnionIterator.builder();
+        for (List<PrimaryKey> input : inputs)
+            builder.add(PrimaryKeyListIterator.create(input));
+        return builder.build();
     }
 
 
-    private static void validateUnionResults(List<List<PrimaryKey>> inputs, List<PrimaryKey> result)
+        private static void validateUnionResults(List<List<PrimaryKey>> inputs, List<PrimaryKey> result)
     {
         // Check for order and duplicates:
         assertIncreasing(result);

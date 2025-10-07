@@ -33,16 +33,20 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import org.junit.Assert;
+import org.junit.Test;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.index.sai.disk.FileUtils;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.utils.Pair;
+
+import static org.apache.cassandra.io.util.FileUtils.closeQuietly;
 
 public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
 {
@@ -419,12 +423,12 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
      * or fail the validation. If the operation succeeds, returns normally, otherwise throws the final exception.
      *
      * @param inputs some arbitrary lists of primary keys
-     * @param operation operation under test that merges multiple lists into one
+     * @param merge operation under test that merges multiple lists into one
      * @param validator validation function that checks if the result of the operation is correct, expected to throw if not
      */
-    void testMergeAndValidate(List<List<PrimaryKey>> inputs,
-                              Function<List<List<PrimaryKey>>, List<PrimaryKey>> operation,
-                              BiConsumer<List<List<PrimaryKey>>, List<PrimaryKey>> validator) throws Throwable
+    void testMerge(List<List<PrimaryKey>> inputs,
+                   Function<List<List<PrimaryKey>>, List<PrimaryKey>> merge,
+                   BiConsumer<List<List<PrimaryKey>>, List<PrimaryKey>> validator) throws Throwable
     {
         List<PrimaryKey> result = null;       // last result we obtained from operation (may be valid)
         List<PrimaryKey> failedResult = null; // last result that failed validation
@@ -432,7 +436,7 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
 
         try
         {
-            result = operation.apply(inputs);
+            result = merge.apply(inputs);
             validator.accept(inputs, result);
             return;  // test passes, nothing to do
         }
@@ -477,7 +481,7 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
             {
                 result = null;  // must clean result in case operation.apply fails in the next line;
                                 // we don't want to keep a result from a previous run
-                result = operation.apply(minimizedInputs);
+                result = merge.apply(minimizedInputs);
                 validator.accept(minimizedInputs, result);
                 attempt++;
             }
@@ -506,6 +510,135 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
         }
 
         throw exception;
+    }
+
+    /**
+     * Tests skipping support of the given merge operation.
+     * Works by comparing the results obtained from calling skipTo on the result merge iterator directly,
+     * with the results obtained by first materializing the full merge result and then applying skipping to
+     * the list (which is easy and obviously correct).
+     * <p>
+     * This does not test the correctness of merge operation itself.
+     * It only checks if skipping works correctly.
+     * <p>
+     * If the validation fails, it will try to first minimize the input lists in the same way as {@link #testMerge}.
+     *
+     * @param inputs some arbitrary lists of primary keys
+     * @param skips the list of positions to skip to
+     * @param mergeOperation the merge operation under test, e.g. intersection or union
+     * @throws Throwable when the merge operation or validation of results fails
+     */
+    void testSkipping(List<List<PrimaryKey>> inputs,
+                             List<Skip> skips,
+                             Function<List<List<PrimaryKey>>, KeyRangeIterator> mergeOperation) throws Throwable
+    {
+        int sizeLimit = inputs.stream().mapToInt(List::size).sum() + 10;
+
+        // The test and validation code looks very alike, but the test code performs skipping *directly*
+        // on the KeyRangeIterator, while the validation logic first materializes the merge
+        // result to an in-memory list and then applies skipping on the list.
+        try
+        {
+            testMerge(inputs,
+                      inp -> {
+                          KeyRangeIterator iterator = mergeOperation.apply(inp);
+                          return collectKeysSkipping(iterator, skips);
+                      },
+                      (inp, result) -> {
+                          KeyRangeIterator iterator = mergeOperation.apply(inp);
+                          List<PrimaryKey> merged = collectKeys(iterator, sizeLimit);
+                          List<PrimaryKey> expected = collectKeysSkipping(merged, skips);
+                          assertKeysEqual(expected, result);
+                      });
+        }
+        catch (Throwable e)
+        {
+            // Skipping informaion is not printed by testMerge, so print it here to help debugging:
+            System.err.println("\nSkipping operations:");
+            for (Skip skip : skips)
+                System.err.println(skip);
+            throw e;
+        }
+    }
+
+    /**
+     * Generates a random list of skip operations to perform on the given keys.
+     */
+    static List<Skip> randomSkips(List<PrimaryKey> keys)
+    {
+        List<Integer> skipPositions = new ArrayList<>();
+        for (int i = 0; i < keys.size(); i++)
+            skipPositions.add(nextInt(keys.size()));
+        Collections.sort(skipPositions);
+
+        List<Skip> skips = new ArrayList<>();
+        for (int pos : skipPositions)
+            skips.add(new Skip(keys.get(pos), nextInt(1, 5)));
+
+        return skips;
+    }
+
+    /**
+     * Iterates the given iterator and collects all keys into an array.
+     */
+    static List<PrimaryKey> collectKeys(KeyRangeIterator iterator, int sizeLimit)
+    {
+        try
+        {
+            List<PrimaryKey> result = new ArrayList<>();
+            while (iterator.hasNext() && result.size() < sizeLimit)
+                result.add(iterator.next());
+            return result;
+        }
+        finally
+        {
+            closeQuietly(iterator);
+        }
+    }
+
+    /**
+     * Iterates the given iterator, skipping to the given keys and collecting a chunk of keys after each skip.
+     */
+    static List<PrimaryKey> collectKeysSkipping(KeyRangeIterator iterator, List<Skip> skips)
+    {
+        try
+        {
+            List<PrimaryKey> result = new ArrayList<>();
+            for (Skip skip : skips)
+            {
+                iterator.skipTo(skip.target);
+                for (int i = 0; i < skip.chunkSize && iterator.hasNext(); i++)
+                    result.add(iterator.next());
+            }
+            return result;
+        }
+        finally
+        {
+            closeQuietly(iterator);
+        }
+    }
+
+    static List<PrimaryKey> collectKeysSkipping(List<PrimaryKey> keys, List<Skip> skips)
+    {
+        return collectKeysSkipping(PrimaryKeyListIterator.create(keys), skips);
+    }
+
+    static class Skip
+    {
+        public final PrimaryKey target;
+        public final int chunkSize;
+
+        Skip(PrimaryKey skipToKey, int chunkSize)
+        {
+            this.target = skipToKey;
+            this.chunkSize = chunkSize;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "Skip: { " + "target: " + target + ", chunkSize: " + chunkSize + " }";
+        }
     }
 
 }
