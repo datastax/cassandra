@@ -115,7 +115,7 @@ public class PostingListKeyRangeIterator extends KeyRangeIterator
             if (rowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            return new PrimaryKeyWithSource(primaryKeyMap, rowId, searcherContext.minimumKey, searcherContext.maximumKey);
+            return primaryKeyMap.primaryKeyFromRowId(rowId);
         }
         catch (Throwable t)
         {
