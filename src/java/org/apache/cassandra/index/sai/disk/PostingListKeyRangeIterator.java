@@ -115,7 +115,7 @@ public class PostingListKeyRangeIterator extends KeyRangeIterator
             if (rowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            return new PrimaryKeyWithSource(primaryKeyMap, rowId, searcherContext.minimumKey, searcherContext.maximumKey);
+            return primaryKeyMap.primaryKeyFromRowId(rowId, searcherContext.minimumKey, searcherContext.maximumKey);
         }
         catch (Throwable t)
         {
@@ -160,20 +160,11 @@ public class PostingListKeyRangeIterator extends KeyRangeIterator
         long segmentRowId;
         if (needsSkipping)
         {
-            long targetSstableRowId;
-            if (skipToToken instanceof PrimaryKeyWithSource
-                && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
+            long targetSstableRowId = primaryKeyMap.ceiling(skipToToken);
+            // skipToToken is larger than max token in token file
+            if (targetSstableRowId < 0)
             {
-                targetSstableRowId = ((PrimaryKeyWithSource) skipToToken).getSourceRowId();
-            }
-            else
-            {
-                targetSstableRowId = primaryKeyMap.ceiling(skipToToken);
-                // skipToToken is larger than max token in token file
-                if (targetSstableRowId < 0)
-                {
-                    return PostingList.END_OF_STREAM;
-                }
+                return PostingList.END_OF_STREAM;
             }
             int targetSegmentRowId = Math.toIntExact(targetSstableRowId - searcherContext.getSegmentRowIdOffset());
             segmentRowId = postingList.advance(targetSegmentRowId);

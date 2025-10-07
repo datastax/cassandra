@@ -16,27 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk;
+package org.apache.cassandra.index.sai.disk.v2;
 
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
-public class PrimaryKeyWithSource implements PrimaryKey
+class PrimaryKeyWithSource implements PrimaryKey
 {
-    private final PrimaryKeyMap primaryKeyMap;
     private final SSTableId<?> sourceSstableId;
     private final long sourceRowId;
     private PrimaryKey delegatePrimaryKey;
+    private PrimaryKeyMap primaryKeyMap;
     private final PrimaryKey sourceSstableMinKey;
     private final PrimaryKey sourceSstableMaxKey;
 
-    public PrimaryKeyWithSource(PrimaryKeyMap primaryKeyMap, long sstableRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
+    PrimaryKeyWithSource(PrimaryKeyMap primaryKeyMap, long sstableRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
     {
         this.primaryKeyMap = primaryKeyMap;
         this.sourceSstableId = primaryKeyMap.getSSTableId();
@@ -45,20 +46,13 @@ public class PrimaryKeyWithSource implements PrimaryKey
         this.sourceSstableMaxKey = sourceSstableMaxKey;
     }
 
-    public PrimaryKeyWithSource(PrimaryKey primaryKey, SSTableId<?> sourceSstableId, long sourceRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
-    {
-        this.delegatePrimaryKey = primaryKey;
-        this.primaryKeyMap = null;
-        this.sourceSstableId = sourceSstableId;
-        this.sourceRowId = sourceRowId;
-        this.sourceSstableMinKey = sourceSstableMinKey;
-        this.sourceSstableMaxKey = sourceSstableMaxKey;
-    }
-
     private PrimaryKey primaryKey()
     {
         if (delegatePrimaryKey == null)
+        {
             delegatePrimaryKey = primaryKeyMap.primaryKeyFromRowId(sourceRowId);
+            primaryKeyMap = null; // Removes the no longer needed reference to the primary key map.
+        }
 
         return delegatePrimaryKey;
     }
@@ -74,13 +68,10 @@ public class PrimaryKeyWithSource implements PrimaryKey
     }
 
     @Override
-    public PrimaryKeyWithSource forStaticRow()
+    public PrimaryKey forStaticRow()
     {
-        return new PrimaryKeyWithSource(primaryKey().forStaticRow(),
-                                        sourceSstableId,
-                                        sourceRowId,
-                                        sourceSstableMinKey,
-                                        sourceSstableMaxKey);
+        // We cannot use row awareness if we need a static row.
+        return primaryKey().forStaticRow();
     }
 
     @Override
@@ -104,7 +95,8 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public PrimaryKey loadDeferred()
     {
-        return primaryKey().loadDeferred();
+        primaryKey().loadDeferred();
+        return this;
     }
 
     @Override
