@@ -81,10 +81,11 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private FileHandle termsTrie = null;
         private final IPartitioner partitioner;
         private final ClusteringComparator clusteringComparator;
-        private final PrimaryKey.Factory primaryKeyFactory;
+        private final RowAwarePrimaryKeyFactory primaryKeyFactory;
         private final SSTableId<?> sstableId;
+        private final boolean hasStaticColumns;
 
-        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
+        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, RowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
             try
             {
@@ -105,6 +106,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.primaryKeyFactory = primaryKeyFactory;
                 this.clusteringComparator = sstable.metadata().comparator;
                 this.sstableId = sstable.getId();
+                this.hasStaticColumns = sstable.metadata().hasStaticColumns();
             }
             catch (Throwable t)
             {
@@ -124,7 +126,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                                  partitioner,
                                                  primaryKeyFactory,
                                                  clusteringComparator,
-                                                 sstableId);
+                                                 sstableId,
+                                                 hasStaticColumns);
             }
             catch (IOException e)
             {
@@ -149,17 +152,19 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     private final SortedTermsReader sortedTermsReader;
     private final SortedTermsReader.Cursor cursor;
     private final IPartitioner partitioner;
-    private final PrimaryKey.Factory primaryKeyFactory;
+    private final RowAwarePrimaryKeyFactory primaryKeyFactory;
     private final ClusteringComparator clusteringComparator;
     private final SSTableId<?> sstableId;
+    private final boolean hasStaticColumns;
 
     private RowAwarePrimaryKeyMap(LongArray rowIdToToken,
                                   SortedTermsReader sortedTermsReader,
                                   SortedTermsReader.Cursor cursor,
                                   IPartitioner partitioner,
-                                  PrimaryKey.Factory primaryKeyFactory,
+                                  RowAwarePrimaryKeyFactory primaryKeyFactory,
                                   ClusteringComparator clusteringComparator,
-                                  SSTableId<?> sstableId)
+                                  SSTableId<?> sstableId,
+                                  boolean hasStaticColumns)
     {
         this.rowIdToToken = rowIdToToken;
         this.sortedTermsReader = sortedTermsReader;
@@ -168,6 +173,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         this.primaryKeyFactory = primaryKeyFactory;
         this.clusteringComparator = clusteringComparator;
         this.sstableId = sstableId;
+        this.hasStaticColumns = hasStaticColumns;
     }
 
     @Override
@@ -186,6 +192,13 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     {
         long token = rowIdToToken.get(sstableRowId);
         return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromLongValue(token), () -> supplier(sstableRowId));
+    }
+
+    @Override
+    public PrimaryKey primaryKeyFromRowId(long sstableRowId, PrimaryKey lowerBound, PrimaryKey upperBound)
+    {
+        return hasStaticColumns ? primaryKeyFromRowId(sstableRowId)
+                                : primaryKeyFactory.createWithSource(this, sstableRowId, lowerBound, upperBound);
     }
 
     private long skinnyExactRowIdOrInvertedCeiling(PrimaryKey key)
@@ -212,6 +225,13 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long exactRowIdOrInvertedCeiling(PrimaryKey key)
     {
+        if (key instanceof PrimaryKeyWithSource)
+        {
+            var pkws = (PrimaryKeyWithSource) key;
+            if (pkws.getSourceSstableId().equals(sstableId))
+                return pkws.getSourceRowId();
+        }
+
         if (clusteringComparator.size() == 0)
             return skinnyExactRowIdOrInvertedCeiling(key);
 
@@ -226,6 +246,13 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long ceiling(PrimaryKey key)
     {
+        if (key instanceof PrimaryKeyWithSource)
+        {
+            var pkws = (PrimaryKeyWithSource) key;
+            if (pkws.getSourceSstableId().equals(sstableId))
+                return pkws.getSourceRowId();
+        }
+
         if (clusteringComparator.size() == 0)
         {
             long rowId = skinnyExactRowIdOrInvertedCeiling(key);
