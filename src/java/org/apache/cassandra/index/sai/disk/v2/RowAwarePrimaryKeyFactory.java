@@ -28,6 +28,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -65,6 +66,11 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
     public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
     {
         return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
+    }
+
+    PrimaryKey createWithSource(PrimaryKeyMap primaryKeyMap, long sstableRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
+    {
+        return new PrimaryKeyWithSource(primaryKeyMap, sstableRowId, sourceSstableMinKey, sourceSstableMaxKey);
     }
 
     private class RowAwarePrimaryKey implements PrimaryKey
