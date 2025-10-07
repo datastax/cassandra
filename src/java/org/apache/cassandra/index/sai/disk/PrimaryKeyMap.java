@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.Closeable;
 import java.io.IOException;
 
+import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -83,6 +84,24 @@ public interface PrimaryKeyMap extends Closeable
      * @return the {@link PrimaryKey} associated with the row Id
      */
     PrimaryKey primaryKeyFromRowId(long sstableRowId);
+
+    /**
+     * Returns a {@link PrimaryKey} for a row Id
+     *
+     * Note: the lower and upper bounds are used to avoid reading the primary key from disk in the event
+     * that compared primary keys are in non-overlapping ranges. The ranges can be within the table, and must
+     * contain the row id. This requirement is not validated, as validation would remove the performance benefit
+     * of this optimization.
+     *
+     * @param sstableRowId the row Id to lookup
+     * @param lowerBound the inclusive lower bound of the primary key being created
+     * @param upperBound the inclusive upper bound of the primary key being created
+     * @return the {@link PrimaryKey} associated with the row Id
+     */
+    default PrimaryKey primaryKeyFromRowId(long sstableRowId, @Nonnull PrimaryKey lowerBound, @Nonnull PrimaryKey upperBound)
+    {
+        return primaryKeyFromRowId(sstableRowId);
+    }
 
     /**
      * Returns a row Id for a {@link PrimaryKey}. If there is no such term, returns the `-(next row id) - 1` where

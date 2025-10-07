@@ -38,7 +38,6 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
@@ -181,10 +180,9 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                 // We need to load eagerly to allow us to close the partition key map.
                 min = pkm.primaryKeyFromRowId(minSSTableRowId).loadDeferred();
                 max = pkm.primaryKeyFromRowId(maxSSTableRowId).loadDeferred();
+                this.minKey = pkm.primaryKeyFromRowId(minSSTableRowId, min, max).loadDeferred();
+                this.maxKey = pkm.primaryKeyFromRowId(maxSSTableRowId, min, max).loadDeferred();
             }
-
-            this.minKey = new PrimaryKeyWithSource(min, sstableContext.sstable.getId(), minSSTableRowId, min, max);
-            this.maxKey = new PrimaryKeyWithSource(max, sstableContext.sstable.getId(), maxSSTableRowId, min, max);
         }
         else
         {
