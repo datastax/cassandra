@@ -181,7 +181,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public String toString()
         {
-            return String.format("TokenAwarePrimaryKey: { token: %s, partition: %s } ", token, partitionKey == null ? null : partitionKey);
+            return String.format("PartitionAwarePrimaryKey: { token: %s, partition: %s } ", token, partitionKey == null ? null : partitionKey);
         }
     }
 }

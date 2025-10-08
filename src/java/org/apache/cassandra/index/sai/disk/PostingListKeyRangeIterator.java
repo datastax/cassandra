@@ -116,6 +116,7 @@ public class PostingListKeyRangeIterator extends KeyRangeIterator
                 return endOfData();
 
             return new PrimaryKeyWithSource(primaryKeyMap, rowId, searcherContext.minimumKey, searcherContext.maximumKey);
+            //return primaryKeyMap.primaryKeyFromRowId(rowId);
         }
         catch (Throwable t)
         {
@@ -162,6 +163,7 @@ public class PostingListKeyRangeIterator extends KeyRangeIterator
         {
             long targetSstableRowId;
             if (skipToToken instanceof PrimaryKeyWithSource
+                && !skipToToken.hasEmptyClustering()
                 && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
             {
                 targetSstableRowId = ((PrimaryKeyWithSource) skipToToken).getSourceRowId();

@@ -104,7 +104,8 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public PrimaryKey loadDeferred()
     {
-        return primaryKey().loadDeferred();
+        primaryKey().loadDeferred();
+        return this;
     }
 
     @Override
@@ -131,7 +132,7 @@ public class PrimaryKeyWithSource implements PrimaryKey
         if (o instanceof PrimaryKeyWithSource)
         {
             var other = (PrimaryKeyWithSource) o;
-            if (sourceSstableId.equals(other.sourceSstableId))
+            if (sourceSstableId.equals(other.sourceSstableId) && !hasEmptyClustering() && !other.hasEmptyClustering())
                 return Long.compare(sourceRowId, other.sourceRowId);
             // Compare to the other source sstable's min and max keys to determine if the keys are comparable.
             // Note that these are already loaded into memory as part of the segment's metadata, so the comparison
@@ -159,7 +160,7 @@ public class PrimaryKeyWithSource implements PrimaryKey
         {
             var other = (PrimaryKeyWithSource) o;
             // If they are from the same source sstable, we can compare the row ids directly.
-            if (sourceSstableId.equals(other.sourceSstableId))
+            if (sourceSstableId.equals(other.sourceSstableId) && !hasEmptyClustering() && !other.hasEmptyClustering())
                 return sourceRowId == other.sourceRowId;
 
             // If the source sstable primary key ranges do not intersect, the keys cannot be equal.
