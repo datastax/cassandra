@@ -208,7 +208,7 @@ public class MemtableIndexWriter implements PerIndexWriter
 
     private boolean writeFrequencies()
     {
-        return indexContext().isAnalyzed() && Version.current().onOrAfter(Version.BM25_EARLIEST);
+        return indexContext().isAnalyzed() && indexContext().version().onOrAfter(Version.BM25_EARLIEST);
     }
 
     private void flushVectorIndex(DecoratedKey minKey, DecoratedKey maxKey, long startTime, Stopwatch stopwatch) throws IOException
@@ -233,7 +233,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
                                                        null,
-                                                       metadataMap);
+                                                       metadataMap,
+                                                       perIndexComponents.version());
 
         try (MetadataWriter writer = new MetadataWriter(perIndexComponents))
         {

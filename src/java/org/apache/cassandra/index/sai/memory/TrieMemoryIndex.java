@@ -97,6 +97,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
+    private final Version version;
 
     private static final FastThreadLocal<Integer> lastQueueSize = new FastThreadLocal<Integer>()
     {
@@ -115,12 +116,13 @@ public class TrieMemoryIndex extends MemoryIndex
     public TrieMemoryIndex(IndexContext indexContext, Memtable memtable, AbstractBounds<PartitionPosition> keyBounds)
     {
         super(indexContext);
+        this.version = indexContext.version();
         this.keyBounds = keyBounds;
         this.primaryKeysHeapAllocations = new LongAdder();
         this.primaryKeysAccumulator = new PrimaryKeysAccumulator(primaryKeysHeapAllocations);
         this.primaryKeysRemover = new PrimaryKeysRemover(primaryKeysHeapAllocations);
         this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
-        this.data = InMemoryTrie.longLived(TypeUtil.byteComparableVersionForTermsData(), TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
+        this.data = InMemoryTrie.longLived(TypeUtil.byteComparableVersionForTermsData(indexContext.version()), TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.memtable = memtable;
     }
 
@@ -354,12 +356,12 @@ public class TrieMemoryIndex extends MemoryIndex
         var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
         lastQueueSize.set(mergingIteratorBuilder.size());
 
-        if (!Version.current().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
+        if (!version.onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
             subtrie.entrySet().forEach(entry -> {
                 // Before version DB, we encoded composite types using a non order-preserving function. In order to
                 // perform a range query on a map, we use the bounds to get all entries for a given map key and then
                 // only keep the map entries that satisfy the expression.
-                assert entry.getKey().encodingVersion() == TypeUtil.BYTE_COMPARABLE_VERSION || Version.current() == Version.AA;
+                assert entry.getKey().encodingVersion() == TypeUtil.BYTE_COMPARABLE_VERSION || version == Version.AA;
                 byte[] key = ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes());
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
                     mergingIteratorBuilder.add(entry.getValue());
@@ -420,7 +422,7 @@ public class TrieMemoryIndex extends MemoryIndex
             return 0;
 
         AbstractType<?> termType = indexContext.getValidator();
-        ByteBuffer endTerm = expression.upper != null && TypeUtil.compare(expression.upper.value.encoded, maxTerm, termType, Version.current()) < 0
+        ByteBuffer endTerm = expression.upper != null && TypeUtil.compare(expression.upper.value.encoded, maxTerm, termType, version) < 0
                              ? expression.upper.value.encoded
                              : maxTerm;
 
@@ -472,7 +474,7 @@ public class TrieMemoryIndex extends MemoryIndex
      */
     private BigDecimal toBigDecimal(ByteBuffer endTerm)
     {
-        ByteComparable bc = Version.current().onDiskFormat().encodeForTrie(endTerm, indexContext.getValidator());
+        ByteComparable bc = version.onDiskFormat().encodeForTrie(endTerm, indexContext.getValidator());
         return toBigDecimal(bc);
     }
 
@@ -484,7 +486,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private BigDecimal toBigDecimal(ByteComparable term)
     {
         AbstractType<?> type = indexContext.getValidator();
-        return TermsDistribution.toBigDecimal(term, type, Version.current(), TypeUtil.BYTE_COMPARABLE_VERSION);
+        return TermsDistribution.toBigDecimal(term, type, version, TypeUtil.BYTE_COMPARABLE_VERSION);
     }
 
     private Trie<PrimaryKeys> getSubtrie(@Nullable Expression expression)
@@ -496,7 +498,7 @@ public class TrieMemoryIndex extends MemoryIndex
         boolean lowerInclusive, upperInclusive;
         if (expression.lower != null)
         {
-            lowerBound = expression.getEncodedLowerBoundByteComparable(Version.current());
+            lowerBound = expression.getEncodedLowerBoundByteComparable(version);
             lowerInclusive = expression.lower.inclusive;
         }
         else
@@ -507,7 +509,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         if (expression.upper != null)
         {
-            upperBound = expression.getEncodedUpperBoundByteComparable(Version.current());
+            upperBound = expression.getEncodedUpperBoundByteComparable(version);
             upperInclusive = expression.upper.inclusive;
         }
         else
@@ -537,13 +539,13 @@ public class TrieMemoryIndex extends MemoryIndex
         // An alternative solution could use the trie to find the min/max term, but the trie has ByteComparable
         // objects, not the ByteBuffer, and we would need to implement a custom decoder to undo the encodeForTrie
         // mapping.
-        minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator(), Version.current());
-        maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.current());
+        minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator(), version);
+        maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), version);
     }
 
     private ByteComparable asByteComparable(ByteBuffer input)
     {
-        return Version.current().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
+        return version.onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
 
     /**

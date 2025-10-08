@@ -36,6 +36,7 @@ import java.util.function.ToIntFunction;
 import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -134,6 +135,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
      */
     public CassandraOnHeapGraph(IndexContext context, boolean forSearching, Memtable memtable)
     {
+        // TODO CNDB-15619: we might want to port back CNDB-14301
+        if (!context.version().onOrAfter(Version.JVECTOR_EARLIEST))
+            throw new UnsupportedOperationException("JVector is not supported in V2OnDiskFormat");
+
         this.source = memtable == null
                       ? "null"
                       : memtable.getClass().getSimpleName() + '@' + Integer.toHexString(memtable.hashCode());
@@ -400,7 +405,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // compute the remapping of old ordinals to new (to fill in holes from deletion and/or to create a
         // closer correspondance to rowids, simplifying postings lookups later)
         V5VectorPostingsWriter.RemappedPostings remappedPostings;
-        if (V5OnDiskFormat.writeV5VectorPostings())
+        if (V5OnDiskFormat.writeV5VectorPostings(perIndexComponents.version()))
         {
             // remove postings corresponding to marked-deleted vectors
             var it = postingsMap.entrySet().iterator();
@@ -419,7 +424,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
             deletedOrdinals.clear();
             builder.cleanup();
-            remappedPostings = V5VectorPostingsWriter.remapForMemtable(postingsMap);
+            remappedPostings = V5VectorPostingsWriter.remapForMemtable(postingsMap, perIndexComponents.version());
         }
         else
         {
@@ -448,7 +453,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
             indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
-            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()));
+            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()), perIndexComponents.version());
             assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
 
             // compute and write PQ
@@ -459,7 +464,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
             long postingsPosition;
-            if (V5OnDiskFormat.writeV5VectorPostings())
+            if (V5OnDiskFormat.writeV5VectorPostings(perIndexComponents.version()))
             {
                 assert deletedOrdinals.isEmpty(); // V5 format does not support recording deleted ordinals
                 postingsPosition = new V5VectorPostingsWriter<T>(remappedPostings)

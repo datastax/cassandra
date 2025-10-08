@@ -39,7 +39,6 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.util.BytesRef;
@@ -74,18 +73,20 @@ public class SegmentMetadataBuilder
     private long numRows;
 
     private final TermsDistribution.Builder termsDistributionBuilder;
+    private final Version version;
 
     SegmentMetadata.ComponentMetadataMap metadataMap;
 
     public SegmentMetadataBuilder(long segmentRowIdOffset, IndexComponents.ForWrite components)
     {
         IndexContext context = Objects.requireNonNull(components.context());
+        this.version = context.version();
         this.segmentRowIdOffset = segmentRowIdOffset;
         this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
 
         int histogramSize = context.getIntOption(HISTOGRAM_SIZE_OPTION, 128);
         int mostFrequentTermsCount = context.getIntOption(MFT_COUNT_OPTION, 128);
-        this.termsDistributionBuilder = new TermsDistribution.Builder(context.getValidator(), byteComparableVersion, histogramSize, mostFrequentTermsCount);
+        this.termsDistributionBuilder = new TermsDistribution.Builder(context.getValidator(), byteComparableVersion, histogramSize, mostFrequentTermsCount, version);
     }
 
     public void setKeyRange(@Nonnull PrimaryKey minKey, @Nonnull PrimaryKey maxKey)
@@ -156,7 +157,8 @@ public class SegmentMetadataBuilder
                                    minTerm,
                                    maxTerm,
                                    termsDistributionBuilder.build(),
-                                   metadataMap);
+                                   metadataMap,
+                                   version);
     }
 
     /**
@@ -373,5 +375,3 @@ public class SegmentMetadataBuilder
     }
 
 }
-
-

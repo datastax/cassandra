@@ -94,7 +94,8 @@ public class NumericIndexWriter implements Closeable
                                     BKDWriter.DEFAULT_MAX_MB_SORT_IN_HEAP,
                                     numRows,
                                     true, null,
-                                    components.addOrGet(IndexComponentType.KD_TREE).byteOrder());
+                                    components.addOrGet(IndexComponentType.KD_TREE).byteOrder(),
+                                    components.version());
     }
 
     @Override

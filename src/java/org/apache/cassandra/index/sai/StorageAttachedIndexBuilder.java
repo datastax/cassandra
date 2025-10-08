@@ -48,7 +48,6 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.ComponentsBuildId;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
@@ -321,7 +320,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         //     where immutable components was enabled, but then disabled for some reason. If that happens, we still
         //     want to ensure a new build removes the old files both from disk (happens below) and from the sstable TOC
         //     (which is what `replacedComponents` is about)).
-        if (components.version().useImmutableComponentFiles() || !components.buildId().equals(ComponentsBuildId.forNewSSTable()))
+        if (components.version().useImmutableComponentFiles() || !components.buildId().equals(ComponentsBuildId.forNewSSTable(components.version())))
             replacedComponents.addAll(components.allAsCustomComponents());
 
         if (!components.version().useImmutableComponentFiles())

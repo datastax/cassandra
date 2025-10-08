@@ -89,6 +89,7 @@ public class TrieMemtableIndex implements MemtableIndex
     private final Memtable memtable;
     private final Context sensorContext;
     private final RequestTracker requestTracker;
+    protected final Version version;
 
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
@@ -109,6 +110,7 @@ public class TrieMemtableIndex implements MemtableIndex
         }
         this.sensorContext = Context.from(indexContext);
         this.requestTracker = RequestTracker.instance;
+        this.version = indexContext.version();
     }
 
     @Override
@@ -160,7 +162,7 @@ public class TrieMemtableIndex implements MemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMinTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.min(a, b, validator, Version.current()))
+                     .reduce((a, b) -> TypeUtil.min(a, b, validator, version))
                      .orElse(null);
     }
 
@@ -177,7 +179,7 @@ public class TrieMemtableIndex implements MemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMaxTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.max(a, b, validator, Version.current()))
+                     .reduce((a, b) -> TypeUtil.max(a, b, validator, version))
                      .orElse(null);
     }
 
@@ -463,7 +465,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return Version.current().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
+        return version.onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
 
     /**

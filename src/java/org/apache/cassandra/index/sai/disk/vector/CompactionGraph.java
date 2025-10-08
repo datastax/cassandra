@@ -34,6 +34,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -169,7 +170,7 @@ public class CompactionGraph implements Closeable, Accountable
         // with "holes" in the ordinal sequence (and pq and data files) which we would prefer to avoid
         // (hence the effort to predict `allRowsHaveVectors`) but will not cause correctness issues,
         // and the next compaction will fill in the holes.
-        this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings() || !allRowsHaveVectors;
+        this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings(context.version()) || !allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
         Component tmpComponent = new Component(Component.Type.CUSTOM, "chronicle" + Descriptor.TMP_EXT);
@@ -218,7 +219,7 @@ public class CompactionGraph implements Closeable, Accountable
         // placeholder writer, will be replaced at flush time when we finalize the index contents
         writer = createTermsWriterBuilder().withMapper(new OrdinalMapper.IdentityMapper(maxRowsInGraph)).build();
         writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
-        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
+        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()), context.version());
     }
 
     private OnDiskGraphIndexWriter.Builder createTermsWriterBuilder() throws IOException
@@ -394,6 +395,7 @@ public class CompactionGraph implements Closeable, Accountable
 
             // write PQ (time to do this is negligible, don't bother doing it async)
             long pqOffset = pqOutput.getFilePointer();
+            Version version = context.version();
             CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
             compressedVectors.write(pqOutput.asSequentialWriter(), JVECTOR_VERSION); // VSTODO old version until we add APQ
             long pqLength = pqOutput.getFilePointer() - pqOffset;
@@ -412,7 +414,7 @@ public class CompactionGraph implements Closeable, Accountable
                     // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
                     // if a row with null vector in sstable A gets updated with a vector in sstable B)
                     if (postingsStructure == Structure.ONE_TO_MANY
-                        && (!V5OnDiskFormat.writeV5VectorPostings() || useSyntheticOrdinals))
+                        && (!V5OnDiskFormat.writeV5VectorPostings(version) || useSyntheticOrdinals))
                     {
                         postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
                     }
@@ -422,7 +424,7 @@ public class CompactionGraph implements Closeable, Accountable
                     ordinalMapper.set(rp.ordinalMapper);
                     try (var view = index.getView())
                     {
-                        if (V5OnDiskFormat.writeV5VectorPostings())
+                        if (V5OnDiskFormat.writeV5VectorPostings(version))
                         {
                             return new V5VectorPostingsWriter<Integer>(rp).writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);
                         }

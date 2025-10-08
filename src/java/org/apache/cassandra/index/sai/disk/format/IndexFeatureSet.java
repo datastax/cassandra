@@ -52,9 +52,9 @@ public interface IndexFeatureSet
      * multiple sources. This will include all the SSTables included in a query and all the indexes
      * attached to those SSTables, added using {@link Accumulator#accumulate}.
      * <p>
-     * The feature set of the current version denoted by {@link Version#current()}
+     * The feature set of the current version denoted by {@link Version#current(String)}
      * is implicitly added, so the result feature set will include only the features supported by the
-     * current version.
+     * current version for the keyspace.
      * <p>
      * The {@code Accumulator} creates an {@code IndexFeatureSet} this contains the features from
      * all the associated feature sets where {@code false} is the highest priority. This means if any
@@ -68,9 +68,9 @@ public interface IndexFeatureSet
         boolean hasTermsHistogram = true;
         boolean complete = false;
 
-        public Accumulator()
+        public Accumulator(Version version)
         {
-            accumulate(Version.current().onDiskFormat().indexFeatureSet());
+            accumulate(version.onDiskFormat().indexFeatureSet());
         }
 
         /**
