@@ -149,6 +149,7 @@ public class IndexContext
     private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
     private final PrimaryKey.Factory primaryKeyFactory;
 
+    private final Version version;
     private final int maxTermSize;
 
     private volatile boolean dropped = false;
@@ -174,7 +175,8 @@ public class IndexContext
         this.viewManager = new IndexViewManager(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
         this.cfs = cfs;
-        this.primaryKeyFactory = Version.current().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
+        this.version = Version.current(keyspace);
+        this.primaryKeyFactory = version.onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
         String columnName = column.name.toString();
 
@@ -218,6 +220,11 @@ public class IndexContext
 
 
         logger.debug(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
+    }
+
+    public Version version()
+    {
+        return version;
     }
 
     public AbstractType<?> keyValidator()
@@ -406,7 +413,7 @@ public class IndexContext
 
     public void update(DecoratedKey key, Row oldRow, Row newRow, Memtable memtable, OpOrder.Group opGroup)
     {
-        if (Version.current().equals(Version.AA))
+        if (version.equals(Version.AA))
         {
             // AA cannot handle updates because it indexes partition keys instead of fully qualified primary keys.
             index(key, newRow, memtable, opGroup);
@@ -653,7 +660,7 @@ public class IndexContext
      */
     public int openPerIndexFiles()
     {
-        return viewManager.getView().size() * Version.current().onDiskFormat().openFilesPerIndex(this);
+        return viewManager.getView().size() * version.onDiskFormat().openFilesPerIndex(this);
     }
 
     public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)
@@ -997,7 +1004,7 @@ public class IndexContext
 
     public IndexFeatureSet indexFeatureSet()
     {
-        IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator();
+        IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator(version);
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
     }
