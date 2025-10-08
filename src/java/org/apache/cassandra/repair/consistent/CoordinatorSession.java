@@ -275,7 +275,7 @@ public class CoordinatorSession extends ConsistentSession
             logger.error("Can't transition endpoints {} to FAILED", cantFail, new RuntimeException());
             return;
         }
-        logger.info("Incremental repair session {} failed \n {}", sessionID, ExceptionUtils.getStackTrace(new Exception()));
+        logger.info("Incremental repair session {} failed \n {}", sessionID, ExceptionUtils.getStackTrace(new Exception("HCD-181 debug - Ignore me")));
         sendFailureMessageToParticipants();
         setAll(State.FAILED);
 

@@ -419,7 +419,7 @@ public class LocalSessions
      */
     public void cancelSession(UUID sessionID, boolean force)
     {
-        logger.info("Cancelling local repair session {} \n {}", sessionID, ExceptionUtils.getStackTrace(new Exception()));
+        logger.info("Cancelling local repair session {} \n {}", sessionID, ExceptionUtils.getStackTrace(new Exception("HCD-181 debug - Ignore me")));
         LocalSession session = getSession(sessionID);
         Preconditions.checkArgument(session != null, "Session {} does not exist", sessionID);
         Preconditions.checkArgument(force || session.coordinator.equals(getBroadcastAddressAndPort()),
@@ -833,7 +833,7 @@ public class LocalSessions
                 }
                 else if (session.getState() != FAILED)
                 {
-                    logger.info("Failing local repair session {} \n {}", session.sessionID, ExceptionUtils.getStackTrace(new Exception()));
+                    logger.info("Failing local repair session {} \n {}", session.sessionID, ExceptionUtils.getStackTrace(new Exception("HCD-181 debug - Ignore me")));
                     setStateAndSave(session, FAILED);
                 }
             }

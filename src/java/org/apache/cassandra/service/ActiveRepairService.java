@@ -415,7 +415,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
     public synchronized void terminateSessions()
     {
-        logger.info("Terminating repair sessions \n {}", ExceptionUtils.getStackTrace(new Exception()));
+        logger.info("Terminating repair sessions \n {}", ExceptionUtils.getStackTrace(new Exception("HCD-181 debug - Ignore me")));
         Throwable cause = new IOException("Terminate session is called");
         for (RepairSession session : sessions.values())
         {
