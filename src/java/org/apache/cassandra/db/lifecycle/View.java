@@ -282,6 +282,9 @@ public class View
     @VisibleForTesting
     public static Function<View, View> updateCompacting(final Set<? extends SSTableReader> unmark, final Iterable<? extends SSTableReader> mark)
     {
+        if (unmark != null && !unmark.isEmpty())
+            logger.debug("HCD-200 updateCompacting unmark {} at\n{}", unmark, ExceptionUtils.getStackTrace(new Exception("HCD-200 debug - Ignore me" )));
+
         if (unmark.isEmpty() && Iterables.isEmpty(mark))
             return Functions.identity();
         return new Function<View, View>()
