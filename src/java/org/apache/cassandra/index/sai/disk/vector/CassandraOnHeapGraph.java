@@ -125,6 +125,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private final InvalidVectorBehavior invalidVectorBehavior;
     private final IntHashSet deletedOrdinals;
     private volatile boolean hasDeletions;
+    private volatile boolean unitVectors;
 
     // we don't need to explicitly close these since only on-heap resources are involved
     private final ThreadLocal<GraphSearcherAccessManager> searchers;
@@ -156,6 +157,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
         deletedOrdinals = new IntHashSet();
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
+
+        // We start by assuming the vectors are unit vectors and then if they are not, we will correct it.
+        unitVectors = true;
 
         int jvectorVersion = Version.current().onDiskFormat().jvectorFileFormatVersion();
         // This is only a warning since it's not a fatal error to write without hierarchy
@@ -269,6 +273,12 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 var success = postingsByOrdinal.compareAndPut(ordinal, null, postings);
                 assert success : "postingsByOrdinal already contains an entry for ordinal " + ordinal;
                 bytesUsed += builder.addGraphNode(ordinal, vector);
+
+                // We safely added to the graph, check if we need to check for unit length
+                if (sourceModel.hasKnownUnitLengthVectors() || unitVectors)
+                    if (!(Math.abs(VectorUtil.dotProduct(vector, vector) - 1.0f) < 0.01))
+                        unitVectors = false;
+
                 return bytesUsed;
             }
             else
@@ -580,15 +590,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // encode (compress) the vectors to save
             if (compressor != null)
                 cv = compressor.encodeAll(new RemappedVectorValues(remapped, remapped.maxNewOrdinal, vectorValues));
-
-            containsUnitVectors = IntStream.range(0, vectorValues.size())
-                                           .parallel()
-                                           .mapToObj(vectorValues::getVector)
-                                           .allMatch(v -> Math.abs(VectorUtil.dotProduct(v, v) - 1.0f) < 0.01);
         }
 
         var actualType = compressor == null ? CompressionType.NONE : preferredCompression.type;
-        writePqHeader(writer, containsUnitVectors, actualType);
+        writePqHeader(writer, unitVectors, actualType);
         if (actualType == CompressionType.NONE)
             return writer.position();
 
