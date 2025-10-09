@@ -389,7 +389,7 @@ public class CompactionGraph implements Closeable, Accountable
     {
         // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
         // TODO what to do about this? Removing this line makes the tests pass, but with it, we get an error when loading it
-//        writer.writeHeader();
+        writer.writeHeader(builder.getGraph().getView());
         writer.close();
 
         int nInProgress = builder.insertsInProgress();
