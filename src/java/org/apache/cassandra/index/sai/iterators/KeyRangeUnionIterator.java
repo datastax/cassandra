@@ -24,16 +24,22 @@ import java.util.List;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
  * Range Union Iterator is used to return sorted stream of elements from multiple KeyRangeIterator instances.
+ * Keys are sorted by natural order of PrimaryKey, however if two keys are equal by their natural order,
+ * the one with an empty clustering always wins.
  */
 @SuppressWarnings("resource")
 public class KeyRangeUnionIterator extends KeyRangeIterator
 {
     public final List<KeyRangeIterator> ranges;
+
+    // If set, we must first skip this partition.
+    private DecoratedKey partitionToSkip = null;
 
     private KeyRangeUnionIterator(Builder.Statistics statistics, List<KeyRangeIterator> ranges)
     {
@@ -43,6 +49,10 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
 
     public PrimaryKey computeNext()
     {
+        // If we already emitted a partition key for the whole partition (== pk with empty clustering),
+        // we should not emit any more keys from this partition.
+        maybeSkipCurrentPartition();
+
         // Keep track of the next best candidate. If another candidate has the same value, advance it to prevent
         // duplicate results. This design avoids unnecessary list operations.
         KeyRangeIterator candidate = null;
@@ -59,14 +69,64 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
             {
                 int cmp = candidate.peek().compareTo(range.peek());
                 if (cmp == 0)
-                    range.next();
+                {
+                    // Due to the way how we compare PrimaryKeys with empty clusterings which is hard to change now,
+                    // the fact that two primary keys compare the same doesn't guarantee they have the same clustering.
+                    // The clustering information is ignored if one key has empty clustering, so a key with an empty
+                    // clustering will match any key with a non-empty clustering (as long as the partition keys are the same).
+                    // So we may end up in a situation when one or more ranges have empty clustering and the others
+                    // have non-empty. This situation is likely if we mix row-aware (DC, EC, ...) indexes with older
+                    // non-row-aware (AA) indexes.
+                    // In that case we absolutely *must* pick the key with an empty clustering,
+                    // as it matches all rows in the partition
+                    // (and hence, it includes all the rows matched by the keys from the other candidates).
+                    // Thanks to postfiltering, we are allowed to return more rows than necessary in SAI, but not less.
+                    // If we chose one of the specific keys with non-empty clustering (e.g. pick the first one we see),
+                    // we may miss rows matched by the non-row-aware index, as well as the rows matched by
+                    // the other row-aware indexes.
+                    if (range.peek().hasEmptyClustering() && !candidate.peek().hasEmptyClustering())
+                        candidate = range;
+                    else
+                        range.next();   // truly equal by partition and clustering, so we can just get rid of one
+                }
                 else if (cmp > 0)
+                {
                     candidate = range;
+                }
             }
         }
+
         if (candidate == null)
             return endOfData();
-        return candidate.next();
+
+        var result = candidate.next();
+
+        // If the winning candidate has an empty clustering, this means it selects the whole partition, so
+        // advance all other ranges to the end of this partition to avoid duplicates.
+        // We delay that to the next call to computeNext() though, because if we have a wide partition, it's better
+        // to first let the caller consume all the rows from this partition - maybe they won't call again.
+        if (result.hasEmptyClustering())
+            partitionToSkip = result.partitionKey();
+
+        return result;
+    }
+
+    private void maybeSkipCurrentPartition()
+    {
+        if (partitionToSkip != null)
+        {
+            for (KeyRangeIterator range : ranges)
+                skipPartition(range, partitionToSkip);
+
+            partitionToSkip = null;
+        }
+    }
+
+    private void skipPartition(KeyRangeIterator iterator, DecoratedKey partitionKey)
+    {
+        // TODO: Push this logic down to the iterator where it can be more efficient
+        while (iterator.hasNext() && iterator.peek().partitionKey() != null && iterator.peek().partitionKey().compareTo(partitionKey) <= 0)
+            iterator.next();
     }
 
     protected void performSkipTo(PrimaryKey nextKey)

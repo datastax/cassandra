@@ -374,7 +374,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // filtered and considered as a result multiple times).
             return lastKey != null &&
                    Objects.equals(lastKey.partitionKey(), key.partitionKey()) &&
-                   Objects.equals(lastKey.clustering(), key.clustering());
+                   (lastKey.hasEmptyClustering() || key.hasEmptyClustering() || Objects.equals(lastKey.clustering(), key.clustering()));
         }
 
         private void fillNextSelectedKeysInPartition(DecoratedKey partitionKey, List<PrimaryKey> nextPrimaryKeys)
