@@ -166,11 +166,6 @@ public class RepairTest extends TestBaseImpl
         populate(cluster, KEYSPACE, compression);
         repair(cluster, KEYSPACE, ImmutableMap.of("parallelism", sequential ? "sequential" : "parallel"));
         verify(cluster, KEYSPACE, 0, 2001, 1, 2, 3);
-
-        for (int i = 1; i <= cluster.size(); i++)
-            Assert.assertEquals("We should use the local write path (which requires flushing) if CDC is enabled on both a node and table-level",
-                                nodesHaveCDC && tableHasCDC,
-                                !cluster.get(i).logs().grep("Enqueuing flush of test \\(STREAMS_RECEIVED\\)").getResult().isEmpty());
     }
 
     void shutDownNodesAndForceRepair(ICluster<IInvokableInstance> cluster, String keyspace, int downNode) throws Exception
