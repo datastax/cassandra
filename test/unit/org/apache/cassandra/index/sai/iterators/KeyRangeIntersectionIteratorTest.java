@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.iterators;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -396,5 +397,94 @@ public class KeyRangeIntersectionIteratorTest extends AbstractKeyRangeIteratorTe
         Set<Long> expectedSet = toSet(ranges[0]);
         IntStream.range(1, ranges.length).forEach(i -> expectedSet.retainAll(toSet(ranges[i])));
         return Pair.create(builder.build(), expectedSet.stream().mapToLong(Long::longValue).sorted().toArray());
+    }
+
+    @Test
+    public void testRandomized() throws Throwable
+    {
+        for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
+        {
+            for (int testIteration = 0; testIteration < 200; testIteration++)
+            {
+                var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
+                for (int j = 0; j < iteratorCount; j++)
+                    inputs.add(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+
+                testMerge(inputs,
+                          KeyRangeIntersectionIteratorTest::intersection,
+                          KeyRangeIntersectionIteratorTest::validateIntersectionResults);
+            }
+        }
+    }
+
+    @Test
+    public void testSkippingRandomized() throws Throwable
+    {
+        for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
+        {
+            for (int testIteration = 0; testIteration < 200; testIteration++)
+            {
+                var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
+                for (int j = 0; j < iteratorCount; j++)
+                    inputs.add(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+
+                // Generate random skip positions.
+                // Use a different data set so that some skip positions exist in the merged result and some do not.
+                var skips = randomSkips(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+
+                testSkipping(inputs, skips, KeyRangeIntersectionIteratorTest::intersectionIterator);
+            }
+        }
+    }
+
+    private static List<PrimaryKey> intersection(List<List<PrimaryKey>> inputs)
+    {
+        // Limit the size of the result to avoid test timeouts.
+        // We don't need to throw, because excessive results will be checked by validation logic
+        // and that way we get better diagnostics. If we threw an assertion error here, the results wouldn't be printed.
+        var sizeLimit = inputs.stream().mapToInt(List::size).sum() + 10;
+        return collectKeys(intersectionIterator(inputs), sizeLimit);
+    }
+
+    private static KeyRangeIterator intersectionIterator(List<List<PrimaryKey>> inputs)
+    {
+        var builder = KeyRangeIntersectionIterator.builder();
+        for (List<PrimaryKey> input : inputs)
+            builder.add(PrimaryKeyListIterator.create(input));
+
+        return builder.build();
+    }
+
+    private static void validateIntersectionResults(List<List<PrimaryKey>> inputs, List<PrimaryKey> result)
+    {
+        // Check for order and duplicates:
+        assertIncreasing(result);
+
+        // Index the keys we got for faster search:
+        ArrayList<PrimaryKeySet> inputSets = new ArrayList<>(inputs.size());
+        for (List<PrimaryKey> input : inputs)
+            inputSets.add(new PrimaryKeySet(input));
+
+        // Check if all keys are present:
+        PrimaryKeySet resultSet = new PrimaryKeySet(result);
+        for (List<PrimaryKey> keys : inputs)
+        {
+            for (PrimaryKey key : keys)
+            {
+                if (!inputSets.stream().allMatch(input -> input.contains(key)))
+                    continue;
+
+                assertTrue("Missing key in intersection result:\n" + key, resultSet.contains(key));
+            }
+        }
+
+        // Check if we inluded only the rows that are present in all inputs;
+        // excessive rows are likely not a correctness issue, but they may degrade performance:
+        for (int i = 0; i < inputs.size(); i++)
+        {
+            for (PrimaryKey key : result)
+                assertTrue("Unexpected key in intersection result, not covered by input " + i +
+                           ":\n" + key, inputSets.get(i).contains(key));
+        }
     }
 }
