@@ -66,9 +66,9 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
     {
         // The highest primary key seen on any range iterator so far.
         // It can become null when we reach the end of the iterator.
-        PrimaryKey highestKey = ranges.get(0).hasNext() ? ranges.get(0).next() : null;
+        PrimaryKey highestKey = ranges.get(0).hasNext() ? ranges.get(0).peek() : null;
         // Index of the range iterator that has advanced beyond the others
-        int alreadyAdvanced = 0;
+        int indexOfHighestKey = 0;
         rangeStats[0]++;
 
         outer:
@@ -78,10 +78,13 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
             // Once this inner loop finishes normally, all iterators are guaranteed to be at the same value.
             for (int index = 0; index < ranges.size(); index++)
             {
-                if (index != alreadyAdvanced)
+                if (index != indexOfHighestKey)
                 {
                     KeyRangeIterator range = ranges.get(index);
-                    PrimaryKey nextKey = nextOrNull(range, highestKey);
+
+                    range.skipTo(highestKey);
+                    PrimaryKey nextKey = range.hasNext() ? range.peek() : null;
+
                     rangeStats[index]++;
                     int comparisonResult;
                     if (nextKey == null || (comparisonResult = nextKey.compareTo(highestKey)) > 0)
@@ -89,20 +92,41 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
                         // We jumped over the highest key seen so far, so make it the new highest key.
                         highestKey = nextKey;
                         // Remember this iterator to avoid advancing it again, because it is already at the highest key
-                        alreadyAdvanced = index;
+                        indexOfHighestKey = index;
                         // This iterator jumped over, so the other iterators are lagging behind now,
                         // including the ones already advanced in the earlier cycles of the inner loop.
                         // Therefore, restart the inner loop in order to advance
                         // the other iterators except this one to match the new highest key.
                         continue outer;
                     }
+
                     assert comparisonResult == 0 :
                            String.format("skipTo skipped to an item smaller than the target; " +
                                          "iterator: %s, target key: %s, returned key: %s", range, highestKey, nextKey);
+
+                    // More specific keys should win over full partitions,
+                    // because they match a single row instead of the whole partition.
+                    // However, because this key matches with the earlier keys, we can continue the inner loop.
+                    if (!nextKey.hasEmptyClustering())
+                    {
+                        highestKey = nextKey;
+                        indexOfHighestKey = index;
+                    }
                 }
             }
-            // If we reached here, next() has been called at least once on each range iterator and
-            // the last call to next() on each iterator returned a value equal to the highestKey.
+            // If we reached here, we have a match - all iterators are at the same key == highestKey.
+
+            // Now we need to advance the iterators to avoid returning the same key again.
+            // This is tricky because of empty clustering keys that match the whole partition.
+            // We must not advance ranges at keys with empty clustering because they
+            // may still match the next keys returned by other iterators in the next cycles.
+            // However, if all ranges are at the same partition with empty clustering (highestKey.hasEmptyClustering()),
+            // we must advance all of them, because we return the key for the whole partition and that partition is done.
+            for (var range : ranges)
+            {
+                if (highestKey.hasEmptyClustering() || !range.peek().hasEmptyClustering())
+                    range.next();
+            }
 
             // Move the iterator that was called the least times to the start of the list.
             // This is an optimisation assuming that iterator is likely a more selective one.
@@ -143,16 +167,6 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
         // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.
         for (KeyRangeIterator range : ranges)
             range.skipTo(nextToken);
-    }
-
-    /**
-     * Fetches the next available item from the iterator, such that the item is not lower than the given key.
-     * If no such items are available, returns null.
-     */
-    private PrimaryKey nextOrNull(KeyRangeIterator iterator, PrimaryKey minKey)
-    {
-        iterator.skipTo(minKey);
-        return iterator.hasNext() ? iterator.next() : null;
     }
 
     public void close() throws IOException

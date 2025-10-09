@@ -17,10 +17,7 @@
  */
 package org.apache.cassandra.index.sai.iterators;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import org.junit.Assert;
@@ -405,4 +402,188 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
             validateWithSkipping(builder.build(), totalOrdered);
         }
     }
+
+    @Test
+    public void testEmptyClusteringTwoWayMerge() {
+        PrimaryKey[] keysA = {
+        makeKey(1, 1L),
+        makeKey(2, 1L),
+        makeKey(2, 1000L),
+        makeKey(3, null),
+        makeKey(3, 30L),
+        makeKey(3, 31L),
+        makeKey(3, 32L),
+        makeKey(3, 33L),
+        makeKey(4, null)
+        };
+
+        PrimaryKey[] keysB = {
+        makeKey(0, null),
+        makeKey(1, 2L),
+        makeKey(2, null),
+        makeKey(3, 31L),
+        makeKey(4, null)
+        };
+
+        List<PrimaryKey> expected = Arrays.asList(
+        makeKey(0, null),
+        makeKey(1, 1L),
+        makeKey(1, 2L),
+        makeKey(2, null),
+        makeKey(3, null),
+        makeKey(4, null)
+        );
+
+        testUnion(expected, keysA, keysB);
+    }
+
+    @Test
+    public void testEmptyClusteringThreeWayMerge() {
+        PrimaryKey[] keysA = {
+        makeKey(1, 11L),
+        makeKey(2, 21L),
+        makeKey(2, 1000L),
+        makeKey(3, null),
+        makeKey(3, 0L),
+        makeKey(3, 1L),
+        makeKey(3, 2L),
+        makeKey(4, 41L),
+        makeKey(6, null),
+        makeKey(7, 72L),
+        makeKey(7, 73L)
+        };
+
+        PrimaryKey[] keysB = {
+        makeKey(0, null),
+        makeKey(1, 13L),
+        makeKey(2, null),
+        makeKey(3, 1L),
+        makeKey(4, 40L),
+        makeKey(4, 42L),
+        makeKey(4, 43L),
+        makeKey(4, 45L),
+        makeKey(5, 50L),
+        makeKey(7, 71L),
+        makeKey(7, 73L),
+        makeKey(7, 74L)
+        };
+
+        PrimaryKey[] keysC = {
+        makeKey(1, 12L),
+        makeKey(2, 22L),
+        makeKey(2, 5L),
+        makeKey(3, 1L),
+        makeKey(4, null),
+        makeKey(6, 60L),
+        makeKey(7, null)
+        };
+
+        List<PrimaryKey> expected = Arrays.asList(
+        makeKey(0, null),
+        makeKey(1, 11L),
+        makeKey(1, 12L),
+        makeKey(1, 13L),
+        makeKey(2, null),
+        makeKey(3, null),
+        makeKey(4, null),
+        makeKey(5, 50L),
+        makeKey(6, null),
+        makeKey(7, null)
+        );
+
+        testUnion(expected, keysA, keysB, keysC);
+    }
+
+    private void testUnion(List<PrimaryKey> expected, PrimaryKey[]... inputs) {
+        // Test all permutations of input arrays to ensure order of iterators does not matter
+        for (int[] permutation : permutations(inputs.length))
+        {
+            KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
+
+            for (int i = 0; i < inputs.length; i++)
+                builder.add(PrimaryKeyListIterator.create(inputs[permutation[i]]));
+
+            KeyRangeIterator union = builder.build();
+
+            List<PrimaryKey> result = new ArrayList<>();
+            while (union.hasNext()) {
+                result.add(union.next());
+            }
+
+            Collections.sort(expected);
+            assertKeysEqual(expected, result);
+        }
+    }
+
+    @Test
+    public void testRandomized() throws Throwable
+    {
+        for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
+        {
+            for (int i = 0; i < 200; i++)
+            {
+                var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
+                for (int j = 0; j < iteratorCount; j++)
+                    inputs.add(randomPrimaryKeys(i / 10, i / 10));
+
+                testMerge(inputs,
+                          KeyRangeUnionIteratorTest::union,
+                          KeyRangeUnionIteratorTest::validateUnionResults);
+            }
+        }
+    }
+
+    @Test
+    public void testSkippingRandomized() throws Throwable
+    {
+        for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
+        {
+            for (int testIteration = 0; testIteration < 200; testIteration++)
+            {
+                var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
+                for (int j = 0; j < iteratorCount; j++)
+                    inputs.add(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+
+                // Generate random skip positions.
+                // Use a different data set so that some skip positions exist in the merged result and some do not.
+                var skips = randomSkips(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+
+                testSkipping(inputs, skips, KeyRangeUnionIteratorTest::unionIterator);
+            }
+        }
+    }
+
+
+    private static List<PrimaryKey> union(List<List<PrimaryKey>> inputs)
+    {
+        var iterator = unionIterator(inputs);
+
+        // Limit the size of the result to avoid test timeouts.
+        // We don't need to throw, because excessive results will be checked by validation logic
+        // and that way we get better diagnostics. If we threw an assertion error here, the results wouldn't be printed.
+        var sizeLimit = inputs.stream().mapToInt(List::size).sum() + 10;
+        return collectKeys(iterator, sizeLimit);
+    }
+
+    private static KeyRangeIterator unionIterator(List<List<PrimaryKey>> inputs)
+    {
+        var builder = KeyRangeUnionIterator.builder();
+        for (List<PrimaryKey> input : inputs)
+            builder.add(PrimaryKeyListIterator.create(input));
+        return builder.build();
+    }
+
+
+        private static void validateUnionResults(List<List<PrimaryKey>> inputs, List<PrimaryKey> result)
+    {
+        // Check for order and duplicates:
+        assertIncreasing(result);
+
+        // Check if we're not missing anything - all keys from input lists must be found in the output
+        PrimaryKeySet resultKeySet = new PrimaryKeySet(result);
+        for (List<PrimaryKey> input : inputs)
+            for (PrimaryKey key : input)
+                assertTrue("Missing key in union result:\n" + key, resultKeySet.contains(key));
+    }
 }
+
