@@ -47,7 +47,7 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
  * We also log timed out operations, see CASSANDRA-7392.
  * Since CASSANDRA-12403 we also log queries that were slow.
  */
-class MonitoringTask
+public class MonitoringTask
 {
     private static final String LINE_SEPARATOR = getProperty("line.separator");
     private static final Logger logger = LoggerFactory.getLogger(MonitoringTask.class);
@@ -65,7 +65,7 @@ class MonitoringTask
     private static final int MAX_OPERATIONS = Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "monitoring_max_operations", "50"));
 
     @VisibleForTesting
-    static MonitoringTask instance = make(REPORT_INTERVAL_MS, MAX_OPERATIONS);
+    public static MonitoringTask instance = make(REPORT_INTERVAL_MS, MAX_OPERATIONS);
 
     private final ScheduledFuture<?> reportingTask;
     private final OperationsQueue failedOperationsQueue;
@@ -133,7 +133,7 @@ class MonitoringTask
     }
 
     @VisibleForTesting
-    private void logOperations(long approxCurrentTimeNanos)
+    public void logOperations(long approxCurrentTimeNanos)
     {
         logSlowOperations(approxCurrentTimeNanos);
         logFailedOperations(approxCurrentTimeNanos);
@@ -360,9 +360,9 @@ class MonitoringTask
      */
     private final static class FailedOperation extends Operation
     {
-        FailedOperation(Monitorable operation, long failedAtNanos)
+        FailedOperation(Monitorable operation, long nowNanos)
         {
-            super(operation, failedAtNanos);
+            super(operation, nowNanos);
         }
 
         public String getLogMessage()
@@ -390,28 +390,43 @@ class MonitoringTask
      */
     private final static class SlowOperation extends Operation
     {
-        SlowOperation(Monitorable operation, long failedAt)
+        /** The details of the slowest operation among the aggregated operations. */
+        private Monitorable.Details slowestOperationDetails;
+
+        SlowOperation(Monitorable operation, long nowNanos)
         {
-            super(operation, failedAt);
+            super(operation, nowNanos);
+            slowestOperationDetails = operation.details();
         }
 
         public String getLogMessage()
         {
             if (numTimesReported == 1)
-                return String.format("<%s>, time %d msec - slow timeout %d %s",
+                return String.format("<%s>, time %d msec - slow timeout %d %s%s",
                                      name(),
                                      NANOSECONDS.toMillis(totalTimeNanos),
                                      NANOSECONDS.toMillis(operation.slowTimeoutNanos()),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     operation.isCrossNode() ? "msec/cross-node" : "msec",
+                                     slowestOperationDetails.toLogString(true));
             else
-                return String.format("<%s>, was slow %d times: avg/min/max %d/%d/%d msec - slow timeout %d %s",
+                return String.format("<%s>, was slow %d times: avg/min/max %d/%d/%d msec - slow timeout %d %s%s",
                                      name(),
                                      numTimesReported,
                                      NANOSECONDS.toMillis(totalTimeNanos/ numTimesReported),
                                      NANOSECONDS.toMillis(minTime),
                                      NANOSECONDS.toMillis(maxTime),
                                      NANOSECONDS.toMillis(operation.slowTimeoutNanos()),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     operation.isCrossNode() ? "msec/cross-node" : "msec",
+                                     slowestOperationDetails.toLogString(false));
+        }
+
+        @Override
+        void add(Operation operation)
+        {
+            if (operation.maxTime > maxTime)
+                slowestOperationDetails = operation.operation.details();
+
+            super.add(operation);
         }
     }
 }

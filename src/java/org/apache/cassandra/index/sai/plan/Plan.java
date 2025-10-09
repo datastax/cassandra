@@ -293,6 +293,15 @@ abstract public class Plan
     }
 
     /**
+     * Formats the whole plan as a pretty tree, with indentation
+     */
+    public final String toStringRecursive(String indent)
+    {
+        TreeFormatter<Plan> formatter = new TreeFormatter<>(Plan::toString, Plan::subplans, indent);
+        return formatter.format(this);
+    }
+
+    /**
      * Returns the string representation of this node only
      */
     public final String toString()
