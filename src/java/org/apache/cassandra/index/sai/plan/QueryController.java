@@ -811,22 +811,19 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     /**
      * Returns whether this query is selecting the {@link PrimaryKey}.
-     * The query selects the key if any of the following statements is true:
-     *  1. The query is not row-aware
-     *  2. The table associated with the query is not using clustering keys
-     *  3. The clustering index filter for the command wants the row.
-     *
-     *  Item 3 is important in paged queries where the {@link ClusteringIndexSliceFilter} for
-     *  subsequent paged queries may not select rows that are returned by the index
-     *  search because that is initially partition based.
+     * The query selects the key if the clustering index filter for the command wants the row.
+     * If the key has no clustering information, it is always selected.
+     * <p>
+     * Checking the clustering index filter is important in paged queries where the {@link ClusteringIndexSliceFilter}
+     * for subsequent paged queries may not select rows that are returned by the index search because that is
+     * initially partition based.
      *
      * @param key The {@link PrimaryKey} to be tested
      * @return true if the key is selected by the query
      */
     public boolean selects(PrimaryKey key)
     {
-        return !indexFeatureSet.isRowAware() ||
-               key.hasEmptyClustering() ||
+        return key.hasEmptyClustering() ||
                command.clusteringIndexFilter(key.partitionKey()).selects(key.clustering());
     }
 
