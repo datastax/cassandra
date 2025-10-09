@@ -30,7 +30,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,7 +66,7 @@ public class SaiDiskSizeTest extends SAITester
     /**
      * The expected sizes were determined empirically to satisfy the result of both flush and compaction.
      * To understand the difference check {@link Version} and on disk components.
-     * There are no vectors involved, thus the expected sizes are not affected by chenges to Vector format.
+     * There are no vectors involved, thus the expected sizes are not affected by changes to Vector format.
      *
      * @return a collection of parameters to test
      */
