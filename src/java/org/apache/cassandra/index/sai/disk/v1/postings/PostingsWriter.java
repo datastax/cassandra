@@ -144,7 +144,7 @@ public class PostingsWriter implements Closeable
         startOffset = dataOutput.getFilePointer();
         deltaBuffer = new long[blockEntries];
         freqBuffer = new int[blockEntries];
-        inMemoryOutput = LuceneCompat.getResettableByteBuffersIndexOutput(dataOutput.order(), 1024, "blockOffsets");
+        inMemoryOutput = LuceneCompat.getResettableByteBuffersIndexOutput(dataOutput.order(), 1024, "blockOffsets", dataOutput.version());
         SAICodecUtils.writeHeader(dataOutput);
     }
 

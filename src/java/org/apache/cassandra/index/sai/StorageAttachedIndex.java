@@ -450,12 +450,12 @@ public class StorageAttachedIndex implements Index
             return ImmediateFuture.success(null);
         }
 
-        if (indexContext.isVector() && Version.current().compareTo(Version.JVECTOR_EARLIEST) < 0)
+        if (indexContext.isVector() && indexContext.version().compareTo(Version.JVECTOR_EARLIEST) < 0)
         {
             throw new FeatureNeedsIndexRebuildException(String.format("The current configured on-disk format version %s does not support vector indexes. " +
                                                                       "The minimum version that supports vectors is %s. " +
                                                                       "The on-disk format version can be set via the -D%s system property.",
-                                                                      Version.current(),
+                                                                      indexContext.version(),
                                                                       Version.JVECTOR_EARLIEST,
                                                                       CassandraRelevantProperties.SAI_CURRENT_VERSION.name()));
         }

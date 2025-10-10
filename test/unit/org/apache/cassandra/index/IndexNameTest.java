@@ -145,7 +145,7 @@ public class IndexNameTest extends CQLTester
     @Test
     public void testMaxAcceptableLongNamesNewIndex() throws Throwable
     {
-        assertEquals(182, Version.calculateIndexNameAllowedLength());
+        assertEquals(182, Version.calculateIndexNameAllowedLength(KEYSPACE));
         String longName = "a".repeat(182);
         createTable("CREATE TABLE %s (" +
                     "key int PRIMARY KEY," +

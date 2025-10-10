@@ -56,6 +56,7 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.metrics.IndexGroupMetrics;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.TableStateMetrics;
@@ -94,6 +95,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     private final ColumnFamilyStore baseCfs;
 
     private final SSTableContextManager contextManager;
+    private final Version version;
 
 
 
@@ -104,6 +106,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         this.stateMetrics = new TableStateMetrics(baseCfs.metadata(), this);
         this.groupMetrics = new IndexGroupMetrics(baseCfs.metadata(), this);
         this.contextManager = new SSTableContextManager(baseCfs.getTracker());
+        this.version = Version.current(baseCfs.keyspace.getName());
 
         Tracker tracker = baseCfs.getTracker();
         tracker.subscribe(this);
@@ -285,7 +288,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     @Override
     public Set<Component> componentsForNewSSTable()
     {
-        return IndexDescriptor.componentsForNewlyFlushedSSTable(indices);
+        return IndexDescriptor.componentsForNewlyFlushedSSTable(indices, version);
     }
 
     @Override
