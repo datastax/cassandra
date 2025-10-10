@@ -31,13 +31,13 @@ import org.apache.cassandra.io.sstable.format.SSTableWriter;
  * A shard tracker that uses the provided tokens as a complete list of split points. The first token is typically
  * the minimum token.
  */
-class SimpleShardTracker implements ShardTracker
+public class SimpleShardTracker implements ShardTracker
 {
     private final Token[] sortedTokens;
     private int index;
     private Token currentEnd;
 
-    SimpleShardTracker(Token[] sortedTokens)
+    public SimpleShardTracker(Token[] sortedTokens)
     {
         assert sortedTokens.length > 0;
         assert sortedTokens[0].isMinimum();
