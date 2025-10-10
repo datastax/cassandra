@@ -56,10 +56,15 @@ public class SAICodecUtils
         return new OutputStreamDataOutput(os);
     }
 
-    public static void writeHeader(DataOutput out) throws IOException
+    public static void writeHeader(org.apache.cassandra.index.sai.disk.io.IndexOutput out) throws IOException
+    {
+        writeHeader(out, out.version());
+    }
+
+    public static void writeHeader(DataOutput out, Version version) throws IOException
     {
         writeBEInt(out, CODEC_MAGIC);
-        out.writeString(Version.current().toString());
+        out.writeString(version.toString());
     }
 
     public static int headerSize() {
