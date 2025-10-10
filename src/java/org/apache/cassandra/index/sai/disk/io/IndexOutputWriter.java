@@ -25,6 +25,7 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
 
@@ -35,9 +36,9 @@ public class IndexOutputWriter extends IndexOutput
     private final SequentialWriter out;
     private boolean closed;
 
-    public IndexOutputWriter(SequentialWriter out, ByteOrder order)
+    public IndexOutputWriter(SequentialWriter out, ByteOrder order, Version version)
     {
-        super(out.getFile().toString(), out.getFile().name(), order);
+        super(out.getFile().toString(), out.getFile().name(), order, version);
         this.out = out;
     }
 

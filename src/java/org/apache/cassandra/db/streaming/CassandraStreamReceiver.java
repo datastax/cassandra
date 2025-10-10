@@ -182,7 +182,7 @@ public class CassandraStreamReceiver implements StreamReceiver
 
     private boolean hasCDC(ColumnFamilyStore cfs)
     {
-        return cfs.metadata().params.cdc;
+        return DatabaseDescriptor.isCDCEnabled() && cfs.metadata().params.cdc;
     }
 
     // returns true iif it is a cdc table and cdc on repair is enabled.
