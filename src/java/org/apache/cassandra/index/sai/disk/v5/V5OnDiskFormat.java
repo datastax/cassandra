@@ -32,9 +32,9 @@ public class V5OnDiskFormat extends V4OnDiskFormat
 {
     public static final V5OnDiskFormat instance = new V5OnDiskFormat();
 
-    public static boolean writeV5VectorPostings()
+    public static boolean writeV5VectorPostings(Version version)
     {
-        return Version.current().onOrAfter(Version.DC);
+        return version.onOrAfter(Version.DC);
     }
 
     @Override

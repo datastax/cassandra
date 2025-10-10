@@ -39,7 +39,7 @@ import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.utils.Pair;
@@ -48,6 +48,10 @@ import static org.apache.cassandra.io.util.FileUtils.closeQuietly;
 
 public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
 {
+
+    private static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = SAIUtil.currentVersion().onDiskFormat()
+                                                                              .newPrimaryKeyFactory(new ClusteringComparator(LongType.instance));
+
     protected long[] arr(long... longArray)
     {
         return longArray;
@@ -178,10 +182,6 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
                 throw new AssertionError();
         }
     }
-
-
-    private static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = Version.current().onDiskFormat()
-                                                                              .newPrimaryKeyFactory(new ClusteringComparator(LongType.instance));
 
     /**
      * Generates a random list of primary keys with the given average number of partitions and rows per partition.

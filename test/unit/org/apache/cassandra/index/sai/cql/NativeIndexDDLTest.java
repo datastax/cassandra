@@ -873,8 +873,8 @@ public class NativeIndexDDLTest extends SAITester
         waitForAssert(this::verifyNoIndexFiles);
 
         // verify index-view-manager has been cleaned up
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 0);
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 0);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V1_COLUMN_IDENTIFIER), 0);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V2_COLUMN_IDENTIFIER), 0);
 
         assertEquals("Segment memory limiter should revert to zero after truncate.", 0L, getSegmentBufferUsedBytes());
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
@@ -1113,13 +1113,13 @@ public class NativeIndexDDLTest extends SAITester
         IndexContext numericIndexContext = getIndexContext(numericIndexName);
         IndexContext stringIndexContext = getIndexContext(stringIndexName);
 
-        for (IndexComponentType component : Version.current().onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType component : Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes())
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, null, corruptionType, true, true, rebuild);
 
-        for (IndexComponentType component : Version.current().onDiskFormat().perIndexComponentTypes(numericIndexContext))
+        for (IndexComponentType component : Version.current(KEYSPACE).onDiskFormat().perIndexComponentTypes(numericIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, numericIndexContext, corruptionType, false, true, rebuild);
 
-        for (IndexComponentType component : Version.current().onDiskFormat().perIndexComponentTypes(stringIndexContext))
+        for (IndexComponentType component : Version.current(KEYSPACE).onDiskFormat().perIndexComponentTypes(stringIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, stringIndexContext, corruptionType, true, false, rebuild);
     }
 
@@ -1223,21 +1223,18 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals(rowCount, rows.all().size());
     }
 
-
     @Test
     public void verifyCanRebuildAndReloadInPlaceToNewerVersion()
     {
-        Version current = Version.current();
+        Version current = Version.current(KEYSPACE);
         try
         {
             SAIUtil.setCurrentVersion(Version.AA);
 
             // prepare schema and data
             createTable(CREATE_TABLE_TEMPLATE);
-            String numericIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-            String stringIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-            IndexContext numericIndexContext = getIndexContext(numericIndexName);
-            IndexContext stringIndexContext = getIndexContext(stringIndexName);
+            createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
 
             int rowCount = 2;
             execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
@@ -1250,11 +1247,11 @@ public class NativeIndexDDLTest extends SAITester
             rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
             assertEquals(rowCount, rows.all().size());
 
-            verifySAIVersionInUse(Version.AA, numericIndexContext, stringIndexContext);
+            verifySAIVersionInUse(Version.AA);
 
             SAIUtil.setCurrentVersion(current);
 
-            rebuildIndexes(numericIndexName, stringIndexName);
+            rebuildTableIndexes();
             reloadSSTableIndexInPlace();
 
             // This should still work
@@ -1263,7 +1260,7 @@ public class NativeIndexDDLTest extends SAITester
             rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
             assertEquals(rowCount, rows.all().size());
 
-            verifySAIVersionInUse(current, numericIndexContext, stringIndexContext);
+            verifySAIVersionInUse(current);
         }
         finally
         {
@@ -1433,8 +1430,8 @@ public class NativeIndexDDLTest extends SAITester
         IndexContext literalIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2")), UTF8Type.instance);
 
         populateData.run();
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 2, 2);
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 2, 2);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V1_COLUMN_IDENTIFIER), 2, 2);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V2_COLUMN_IDENTIFIER), 2, 2);
         verifyIndexFiles(numericIndexContext, literalIndexContext, 2, 0, 0, 2, 2);
 
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
@@ -1444,8 +1441,8 @@ public class NativeIndexDDLTest extends SAITester
 
         // compact empty index
         compact();
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 1, 1);
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 1, 1);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V1_COLUMN_IDENTIFIER), 1, 1);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V2_COLUMN_IDENTIFIER), 1, 1);
         waitForAssert(() -> verifyIndexFiles(numericIndexContext, literalIndexContext, 1, 0, 0, 1, 1));
 
         rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");

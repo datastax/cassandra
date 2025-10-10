@@ -368,8 +368,8 @@ public class NodeStartupTest extends SAITester
             case VALID:
                 break;
             case ALL_EMPTY:
-                Version.current().onDiskFormat().perSSTableComponentTypes().forEach(this::remove);
-                Version.current().onDiskFormat().perIndexComponentTypes(indexContext).forEach(c -> remove(c, indexContext));
+                Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes().forEach(this::remove);
+                Version.current(KEYSPACE).onDiskFormat().perIndexComponentTypes(indexContext).forEach(c -> remove(c, indexContext));
                 break;
             case PER_SSTABLE_INCOMPLETE:
                 remove(IndexComponentType.GROUP_COMPLETION_MARKER);
