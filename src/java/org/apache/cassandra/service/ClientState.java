@@ -608,9 +608,10 @@ public class ClientState
      */
     public boolean isOrdinaryUser()
     {
+        // check isSystem() before super user, system users should bypass all guardrails and permissions
         if (ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER.getBoolean())
-            return !isSuperIgnoreAnonymousUser() && !isSystem();
-        return !isSuper() && !isSystem();
+            return !isSystem() && !isSuperIgnoreAnonymousUser();
+        return !isSystem() && !isSuper();
     }
 
     /**
@@ -633,11 +634,14 @@ public class ClientState
     /**
      * Checks if the user is the system user.
      *
+     * Returns true for both internal calls (isInternal) and external calls
+     * made by system users.
+     *
      * @return {@code true} if this user is the system user, {@code false} otherwise.
      */
     public boolean isSystem()
     {
-        return isInternal;
+        return isInternal || (user != null && user.isSystem());
     }
 
     public void ensureIsSuperuser(String message)
