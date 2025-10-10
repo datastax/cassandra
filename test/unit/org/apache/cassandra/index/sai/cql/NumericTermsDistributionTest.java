@@ -49,7 +49,7 @@ import static org.junit.Assert.assertTrue;
 public class NumericTermsDistributionTest extends SAITester
 {
     static {
-        SAIUtil.setCurrentVersion(Version.current().onOrAfter(Version.EB) ? Version.current() : Version.EB);
+        SAIUtil.setCurrentVersion(SAIUtil.currentVersion().onOrAfter(Version.EB) ? SAIUtil.currentVersion() : Version.EB);
     }
 
     @Parameterized.Parameter

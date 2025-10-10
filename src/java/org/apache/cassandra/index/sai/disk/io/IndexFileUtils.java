@@ -101,7 +101,7 @@ public class IndexFileUtils
     {
         assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
         var checksumWriter = new IncrementalChecksumSequentialWriter(file, writerOption, version, append);
-        return new IndexOutputWriter(checksumWriter, order);
+        return new IndexOutputWriter(checksumWriter, order, version);
     }
 
     public BufferedRandomAccessWriter openRandomAccessOutput(File file, boolean append) throws IOException

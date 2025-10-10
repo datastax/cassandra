@@ -40,11 +40,10 @@ import static org.junit.Assert.assertEquals;
 @RunWith(Parameterized.class)
 public class ComplexQueryTest extends SAITester
 {
-
     @Parameterized.Parameters(name = "version={0}")
     public static List<Object> data()
     {
-        return Stream.of(Version.AA, Version.CURRENT, Version.LATEST).map(v -> new Object[]{ v}).collect(Collectors.toList());
+        return Stream.of(Version.AA, SAIUtil.currentVersion(), Version.LATEST).map(v -> new Object[]{ v}).collect(Collectors.toList());
     }
 
     @Parameterized.Parameter

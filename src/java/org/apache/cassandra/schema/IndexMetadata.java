@@ -124,11 +124,12 @@ public final class IndexMetadata
      * Characters other than alphanumeric and underscore are removed.
      * Long index names are truncated to fit the length allowing constructing filenames.
      *
+     * @param keyspace the keyspace name
      * @param table  the table name
      * @param column the column identifier. Can be null if the index is not column specific.
      * @return the generated index name
      */
-    public static String generateDefaultIndexName(String table, @Nullable ColumnIdentifier column)
+    public static String generateDefaultIndexName(String keyspace, String table, @Nullable ColumnIdentifier column)
     {
         String indexNameUncleaned = table;
         if (column != null)
@@ -136,7 +137,7 @@ public final class IndexMetadata
         String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(indexNameUncleaned).replaceAll("");
         String indexNameTrimmed = indexNameUntrimmed
                                   .substring(0,
-                                             Math.min(calculateGeneratedIndexNameMaxLength(),
+                                             Math.min(calculateGeneratedIndexNameMaxLength(keyspace),
                                                       indexNameUntrimmed.length()));
         return indexNameTrimmed + INDEX_POSTFIX;
     }
@@ -149,14 +150,14 @@ public final class IndexMetadata
      *
      * @return the allowed length of the generated index name
      */
-    private static int calculateGeneratedIndexNameMaxLength()
+    private static int calculateGeneratedIndexNameMaxLength(String keyspace)
     {
         // Speculative assumption that uniqueness breaker will fit into 999.
         // The value is used for trimming the index name if needed.
         // Introducing validation of index name length is TODO for CNDB-13198.
         int uniquenessSuffixLength = 4;
         int indexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
-        int allowedIndexNameLength = Version.calculateIndexNameAllowedLength();
+        int allowedIndexNameLength = Version.calculateIndexNameAllowedLength(keyspace);
 
         assert allowedIndexNameLength >= indexNameAddition : "cannot happen with current implementation as allowedIndexNameLength is approximately 255 - ~76. However, allowedIndexNameLength was " + allowedIndexNameLength + " and  indexNameAddition was " + indexNameAddition;
 

@@ -49,7 +49,7 @@ public abstract class AbstractBlockPackedWriter
     {
         checkBlockSize(blockSize, MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
         this.out = out;
-        this.blockMetaWriter = LuceneCompat.getResettableByteBuffersIndexOutput(out.order(), 1024, "NumericValuesMeta");
+        this.blockMetaWriter = LuceneCompat.getResettableByteBuffersIndexOutput(out.order(), 1024, "NumericValuesMeta", out.version());
         values = new long[blockSize];
     }
 
