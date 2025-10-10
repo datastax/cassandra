@@ -169,7 +169,7 @@ public class CompactionGraph implements Closeable, Accountable
         // with "holes" in the ordinal sequence (and pq and data files) which we would prefer to avoid
         // (hence the effort to predict `allRowsHaveVectors`) but will not cause correctness issues,
         // and the next compaction will fill in the holes.
-        this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings() || !allRowsHaveVectors;
+        this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings(context.version()) || !allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
         Component tmpComponent = new Component(SSTableFormat.Components.Types.CUSTOM, "chronicle" + Descriptor.TMP_EXT);
@@ -199,7 +199,7 @@ public class CompactionGraph implements Closeable, Accountable
         {
             throw new IllegalArgumentException("Unsupported compressor: " + compressor);
         }
-        int jvectorVersion = Version.current().onDiskFormat().jvectorFileFormatVersion();
+        int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
                         "Skipping setting for {}", jvectorVersion, indexConfig.getIndexName());
@@ -221,7 +221,7 @@ public class CompactionGraph implements Closeable, Accountable
         // placeholder writer, will be replaced at flush time when we finalize the index contents
         writer = createTermsWriter(new OrdinalMapper.IdentityMapper(maxRowsInGraph));
         writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
-        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
+        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()), perIndexComponents.version());
     }
 
     private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper) throws IOException
@@ -229,7 +229,7 @@ public class CompactionGraph implements Closeable, Accountable
         return new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                .withStartOffset(termsOffset)
                .with(new InlineVectors(dimension))
-               .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion())
+               .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
                .withMapper(ordinalMapper)
                .build();
     }
@@ -399,8 +399,9 @@ public class CompactionGraph implements Closeable, Accountable
 
             // write PQ (time to do this is negligible, don't bother doing it async)
             long pqOffset = pqOutput.getFilePointer();
-            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
-            compressedVectors.write(pqOutput.asSequentialWriter(), Version.current().onDiskFormat().jvectorFileFormatVersion());
+            Version version = context.version();
+            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION, version);
+            compressedVectors.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings asynchronously while we run cleanup()
@@ -417,7 +418,7 @@ public class CompactionGraph implements Closeable, Accountable
                     // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
                     // if a row with null vector in sstable A gets updated with a vector in sstable B)
                     if (postingsStructure == Structure.ONE_TO_MANY
-                        && (!V5OnDiskFormat.writeV5VectorPostings() || useSyntheticOrdinals))
+                        && (!V5OnDiskFormat.writeV5VectorPostings(version) || useSyntheticOrdinals))
                     {
                         postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
                     }
@@ -427,7 +428,7 @@ public class CompactionGraph implements Closeable, Accountable
                     ordinalMapper.set(rp.ordinalMapper);
                     try (var view = index.getView())
                     {
-                        if (V5OnDiskFormat.writeV5VectorPostings())
+                        if (V5OnDiskFormat.writeV5VectorPostings(version))
                         {
                             return new V5VectorPostingsWriter<Integer>(rp).writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);
                         }

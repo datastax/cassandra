@@ -38,6 +38,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 
 public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
@@ -86,7 +87,8 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
             return null;
 
         // collect the features of the selected indexes
-        IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator();
+        Version version = Version.current(cfs.keyspace.getName());
+        IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator(version);
         for (StorageAttachedIndex index : selectedIndexes)
             accumulator.accumulate(index.getIndexContext().indexFeatureSet());
 

@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.oldlucene;
 import java.io.IOException;
 import java.nio.ByteOrder;
 
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 
 /**
@@ -30,10 +31,9 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 
 public abstract class ResettableByteBuffersIndexOutput extends IndexOutput
 {
-
-    public ResettableByteBuffersIndexOutput(String resourceDescription, String name, ByteOrder order)
+    protected ResettableByteBuffersIndexOutput(String resourceDescription, String name, ByteOrder order, Version version)
     {
-        super(resourceDescription, name, order);
+        super(resourceDescription, name, order, version);
     }
 
     public abstract void copyTo(IndexOutput out) throws IOException;

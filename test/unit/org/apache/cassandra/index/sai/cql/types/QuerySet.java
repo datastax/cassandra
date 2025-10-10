@@ -46,7 +46,7 @@ public abstract class QuerySet extends CQLTester
 
     protected static boolean isOrderBySupported()
     {
-        return Version.current().onOrAfter(Version.BA);
+        return Version.current(KEYSPACE).onOrAfter(Version.BA);
     }
 
     public static class NumericQuerySet extends QuerySet
@@ -648,4 +648,3 @@ public abstract class QuerySet extends CQLTester
         }
     }
 }
-
