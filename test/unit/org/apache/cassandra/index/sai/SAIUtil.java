@@ -19,34 +19,99 @@
 package org.apache.cassandra.index.sai;
 
 import java.lang.reflect.Field;
+import java.util.Map;
 
-import org.apache.cassandra.cql3.Ordering;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.ReflectionUtils;
 
 public class SAIUtil
 {
+    public static Version currentVersion()
+    {
+        return Version.current(CQLTester.KEYSPACE);
+    }
+
+    public static void resetCurrentVersion()
+    {
+        setCurrentVersion(Version.Selector.DEFAULT);
+    }
+
     public static void setCurrentVersion(Version version)
+    {
+        setCurrentVersion(version, Map.of());
+    }
+
+    public static void setCurrentVersion(Version defaultVersion, Map<String, Version> versionsPerKeyspace)
+    {
+        setCurrentVersion(new CustomVersionSelector(defaultVersion, versionsPerKeyspace));
+    }
+
+    public static void setCurrentVersion(Version.Selector versionSelector)
     {
         try
         {
             // set the current version
-            Field current = Version.class.getDeclaredField("CURRENT");
-            current.setAccessible(true);
-            Field modifiersField = ReflectionUtils.getModifiersField();
+            Field field = Version.class.getDeclaredField("SELECTOR");
+            field.setAccessible(true);
+            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
             modifiersField.setAccessible(true);
-            current.set(null, version);
+            field.set(null, versionSelector);
 
-            // set the synthetic score flag too, because it depends on the current version
-            current = Ordering.Ann.class.getDeclaredField("USE_SYNTHETIC_SCORE");
-            current.setAccessible(true);
-            modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-            modifiersField.setAccessible(true);
-            current.set(null, Ordering.Ann.useSyntheticScore(version));
+            // update the index contexts for each keyspace
+            for (String keyspaceName : Schema.instance.getKeyspaces())
+            {
+                Keyspace keyspace = Keyspace.open(keyspaceName);
+                Version version = versionSelector.select(keyspaceName);
+
+                for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
+                {
+                    SecondaryIndexManager sim = cfs.getIndexManager();
+                    for (Index index : sim.listIndexes())
+                    {
+                        if (index instanceof StorageAttachedIndex)
+                        {
+                            StorageAttachedIndex sai = (StorageAttachedIndex)index;
+                            IndexContext context = sai.getIndexContext();
+
+                            field = IndexContext.class.getDeclaredField("version");
+                            field.setAccessible(true);
+                            field.set(context, version);
+
+                            field = IndexContext.class.getDeclaredField("primaryKeyFactory");
+                            field.setAccessible(true);
+                            field.set(context, version.onDiskFormat().newPrimaryKeyFactory(cfs.metadata().comparator));
+                        }
+                    }
+                }
+            }
         }
         catch (Exception e)
         {
             throw new RuntimeException(e);
+        }
+    }
+
+    public static class CustomVersionSelector implements Version.Selector
+    {
+        private final Version defaultVersion;
+        private final Map<String, Version> versionsPerKeyspace;
+
+        public CustomVersionSelector(Version defaultVersion, Map<String, Version> versionsPerKeyspace)
+        {
+            this.defaultVersion = defaultVersion;
+            this.versionsPerKeyspace = versionsPerKeyspace;
+        }
+
+        @Override
+        public Version select(String keyspace)
+        {
+            return versionsPerKeyspace.getOrDefault(keyspace, defaultVersion);
         }
     }
 }

@@ -64,7 +64,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
     private static final String CREATE_TABLE = "CREATE TABLE %s.%s (pk text primary key, v1 int, v2 text) " +
                                                "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
     private static final String CREATE_INDEX = "CREATE CUSTOM INDEX %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
-    
+
     private static final Map<NodeIndex, Index.Status> expectedNodeIndexQueryability = new ConcurrentHashMap<>();
     private List<String> keyspaces;
     private List<String> indexesPerKs;
@@ -293,7 +293,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
 
             // get index name base on node id to have different non-queryable index on different nodes.
             Function<Integer, String> nodeIdToColumn = nodeId -> "v" + (nodeId % 2 + 1);
-            IntFunction<String> nodeIdToIndex = nodeId -> IndexMetadata.generateDefaultIndexName(table, ColumnIdentifier.getInterned(nodeIdToColumn.apply(nodeId), false));
+            IntFunction<String> nodeIdToIndex = nodeId -> IndexMetadata.generateDefaultIndexName(KEYSPACE, table, ColumnIdentifier.getInterned(nodeIdToColumn.apply(nodeId), false));
 
             for (List<Integer> nonQueryableNodes : nonQueryableNodesList)
             {
@@ -453,7 +453,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
     {
         return Index.Status.values()[node.callsOnInstance(() -> getIndexStatus(keyspaceName, indexName, replica).ordinal()).call()];
     }
-    
+
     private static Index.Status getIndexStatus(String keyspaceName, String indexName, InetAddressAndPort replica)
     {
         KeyspaceMetadata keyspace = Schema.instance.getKeyspaceMetadata(keyspaceName);
@@ -473,7 +473,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
         int port = node.callOnInstance(() -> FBUtilities.getBroadcastAddressAndPort().getPort());
         return InetAddressAndPort.getByAddressOverrideDefaults(address, port);
     }
-    
+
     private static class NodeIndex
     {
         private final String keyspace;

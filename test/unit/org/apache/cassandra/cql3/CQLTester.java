@@ -1079,7 +1079,12 @@ public abstract class CQLTester
 
     protected String createKeyspace(String query)
     {
-        String currentKeyspace = createKeyspaceName();
+        return createKeyspace(query, null);
+    }
+
+    protected String createKeyspace(String query, @Nullable String keyspaceName)
+    {
+        String currentKeyspace = createKeyspaceName(keyspaceName);
         String fullQuery = String.format(query, currentKeyspace);
         logger.info(fullQuery);
         schemaChange(fullQuery);
@@ -1102,7 +1107,12 @@ public abstract class CQLTester
 
     protected String createKeyspaceName()
     {
-        String currentKeyspace = createSchemaElementName(SchemaElement.SchemaElementType.KEYSPACE, null);
+        return createKeyspaceName(null);
+    }
+
+    protected String createKeyspaceName(@Nullable String keyspaceName)
+    {
+        String currentKeyspace = keyspaceName == null ? createSchemaElementName(SchemaElement.SchemaElementType.KEYSPACE, null) : keyspaceName;
         keyspaces.add(currentKeyspace);
         return currentKeyspace;
     }
@@ -1386,8 +1396,8 @@ public abstract class CQLTester
             isQuotedGeneratedIndexName = ParseUtils.isQuoted(column, '\"');
 
             String baseName = Strings.isNullOrEmpty(column)
-                              ? IndexMetadata.generateDefaultIndexName(table, null)
-                              : IndexMetadata.generateDefaultIndexName(table, new ColumnIdentifier(column, true));
+                              ? IndexMetadata.generateDefaultIndexName(keyspace, table, null)
+                              : IndexMetadata.generateDefaultIndexName(keyspace, table, new ColumnIdentifier(column, true));
 
             KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(keyspace);
             assertNotNull(ks);

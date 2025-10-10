@@ -1329,9 +1329,9 @@ abstract public class Plan
             double expectedKeys = access.expectedAccessCount(source.expectedKeys());
             int expectedKeysInt = max(1, (int) Math.ceil(expectedKeys));
             int expectedSourceKeysInt = max(1, (int) Math.ceil(source.expectedKeys()));
-            double initCost = ANN_SORT_OPEN_COST * factory.tableMetrics.sstables
+            double initCost = annSortOpenCost(factory.keyspace) * factory.tableMetrics.sstables
                               + source.fullCost()
-                              + source.expectedKeys() * CostCoefficients.ANN_SORT_KEY_COST;
+                              + source.expectedKeys() * CostCoefficients.annSortKeyCost(factory.keyspace);
             double searchCost = factory.costEstimator.estimateAnnSearchCost(ordering,
                                                                             expectedKeysInt,
                                                                             expectedSourceKeysInt);
@@ -1773,6 +1773,8 @@ abstract public class Plan
     @NotThreadSafe
     public static final class Factory
     {
+        public final String keyspace;
+
         /** Table metrics that affect cost estimates, e.g. row count, sstable count etc */
         public final TableMetrics tableMetrics;
 
@@ -1799,8 +1801,9 @@ abstract public class Plan
          * @param costEstimator a cost estimator
          * @param hints the user-provided index hints, the plan should try to respect them
          */
-        public Factory(TableMetrics tableMetrics, CostEstimator costEstimator, IndexHints hints)
+        public Factory(String keyspace, TableMetrics tableMetrics, CostEstimator costEstimator, IndexHints hints)
         {
+            this.keyspace = keyspace;
             this.tableMetrics = tableMetrics;
             this.costEstimator = costEstimator;
             this.hints = hints;
@@ -2068,14 +2071,6 @@ abstract public class Plan
         /** Cost to advance the index iterator to the next key and load the key. Common for literal and numeric indexes. */
         public final static double SAI_KEY_COST = 0.1;
 
-        /** Cost to begin processing PKs into index ordinals for estimateAnnSortCost */
-        // DC introduced the one-to-many ordinal mapping optimization
-        public final static double ANN_SORT_OPEN_COST = Version.current().onOrAfter(Version.DC) ? 370 : 4200;
-
-        /** Additional overhead needed to process each input key fed to the ANN index searcher */
-        // DC introduced the one-to-many ordinal mapping optimization
-        public final static double ANN_SORT_KEY_COST = Version.current().onOrAfter(Version.DC) ? 0.03 : 0.2;
-
         /** Cost to get a scored key from DiskANN (~rerank cost). Affected by cache hit rate */
         public final static double ANN_SCORED_KEY_COST = 15;
 
@@ -2096,6 +2091,21 @@ abstract public class Plan
 
         /** Cost to perform BM25 scoring, per query term */
         public final static double BM25_SCORE_COST = 0.5;
+
+        /** Cost to begin processing PKs into index ordinals for estimateAnnSortCost */
+        // DC introduced the one-to-many ordinal mapping optimization
+        public static double annSortOpenCost(String keyspace)
+        {
+            return Version.current(keyspace).onOrAfter(Version.DC) ? 370 : 4200;
+        }
+
+        /** Additional overhead needed to process each input key fed to the ANN index searcher */
+        // DC introduced the one-to-many ordinal mapping optimization
+        public static double annSortKeyCost(String keyspace)
+        {
+            return Version.current(keyspace).onOrAfter(Version.DC) ? 0.03 : 0.2;
+        }
+
     }
 
     /** Convenience builder for building intersection and union nodes */
