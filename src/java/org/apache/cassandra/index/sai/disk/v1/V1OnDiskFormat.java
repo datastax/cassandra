@@ -217,8 +217,8 @@ public class V1OnDiskFormat implements OnDiskFormat
         Version earliest = Version.EARLIEST;
         if (isVectorDataComponent(context, indexComponentType))
         {
-            if (!Version.current().onOrAfter(Version.VECTOR_EARLIEST))
-                throw new IllegalStateException("Configured current version " + Version.current() + " is not compatible with vector index");
+            if (!context.version().onOrAfter(Version.VECTOR_EARLIEST))
+                throw new IllegalStateException("Configured current version " + context.version() + " is not compatible with vector index");
             earliest = Version.VECTOR_EARLIEST;
         }
         return earliest;
