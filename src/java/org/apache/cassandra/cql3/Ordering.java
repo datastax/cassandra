@@ -97,34 +97,27 @@ public class Ordering
      */
     public static class Ann implements Expression
     {
+        final ColumnMetadata column;
+        final Term vectorValue;
+        final Direction direction;
         // TODO: remove this when we no longer need to downgrade to replicas on version lower than ED SAI that don't
         //  know about synthetic columns, and the related code in
         //  - StatementRestrictions.addOrderingRestrictions
         //  - StorageAttachedIndexSearcher.PrimaryKeyIterator constructor
-        // This is volatile rather than final so that tests may use reflection to change it.
-        @SuppressWarnings("FieldMayBeFinal")
-        private static volatile boolean USE_SYNTHETIC_SCORE = useSyntheticScore(Version.CURRENT);
-
-        final ColumnMetadata column;
-        final Term vectorValue;
-        final Direction direction;
+        final boolean useSyntheticScore;
 
         public Ann(ColumnMetadata column, Term vectorValue, Direction direction)
         {
             this.column = column;
             this.vectorValue = vectorValue;
             this.direction = direction;
+            useSyntheticScore = useSyntheticScore(Version.current(column.ksName));
         }
 
         public static boolean useSyntheticScore(Version version)
         {
             boolean defaultValue = version.onOrAfter(Version.ED);
             return CassandraRelevantProperties.SAI_ANN_USE_SYNTHETIC_SCORE.getBoolean(defaultValue);
-        }
-
-        public static boolean useSyntheticScore()
-        {
-            return USE_SYNTHETIC_SCORE;
         }
 
         @Override
@@ -148,7 +141,7 @@ public class Ordering
         @Override
         public boolean isScored()
         {
-            return useSyntheticScore();
+            return useSyntheticScore;
         }
     }
 

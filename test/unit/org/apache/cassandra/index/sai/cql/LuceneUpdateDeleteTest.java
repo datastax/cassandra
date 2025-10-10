@@ -60,7 +60,7 @@ public class LuceneUpdateDeleteTest extends SAITester
     public static Collection<Object[]> data()
     {
         // Confirm it works for AA, current, and latest versions
-        return Stream.of(Version.AA, Version.CURRENT, Version.LATEST).map(v -> new Object[]{ v}).collect(Collectors.toList());
+        return Stream.of(Version.AA, SAIUtil.currentVersion(), Version.LATEST).map(v -> new Object[]{ v}).collect(Collectors.toList());
     }
 
     @Before

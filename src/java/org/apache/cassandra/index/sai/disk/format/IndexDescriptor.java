@@ -80,14 +80,13 @@ public class IndexDescriptor
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    private static final ComponentsBuildId EMPTY_GROUP_MARKER = ComponentsBuildId.current(-1);
-
     // TODO Because indexes can be added at any time to existing data, the Version of a column index
     // may not match the Version of the base sstable.  OnDiskFormat + IndexFeatureSet + IndexDescriptor
     // was not designed with this in mind, leading to some awkwardness, notably in IFS where some features
     // are per-sstable (`isRowAware`) and some are per-column (`hasTermsHistogram`).
 
     public final Descriptor descriptor;
+    private final ComponentsBuildId emptyGroupMarker;
 
     // The per-sstable components for this descriptor. This is never `null` in practice, but 1) it's a bit easier to
     // initialize it outsides of the ctor, and 2) it can actually change upon calls to `reload`.
@@ -97,6 +96,7 @@ public class IndexDescriptor
     private IndexDescriptor(Descriptor descriptor)
     {
         this.descriptor = descriptor;
+        this.emptyGroupMarker = ComponentsBuildId.of(Version.current(descriptor.ksname), -1);
     }
 
     public static IndexDescriptor empty(Descriptor descriptor)
@@ -169,7 +169,7 @@ public class IndexDescriptor
 
     private IndexComponentsImpl createEmptyGroup(@Nullable IndexContext context)
     {
-        return new IndexComponentsImpl(context, EMPTY_GROUP_MARKER);
+        return new IndexComponentsImpl(context, emptyGroupMarker);
     }
 
     /**
@@ -179,9 +179,9 @@ public class IndexDescriptor
      * Please note that the final sstable may not contain all of these components, as some may be empty or not written
      * due to the specific of the flush, but this should be a superset of the components written.
      */
-    public static Set<Component> componentsForNewlyFlushedSSTable(Collection<StorageAttachedIndex> indices)
+    public static Set<Component> componentsForNewlyFlushedSSTable(Collection<StorageAttachedIndex> indices, Version version)
     {
-        ComponentsBuildId buildId = ComponentsBuildId.forNewSSTable();
+        ComponentsBuildId buildId = ComponentsBuildId.forNewSSTable(version);
         Set<Component> components = new HashSet<>();
         for (IndexComponentType component : buildId.version().onDiskFormat().perSSTableComponentTypes())
             components.add(customComponentFor(buildId, component, null));
@@ -194,11 +194,11 @@ public class IndexDescriptor
     /**
      * The set of per-index components _expected_ to be written for a newly flushed sstable for the provided index.
      * <p>
-     * This is a subset of {@link #componentsForNewlyFlushedSSTable(Collection)} and has the same caveats.
+     * This is a subset of {@link #componentsForNewlyFlushedSSTable(Collection, Version)} and has the same caveats.
      */
     public static Set<Component> perIndexComponentsForNewlyFlushedSSTable(IndexContext context)
     {
-        return addPerIndexComponentsForNewlyFlushedSSTable(new HashSet<>(), ComponentsBuildId.forNewSSTable(), context);
+        return addPerIndexComponentsForNewlyFlushedSSTable(new HashSet<>(), ComponentsBuildId.forNewSSTable(context.version()), context);
     }
 
     private static Set<Component> addPerIndexComponentsForNewlyFlushedSSTable(Set<Component> addTo, ComponentsBuildId buildId, IndexContext context)
@@ -274,8 +274,9 @@ public class IndexDescriptor
 
     private IndexComponents.ForWrite newComponentsForWrite(@Nullable IndexContext context, IndexComponentsImpl currentComponents)
     {
+        Version version = context != null ? context.version() : Version.current(descriptor.ksname);
         var currentBuildId = currentComponents == null ? null : currentComponents.buildId;
-        return new IndexComponentsImpl(context, ComponentsBuildId.forNewBuild(currentBuildId, candidateId -> {
+        return new IndexComponentsImpl(context, ComponentsBuildId.forNewBuild(version, currentBuildId, candidateId -> {
             // This checks that there is no existing files on disk we would overwrite by using `candidateId` for our
             // new build.
             IndexComponentsImpl candidate = new IndexComponentsImpl(context, candidateId);
@@ -494,7 +495,7 @@ public class IndexDescriptor
         {
             Preconditions.checkArgument(!sealed, "Should not add components for SSTable %s at this point; the completion marker has already been written", descriptor);
             // When a sstable doesn't have any complete group, we use a marker empty one with a generation of -1:
-            Preconditions.checkArgument(buildId != EMPTY_GROUP_MARKER, "Should not be adding component to empty components");
+            Preconditions.checkArgument(!buildId.equals(emptyGroupMarker), "Should not be adding component to empty components");
             components.computeIfAbsent(component, type -> {
                 var created = new IndexComponentImpl(type);
                 return created.file().exists() ? created : null;
@@ -506,7 +507,7 @@ public class IndexDescriptor
         {
             Preconditions.checkArgument(!sealed, "Should not add components for SSTable %s at this point; the completion marker has already been written", descriptor);
             // When a sstable doesn't have any complete group, we use a marker empty one with a generation of -1:
-            Preconditions.checkArgument(buildId != EMPTY_GROUP_MARKER, "Should not be adding component to empty components");
+            Preconditions.checkArgument(!buildId.equals(emptyGroupMarker), "Should not be adding component to empty components");
             return components.computeIfAbsent(component, IndexComponentImpl::new);
         }
 
