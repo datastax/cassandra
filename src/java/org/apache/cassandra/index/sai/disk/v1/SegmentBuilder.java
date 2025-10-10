@@ -204,7 +204,7 @@ public abstract class SegmentBuilder
 
         private boolean writeFrequencies()
         {
-            return !(analyzer instanceof NoOpAnalyzer) && Version.current().onOrAfter(Version.BM25_EARLIEST);
+            return !(analyzer instanceof NoOpAnalyzer) && components.version().onOrAfter(Version.BM25_EARLIEST);
         }
 
         public boolean isEmpty()
@@ -511,8 +511,8 @@ public abstract class SegmentBuilder
         for (ByteBuffer term : terms)
         {
             assert term != null : "term must not be null";
-            minTerm = TypeUtil.min(term, minTerm, termComparator, Version.current());
-            maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.current());
+            minTerm = TypeUtil.min(term, minTerm, termComparator, components.version());
+            maxTerm = TypeUtil.max(term, maxTerm, termComparator, components.version());
         }
 
         assert minTerm != null : "minTerm should not be null at this point";

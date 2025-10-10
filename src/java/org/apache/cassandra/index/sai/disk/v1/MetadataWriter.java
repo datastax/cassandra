@@ -48,7 +48,7 @@ public class MetadataWriter implements Closeable
     public IndexOutput builder(String name)
     {
         if (output.order() == ByteOrder.BIG_ENDIAN) {
-            return new LegacyResettableByteBuffersIndexOutput(1024, name) {
+            return new LegacyResettableByteBuffersIndexOutput(1024, name, version) {
                 @Override
                 public void close()
                 {
@@ -56,7 +56,7 @@ public class MetadataWriter implements Closeable
                 }
             };
         } else {
-            return new ModernResettableByteBuffersIndexOutput(1024, name) {
+            return new ModernResettableByteBuffersIndexOutput(1024, name, version) {
                 @Override
                 public void close()
                 {

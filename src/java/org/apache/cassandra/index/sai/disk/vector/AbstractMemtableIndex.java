@@ -22,12 +22,14 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 
 public abstract class AbstractMemtableIndex implements MemtableIndex
 {
     protected final IndexContext indexContext;
     protected final Memtable memtable;
+    protected final Version version;
 
     private final int flushThresholdMaxRows;
 
@@ -37,6 +39,7 @@ public abstract class AbstractMemtableIndex implements MemtableIndex
         this.memtable = memtable;
         this.flushThresholdMaxRows = indexContext.isVector() ? CassandraRelevantProperties.SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.getInt()
                                                              : CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.getInt();
+        this.version = indexContext.version();
     }
 
     /**

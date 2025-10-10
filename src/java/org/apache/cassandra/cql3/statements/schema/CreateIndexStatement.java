@@ -334,9 +334,10 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
     private String generateIndexName(KeyspaceMetadata keyspace, List<IndexTarget> targets)
     {
+        assert keyspace.name.equals(keyspaceName);
         String baseName = targets.size() == 1
-                        ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
-                        : IndexMetadata.generateDefaultIndexName(tableName, null);
+                        ? IndexMetadata.generateDefaultIndexName(keyspaceName, tableName, targets.get(0).column)
+                        : IndexMetadata.generateDefaultIndexName(keyspaceName, tableName, null);
         return keyspace.findAvailableIndexName(baseName);
     }
 
