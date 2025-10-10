@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -75,18 +76,20 @@ public class SegmentMetadataBuilder
     private long totalTermCount;
 
     private final TermsDistribution.Builder termsDistributionBuilder;
+    private final Version version;
 
     SegmentMetadata.ComponentMetadataMap metadataMap;
 
     public SegmentMetadataBuilder(long segmentRowIdOffset, IndexComponents.ForWrite components)
     {
         IndexContext context = Objects.requireNonNull(components.context());
+        this.version = context.version();
         this.segmentRowIdOffset = segmentRowIdOffset;
         this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
 
         int histogramSize = context.getIntOption(HISTOGRAM_SIZE_OPTION, 128);
         int mostFrequentTermsCount = context.getIntOption(MFT_COUNT_OPTION, 128);
-        this.termsDistributionBuilder = new TermsDistribution.Builder(context.getValidator(), byteComparableVersion, histogramSize, mostFrequentTermsCount);
+        this.termsDistributionBuilder = new TermsDistribution.Builder(context.getValidator(), byteComparableVersion, histogramSize, mostFrequentTermsCount, version);
     }
 
     public void setNumRows(long numRows)
@@ -171,7 +174,8 @@ public class SegmentMetadataBuilder
                                    maxTerm,
                                    termsDistributionBuilder.build(),
                                    metadataMap,
-                                   totalTermCount);
+                                   totalTermCount,
+                                   version);
     }
 
     /**

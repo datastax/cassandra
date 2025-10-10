@@ -663,8 +663,8 @@ public class TypeUtil
         return DecimalType.instance.fromComparableBytes(peekableValue, BYTE_COMPARABLE_VERSION);
     }
 
-    public static ByteComparable.Version byteComparableVersionForTermsData()
+    public static ByteComparable.Version byteComparableVersionForTermsData(Version version)
     {
-        return Version.current().byteComparableVersionFor(IndexComponentType.TERMS_DATA, DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion());
+        return version.byteComparableVersionFor(IndexComponentType.TERMS_DATA, DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion());
     }
 }

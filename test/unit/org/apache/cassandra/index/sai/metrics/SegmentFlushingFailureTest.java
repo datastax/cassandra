@@ -141,9 +141,9 @@ public abstract class SegmentFlushingFailureTest extends SAITester
     @Test
     public void shouldZeroMemoryTrackerOnOffsetsRuntimeFailure() throws Throwable
     {
-        shouldZeroMemoryTrackerOnFailure(Version.current() == Version.AA ? v1sstableComponentsWriterFailure : v2sstableComponentsWriterFailure, "v1");
+        shouldZeroMemoryTrackerOnFailure(Version.current(KEYSPACE) == Version.AA ? v1sstableComponentsWriterFailure : v2sstableComponentsWriterFailure, "v1");
         resetCounters();
-        shouldZeroMemoryTrackerOnFailure(Version.current() == Version.AA ? v1sstableComponentsWriterFailure : v2sstableComponentsWriterFailure, "v2");
+        shouldZeroMemoryTrackerOnFailure(Version.current(KEYSPACE) == Version.AA ? v1sstableComponentsWriterFailure : v2sstableComponentsWriterFailure, "v2");
     }
 
     @Test

@@ -42,7 +42,7 @@ import static org.junit.Assert.assertTrue;
 public class NonNumericTermsDistributionTest extends SAITester
 {
     static {
-        SAIUtil.setCurrentVersion(Version.current().onOrAfter(Version.EB) ? Version.current() : Version.EB);
+        SAIUtil.setCurrentVersion(Version.current(KEYSPACE).onOrAfter(Version.EB) ? Version.current(KEYSPACE) : Version.EB);
     }
 
     private StorageAttachedIndex getIndex()

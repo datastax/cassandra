@@ -28,6 +28,7 @@ import java.util.function.IntFunction;
 
 import com.google.common.base.MoreObjects;
 
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.ByteBuffersDataOutputAdapter;
@@ -126,6 +127,7 @@ public class BKDWriter implements Closeable
 
     private final ICompressor compressor;
     private final ByteOrder order;
+    private final Version version;
 
     // reused when writing leaf blocks
     private final ByteBuffersDataOutputAdapter scratchOut;
@@ -133,16 +135,16 @@ public class BKDWriter implements Closeable
 
     public BKDWriter(long maxDoc, int numDims, int bytesPerDim,
             int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount, boolean singleValuePerDoc,
-            ICompressor compressor, ByteOrder order) throws IOException
+            ICompressor compressor, ByteOrder order, Version version) throws IOException
     {
         this(maxDoc, numDims, bytesPerDim, maxPointsInLeafNode, maxMBSortInHeap, totalPointCount, singleValuePerDoc,
-             totalPointCount > Integer.MAX_VALUE, compressor, order);
+             totalPointCount > Integer.MAX_VALUE, compressor, order, version);
     }
 
     protected BKDWriter(long maxDoc, int numDims, int bytesPerDim,
                         int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount,
                         boolean singleValuePerDoc, boolean longOrds, ICompressor compressor,
-                        ByteOrder order) throws IOException
+                        ByteOrder order, Version version) throws IOException
     {
         verifyParams(numDims, maxPointsInLeafNode, maxMBSortInHeap, totalPointCount);
         // We use tracking dir to deal with removing files on exception, so each place that
@@ -154,6 +156,7 @@ public class BKDWriter implements Closeable
         this.maxDoc = maxDoc;
         this.compressor = compressor;
         this.order = order;
+        this.version = version;
         docsSeen = new LongBitSet(maxDoc);
         packedBytesLength = numDims * bytesPerDim;
 
@@ -629,7 +632,7 @@ public class BKDWriter implements Closeable
         }
 
         // Reused while packing the index
-        var writeBuffer = LuceneCompat.getResettableByteBuffersIndexOutput(order, 1024, "");
+        var writeBuffer = LuceneCompat.getResettableByteBuffersIndexOutput(order, 1024, "", version);
 
         // This is the "file" we append the byte[] to:
         List<byte[]> blocks = new ArrayList<>();
@@ -843,7 +846,7 @@ public class BKDWriter implements Closeable
 
         if (compressor != null)
         {
-            var ramOut = LuceneCompat.getResettableByteBuffersIndexOutput(order, 1024, "");
+            var ramOut = LuceneCompat.getResettableByteBuffersIndexOutput(order, 1024, "", out.version());
             ramOut.writeBytes(minPackedValue, 0, packedBytesLength);
             ramOut.writeBytes(maxPackedValue, 0, packedBytesLength);
 

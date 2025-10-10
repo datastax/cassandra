@@ -54,12 +54,9 @@ abstract class SingleNodeQueryTester extends SAITester
 
     protected DataModel.Executor executor;
 
-    private Version current;
-
     @Before
     public void setup() throws Throwable
     {
-        current = Version.current();
         SAIUtil.setCurrentVersion(version);
         requireNetwork();
 
@@ -73,7 +70,7 @@ abstract class SingleNodeQueryTester extends SAITester
     @After
     public void teardown() throws Throwable
     {
-        SAIUtil.setCurrentVersion(current);
+        SAIUtil.resetCurrentVersion();
     }
 
     @Parameterized.Parameters(name = "{0}_{1}")

@@ -56,7 +56,7 @@ public class InvertedIndexWriter implements Closeable
     {
         this.termsDictionaryWriter = new TrieTermsDictionaryWriter(components);
         this.postingsWriter = new PostingsWriter(components, writeFrequencies);
-        this.docLengthsWriter = Version.current().onOrAfter(Version.BM25_EARLIEST) ? new DocLengthsWriter(components) : null;
+        this.docLengthsWriter = components.version().onOrAfter(Version.BM25_EARLIEST) ? new DocLengthsWriter(components) : null;
     }
 
     /**

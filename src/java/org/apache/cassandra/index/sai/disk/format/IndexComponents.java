@@ -82,7 +82,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  * of the completion marker, but not of the other component of the group). The bumping of generations takes incomplete
  * groups into account, and so incomplete groups are not overridden either. Essentially, the generation used by a new
  * build is always one more than the highest generation of any component found on disk (for the group in question, and
- * the version we writting, usually {@link Version#current()}).
+ * the version we writting, usually {@link Version#current(String)}).
  */
 public interface IndexComponents
 {

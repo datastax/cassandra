@@ -441,6 +441,7 @@ public class TermsDistribution
     public static class Builder
     {
         final AbstractType<?> termType;
+        final Version version;
         final ByteComparable.Version byteComparableVersion;
         final int histogramSize;
         final int mostFrequentTermsTableSize;
@@ -457,12 +458,14 @@ public class TermsDistribution
         public Builder(AbstractType<?> termType,
                        ByteComparable.Version byteComparableVersion,
                        int histogramSize,
-                       int mostFrequentTermsTableSize)
+                       int mostFrequentTermsTableSize,
+                       Version version)
         {
             this.termType = termType;
             this.byteComparableVersion = byteComparableVersion;
             this.histogramSize = histogramSize;
             this.mostFrequentTermsTableSize = mostFrequentTermsTableSize;
+            this.version = version;
 
             // Let's start with adding buckets for every point.
             // This will be corrected to a higher value once the histogram gets too large and we'll do shrinking.
@@ -509,7 +512,7 @@ public class TermsDistribution
                 mft.put(point.term, point.rowCount);
             }
 
-            return new TermsDistribution(termType, buckets, mft, Version.current(), byteComparableVersion);
+            return new TermsDistribution(termType, buckets, mft, version, byteComparableVersion);
         }
 
         /**

@@ -326,8 +326,8 @@ public class CompactionTest extends AbstractMetricsTest
 
         assertNumRows(num, "SELECT id1 FROM %%s WHERE v1>=0");
         assertNumRows(num, "SELECT id1 FROM %%s WHERE v2='0'");
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), sstables);
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), sstables);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V1_COLUMN_IDENTIFIER), sstables);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V2_COLUMN_IDENTIFIER), sstables);
     }
 
     @Test

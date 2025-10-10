@@ -21,6 +21,7 @@ import java.nio.ByteOrder;
 
 import org.junit.Test;
 
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
@@ -39,7 +40,7 @@ public class LeafOrderMapTest extends SaiRandomizedTest
         }
         shuffle(array);
 
-        var out = new ModernResettableByteBuffersIndexOutput(array.length, "");
+        var out = new ModernResettableByteBuffersIndexOutput(array.length, "", SAIUtil.currentVersion());
 
         LeafOrderMap.write(ByteOrder.LITTLE_ENDIAN, array, array.length, array.length - 1, out);
 
