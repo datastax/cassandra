@@ -25,6 +25,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -43,8 +45,18 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
 
+@RunWith(Parameterized.class)
 public class SingleRestrictionEstimatedRowCountTest extends SAITester
 {
+    @Parameterized.Parameter
+    public String memtableClass;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static String[] memtableClasses()
+    {
+        return new String[]{ "TrieMemtable", "TrieMemtableStage2", "TrieMemtableStage1" };
+    }
+
     static protected Map<Map.Entry<Version, CQL3Type.Native>, ColumnFamilyStore> tables = new HashMap<>();
     static Version[] versions = new Version[]{ Version.DB, Version.EB };
     static CQL3Type.Native[] types = new CQL3Type.Native[]{ INT, DECIMAL, VARINT };
@@ -75,12 +87,12 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         createTables();
 
         RowCountTest test = new RowCountTest(Operator.NEQ, 25);
-        test.doTest(Version.DB, INT, 97.0);
-        test.doTest(Version.EB, INT, 97.0);
+        test.doTest(Version.DB, INT, 100);
+        test.doTest(Version.EB, INT, 100);
         // Truncated numeric types planned differently
-        test.doTest(Version.DB, DECIMAL, 97.0);
-        test.doTest(Version.EB, DECIMAL, 97.0);
-        test.doTest(Version.EB, VARINT, 97.0);
+        test.doTest(Version.DB, DECIMAL, 100);
+        test.doTest(Version.EB, DECIMAL, 100);
+        test.doTest(Version.EB, VARINT, 100);
 
         test = new RowCountTest(Operator.LT, 50);
         test.doTest(Version.DB, INT, 48);
@@ -89,10 +101,10 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         test.doTest(Version.EB, DECIMAL, 48);
 
         test = new RowCountTest(Operator.LT, 150);
-        test.doTest(Version.DB, INT, 97);
-        test.doTest(Version.EB, INT, 97);
-        test.doTest(Version.DB, DECIMAL, 97);
-        test.doTest(Version.EB, DECIMAL, 97);
+        test.doTest(Version.DB, INT, 100);
+        test.doTest(Version.EB, INT, 100);
+        test.doTest(Version.DB, DECIMAL, 100);
+        test.doTest(Version.EB, DECIMAL, 100);
 
         test = new RowCountTest(Operator.EQ, 31);
         test.doTest(Version.DB, INT, 15);
@@ -109,7 +121,8 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             SAIUtil.setCurrentVersion(version);
             for (CQL3Type.Native type : types)
             {
-                createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ')');
+                createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ") " +
+                            "WITH memtable = {'class': '" + memtableClass + "'}");
                 createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
                 tables.put(tablesEntryKey(version, type), getCurrentColumnFamilyStore());
             }
@@ -159,7 +172,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
 
             long totalRows = controller.planFactory.tableMetrics.rows;
             assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
-            assertEquals(97, totalRows);
+            assertEquals(100, totalRows);
 
             Plan plan = controller.buildPlan();
             assert plan instanceof Plan.RowsIteration;

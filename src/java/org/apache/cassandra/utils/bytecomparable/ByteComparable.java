@@ -20,9 +20,6 @@ package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.utils.FastByteOperations;
-
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 /**
@@ -81,13 +78,6 @@ public interface ByteComparable
     }
 
     // Simple factories used for testing
-
-    @VisibleForTesting
-    static ByteComparable of(String s)
-    {
-        // Note: This is not prefix-free
-        return v -> ByteSource.of(s, v);
-    }
 
     static ByteComparable of(long value)
     {
@@ -179,6 +169,17 @@ public interface ByteComparable
     static ByteComparable cut(ByteComparable src, int cutoff)
     {
         return version -> ByteSource.cut(src.asComparableBytes(version), cutoff);
+    }
+
+    static ByteComparable skipFirst(ByteComparable src, int bytesToSkip)
+    {
+        return version ->
+        {
+            ByteSource bsrc = src.asComparableBytes(version);
+            for (int i = 0; i < bytesToSkip; i++)
+                bsrc.next();
+            return bsrc;
+        };
     }
 
     /**

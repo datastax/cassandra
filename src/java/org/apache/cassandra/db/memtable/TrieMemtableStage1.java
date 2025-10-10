@@ -75,26 +75,23 @@ import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
 
-/**
- * Previous TrieMemtable implementation, provided for two reasons:
- * <ul>
- * <li> to easily compare current and earlier implementations of the trie memtable
- * <li> to have an option to change a database back to the older implementation if we find a bug or a performance problem
- *   with the new code.
- *   </ul>
- * <p>
- * To switch a table to this version, use
- * <code><pre>
- *   ALTER TABLE ... WITH memtable = {'class': 'TrieMemtableStage1'}
- * </pre></code>
- * or add
- * <code><pre>
- *   memtable:
- *     class: TrieMemtableStage1
- * </pre></code>
- * in <code>cassandra.yaml</code> to switch a node to it as default.
- *
- */
+/// Previous TrieMemtable implementation, provided for two reasons:
+///
+///   -  to easily compare current and earlier implementations of the trie memtable
+///   -  to have an option to change a database back to the older implementation if we find a bug or a performance
+///      problem with the new code.
+///
+///
+/// To switch a table to this version, use
+/// ```
+///   ALTER TABLE ... WITH memtable = {'class': 'TrieMemtableStage1'}
+/// ```
+/// or add
+/// ```
+///   memtable:
+///     class: TrieMemtableStage1
+/// ```
+/// in `cassandra.yaml` to switch a node to it as default.
 public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtableStage1.class);
@@ -146,7 +143,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     TrieMemtableStage1(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
-        this.boundaries = owner.localRangeSplits(TrieMemtable.SHARD_COUNT);
+        this.boundaries = owner.localRangeSplits(TrieMemtable.shardCount());
         this.metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
         this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics);
         this.mergedTrie = makeMergedTrie(shards);
@@ -387,13 +384,19 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
 
-        Trie<BTreePartitionData> subMap = mergedTrie.subtrie(left, includeStart, right, includeStop);
+        Trie<BTreePartitionData> subMap = mergedTrie.subtrie(toComparableBound(left, includeStart),
+                                                             toComparableBound(right, !includeStop));
 
         return new MemtableUnfilteredPartitionIterator(metadata(),
                                                        allocator.ensureOnHeap(),
                                                        subMap,
                                                        columnFilter,
                                                        dataRange);
+    }
+
+    private static ByteComparable toComparableBound(PartitionPosition position, boolean before)
+    {
+        return position == null || position.isMinimum() ? null : position.asComparableBound(before);
     }
 
     public Partition getPartition(DecoratedKey key)
@@ -426,7 +429,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 
     public FlushCollection<MemtablePartition> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
-        Trie<BTreePartitionData> toFlush = mergedTrie.subtrie(from, true, to, false);
+        Trie<BTreePartitionData> toFlush = mergedTrie.subtrie(toComparableBound(from, true), toComparableBound(to, true));
         long keySize = 0;
         int keyCount = 0;
 

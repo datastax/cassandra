@@ -87,7 +87,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
 
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
-        this(indexContext, memtable, TrieMemtable.SHARD_COUNT);
+        this(indexContext, memtable, TrieMemtable.shardCount());
     }
 
     @VisibleForTesting

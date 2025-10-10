@@ -21,12 +21,13 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
@@ -39,12 +40,14 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
+import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
-import org.apache.cassandra.db.tries.InMemoryTrie;
-import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.DeletionAwareTrie;
+import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.btree.BTree;
@@ -70,20 +73,20 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                 RegularAndStaticColumns columns,
                                 EncodingStats stats,
                                 int rowCountIncludingStatic,
+                                int tombstoneCount,
                                 int dataSize,
-                                Trie<Object> trie,
-                                boolean canHaveShadowedData)
+                                DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
-        super(key, columns, stats, rowCountIncludingStatic, trie, metadata, canHaveShadowedData);
+        super(key, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata);
         this.dataSize = dataSize;
     }
 
-    private static InMemoryTrie<Object> newTrie(DeletionInfo deletion)
+    private static InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> newTrie()
     {
-        InMemoryTrie<Object> trie = InMemoryTrie.shortLived(BYTE_COMPARABLE_VERSION);
+        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = InMemoryDeletionAwareTrie.shortLived(BYTE_COMPARABLE_VERSION);
         try
         {
-            trie.putRecursive(ByteComparable.EMPTY, deletion, NO_CONFLICT_RESOLVER);
+            trie.putRecursive(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -108,8 +111,8 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                        EncodingStats.NO_STATS,
                                        0,
                                        0,
-                                       newTrie(MutableDeletionInfo.live()),
-                                       false);
+                                       0,
+                                       newTrie());
     }
 
     /**
@@ -124,15 +127,16 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      */
     public static TriePartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, int nowInSec)
     {
-        MutableDeletionInfo deletion = new MutableDeletionInfo(timestamp, nowInSec);
+        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = newTrie();
+        putPartitionDeletionInTrie(trie, new DeletionTime(timestamp, nowInSec));
         return new TriePartitionUpdate(metadata,
                                        key,
                                        RegularAndStaticColumns.NONE,
                                        new EncodingStats(timestamp, nowInSec, LivenessInfo.NO_TTL),
                                        0,
+                                       1,
                                        0,
-                                       newTrie(deletion),
-                                       false);
+                                       trie);
     }
 
     /**
@@ -147,7 +151,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     public static TriePartitionUpdate singleRowUpdate(TableMetadata metadata, DecoratedKey key, Row row)
     {
         EncodingStats stats = EncodingStats.Collector.forRow(row);
-        InMemoryTrie<Object> trie = newTrie(DeletionInfo.LIVE);
+        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = newTrie();
 
         RegularAndStaticColumns columns;
         if (row.isStatic())
@@ -157,14 +161,14 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
         try
         {
-            putInTrie(metadata.comparator, useRecursive(metadata.comparator), trie, row);
+            putInTrie(metadata.comparator, trie, row);
         }
         catch (TrieSpaceExhaustedException e)
         {
             throw new AssertionError(e);
         }
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.dataSize(), trie, false);
+        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.deletion().isLive() ? 0 : 1, row.dataSize(), trie);
     }
 
     /**
@@ -199,9 +203,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                        iterator.columns(),
                                        iterator.stats(),
                                        builder.rowCountIncludingStatic(),
+                                       builder.tombstoneCount(),
                                        builder.dataSize(),
-                                       builder.trie(),
-                                       false);
+                                       builder.trie());
     }
 
     public static TriePartitionUpdate asTrieUpdate(PartitionUpdate update)
@@ -215,7 +219,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         }
     }
 
-    public static Trie<Object> asMergableTrie(PartitionUpdate update)
+    public static DeletionAwareTrie<Object, TrieTombstoneMarker> asMergableTrie(PartitionUpdate update)
     {
         return asTrieUpdate(update).trie.prefixedBy(update.partitionKey());
     }
@@ -238,50 +242,55 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     public TriePartitionUpdate withUpdatedTimestamps(long newTimestamp)
     {
 
-        InMemoryTrie<Object> t = InMemoryTrie.shortLived(BYTE_COMPARABLE_VERSION);
+        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> t = InMemoryDeletionAwareTrie.shortLived(BYTE_COMPARABLE_VERSION);
         try
         {
-            t.apply(trie, new InMemoryTrie.UpsertTransformer<Object, Object>()
-            {
-                public Object apply(Object shouldBeNull, Object o)
-                {
-                    assert shouldBeNull == null;
-                    if (o instanceof RowData)
-                        return applyRowData((RowData) o);
-                    else
-                        return applyDeletion((DeletionInfo) o);
-                }
+            t.apply(trie,
+                    (shouldBeNull, o) ->
+                    {
+                        assert shouldBeNull == null;
+                        if (!(o instanceof RowData))
+                            return o;
+                        RowData update = (RowData) o;
 
-                public RowData applyRowData(RowData update)
-                {
-                    LivenessInfo newInfo = update.livenessInfo.isEmpty()
-                                           ? update.livenessInfo
-                                           : update.livenessInfo.withUpdatedTimestamp(newTimestamp);
-                    DeletionTime newDeletion = update.deletion.isLive()
-                                               ? DeletionTime.LIVE
-                                               : new DeletionTime(newTimestamp - 1, update.deletion.localDeletionTime());
+                        LivenessInfo newInfo = update.livenessInfo.isEmpty()
+                                               ? update.livenessInfo
+                                               : update.livenessInfo.withUpdatedTimestamp(newTimestamp);
 
-                    return new RowData(BTree.transformAndFilter(update.columnsBTree,
-                                                                (ColumnData cd) -> cd.updateAllTimestamp(newTimestamp)),
-                                       newInfo, newDeletion);
-                }
-
-                public DeletionInfo applyDeletion(DeletionInfo update)
-                {
-                    if (update.isLive())
-                        return update;
-
-                    MutableDeletionInfo mdi = update.mutableCopy();
-                    mdi.updateAllTimestamp(newTimestamp - 1);
-                    return mdi;
-                }
-            }, x -> false);
+                        return new RowData(BTree.transformAndFilter(update.columnsBTree,
+                                                                    (ColumnData cd) -> cd.updateAllTimestamp(newTimestamp)),
+                                           newInfo);
+                    },
+                    (shouldBeNull, o) ->
+                    {
+                        assert shouldBeNull == null;
+                        return o.withUpdatedTimestamp(newTimestamp - 1);
+                    },
+                    noIncomingSelfDeletion(),
+                    noExistingSelfDeletion(),
+                    true,
+                    x -> false);
         }
         catch (TrieSpaceExhaustedException e)
         {
             throw new AssertionError(e);
         }
-        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCountIncludingStatic, dataSize, t, canHaveShadowedData);
+        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, t);
+    }
+
+    @Override
+    public DeletionInfo deletionInfo()
+    {
+        // Collect deletion info from the trie.
+        DeletionTime partitionLevelDeletion = partitionLevelDeletion();
+        MutableDeletionInfo.Builder builder = MutableDeletionInfo.builder(partitionLevelDeletion, metadata.comparator, false);
+        for (Map.Entry<ByteComparable.Preencoded, TrieTombstoneMarker> entry : trie.deletionOnlyTrie().entrySet())
+        {
+            RangeTombstoneMarker marker = entry.getValue().toRangeTombstoneMarker(entry.getKey(), BYTE_COMPARABLE_VERSION, metadata.comparator, partitionLevelDeletion);
+            if (marker != null)
+                builder.add(marker);
+        }
+        return builder.build();
     }
 
     /**
@@ -295,9 +304,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     @Override
     public int operationCount()
     {
-        return rowCountIncludingStatic
-             + deletionInfo().rangeCount()
-             + (deletionInfo().getPartitionDeletion().isLive() ? 0 : 1);
+        return rowCountIncludingStatic + tombstoneCount;
     }
 
     /**
@@ -336,7 +343,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     @Override
     public long maxTimestamp()
     {
-        long maxTimestamp = deletionInfo().maxTimestamp();
+        long maxTimestamp = Long.MIN_VALUE;
+        for (Iterator<TrieTombstoneMarker> it = trie.deletionOnlyTrie().valueIterator(); it.hasNext();)
+            maxTimestamp = Math.max(maxTimestamp, it.next().deletionTime().markedForDeleteAt());
         for (Iterator<Row> it = rowsIncludingStatic(); it.hasNext();)
             maxTimestamp = Math.max(maxTimestamp, Rows.collectMaxTimestamp(it.next()));
 
@@ -381,48 +390,26 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     public static class Builder implements PartitionUpdate.Builder
     {
         private final TableMetadata metadata;
+        private final ColumnFilter cf;
         private final DecoratedKey key;
-        private final MutableDeletionInfo deletionInfo;
-        private final boolean canHaveShadowedData;
         private final RegularAndStaticColumns columns;
-        private final InMemoryTrie<Object> trie = InMemoryTrie.shortLived(BYTE_COMPARABLE_VERSION);
+        private final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = InMemoryDeletionAwareTrie.shortLived(BYTE_COMPARABLE_VERSION);
         private final EncodingStats.Collector statsCollector = new EncodingStats.Collector();
-        private final boolean useRecursive;
         private int rowCountIncludingStatic;
+        private int tombstoneCount;
         private long dataSize;
 
         public Builder(TableMetadata metadata,
                        DecoratedKey key,
                        RegularAndStaticColumns columns)
         {
-            this(metadata, key, columns, true, Rows.EMPTY_STATIC_ROW, DeletionInfo.LIVE);
-        }
-
-        private Builder(TableMetadata metadata,
-                        DecoratedKey key,
-                        RegularAndStaticColumns columns,
-                        boolean canHaveShadowedData,
-                        Row staticRow,
-                        DeletionInfo deletionInfo)
-        {
             this.metadata = metadata;
             this.key = key;
             this.columns = columns;
-            this.canHaveShadowedData = canHaveShadowedData;
-            this.deletionInfo = deletionInfo.mutableCopy();
-            useRecursive = useRecursive(metadata.comparator);
             rowCountIncludingStatic = 0;
+            tombstoneCount = 0;
             dataSize = 0;
-            add(staticRow);
-        }
-
-        // This is wasteful, only to be used for testing.
-        @VisibleForTesting
-        public Builder(TriePartitionUpdate base)
-        {
-            this(base.metadata, base.partitionKey, base.columns(), base.canHaveShadowedData, Rows.EMPTY_STATIC_ROW, base.deletionInfo());
-            for (Iterator<Row> it = base.rowsIncludingStatic(); it.hasNext();)
-                add(it.next());
+            cf = ColumnFilter.all(metadata);
         }
 
         /**
@@ -448,10 +435,30 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
             try
             {
-                trie.putSingleton(metadata.comparator.asByteComparable(row.clustering()),
-                                  row,
-                                  this::merge,
-                                  useRecursive);
+                // We do not look for atomicity here, so can do the two steps separately.
+                // TODO: Direct insertion methods (singleton known to not be deleted, deletion known to not delete anything)
+                Clustering<?> clustering = row.clustering();
+                DeletionTime deletionTime = row.deletion().time();
+
+                ByteComparable comparableClustering = metadata.comparator.asByteComparable(clustering);
+                if (!deletionTime.isLive())
+                {
+                    putDeletionInTrie(comparableClustering,
+                                      comparableClustering,
+                                      deletionTime);
+                }
+                if (!row.isEmptyAfterDeletion())
+                {
+                    trie.apply(DeletionAwareTrie.<Row, TrieTombstoneMarker>singleton(comparableClustering,
+                                                                                     BYTE_COMPARABLE_VERSION,
+                                                                                     row),
+                               this::merge,
+                               this::mergeTombstones,
+                               this::applyTombstone,
+                               this::applyTombstone,
+                               true,
+                               x -> false);
+                }
             }
             catch (TrieSpaceExhaustedException e)
             {
@@ -460,14 +467,40 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             Rows.collectStats(row, statsCollector);
         }
 
+        private void putDeletionInTrie(ByteComparable start, ByteComparable end, DeletionTime deletionTime)
+        {
+            try
+            {
+                trie.apply(DeletionAwareTrie.deletion(ByteComparable.EMPTY,
+                                                      start,
+                                                      end,
+                                                      BYTE_COMPARABLE_VERSION,
+                                                      TrieTombstoneMarker.covering(deletionTime)),
+                           this::merge,
+                           this::mergeTombstones,
+                           this::applyTombstone,
+                           this::applyTombstone,
+                           true,
+                           x -> false);
+                statsCollector.update(deletionTime);
+            }
+            catch (TrieSpaceExhaustedException e)
+            {
+                throw new AssertionError(e);
+            }
+        }
+
         public void addPartitionDeletion(DeletionTime deletionTime)
         {
-            deletionInfo.add(deletionTime);
+            if (!deletionTime.isLive())
+                putDeletionInTrie(PARTITION_DELETION_START, PARTITION_DELETION_END, deletionTime);
         }
 
         public void add(RangeTombstone range)
         {
-            deletionInfo.add(range, metadata.comparator);
+            putDeletionInTrie(metadata.comparator.asByteComparable(range.deletedSlice().start()),
+                              metadata.comparator.asByteComparable(range.deletedSlice().end()),
+                              range.deletionTime());
         }
 
         public DecoratedKey partitionKey()
@@ -484,21 +517,20 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             try
             {
-                trie.putRecursive(ByteComparable.EMPTY, deletionInfo, NO_CONFLICT_RESOLVER);
+                trie.putRecursive(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());
             }
             catch (TrieSpaceExhaustedException e)
             {
                 throw new AssertionError(e);
             }
-            deletionInfo.collectStats(statsCollector);
             TriePartitionUpdate pu = new TriePartitionUpdate(metadata,
                                                              partitionKey(),
                                                              columns,
                                                              statsCollector.get(),
                                                              rowCountIncludingStatic,
+                                                             tombstoneCount,
                                                              Ints.saturatedCast(dataSize),
-                                                             trie,
-                                                             canHaveShadowedData);
+                                                             trie);
 
             return pu;
         }
@@ -509,7 +541,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             {
                 // this is not expected to happen much, so going through toRow and the existing size is okay
                 RowData rowData = (RowData) existing;
-                update = Rows.merge(rowData.toRow(update.clustering()), update);
+                update = Rows.merge(rowData.toRow(update.clustering(), DeletionTime.LIVE), update);
                 dataSize += update.dataSize() - rowData.dataSize();
             }
             else
@@ -521,14 +553,38 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             return rowToData(update);
         }
 
+        private Row applyTombstone(TrieTombstoneMarker trieTombstoneMarker, Row o)
+        {
+            return o.filter(cf, trieTombstoneMarker.deletionTime(), false, metadata);
+        }
+
+        private Object applyTombstone(Object o, TrieTombstoneMarker trieTombstoneMarker)
+        {
+            RowData row = (RowData) o;
+            return row.delete(trieTombstoneMarker.deletionTime());
+        }
+
+        private TrieTombstoneMarker mergeTombstones(TrieTombstoneMarker existing, TrieTombstoneMarker update)
+        {
+            if (existing == null)
+            {
+                ++tombstoneCount;
+                return update;
+            }
+            else
+                return update.mergeWith(existing);
+        }
+
         public RegularAndStaticColumns columns()
         {
             return columns;
         }
 
+        @Override
         public DeletionTime partitionLevelDeletion()
         {
-            return deletionInfo.getPartitionDeletion();
+            TrieTombstoneMarker applicableRange = trie.deletionOnlyTrie().applicableRange(STATIC_CLUSTERING_PATH);
+            return applicableRange != null ? applicableRange.deletionTime() : DeletionTime.LIVE;
         }
 
         @Override
@@ -537,8 +593,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             return "Builder{" +
                    "metadata=" + metadata +
                    ", key=" + key +
-                   ", deletionInfo=" + deletionInfo +
-                   ", canHaveShadowedData=" + canHaveShadowedData +
                    ", columns=" + columns +
                    '}';
         }

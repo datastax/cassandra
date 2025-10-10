@@ -28,10 +28,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.junit.Before;
+import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -44,14 +47,13 @@ public class LongVectorTest extends SAITester
     int dimension = 16; // getRandom().nextIntBetween(128, 768);
 
     KeySet keysInserted = new KeySet();
-    private final int threadCount = 12;
+    private final static int threadCount = 12;
 
-    @Before
-    public void setup() throws Throwable
+    @BeforeClass
+    public static void setUpClass()
     {
-        // we don't get loaded until after TM, so we can't affect the very first memtable,
-        // but this will affect all subsequent ones
-        TrieMemtable.SHARD_COUNT = 4 * threadCount;
+        CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(4 * threadCount);
+        SAITester.setUpClass();
     }
 
     @FunctionalInterface
@@ -62,6 +64,7 @@ public class LongVectorTest extends SAITester
 
     public void testConcurrentOps(Op op) throws ExecutionException, InterruptedException
     {
+        Assert.assertEquals(4 * threadCount, TrieMemtable.shardCount());
         createTable(String.format("CREATE TABLE %%s (key int primary key, value vector<float, %s>)", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function': 'dot_product' }");
 

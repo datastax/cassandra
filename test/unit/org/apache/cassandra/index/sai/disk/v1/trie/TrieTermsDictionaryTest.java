@@ -504,7 +504,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void testForDifferentByteComparableEncodings(ThrowingConsumer<Function<String, ByteComparable>> test) throws Exception
     {
         test.accept(s -> ByteComparable.preencoded(VERSION, ByteBufferUtil.bytes(s)));
-        test.accept(ByteComparable::of);
+        test.accept(s -> v -> ByteSource.of(s, v));
     }
 
     @FunctionalInterface
