@@ -167,8 +167,8 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         // want.
         if (contains(that.left))
             return true;
-        else if (that.left.equals(that.right))  // full range
-            return that.right.isMinimum();
+        else if (that.left.equals(that.right))
+            return that.right.isMinimum(); // [x, x] denotes a single point only, but [min, min] covers the full token range
         else
             return intersects(new Range<T>(that.left, that.right));
     }
