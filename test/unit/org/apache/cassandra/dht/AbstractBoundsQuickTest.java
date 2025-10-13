@@ -63,10 +63,10 @@ public class AbstractBoundsQuickTest
 
         Token l = bounds.left;
         if (bounds.inclusiveLeft())
-            l = l.prevValidToken();
+            l = new Murmur3Partitioner.LongToken(l.getLongValue() - 1);
         Token r = bounds.right;
         if (!bounds.inclusiveRight())
-            r = r.prevValidToken();
+            r = new Murmur3Partitioner.LongToken(r.getLongValue() - 1);
 
         return new Range<>(l, r);
     }

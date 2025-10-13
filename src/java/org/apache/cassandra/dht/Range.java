@@ -118,6 +118,7 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         return intersectionWith(that).size() > 0;
     }
 
+    @Override
     public boolean intersects(AbstractBounds<T> that)
     {
         // implemented for cleanup compaction membership test, so only Range + Bounds are supported for now
