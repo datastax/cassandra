@@ -147,6 +147,22 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
     public abstract boolean isStartInclusive();
     public abstract boolean isEndInclusive();
 
+    public boolean intersects(AbstractBounds<T> other)
+    {
+        // If one is a Range, it may be wraparound, thus we must defer to its implementation of intersects.
+        if (other instanceof Range)
+            return other.intersects(this);
+
+        int cmp = other.right.isMinimum() ? -1 : left.compareTo(other.right);
+        if (cmp > 0 || (cmp == 0 && (!inclusiveLeft() || !other.inclusiveRight())))
+            return false;
+        cmp = right.isMinimum() ? 1 : right.compareTo(other.left);
+        if (cmp < 0 || (cmp == 0 && (!inclusiveRight() || !other.inclusiveLeft())))
+            return false;
+
+        return true;
+    }
+
     public abstract AbstractBounds<T> withNewRight(T newRight);
 
     public static class AbstractBoundsSerializer<T extends RingPosition<T>> implements IPartitionerDependentSerializer<AbstractBounds<T>>
