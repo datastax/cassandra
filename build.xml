@@ -665,10 +665,10 @@
           <dependency groupId="io.airlift" artifactId="airline" version="0.8">
             <exclusion groupId="com.google.code.findbugs" artifactId="jsr305" />
            </dependency>
-          <dependency groupId="io.netty" artifactId="netty-bom" version="4.1.118.Final" type="pom" scope="provided"/>
-          <dependency groupId="io.netty" artifactId="netty-all" version="4.1.118.Final" />
-          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.118.Final"/>
-          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.118.Final" classifier="linux-x86_64"/>
+          <dependency groupId="io.netty" artifactId="netty-bom" version="4.1.127.Final" type="pom" scope="provided"/>
+          <dependency groupId="io.netty" artifactId="netty-all" version="4.1.127.Final" />
+          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.127.Final"/>
+          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.127.Final" classifier="linux-x86_64"/>
           <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static" version="2.0.69.Final"/>
           <dependency groupId="net.openhft" artifactId="chronicle-queue" version="${chronicle-queue.version}">
             <exclusion groupId="com.sun" artifactId="tools" />
