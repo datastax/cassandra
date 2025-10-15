@@ -43,7 +43,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-public class VectorSiftSmallTest extends VectorTester
+public class VectorSiftSmallTest extends VectorTester.Versioned
 {
     private static final String DATASET = "siftsmall"; // change to "sift" for larger dataset. requires manual download
 
@@ -156,6 +156,7 @@ public class VectorSiftSmallTest extends VectorTester
             assertTrue("Pre-compaction recall is " + recall, recall > 0.975);
         }
 
+        compact();
         compact();
         for (int topK : List.of(1, 100))
         {
@@ -313,7 +314,7 @@ public class VectorSiftSmallTest extends VectorTester
     private void createIndex()
     {
         // we need a long timeout because we are adding many vectors
-        String index = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        String index = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean', 'enable_hierarchy': 'true'}");
         waitForIndexQueryable(KEYSPACE, index, 5, TimeUnit.MINUTES);
     }
 

@@ -19,10 +19,11 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.NoSuchElementException;
+import java.util.function.Function;
 
 import org.junit.Test;
 
-import io.github.jbellis.jvector.graph.GraphIndex;
+import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
 import io.github.jbellis.jvector.graph.NodeQueue;
 import io.github.jbellis.jvector.graph.NodesIterator;
 import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
@@ -63,7 +64,7 @@ public class BruteForceRowIdIteratorTest
         assertTrue(view.isClosed);
     }
 
-    private static class TestView implements GraphIndex.ScoringView
+    private static class TestView implements ImmutableGraphIndex.ScoringView
     {
         private boolean isClosed = false;
 
@@ -96,13 +97,19 @@ public class BruteForceRowIdIteratorTest
         }
 
         @Override
+        public void processNeighbors(int i, int i1, ScoreFunction scoreFunction, Function<Integer, Boolean> function, ImmutableGraphIndex.NeighborProcessor neighborProcessor)
+        {
+
+        }
+
+        @Override
         public int size()
         {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public GraphIndex.NodeAtLevel entryNode()
+        public ImmutableGraphIndex.NodeAtLevel entryNode()
         {
             throw new UnsupportedOperationException();
         }
@@ -111,6 +118,12 @@ public class BruteForceRowIdIteratorTest
         public Bits liveNodes()
         {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean contains(int i, int i1)
+        {
+            return false;
         }
     }
 }

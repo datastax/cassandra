@@ -41,6 +41,7 @@ import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
@@ -67,6 +68,7 @@ import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -108,6 +110,8 @@ public class CompactionGraph implements Closeable, Accountable
 
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
+
+    private static boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
 
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
@@ -225,12 +229,14 @@ public class CompactionGraph implements Closeable, Accountable
 
     private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper) throws IOException
     {
-        return new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
+        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                .withStartOffset(termsOffset)
                .with(new InlineVectors(dimension))
                .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion())
-               .withMapper(ordinalMapper)
-               .build();
+               .withMapper(ordinalMapper);
+        if (ENABLE_FUSED && compressor instanceof ProductQuantization && Version.current().onDiskFormat().jvectorFileFormatVersion() >= 6)
+            writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
+        return writerBuilder.build();
     }
 
     @Override
@@ -372,7 +378,7 @@ public class CompactionGraph implements Closeable, Accountable
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
         // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
-        writer.writeHeader();
+        writer.writeHeader(builder.getGraph().getView());
         writer.close();
 
         int nInProgress = builder.insertsInProgress();
@@ -408,7 +414,7 @@ public class CompactionGraph implements Closeable, Accountable
             var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
             long postingsLength;
             try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createIndexBuildTimeFileHandle();
-                 var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
+                 var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset, false))
             {
                 var postingsFuture = es.submit(() -> {
                     // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
@@ -453,9 +459,18 @@ public class CompactionGraph implements Closeable, Accountable
 
             // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();
-            // Required becuase jvector 3 wrote the fused adc map here. We no longer write jvector 3, but we still
-            // write out the empty map.
-            writer.write(Map.of());
+            if (writer.getFeatureSet().contains(FeatureId.FUSED_PQ))
+            {
+                try (var view = builder.getGraph().getView())
+                {
+                    var supplier = Feature.singleStateFactory(FeatureId.FUSED_PQ, ordinal -> new FusedPQ.State(view, (PQVectors) compressedVectors, ordinal));
+                    writer.write(supplier);
+                }
+            }
+            else
+            {
+                writer.write(Map.of());
+            }
             SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
             logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
             long termsLength = writer.getOutput().position() - termsOffset;

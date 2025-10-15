@@ -27,7 +27,7 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.graph.GraphIndex;
+import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
@@ -72,7 +72,7 @@ public class CassandraDiskAnn
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final Set<FeatureId> features;
-    private final GraphIndex graph;
+    private final ImmutableGraphIndex graph;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -94,7 +94,7 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponentType.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
+        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset, false);
         features = rawGraph.getFeatureSet();
         graph = rawGraph;
 
@@ -117,7 +117,7 @@ public class CassandraDiskAnn
             }
 
             VectorCompression.CompressionType compressionType = VectorCompression.CompressionType.values()[reader.readByte()];
-            if (features.contains(FeatureId.FUSED_ADC))
+            if (features.contains(FeatureId.FUSED_PQ))
             {
                 assert compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
                 compressedVectors = null;
@@ -231,11 +231,9 @@ public class CassandraDiskAnn
         searcher.usePruning(usePruning);
         try
         {
-            var view = (GraphIndex.ScoringView) searcher.getView();
+            var view = (ImmutableGraphIndex.ScoringView) searcher.getView();
             SearchScoreProvider ssp;
-            // FusedADC can no longer be written due to jvector upgrade. However, it's possible these index files
-            // still exist, so we have to support them.
-            if (features.contains(FeatureId.FUSED_ADC))
+            if (features.contains(FeatureId.FUSED_PQ))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
                 var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);
@@ -311,9 +309,9 @@ public class CassandraDiskAnn
         return ordinalsMap.getOrdinalsView();
     }
 
-    public GraphIndex.ScoringView getView()
+    public ImmutableGraphIndex.ScoringView getView()
     {
-        return (GraphIndex.ScoringView) graph.getView();
+        return (ImmutableGraphIndex.ScoringView) graph.getView();
     }
 
     public boolean containsUnitVectors()
