@@ -67,6 +67,7 @@ import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.ByteSequence;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
@@ -461,9 +462,12 @@ public class CassandraOnHeapGraph<T> implements Accountable
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
 
+            // Write fused unless we don't meet some criteria
+            boolean attemptWritingFused = ENABLE_FUSED && Version.current().onDiskFormat().jvectorFileFormatVersion() >= 6;
+
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
-            CompressedVectors cv = writePQ(pqOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context());
+            var compressor = writePQ(pqOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context(), attemptWritingFused);
             long pqLength = pqOutput.asSequentialWriter().position() - pqOffset;
 
             // write postings
@@ -483,7 +487,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
             long postingsLength = postingsPosition - postingsOffset;
 
-            try (var indexWriter = createIndexWriter(indexFile, termsOffset, perIndexComponents.context(), ordinalMapper, cv);
+            try (var indexWriter = createIndexWriter(indexFile, termsOffset, perIndexComponents.context(), ordinalMapper, compressor);
                  var view = builder.getGraph().getView())
             {
                 indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
@@ -492,10 +496,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
                 // write the graph
                 var start = System.nanoTime();
-                System.out.println("Writing graph");
-                indexWriter.write(suppliers(view, (PQVectors) cv));
-                System.out.println("Done writing graph");
-//            SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
+                indexWriter.write(suppliers(view, compressor));
+                SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
                 logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
                 long termsLength = indexWriter.getOutput().position() - termsOffset;
 
@@ -509,7 +511,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
-    private OnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, CompressedVectors compressor) throws IOException
+    private OnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, VectorCompressor<?> compressor) throws IOException
     {
         var indexWriterBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
             .withStartOffset(termsOffset)
@@ -517,8 +519,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             .withMapper(ordinalMapper)
             .with(new InlineVectors(vectorValues.dimension()));
 
-        if (ENABLE_FUSED && compressor instanceof ImmutablePQVectors && Version.current().onDiskFormat().jvectorFileFormatVersion() >= 6)
-            indexWriterBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor.getCompressor()));
+        if (ENABLE_FUSED && compressor instanceof ProductQuantization && Version.current().onDiskFormat().jvectorFileFormatVersion() >= 6)
+            indexWriterBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
 
         return indexWriterBuilder.build();
     }
@@ -533,12 +535,19 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return metadataMap;
     }
 
-    private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(ImmutableGraphIndex.View view, PQVectors pqVectors)
+    private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(ImmutableGraphIndex.View view, VectorCompressor<?> compressor)
     {
         var features = new EnumMap<FeatureId, IntFunction<Feature.State>>(FeatureId.class);
         features.put(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
-        if (pqVectors != null && pqVectors.getCompressor() != null && ENABLE_FUSED && Version.current().onDiskFormat().jvectorFileFormatVersion() >= 6)
-            features.put(FeatureId.FUSED_PQ, nodeId -> new FusedPQ.State(view, pqVectors, nodeId));
+        if (ENABLE_FUSED && Version.current().onDiskFormat().jvectorFileFormatVersion() >= 6)
+        {
+            if (compressor instanceof ProductQuantization)
+            {
+                ProductQuantization quantization = (ProductQuantization) compressor;
+                IntFunction<ByteSequence<?>> func = (oldNodeId) -> quantization.encode(vectorValues.getVector(oldNodeId));
+                features.put(FeatureId.FUSED_PQ, nodeId -> new FusedPQ.State(view, func, nodeId));
+            }
+        }
         return features;
     }
 
@@ -594,7 +603,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
-    private CompressedVectors writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext) throws IOException
+    private VectorCompressor<?> writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext, boolean attemptWritingFused) throws IOException
     {
         var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
 
@@ -618,7 +627,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
             assert !vectorValues.isValueShared();
             // encode (compress) the vectors to save
-            if (compressor != null)
+            if ((compressor instanceof ProductQuantization && !attemptWritingFused) || compressor instanceof BinaryQuantization)
                 cv = compressor.encodeAll(new RemappedVectorValues(remapped, remapped.maxNewOrdinal, vectorValues));
         }
 
@@ -627,9 +636,15 @@ public class CassandraOnHeapGraph<T> implements Accountable
         if (actualType == CompressionType.NONE)
             return null;
 
+        if (attemptWritingFused)
+        {
+            compressor.write(writer, Version.current().onDiskFormat().jvectorFileFormatVersion());
+            return compressor;
+        }
+
         // save (outside the synchronized block, this is io-bound not CPU)
         cv.write(writer, Version.current().onDiskFormat().jvectorFileFormatVersion());
-        return cv;
+        return null; // Don't need compressor in this case
     }
 
     static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type)

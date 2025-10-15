@@ -472,7 +472,7 @@ public class CompactionGraph implements Closeable, Accountable
             {
                 writer.write(Map.of());
             }
-//            SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
+            SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
             logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
             long termsLength = writer.getOutput().position() - termsOffset;
 

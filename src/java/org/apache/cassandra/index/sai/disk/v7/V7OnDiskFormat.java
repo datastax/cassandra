@@ -79,10 +79,10 @@ public class V7OnDiskFormat extends V6OnDiskFormat
                 // which does not check the checksum. (The issue is in the way the checksum was computed. It didn't
                 // include the header/footer bytes, and for multi-segment builds, it didn't include the bytes from
                 // all previous segments, which is the design for all index components to date.)
-//                if (!checksum || component.componentType() == IndexComponentType.TERMS_DATA)
-//                    SAICodecUtils.validate(input, getExpectedEarliestVersion(context, component.componentType()));
-//                else
-//                    SAICodecUtils.validateChecksum(input);
+                if (!checksum || component.componentType() == IndexComponentType.TERMS_DATA)
+                    SAICodecUtils.validate(input, getExpectedEarliestVersion(context, component.componentType()));
+                else
+                    SAICodecUtils.validateChecksum(input);
                 return true;
             }
             catch (Throwable e)
