@@ -30,16 +30,12 @@ public interface MultiPartitionReadQuery extends ReadQuery
 
     default void appendCQLWhereClause(CqlBuilder builder)
     {
-        List<DataRange> ranges = ranges();
-        if (ranges.size() == 1 && ranges.get(0).isUnrestricted() && rowFilter().isEmpty())
-            return;
-
         // Append the data ranges.
         TableMetadata metadata = metadata();
         boolean hasRanges = appendRanges(builder);
 
         // Append the clustering index filter and the row filter.
-        String filter = ranges.get(0).clusteringIndexFilter.toCQLString(metadata, rowFilter());
+        String filter = ranges().get(0).clusteringIndexFilter.toCQLString(metadata, rowFilter());
         if (!filter.isEmpty())
         {
             if (filter.startsWith("ORDER BY"))
@@ -55,19 +51,22 @@ public interface MultiPartitionReadQuery extends ReadQuery
     private boolean appendRanges(CqlBuilder builder)
     {
         List<DataRange> ranges = ranges();
-        boolean hasRangeRestrictions = false;
         if (ranges.size() == 1)
         {
-            String rangeString = ranges.get(0).toCQLString(metadata());
+            DataRange range = ranges.get(0);
+            if (range.isUnrestricted())
+                return false;
+
+            String rangeString = range.toCQLString(metadata());
             if (!rangeString.isEmpty())
             {
                 builder.append(" WHERE ").append(rangeString);
-                hasRangeRestrictions = true;
+                return true;
             }
         }
         else
         {
-            builder.append(" WHERE (");
+            builder.append(" WHERE ").append('(');
             for (int i = 0; i < ranges.size(); i++)
             {
                 if (i > 0)
@@ -75,8 +74,8 @@ public interface MultiPartitionReadQuery extends ReadQuery
                 builder.append(ranges.get(i).toCQLString(metadata()));
             }
             builder.append(')');
-            hasRangeRestrictions = true;
+            return true;
         }
-        return hasRangeRestrictions;
+        return false;
     }
 }

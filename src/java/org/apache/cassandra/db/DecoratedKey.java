@@ -172,7 +172,6 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
      * For multi-column keys: "k1 = 1 AND k2 = 2"
      *
      * @param metadata the table metadata
-     * @param redact whether to redact the key value, as in "k1 = ? AND k2 = ?".
      */
     public String toCQLString(TableMetadata metadata)
     {

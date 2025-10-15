@@ -759,26 +759,24 @@ public class RowFilter
         public String toCQLString()
         {
             StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < expressions.size(); i++)
+            for (Expression expression : expressions)
             {
-                Expression expression = expressions.get(i);
                 if (expression.isOrderingExpression())
                     continue;
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
                 sb.append(expression.toCQLString());
             }
-            for (int i = 0; i < children.size(); i++)
+            for (FilterElement child : children)
             {
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
                 sb.append('(');
-                sb.append(children.get(i).toCQLString());
+                sb.append(child.toCQLString());
                 sb.append(')');
             }
-            for (int i = 0; i < expressions.size(); i++)
+            for (Expression expression : expressions)
             {
-                Expression expression = expressions.get(i);
                 if (!expression.isOrderingExpression())
                     continue;
                 if (sb.length() > 0)
@@ -1405,9 +1403,9 @@ public class RowFilter
                 case ORDER_BY_ASC:
                 case ORDER_BY_DESC:
                     // These don't have a value, so we return here to prevent an error calling type.getString(value)
-                    return String.format("ORDER BY %s %s", column.name, operator);
+                    return String.format("ORDER BY %s %s", column.name.toCQLString(), operator);
                 case ANN:
-                    return String.format("ORDER BY %s ANN OF %s", column.name, valueAsCQLString(type, value));
+                    return String.format("ORDER BY %s ANN OF %s", column.name.toCQLString(), valueAsCQLString(type, value));
                 default:
                     break;
             }

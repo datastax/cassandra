@@ -171,9 +171,8 @@ public interface SinglePartitionReadQuery extends ReadQuery
         String filter = clusteringIndexFilter().toCQLString(metadata(), rowFilter());
         if (!filter.isEmpty())
         {
-            if (!clusteringIndexFilter().selectsAllPartition() || !rowFilter().isEmpty())
-                builder.append(" AND ");
-            builder.append(filter);
+            builder.append(filter.startsWith("ORDER BY") ? " " : " AND ")
+                   .append(filter);
         }
     }
 

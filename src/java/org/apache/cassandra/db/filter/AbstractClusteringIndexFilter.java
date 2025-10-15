@@ -51,7 +51,9 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
     {
         if (reversed)
         {
-            sb.append(" ORDER BY ");
+            if (sb.length() > 0)
+                sb.append(' ');
+            sb.append("ORDER BY ");
             int i = 0;
             for (ColumnMetadata column : metadata.clusteringColumns())
             {
