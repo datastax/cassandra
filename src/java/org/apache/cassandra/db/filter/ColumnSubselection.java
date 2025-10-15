@@ -91,10 +91,10 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
     @Override
     public String toString()
     {
-        return toString(false);
+        return toString(false, true);
     }
 
-    protected abstract String toString(boolean cql);
+    protected abstract String toString(boolean cql, boolean redact);
 
     private static class Slice extends ColumnSubselection
     {
@@ -130,13 +130,13 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
         }
 
         @Override
-        protected String toString(boolean cql)
+        protected String toString(boolean cql, boolean redact)
         {
             // This asserts we're dealing with a collection since that's the only thing it's used for so far.
             AbstractType<?> type = ((CollectionType<?>)column().type).nameComparator();
             return String.format("[%s:%s]",
-                                 from == CellPath.BOTTOM ? "" : (cql ? type.toCQLString(from.get(0)) : type.getString(from.get(0))),
-                                 to == CellPath.TOP ? "" : (cql ? type.toCQLString(to.get(0)) : type.getString(to.get(0))));
+                                 from == CellPath.BOTTOM ? "" : (cql ? type.toCQLString(from.get(0), redact) : type.getString(from.get(0))),
+                                 to == CellPath.TOP ? "" : (cql ? type.toCQLString(to.get(0), redact) : type.getString(to.get(0))));
         }
     }
 
@@ -166,11 +166,11 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
         }
 
         @Override
-        protected String toString(boolean cql)
+        protected String toString(boolean cql, boolean redact)
         {
-            // This assert we're dealing with a collection since that's the only thing it's used for so far.
+            // This asserts we're dealing with a collection since that's the only thing it's used for so far.
             AbstractType<?> type = ((CollectionType<?>)column().type).nameComparator();
-            return String.format("[%s]", cql ? type.toCQLString(element.get(0)) : type.getString(element.get(0)));
+            return String.format("[%s]", cql ? type.toCQLString(element.get(0), redact) : type.getString(element.get(0)));
         }
     }
 
