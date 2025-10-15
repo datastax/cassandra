@@ -378,8 +378,7 @@ public class CompactionGraph implements Closeable, Accountable
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
         // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
-        // TODO what to do about this? Removing this line makes the tests pass, but with it, we get an error when loading it
-//        writer.writeHeader(builder.getGraph().getView());
+        writer.writeHeader(builder.getGraph().getView());
         writer.close();
 
         int nInProgress = builder.insertsInProgress();
@@ -415,7 +414,7 @@ public class CompactionGraph implements Closeable, Accountable
             var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
             long postingsLength;
             try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createIndexBuildTimeFileHandle();
-                 var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
+                 var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset, false))
             {
                 var postingsFuture = es.submit(() -> {
                     // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
