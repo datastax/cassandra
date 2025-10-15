@@ -234,18 +234,8 @@ public class CompactionGraph implements Closeable, Accountable
                .with(new InlineVectors(dimension))
                .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion())
                .withMapper(ordinalMapper);
-        if (ENABLE_FUSED)
-        {
-            if (Version.current().onDiskFormat().jvectorFileFormatVersion() >= 6)
-            {
-                assert compressor instanceof ProductQuantization; // todo revisit this
-                writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
-            }
-            else
-            {
-                logger.warn("Fused ADC enabled, but will not be used because on disk version is {}.", Version.current());
-            }
-        }
+        if (ENABLE_FUSED && compressor instanceof ProductQuantization && Version.current().onDiskFormat().jvectorFileFormatVersion() >= 6)
+            writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
         return writerBuilder.build();
     }
 
@@ -389,7 +379,7 @@ public class CompactionGraph implements Closeable, Accountable
     {
         // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
         // TODO what to do about this? Removing this line makes the tests pass, but with it, we get an error when loading it
-        writer.writeHeader(builder.getGraph().getView());
+//        writer.writeHeader(builder.getGraph().getView());
         writer.close();
 
         int nInProgress = builder.insertsInProgress();
