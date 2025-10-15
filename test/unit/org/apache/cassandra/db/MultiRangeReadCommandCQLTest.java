@@ -45,22 +45,31 @@ public class MultiRangeReadCommandCQLTest extends ReadCommandCQLTester<MultiRang
         AbstractBounds<PartitionPosition> boundsLeft = new Range<>(partitioner.getMinimumToken().minKeyBound(), token.maxKeyBound());
         Token left = partitioner.midpoint(boundsLeft.left.getToken(), boundsLeft.right.getToken());
 
+        // error message for multi-range queries, which are sent to the replicas after splitting a command but are not
+        // directly supported by CQL on the coordinators
+        String multiRangeError = "Restriction on partition key column k must not be nested under OR operator";
+
         // test with a secondary index
         createIndex("CREATE INDEX ON %s(v)");
         assertToCQLString("SELECT * FROM %s WHERE v = 0",
-                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND v = 0 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND v = 0 ALLOW FILTERING",
+                          multiRangeError);
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 0",
                           "SELECT * FROM %s WHERE k = 0 AND v = 0 ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ",
                           "SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE token(k) > token(0) AND v = 0",
-                          "SELECT * FROM %s WHERE (token(k) > " + token + " AND token(k) <= " + right + " OR token(k) > " + right + ") AND v = 0 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) > " + token + " AND token(k) <= " + right + " OR token(k) > " + right + ") AND v = 0 ALLOW FILTERING",
+                          multiRangeError);
         assertToCQLString("SELECT * FROM %s WHERE token(k) >= token(0) AND v = 0",
-                          "SELECT * FROM %s WHERE (token(k) >= " + token + " AND token(k) <= " + right + " OR token(k) > " + right + ") AND v = 0 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) >= " + token + " AND token(k) <= " + right + " OR token(k) > " + right + ") AND v = 0 ALLOW FILTERING",
+                          multiRangeError);
         assertToCQLString("SELECT * FROM %s WHERE token(k) < token(0) AND v = 0",
-                          "SELECT * FROM %s WHERE (token(k) <= " + left + " OR token(k) > " + left + " AND token(k) < " + token + ") AND v = 0 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) <= " + left + " OR token(k) > " + left + " AND token(k) < " + token + ") AND v = 0 ALLOW FILTERING",
+                          multiRangeError);
         assertToCQLString("SELECT * FROM %s WHERE token(k) <= token(0) AND v = 0",
-                          "SELECT * FROM %s WHERE (token(k) <= " + left + " OR token(k) > " + left + " AND token(k) <= " + token + ") AND v = 0 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) <= " + left + " OR token(k) > " + left + " AND token(k) <= " + token + ") AND v = 0 ALLOW FILTERING",
+                          multiRangeError);
         assertToCQLString("SELECT * FROM %s WHERE token(k) >= token(0) AND token(k) <= token(0) AND v = 0",
                           "SELECT * FROM %s WHERE token(k) >= " + token + " AND token(k) <= " + token + " AND v = 0 ALLOW FILTERING");
 
@@ -68,24 +77,31 @@ public class MultiRangeReadCommandCQLTest extends ReadCommandCQLTester<MultiRang
         createTable("CREATE TABLE %s (k int, c int, n int, PRIMARY KEY (k, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
         assertToCQLString("SELECT * FROM %s ORDER BY n LIMIT 10",
-                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
+                          multiRangeError);
         assertToCQLString("SELECT * FROM %s ORDER BY n DESC LIMIT 10",
-                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY n DESC LIMIT 10 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY n DESC LIMIT 10 ALLOW FILTERING",
+                          multiRangeError);
         assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY n LIMIT 10",
                           "SELECT * FROM %s WHERE k = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE n = 0 ORDER BY n LIMIT 10",
-                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND n = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND n = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
+                          multiRangeError);
 
         // test ANN index-based ORDER BY
         createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY (k, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+        String truncationError = "no viable alternative at input '..'";
         assertToCQLString("SELECT * FROM %s ORDER BY v ANN OF [1, 2] LIMIT 10",
-                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
+                          truncationError);
         assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
-                          "SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
+                          truncationError);
         assertToCQLString("SELECT * FROM %s WHERE n = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
-                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND n = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND n = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
+                          truncationError);
     }
 
     @Override
