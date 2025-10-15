@@ -174,4 +174,47 @@ public class NumericIndexMixedVersionTest extends SAITester
             assertNumRows(10, "SELECT ck FROM %%s WHERE val1 = 1 AND val2 >= 0 LIMIT 1000");
         });
     }
+
+    @Test
+    public void testMultiVersionCompatibilityWithClusteringKeyFiltering() throws Throwable
+    {
+        QueryController.QUERY_OPT_LEVEL = 0;
+
+        createTable("CREATE TABLE %s (pk text, ck int, val int, is_true boolean, PRIMARY KEY(pk, ck, val)) " +
+                    "WITH CLUSTERING ORDER BY (ck DESC, val DESC)");
+
+        disableCompaction();
+
+        SAIUtil.setCurrentVersion(Version.AA);
+        createIndex("CREATE CUSTOM INDEX ON %s(is_true) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (pk, ck, val, is_true) VALUES (?, ?, ?, ?)", "pk-1", 1, 1, false);
+        // those rows are only needed to make key bounds of the index large enough that the sstable index is
+        // included in the query view
+        execute("INSERT INTO %s (pk, ck, val, is_true) VALUES (?, ?, ?, ?)", "pk-2", 2, 2, true);
+        execute("INSERT INTO %s (pk, ck, val, is_true) VALUES (?, ?, ?, ?)", "pk-3", 3, 3, true);
+        execute("INSERT INTO %s (pk, ck, val, is_true) VALUES (?, ?, ?, ?)", "pk-4", 4, 4, true);
+
+        flush(); // Force to sstable with AA version
+
+        SAIUtil.setCurrentVersion(Version.EC);
+        execute("INSERT INTO %s (pk, ck, val, is_true) VALUES (?, ?, ?, ?)", "pk-1", 201, 201, true);
+        execute("INSERT INTO %s (pk, ck, val, is_true) VALUES (?, ?, ?, ?)", "pk-1", 202, 202, true);
+        execute("INSERT INTO %s (pk, ck, val, is_true) VALUES (?, ?, ?, ?)", "pk-1", 301, 301, false);
+        execute("INSERT INTO %s (pk, ck, val, is_true) VALUES (?, ?, ?, ?)", "pk-1", 302, 302, false);
+        execute("INSERT INTO %s (pk, ck, val, is_true) VALUES (?, ?, ?, ?)", "pk-1", 303, 303, false);
+
+        flush(); // Force to sstable with EC version
+
+        beforeAndAfterFlush(() -> {
+            // No rows match, because is_true does not match on the AA sstable and ck < 10 does not match on the EC sstable
+            assertNumRows(0, "SELECT ck FROM %%s WHERE pk = 'pk-1' AND is_true = true AND ck < 10");
+            // 2 rows from the EC sstable (201, 202)
+            assertNumRows(2, "SELECT ck FROM %%s WHERE pk = 'pk-1' AND is_true = true AND ck < 1000");
+            // 1 row from the AA sstable (1)
+            assertNumRows(1, "SELECT ck FROM %%s WHERE pk = 'pk-1' AND is_true = false AND ck < 10");
+            // 3 rows from the EC sstable (301, 302, 303) and 1 from the AA sstable (1)
+            assertNumRows(4, "SELECT ck FROM %%s WHERE pk = 'pk-1' AND is_true = false AND ck < 1000");
+        });
+    }
 }
