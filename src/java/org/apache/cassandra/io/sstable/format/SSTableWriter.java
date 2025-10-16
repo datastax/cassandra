@@ -412,11 +412,26 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
                 {
                     Map<MetadataType, MetadataComponent> finalMetadata = finalizeMetadata();
                     StatsMetadata stats = (StatsMetadata) finalMetadata.get(MetadataType.STATS);
+
+                    // Try to get file pointers, but handle the case where channels may already be closed
+                    long compressedSize = 0;
+                    long uncompressedSize = 0;
+                    try
+                    {
+                        compressedSize = getOnDiskFilePointer();
+                        uncompressedSize = getFilePointer();
+                    }
+                    catch (IllegalStateException e)
+                    {
+                        // Channel may already be closed due to the error - use 0 as fallback
+                        logger.debug("Could not get file pointers after error (channel likely closed): {}", e.getMessage());
+                    }
+
                     finalReader = storageHandler.onOpeningWrittenSSTableFailure(SSTableReader.OpenReason.NORMAL,
                                                                                 descriptor,
                                                                                 components(),
-                                                                                getOnDiskFilePointer(),
-                                                                                getFilePointer(),
+                                                                                compressedSize,
+                                                                                uncompressedSize,
                                                                                 stats,
                                                                                 first,
                                                                                 last,

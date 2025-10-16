@@ -2196,9 +2196,17 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
             // Only the data file is compressable.
             if (logical && component == Components.DATA && compression)
             {
-                // For encrypted files, compression metadata may not exist
-                CompressionMetadata metadata = dfile.compressionMetadata().orElse(null);
-                bytes += metadata != null ? metadata.dataLength : dfile.dataLength();
+                // For encrypted files or shallow readers, dfile may be null
+                if (dfile != null)
+                {
+                    CompressionMetadata metadata = dfile.compressionMetadata().orElse(null);
+                    bytes += metadata != null ? metadata.dataLength : dfile.dataLength();
+                }
+                else
+                {
+                    // For shallow readers without dfile, use file length from descriptor
+                    bytes += descriptor.fileFor(component).length();
+                }
             }
             else
             {
