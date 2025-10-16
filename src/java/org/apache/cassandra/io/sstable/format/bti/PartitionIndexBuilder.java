@@ -124,6 +124,11 @@ public class PartitionIndexBuilder implements AutoCloseable
             partialIndexConsumer.accept(pi);
             partialIndexConsumer = null;
         }
+        finally
+        {
+            fhBuilder.withLengthOverride(FileHandle.Builder.NO_LENGTH_OVERRIDE);
+        }
+
     }
 
     /**

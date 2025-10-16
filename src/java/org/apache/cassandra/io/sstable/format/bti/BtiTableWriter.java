@@ -219,8 +219,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             TableMetadata metadata = b.getTableMetadataRef().getLocal();
             CompressionParams params = metadata.params.compression;
             ICompressor encryptor = compression ? params.getSstableCompressor().encryptionOnly() : null;
-
-            // Build into locals so that a failure partway through construction can release whatever was
+// Build into locals so that a failure partway through construction can release whatever was
             // already created: SortedTableWriter's constructor only sees a null indexWriter in that case
             // and cannot close any of it (including the bloom filter created by the super constructor).
             CompressionMetadata encryptionMetadata = null;
@@ -234,19 +233,19 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
                     // Create encrypted writers and configure FileHandle builders for encryption
                     encryptionMetadata = CompressionMetadata.encryptedOnly(params);
                     riWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.ROW_INDEX),
-                                                             b.getIOOptions().writerOptions,
-                                                             encryptor);
-                    rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
-                                                      .withMmappedRegionsCache(b.getMmappedRegionsCache())
-                                                      .withCompressionMetadata(encryptionMetadata)
-                                                      .encryptionOnly();
+                                                               b.getIOOptions().writerOptions,
+                                                               encryptor);
+                rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
+                                                  .withMmappedRegionsCache(b.getMmappedRegionsCache())
+                                                  .withCompressionMetadata(encryptionMetadata)
+                                                  .encryptionOnly();
 
-                    piWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX),
-                                                             b.getIOOptions().writerOptions,
-                                                             encryptor);
-                    partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
-                                                            .withMmappedRegionsCache(b.getMmappedRegionsCache())
-                                                            .withCompressionMetadata(encryptionMetadata)
+                piWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX),
+                                                                    b.getIOOptions().writerOptions,
+                                                                    encryptor);
+                partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
+                                                        .withMmappedRegionsCache(b.getMmappedRegionsCache())
+                                                        .withCompressionMetadata(encryptionMetadata)
                                                             .encryptionOnly();
                 }
                 else
@@ -370,7 +369,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             {
                 partitionIndex.complete();
                 partitionIndexCompleted = true;
-                
+
                 // Update FileHandle builders for encrypted writers
                 rowIndexWriter.updateFileHandle(rowIndexFHBuilder);
                 partitionIndexWriter.updateFileHandle(partitionIndexFHBuilder);
@@ -384,6 +383,8 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         PartitionIndex completedPartitionIndex()
         {
             complete();
+            rowIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
+            partitionIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
             try
             {
                 return PartitionIndex.load(partitionIndexFHBuilder, metadata.getLocal().partitioner, false, descriptor.version.getByteComparableVersion());
