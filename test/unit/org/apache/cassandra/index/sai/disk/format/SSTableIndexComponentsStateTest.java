@@ -27,6 +27,7 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.SSTableIndexComponentsState.UnapplicableDiffException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -344,8 +345,8 @@ public class SSTableIndexComponentsStateTest
             Descriptor descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/ca-1-bti-Data.db");
 
             createFakeDataFile(descriptor);
-            createFakePerSSTableComponents(descriptor, Version.current(), 0, 1 * 1024 * 1024); // 1mb per file
-            createFakePerIndexComponents(descriptor, idx1, Version.current(), 1, 2 * 1024 * 1024); // 2mb per file
+            createFakePerSSTableComponents(descriptor, SAIUtil.currentVersion(), 0, 1 * 1024 * 1024); // 1mb per file
+            createFakePerIndexComponents(descriptor, idx1, SAIUtil.currentVersion(), 1, 2 * 1024 * 1024); // 2mb per file
             createFakePerIndexComponents(descriptor, idx2, Version.DB, 0, 3 * 1024 * 1024); // 3mb per file
 
             SSTableReader sstable = Mockito.mock(SSTableReader.class);
@@ -363,11 +364,11 @@ public class SSTableIndexComponentsStateTest
 
             assertEquals(Set.of(idx1.getIndexName(), idx2.getIndexName()), state.includedIndexes());
 
-            assertEquals(Version.current(), state.perSSTable().buildId.version());
+            assertEquals(SAIUtil.currentVersion(), state.perSSTable().buildId.version());
             assertEquals(0, state.perSSTable().buildId.generation());
             assertEquals(6, state.perSSTable().sizeInMB);
 
-            assertEquals(Version.current(), state.perIndex(idx1.getIndexName()).buildId.version());
+            assertEquals(SAIUtil.currentVersion(), state.perIndex(idx1.getIndexName()).buildId.version());
             assertEquals(1, state.perIndex(idx1.getIndexName()).buildId.generation());
             assertEquals(8, state.perIndex(idx1.getIndexName()).sizeInMB);
 

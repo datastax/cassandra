@@ -50,7 +50,6 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.KDTreeIndexSearcher;
@@ -190,7 +189,7 @@ public class KDTreeIndexBuilder
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
             when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
 
-            IndexSearcher searcher = Version.current().onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+            IndexSearcher searcher = components.version().onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
             assertThat(searcher).isInstanceOf(KDTreeIndexSearcher.class);
             return (KDTreeIndexSearcher) searcher;
         }
