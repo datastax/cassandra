@@ -158,10 +158,14 @@ public class CassandraOnHeapGraph<T> implements Accountable
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
 
+<<<<<<< HEAD
         // We start by assuming the vectors are unit vectors and then if they are not, we will correct it.
         unitVectors = true;
 
         int jvectorVersion = Version.current().onDiskFormat().jvectorFileFormatVersion();
+=======
+        int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
+>>>>>>> datastax/main
         // This is only a warning since it's not a fatal error to write without hierarchy
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
@@ -411,7 +415,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // compute the remapping of old ordinals to new (to fill in holes from deletion and/or to create a
         // closer correspondance to rowids, simplifying postings lookups later)
         V5VectorPostingsWriter.RemappedPostings remappedPostings;
-        if (V5OnDiskFormat.writeV5VectorPostings())
+        if (V5OnDiskFormat.writeV5VectorPostings(perIndexComponents.version()))
         {
             // remove postings corresponding to marked-deleted vectors
             var it = postingsMap.entrySet().iterator();
@@ -430,7 +434,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
             deletedOrdinals.clear();
             builder.cleanup();
-            remappedPostings = V5VectorPostingsWriter.remapForMemtable(postingsMap);
+            remappedPostings = V5VectorPostingsWriter.remapForMemtable(postingsMap, perIndexComponents.version());
         }
         else
         {
@@ -451,7 +455,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
              var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
              var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
                                .withStartOffset(termsOffset)
-                               .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion())
+                               .withVersion(perIndexComponents.version().onDiskFormat().jvectorFileFormatVersion())
                                .withMapper(ordinalMapper)
                                .with(new InlineVectors(vectorValues.dimension()))
                                .build())
@@ -459,7 +463,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
             indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
-            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()));
+            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()), perIndexComponents.version());
             assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
 
             // compute and write PQ
@@ -470,7 +474,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
             long postingsPosition;
-            if (V5OnDiskFormat.writeV5VectorPostings())
+            if (V5OnDiskFormat.writeV5VectorPostings(perIndexComponents.version()))
             {
                 assert deletedOrdinals.isEmpty(); // V5 format does not support recording deleted ordinals
                 postingsPosition = new V5VectorPostingsWriter<T>(remappedPostings)
@@ -592,19 +596,19 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
 
         var actualType = compressor == null ? CompressionType.NONE : preferredCompression.type;
-        writePqHeader(writer, unitVectors, actualType);
+        writePqHeader(writer, unitVectors, actualType, indexContext.version());
         if (actualType == CompressionType.NONE)
             return writer.position();
 
         // save (outside the synchronized block, this is io-bound not CPU)
-        cv.write(writer, Version.current().onDiskFormat().jvectorFileFormatVersion());
+        cv.write(writer, indexContext.version().onDiskFormat().jvectorFileFormatVersion());
         return writer.position();
     }
 
-    static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type)
+    static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type, Version version)
     throws IOException
     {
-        if (Version.current().onDiskFormat().jvectorFileFormatVersion() >= 3)
+        if (version.onDiskFormat().jvectorFileFormatVersion() >= 3)
         {
             // version and optional fields
             writer.writeInt(CassandraDiskAnn.PQ_MAGIC);

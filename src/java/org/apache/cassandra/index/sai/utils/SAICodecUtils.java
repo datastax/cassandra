@@ -25,7 +25,6 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.index.CorruptIndexException;
-import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
@@ -56,10 +55,15 @@ public class SAICodecUtils
         return new OutputStreamDataOutput(os);
     }
 
-    public static void writeHeader(DataOutput out) throws IOException
+    public static void writeHeader(org.apache.cassandra.index.sai.disk.io.IndexOutput out) throws IOException
+    {
+        writeHeader(out, out.version());
+    }
+
+    public static void writeHeader(DataOutput out, Version version) throws IOException
     {
         writeBEInt(out, CODEC_MAGIC);
-        out.writeString(Version.current().toString());
+        out.writeString(version.toString());
     }
 
     public static int headerSize() {

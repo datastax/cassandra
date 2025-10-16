@@ -182,7 +182,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMinTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.min(a, b, validator, Version.current()))
+                     .reduce((a, b) -> TypeUtil.min(a, b, validator, version))
                      .orElse(null);
     }
 
@@ -199,7 +199,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMaxTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.max(a, b, validator, Version.current()))
+                     .reduce((a, b) -> TypeUtil.max(a, b, validator, version))
                      .orElse(null);
     }
 
@@ -483,7 +483,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return Version.current().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
+        return version.onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
 
     private int getEndShardForBounds(AbstractBounds<PartitionPosition> bounds)
