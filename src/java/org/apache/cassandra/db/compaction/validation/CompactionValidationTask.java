@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -36,6 +35,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
 
@@ -120,7 +120,7 @@ public class CompactionValidationTask
     private void doValidate()
     {
         logger.info("Starting compaction validation for task {}", id);
-        long startedNanos = System.nanoTime();
+        long startedNanos = Clock.Global.nanoTime();
         metrics.incrementValidation();
 
         Set<DecoratedKey> absentKeys = new HashSet<>();
@@ -152,14 +152,14 @@ public class CompactionValidationTask
         {
             metrics.incrementValidationWithoutAbsentKeys();
             logger.info("[Task {}] Compaction validation passed: all first/last keys found in update sstables, took {}ms",
-                        id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
+                        id, TimeUnit.NANOSECONDS.toMillis(Clock.Global.nanoTime() - startedNanos));
             return;
         }
 
         metrics.incrementAbsentKeys(absentKeys.size());
         if (validateAbsentKeysAgainstTombstones(absentKeys))
             logger.info("[Task {}] Compaction validation passed: all absent keys are properly obsoleted due to tombstones, took {} ms",
-                        id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
+                        id, TimeUnit.NANOSECONDS.toMillis(Clock.Global.nanoTime() - startedNanos));
     }
 
     private boolean isKeyAbsentInOutputSSTables(DecoratedKey key)
