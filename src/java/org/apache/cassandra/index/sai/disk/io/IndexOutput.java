@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
@@ -31,16 +32,23 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 public abstract class IndexOutput extends org.apache.lucene.store.IndexOutput
 {
     protected final ByteOrder order;
+    protected final Version version;
 
-    public IndexOutput(String resourceDescription, String name, ByteOrder order)
+    protected IndexOutput(String resourceDescription, String name, ByteOrder order, Version version)
     {
         super(resourceDescription, name);
         this.order = order;
+        this.version = version;
     }
 
     public ByteOrder order()
     {
         return order;
+    }
+
+    public Version version()
+    {
+        return version;
     }
 
     public final void writeBytes(ByteBuffer buf) throws IOException

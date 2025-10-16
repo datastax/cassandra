@@ -91,7 +91,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                                       TableMetrics tableMetrics) throws IOException
     {
         // We always write at the latest version (through what that version is can be configured for specific cases)
-        var onDiskFormat = Version.current().onDiskFormat();
+        var onDiskFormat = Version.current(indexDescriptor.descriptor.ksname).onDiskFormat();
         this.indexDescriptor = indexDescriptor;
         // Note: I think there is a silent assumption here. That is, the PK factory we use here must be for the current
         // format version, because that is what `IndexContext.keyFactory` always uses (see ctor)
@@ -126,7 +126,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     public void startPartition(DecoratedKey key, long position)
     {
         if (aborted) return;
-        
+
         currentKey = key;
 
         try
@@ -174,7 +174,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     public void staticRow(Row staticRow, long position)
     {
         if (aborted) return;
-        
+
         if (staticRow.isEmpty())
             return;
 
@@ -279,7 +279,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
     /**
      * Aborts all column index writers and, only if they have not yet completed, SSTable-level component writers.
-     * 
+     *
      * @param accumulator the initial exception thrown from the failed writer
      */
     @Override
@@ -300,12 +300,12 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
         // Mark the write aborted, so we can short-circuit any further operations on the component writers.
         aborted = true;
-        
+
         // For non-compaction, make any indexes involved in this transaction non-queryable, as they will likely not match the backing table.
         // For compaction: the compaction task should be aborted and new sstables will not be added to tracker
         if (fromIndex && opType != OperationType.COMPACTION)
             indices.forEach(StorageAttachedIndex::makeIndexNonQueryable);
-        
+
         for (PerIndexWriter perIndexWriter : perIndexWriters)
         {
             try
@@ -320,10 +320,10 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                 }
             }
         }
-        
+
         if (!tokenOffsetWriterCompleted)
         {
-            // If the token/offset files have already been written successfully, they can be reused later. 
+            // If the token/offset files have already been written successfully, they can be reused later.
             perSSTableWriter.abort(accumulator);
         }
     }

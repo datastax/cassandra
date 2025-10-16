@@ -110,7 +110,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                     ByteBuffer minTerm,
                     ByteBuffer maxTerm,
                     TermsDistribution termsDistribution,
-                    ComponentMetadataMap componentMetadatas)
+                    ComponentMetadataMap componentMetadatas,
+                    Version version)
     {
         // numRows can exceed Integer.MAX_VALUE because it is the count of unique term and segmentRowId pairs.
         Objects.requireNonNull(minKey);
@@ -118,7 +119,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         Objects.requireNonNull(minTerm);
         Objects.requireNonNull(maxTerm);
 
-        this.version = Version.current();
+        this.version = version;
         this.segmentRowIdOffset = segmentRowIdOffset;
         this.minSSTableRowId = minSSTableRowId;
         this.maxSSTableRowId = maxSSTableRowId;
@@ -206,7 +207,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                 {
                     if (metadata.termsDistribution != null)
                     {
-                        var tmp = new ModernResettableByteBuffersIndexOutput(1024, "");
+                        var tmp = new ModernResettableByteBuffersIndexOutput(1024, "", output.version());
                         metadata.termsDistribution.write(tmp);
                         output.writeInt(tmp.intSize());
                         tmp.copyTo(output);
