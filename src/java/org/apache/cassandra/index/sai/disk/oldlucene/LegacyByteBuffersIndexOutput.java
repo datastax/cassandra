@@ -26,6 +26,7 @@ import java.util.function.Consumer;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.DataInput;
@@ -52,16 +53,16 @@ public final class LegacyByteBuffersIndexOutput extends IndexOutput
 
     private LegacyByteBuffersDataOutput delegate;
 
-    public LegacyByteBuffersIndexOutput(LegacyByteBuffersDataOutput delegate, String resourceDescription, String name)
+    public LegacyByteBuffersIndexOutput(LegacyByteBuffersDataOutput delegate, String resourceDescription, String name, Version version)
     {
-        this(delegate, resourceDescription, name, new CRC32(), null);
+        this(delegate, resourceDescription, name, new CRC32(), null, version);
     }
 
     public LegacyByteBuffersIndexOutput(LegacyByteBuffersDataOutput delegate, String resourceDescription, String name,
                                         Checksum checksum,
-                                        Consumer<LegacyByteBuffersDataOutput> onClose)
+                                        Consumer<LegacyByteBuffersDataOutput> onClose, Version version)
     {
-        super(resourceDescription, name, ByteOrder.BIG_ENDIAN);
+        super(resourceDescription, name, ByteOrder.BIG_ENDIAN, version);
         this.delegate = delegate;
         this.checksum = checksum;
         this.onClose = onClose;
