@@ -200,27 +200,27 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         IndexWriter(Builder b, SequentialWriter dataWriter)
         {
             super(b);
-            
+
             // Check if encryption is enabled (following trie-index pattern)
             boolean compression = b.getComponents().contains(SSTableFormat.Components.COMPRESSION_INFO);
             TableMetadata metadata = b.getTableMetadataRef().getLocal();
             CompressionParams params = metadata.params.compression;
             ICompressor encryptor = compression ? params.getSstableCompressor().encryptionOnly() : null;
-            
+
             if (encryptor != null)
             {
                 // Create encrypted writers and configure FileHandle builders for encryption
                 CompressionMetadata compressionMetadata = CompressionMetadata.encryptedOnly(params);
-                rowIndexWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.ROW_INDEX), 
-                                                               b.getIOOptions().writerOptions, 
+                rowIndexWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.ROW_INDEX),
+                                                               b.getIOOptions().writerOptions,
                                                                encryptor);
                 rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
                                                   .withMmappedRegionsCache(b.getMmappedRegionsCache())
                                                   .withCompressionMetadata(compressionMetadata)
                                                   .encryptionOnly();
-                
-                partitionIndexWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX), 
-                                                                    b.getIOOptions().writerOptions, 
+
+                partitionIndexWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX),
+                                                                    b.getIOOptions().writerOptions,
                                                                     encryptor);
                 partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
                                                         .withMmappedRegionsCache(b.getMmappedRegionsCache())
@@ -333,7 +333,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             {
                 partitionIndex.complete();
                 partitionIndexCompleted = true;
-                
+
                 // Update FileHandle builders for encrypted writers
                 rowIndexWriter.updateFileHandle(rowIndexFHBuilder);
                 partitionIndexWriter.updateFileHandle(partitionIndexFHBuilder);
@@ -347,6 +347,8 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         PartitionIndex completedPartitionIndex()
         {
             complete();
+            rowIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
+            partitionIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
             try
             {
                 return PartitionIndex.load(partitionIndexFHBuilder, metadata.getLocal().partitioner, false, descriptor.version.getByteComparableVersion());
