@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -379,10 +380,10 @@ public class IndexHints
                                           TableMetadata table,
                                           IndexRegistry indexRegistry)
     {
-        if (included != null && included.size() > Short.MAX_VALUE)
+        if (included != null && included.size() > maxIncludedOrExcludedIndexCount())
             throw new InvalidRequestException(TOO_MANY_INDEXES_ERROR + included.size());
 
-        if (excluded != null && excluded.size() > Short.MAX_VALUE)
+        if (excluded != null && excluded.size() > maxIncludedOrExcludedIndexCount())
             throw new InvalidRequestException(TOO_MANY_INDEXES_ERROR + excluded.size());
 
         IndexHints hints = IndexHints.create(fetchIndexes(included, table, indexRegistry),
@@ -406,6 +407,14 @@ public class IndexHints
             throw new InvalidRequestException("Index hints are not supported in clusters below DS 12.");
 
         return hints;
+    }
+
+    private static int maxIncludedOrExcludedIndexCount()
+    {
+        int guardrail = DatabaseDescriptor.getGuardrailsConfig().getSecondaryIndexesPerTableFailThreshold();
+
+        // If no guardrail is configured, use a value that safely fits in a single byte for serialization:
+        return guardrail > 0 ? guardrail : 128;
     }
 
     private static Set<IndexMetadata> fetchIndexes(Set<QualifiedName> indexNames, TableMetadata table, IndexRegistry indexRegistry)
@@ -583,9 +592,9 @@ public class IndexHints
                 return;
 
             int n = indexes.size();
-            assert n < Short.MAX_VALUE : TOO_MANY_INDEXES_ERROR + n;
+            assert n < maxIncludedOrExcludedIndexCount() : TOO_MANY_INDEXES_ERROR + n;
 
-            out.writeVInt(n);
+            out.writeVInt32(n);
             for (IndexMetadata index : indexes)
                 IndexMetadata.serializer.serialize(index, out, version);
         }
