@@ -194,7 +194,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
-        this.planFactory = new Plan.Factory(tableMetrics, this, command.rowFilter().indexHints);
+        this.planFactory = new Plan.Factory(cfs.metadata.keyspace, tableMetrics, this, command.rowFilter().indexHints);
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -623,7 +623,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // Only the disk format limits the features of the index, but we also fail for in memory indexes because they
         // will fail when flushed.
-        if (orderer.isBM25() && !Version.current().onOrAfter(Version.BM25_EARLIEST))
+        if (orderer.isBM25() && !orderer.context.version().onOrAfter(Version.BM25_EARLIEST))
         {
             throw new FeatureNeedsIndexRebuildException(String.format(INDEX_VERSION_DOES_NOT_SUPPORT_BM25,
                                                                       orderer.context.getIndexName()));

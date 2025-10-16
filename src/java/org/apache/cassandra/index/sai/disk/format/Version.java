@@ -20,11 +20,15 @@ package org.apache.cassandra.index.sai.disk.format;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -38,6 +42,7 @@ import org.apache.cassandra.index.sai.disk.v7.V7OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -48,6 +53,7 @@ import static com.google.common.base.Preconditions.checkArgument;
  */
 public class Version implements Comparable<Version>
 {
+    private static final Logger LOGGER = LoggerFactory.getLogger(Version.class);
     // 6.8 formats
     public static final Version AA = new Version("aa", V1OnDiskFormat.instance, Version::aaFileNameFormat);
     // Stargazer
@@ -79,10 +85,11 @@ public class Version implements Comparable<Version>
     public static final Version JVECTOR_EARLIEST = CA;
     public static final Version BM25_EARLIEST = EC;
     public static final Version LATEST = ALL.get(0);
-    // The current version can be configured to be an earlier version to support partial upgrades that don't
-    // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
-    // use reflection to change it and safely publish across threads.
-    public static volatile Version CURRENT = parse(currentVersionProperty());
+
+    // This is volatile rather than final so that tests may use reflection to change it and safely publish across threads,
+    // but it should not be changed outside of tests.
+    @SuppressWarnings("FieldMayBeFinal")
+    private static volatile Selector SELECTOR = Selector.fromProperty();
 
     private static final Pattern GENERATION_PATTERN = Pattern.compile("\\d+");
 
@@ -97,11 +104,6 @@ public class Version implements Comparable<Version>
         this.fileNameFormatter = fileNameFormatter;
     }
 
-    private static String currentVersionProperty()
-    {
-        return CassandraRelevantProperties.SAI_CURRENT_VERSION.getString();
-    }
-
     public static Version parse(String input)
     {
         checkArgument(input != null);
@@ -113,9 +115,14 @@ public class Version implements Comparable<Version>
         throw new IllegalArgumentException("Unrecognized SAI version string " + input);
     }
 
-    public static Version current()
+    /**
+     * @param keyspace the keyspace for which to select a version, assumed to belong to an existing keyspace.
+     * @return the version to use on new SSTables for the provided keyspace.
+     */
+    public static Version current(String keyspace)
     {
-        return CURRENT;
+        assert keyspace != null : "Keyspace name must not be null";
+        return SELECTOR.select(keyspace);
     }
 
     /**
@@ -123,9 +130,9 @@ public class Version implements Comparable<Version>
      * do not exceed the system's filename length limit (defined in {@link SchemaConstants#FILENAME_LENGTH}).
      * This accounts for all additional components in the filename.
      */
-    public static int calculateIndexNameAllowedLength()
+    public static int calculateIndexNameAllowedLength(String keyspace)
     {
-        int addedLength = getAddedLengthFromDescriptorAndVersion();
+        int addedLength = getAddedLengthFromDescriptorAndVersion(keyspace);
         assert addedLength < SchemaConstants.FILENAME_LENGTH;
         return SchemaConstants.FILENAME_LENGTH - addedLength;
     }
@@ -136,10 +143,10 @@ public class Version implements Comparable<Version>
      *
      * @return the length of the added prefixes and suffixes
      */
-    private static int getAddedLengthFromDescriptorAndVersion()
+    private static int getAddedLengthFromDescriptorAndVersion(String keyspace)
     {
         // Prefixes and suffixes constructed by Version.stargazerFileNameFormat
-        int versionNameLength = current().toString().length();
+        int versionNameLength = current(keyspace).toString().length();
         // room for up to 999 generations
         int generationLength = 3 + SAI_SEPARATOR.length();
         int addedLength = SAI_DESCRIPTOR.length()
@@ -310,6 +317,51 @@ public class Version implements Comparable<Version>
             indexName = componentStr.substring(firstSepIdx + 1, lastSepIdx);
 
         return Optional.of(new ParsedFileName(ComponentsBuildId.of(AA, 0), indexComponentType, indexName));
+    }
+
+    /**
+     * This is an interface for selecting the appropriate version of the on-disk format to use.
+     * This is going to be used by CNDB to inject the version of SAI to use for a given tenant
+     */
+    public interface Selector
+    {
+        /**
+         * Default version used by {@link #DEFAULT}.
+         */
+        Version DEFAULT_VERSION = Version.parse(CassandraRelevantProperties.SAI_CURRENT_VERSION.getString());
+
+        /**
+         * Default version selector that uses the same version for all keyspaces.
+         */
+        Selector DEFAULT = keyspace -> DEFAULT_VERSION;
+
+        /**
+         * @param keyspace the keyspace for which to select a version, assumed to belong to an existing keyspace.
+         * @return the version of the on-disk format to use for the provided keyspace, it should not be null.
+         */
+        @Nonnull
+        Version select(@Nonnull String keyspace);
+
+        static Selector fromProperty()
+        {
+            try
+            {
+                String selectorClass = CassandraRelevantProperties.SAI_VERSION_SELECTOR_CLASS.getString();
+                if (selectorClass.isEmpty())
+                {
+                    return Selector.DEFAULT;
+                }
+                else
+                {
+                    LOGGER.info("Using SAI version selector: {}", selectorClass);
+                    return FBUtilities.construct(selectorClass, "SAI version selector");
+                }
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     //

@@ -40,6 +40,7 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
 
@@ -386,9 +387,9 @@ public class V5VectorPostingsWriter<T>
     /**
      * @see RemappedPostings
      */
-    public static <T> RemappedPostings remapForMemtable(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
+    public static <T> RemappedPostings remapForMemtable(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap, Version version)
     {
-        assert V5OnDiskFormat.writeV5VectorPostings();
+        assert V5OnDiskFormat.writeV5VectorPostings(version);
 
         BiMap<Integer, Integer> ordinalMap = HashBiMap.create();
         Int2IntHashMap extraPostings = new Int2IntHashMap(Integer.MIN_VALUE);
