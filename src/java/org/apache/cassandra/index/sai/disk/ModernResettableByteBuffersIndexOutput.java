@@ -23,6 +23,7 @@ import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.lucene.store.ByteBuffersDataInput;
@@ -43,9 +44,9 @@ public class ModernResettableByteBuffersIndexOutput extends ResettableByteBuffer
     private final ByteBuffersIndexOutput bbio;
     private final ByteBuffersDataOutput delegate;
 
-    public ModernResettableByteBuffersIndexOutput(int expectedSize, String name)
+    public ModernResettableByteBuffersIndexOutput(int expectedSize, String name, Version version)
     {
-        super("", name, ByteOrder.LITTLE_ENDIAN);
+        super("", name, ByteOrder.LITTLE_ENDIAN, version);
         delegate = new ByteBuffersDataOutput(expectedSize);
         bbio = new ByteBuffersIndexOutput(delegate, "", name + "-bb");
     }

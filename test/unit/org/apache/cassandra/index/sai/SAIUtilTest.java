@@ -16,8 +16,10 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.stream.Collectors;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -25,40 +27,66 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.cql3.Ordering;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.assertj.core.api.Assertions;
 
 @RunWith(Parameterized.class)
 public class SAIUtilTest
 {
     @Parameterized.Parameter
-    public Version version;
+    public Version currentVersion;
 
-    @Parameterized.Parameters(name = "{0}")
+    @Parameterized.Parameter(1)
+    public Version keyspaceVersion;
+
+    private String keyspaceWithVersion;
+
+    @Parameterized.Parameters(name = "currentVersion={0} keyspaceVersion={1}")
     public static Collection<Object[]> data()
     {
-        return Version.ALL.stream()
-                          .map(v -> new Object[]{ v })
-                          .collect(Collectors.toList());
+        Collection<Object[]> parameters = new ArrayList<>();
+        for (Version currentVersion : Version.ALL)
+        {
+            for (Version keyspaceVersion : Version.ALL)
+            {
+                parameters.add(new Object[]{currentVersion, keyspaceVersion});
+            }
+        }
+        return parameters;
     }
 
     @Before
-    public void setCurrentVersion() throws Throwable
+    public void setVersionSelector()
     {
-        SAIUtil.setCurrentVersion(version);
+        keyspaceWithVersion = "ks_" + keyspaceVersion;
+        Map<String, Version> versionsPerKeyspace = new HashMap<>() {{ put(keyspaceWithVersion, keyspaceVersion); }};
+        SAIUtil.setCurrentVersion(currentVersion, versionsPerKeyspace);
     }
 
     @Test
     public void testCurrentVersion()
     {
-        Assertions.assertThat(Version.current())
-                  .isEqualTo(version);
+        Assertions.assertThat(SAIUtil.currentVersion())
+                  .isEqualTo(currentVersion);
+        Assertions.assertThat(Version.current("ks"))
+                  .isEqualTo(currentVersion);
+        Assertions.assertThat(Version.current(keyspaceWithVersion))
+                  .isEqualTo(keyspaceVersion);
     }
 
     @Test
     public void testANNUseSyntheticScoreProperty()
     {
-        Assertions.assertThat(Ordering.Ann.useSyntheticScore())
-                  .isEqualTo(Ordering.Ann.useSyntheticScore(version));
+        // with a column belonging to a keyspace without a specific version
+        ColumnMetadata column = ColumnMetadata.regularColumn("ks", "cf", "col", FloatType.instance);
+        Assertions.assertThat(new Ordering.Ann(column, null, null).isScored())
+                  .isEqualTo(Ordering.Ann.useSyntheticScore(currentVersion));
+
+        // with a column belonging to the keyspace with a specific version
+        column = ColumnMetadata.regularColumn(keyspaceWithVersion, "cf", "col", FloatType.instance);
+        Assertions.assertThat(new Ordering.Ann(column, null, null).isScored())
+                  .isEqualTo(Ordering.Ann.useSyntheticScore(keyspaceVersion));
     }
 }
