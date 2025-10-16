@@ -112,7 +112,7 @@ public class SortedTermsWriter implements Closeable
         SAICodecUtils.writeHeader(this.trieOutput);
         this.trieWriter = IncrementalTrieWriter.open(trieSerializer, trieOutput.asSequentialWriter(), TypeUtil.BYTE_COMPARABLE_VERSION);
         this.termsOutput = termsDataComponent.openOutput();
-        SAICodecUtils.writeHeader(termsOutput);
+        SAICodecUtils.writeHeader(termsOutput, termsDataComponent.parent().version());
         this.bytesStartFP = termsOutput.getFilePointer();
         this.offsetsWriter = termsDataBlockOffsets;
     }
