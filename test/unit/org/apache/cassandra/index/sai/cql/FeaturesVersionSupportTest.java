@@ -31,6 +31,7 @@ import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
@@ -83,24 +84,25 @@ public class FeaturesVersionSupportTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX ON %s(x) USING 'StorageAttachedIndex'");
 
         // vector index creation will be rejected in older versions
-        String idx = createIndexAsync("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexBuilds(idx);
-        boolean isIndexQueryable = isIndexQueryable(keyspace(), idx);
+        String createIndexQuery = "CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'";
         if (version.onOrAfter(Version.JVECTOR_EARLIEST))
         {
-            assertThat(isIndexQueryable).isTrue();
+            String idx = createIndex(createIndexQuery);
+            assertThat(isIndexQueryable(keyspace(), idx)).isTrue();
 
             // the index is marked as queryable, so we should be able to query it
             assertRows(execute("SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5, 4.5] LIMIT 3"), row(2), row(1), row(3));
             assertRows(execute("SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5, 4.5] LIMIT 3 WITH ann_options = {'rerank_k':3}"), row(2), row(1), row(3));
+
+            dropIndex("DROP INDEX %s." + idx);
         }
         else
         {
-            assertThat(isIndexQueryable).isFalse();
+            Assertions.assertThatThrownBy(() -> createIndex(createIndexQuery))
+                      .hasMessageContaining(StorageAttachedIndex.vectorUnsupportedByVersionError(version));
         }
 
         // vector index creation will be accepted on newer versions, even if there is still another index in the older version
-        dropIndex("DROP INDEX %s." + idx);
         SAIUtil.setCurrentVersion(Version.LATEST);
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
@@ -131,24 +133,25 @@ public class FeaturesVersionSupportTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX ON %s(x) USING 'StorageAttachedIndex'");
 
         // vector index creation will be rejected in older versions
-        String idx = createIndexAsync("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexBuilds(idx);
-        boolean isIndexQueryable = isIndexQueryable(keyspace(), idx);
+        String createIndexQuery = "CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}";
         if (version.onOrAfter(Version.JVECTOR_EARLIEST))
         {
-            assertThat(isIndexQueryable).isTrue();
+            String idx = createIndex(createIndexQuery);
+            assertThat(isIndexQueryable(keyspace(), idx)).isTrue();
 
             // the index is marked as queryable, so we should be able to query it
             assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE GEO_DISTANCE(v, [5,5]) < 157000"), row(2), row(3));
             assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE GEO_DISTANCE(v, [5,5]) < 157011"), row(1), row(2), row(3));
+
+            dropIndex("DROP INDEX %s." + idx);
         }
         else
         {
-            assertThat(isIndexQueryable).isFalse();
+            Assertions.assertThatThrownBy(() -> createIndex(createIndexQuery))
+                      .hasMessageContaining(StorageAttachedIndex.vectorUnsupportedByVersionError(version));
         }
 
         // vector index creation will be accepted on newer versions, even if there is still an index in the older version
-        dropIndex("DROP INDEX %s." + idx);
         SAIUtil.setCurrentVersion(Version.LATEST);
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
 

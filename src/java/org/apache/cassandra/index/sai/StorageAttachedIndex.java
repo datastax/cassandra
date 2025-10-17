@@ -356,6 +356,9 @@ public class StorageAttachedIndex implements Index
         }
         else if (type.isVector())
         {
+            if (!Version.current(metadata.keyspace).onOrAfter(Version.JVECTOR_EARLIEST))
+                throw new InvalidRequestException(vectorUnsupportedByVersionError(Version.current(metadata.keyspace)));
+
             if (type.valueLengthIfFixed() == 4 && config.getSimilarityFunction() == VectorSimilarityFunction.COSINE)
                 throw new InvalidRequestException("Cosine similarity is not supported for single-dimension vectors");
 
@@ -452,12 +455,7 @@ public class StorageAttachedIndex implements Index
 
         if (indexContext.isVector() && indexContext.version().compareTo(Version.JVECTOR_EARLIEST) < 0)
         {
-            throw new FeatureNeedsIndexRebuildException(String.format("The current configured on-disk format version %s does not support vector indexes. " +
-                                                                      "The minimum version that supports vectors is %s. " +
-                                                                      "The on-disk format version can be set via the -D%s system property.",
-                                                                      indexContext.version(),
-                                                                      Version.JVECTOR_EARLIEST,
-                                                                      CassandraRelevantProperties.SAI_CURRENT_VERSION.name()));
+            throw new FeatureNeedsIndexRebuildException(vectorUnsupportedByVersionError(indexContext.version()));
         }
 
         // stop in-progress compaction tasks to prevent compacted sstables not being indexed.
@@ -500,6 +498,17 @@ public class StorageAttachedIndex implements Index
 
         logger.info(indexContext.logMessage("Submitting {} parallel initial index builds over {} total sstables..."), futures.size(), nonIndexed.size());
         return FutureCombiner.allOf(futures);
+    }
+
+    @VisibleForTesting
+    public static String vectorUnsupportedByVersionError(Version currentVersion)
+    {
+        return String.format("The current configured on-disk format version %s does not support vector indexes. " +
+                             "The minimum version that supports vectors is %s. " +
+                             "The on-disk format version can be set via the -D%s system property.",
+                             currentVersion,
+                             Version.JVECTOR_EARLIEST,
+                             CassandraRelevantProperties.SAI_CURRENT_VERSION.name());
     }
 
     /**
