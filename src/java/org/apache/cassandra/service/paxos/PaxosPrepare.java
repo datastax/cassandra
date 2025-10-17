@@ -52,6 +52,12 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.paxos.PaxosPrepare.Status.Outcome;
 import org.apache.cassandra.tracing.Tracing;
@@ -1021,11 +1027,33 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
         @Override
         public void doVerb(Message<Request> message)
         {
+            // Initialize the sensor and set ExecutorLocals
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.table.keyspace);
+            Context context = Context.from(message.payload.table);
+
+            // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
+            sensors.registerSensor(context, Type.READ_BYTES);
+            sensors.registerSensor(context, Type.WRITE_BYTES);
+            sensors.registerSensor(context, Type.INTERNODE_BYTES);
+            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+            RequestTracker.instance.set(sensors);
+
             Response response = execute(message.payload, message.from());
-            if (response == null)
-                MessagingService.instance().respondWithFailure(UNKNOWN, message);
+
+            // calculate outbound internode bytes before adding the sensor to the response
+            if (response != null)
+            {
+                Message.Builder<Response> reply = message.responseWithBuilder(response);
+                int size = reply.currentPayloadSize(MessagingService.current_version);
+                sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+                sensors.syncAllSensors();
+                SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
+                MessagingService.instance().send(reply.build(), message.from());
+            }
             else
-                MessagingService.instance().respond(response, message);
+            {
+                MessagingService.instance().respondWithFailure(UNKNOWN, message);
+            }
         }
 
         static Response execute(AbstractRequest<?> request, InetAddressAndPort from)
