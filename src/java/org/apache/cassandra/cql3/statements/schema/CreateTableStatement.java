@@ -104,6 +104,18 @@ public final class CreateTableStatement extends AlterSchemaStatement
         return useCompactStorage;
     }
 
+    // CNDB-14199: the method is needed for CNDB
+    public boolean containsDateRangeTypeColumn()
+    {
+        for (CQL3Type.Raw columnType : rawColumns.values())
+        {
+            if (columnType.isDateRange())
+                return true;
+        }
+
+        return false;
+    }
+
     @Override
     public void validate(QueryState state)
     {

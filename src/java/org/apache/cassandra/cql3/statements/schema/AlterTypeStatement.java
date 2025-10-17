@@ -103,6 +103,13 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, typeName);
     }
 
+    // CNDB-14199: the method is needed for CNDB
+    public boolean containsDateRangeTypeColumn()
+    {
+        // Classes that need this method exposed have to override it
+        return false;
+    }
+
     private static final class AddField extends AlterTypeStatement
     {
         private final FieldIdentifier fieldName;
@@ -151,6 +158,12 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
             type.validate(state, "Field " + fieldName);
 
             return new UserType(keyspaceName, userType.name, fieldNames, fieldTypes, true);
+        }
+
+        @Override
+        public boolean containsDateRangeTypeColumn()
+        {
+            return type.isDateRange();
         }
 
         private static Collection<TableMetadata> findTablesReferencingTypeInPartitionKey(KeyspaceMetadata keyspace, UserType userType)
