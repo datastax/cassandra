@@ -129,6 +129,18 @@ public final class CreateTableStatement extends AlterSchemaStatement
         return useCompactStorage;
     }
 
+    // CNDB-14199: the method is needed for CNDB
+    public boolean containsDateRangeTypeColumn()
+    {
+        for (ColumnProperties.Raw columnType : rawColumns.values())
+        {
+            if (columnType.rawType.isDateRange())
+                return true;
+        }
+
+        return false;
+    }
+
     public Keyspaces apply(Keyspaces schema)
     {
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
