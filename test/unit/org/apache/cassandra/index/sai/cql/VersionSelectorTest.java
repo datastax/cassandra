@@ -16,22 +16,22 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
+import java.util.function.Function;
 
-import org.junit.Assume;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.assertj.core.api.Assertions;
 
@@ -46,15 +46,37 @@ import static java.lang.String.format;
 public class VersionSelectorTest extends SAITester
 {
     public static final String TABLE = "tbl";
-    private static final Logger logger = LoggerFactory.getLogger(VersionSelectorTest.class);
 
     @Parameterized.Parameter
     public Version globalCurrentVersion;
 
-    @Parameterized.Parameters(name = "globalCurrentVersion={0}")
+    @Parameterized.Parameter(1)
+    public Operation operation;
+
+    public enum Operation
+    {
+        CREATE,
+        REBUILD
+    }
+
+    @Parameterized.Parameters(name = "globalCurrentVersion={0} operation={1}")
     public static Collection<Object[]> data()
     {
-        return Version.ALL.stream().map(v -> new Object[]{ v }).collect(Collectors.toList());
+        Collection<Object[]> params = new ArrayList<>();
+        for (Operation operation : Operation.values())
+        {
+            for (Version version : Version.ALL)
+            {
+                params.add(new Object[]{ version, operation });
+            }
+        }
+        return params;
+    }
+
+    @Before
+    public void before()
+    {
+        SAIUtil.setCurrentVersion(globalCurrentVersion);
     }
 
     @Test
@@ -62,13 +84,13 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int PRIMARY KEY, v int)");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex'");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (0, 0)");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (1, 1)");
-        }).withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v>=0", 2);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v>0", 1);
-        });
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex'"))
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v>=0", 2);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v>0", 1);
+          });
     }
 
     @Test
@@ -76,17 +98,17 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex'");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 0, 0)");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 1, 1)");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 0, 0)");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 1, 2)");
-        }).withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v>=0", 4);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v>0", 2);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v>=0", 2);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v>0", 1);
-        });
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex'"))
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v>=0", 4);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v>0", 2);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v>=0", 2);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v>0", 1);
+          });
     }
 
     @Test
@@ -94,15 +116,15 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int PRIMARY KEY, v text)");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex'");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (0, '0')");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (1, '0')");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (2, '1')");
-        }).withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='0'", 2);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='1'", 1);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='2'", 0);
-        });
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex'"))
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='0'", 2);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='1'", 1);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='2'", 0);
+          });
     }
 
     @Test
@@ -110,21 +132,21 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int, c int, v text, PRIMARY KEY (k, c))");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex'");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 0, '0')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 1, '0')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 2, '1')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 0, '0')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 1, '0')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 2, '1')");
-        }).withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='0'", 4);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='1'", 2);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='2'", 0);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='0'", 2);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='1'", 1);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='2'", 0);
-        });
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex'"))
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='0'", 4);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='1'", 2);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='2'", 0);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='0'", 2);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='1'", 1);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='2'", 0);
+          });
     }
 
     @Test
@@ -132,26 +154,27 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int PRIMARY KEY, v text)");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
-                               "WITH OPTIONS = {" +
-                               "'index_analyzer': '{" +
-                               "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
-                               "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
-                               "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
-                               "  \"charFilters\" : []}', " +
-                               "'query_analyzer': '{" +
-                               "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
-                               "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (1, 'astra quick fox')");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (2, 'astra2 quick fox')");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (3, 'astra3 quick foxes')");
-        }).withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='ast'", 3);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='astra'", 3);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='astra2'", 1);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='fox'", 3);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='foxes'", 1);
-        });
+        }).withIndex(keyspace -> createIndex(keyspace,
+                                             "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
+                                             "WITH OPTIONS = {" +
+                                             "'index_analyzer': '{" +
+                                             "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                                             "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
+                                             "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
+                                             "  \"charFilters\" : []}', " +
+                                             "'query_analyzer': '{" +
+                                             "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                                             "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}"))
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='ast'", 3);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='astra'", 3);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='astra2'", 1);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='fox'", 3);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='foxes'", 1);
+          });
     }
 
     @Test
@@ -159,34 +182,35 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int, c int, v text, PRIMARY KEY (k, c))");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
-                               "WITH OPTIONS = {" +
-                               "'index_analyzer': '{" +
-                               "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
-                               "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
-                               "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
-                               "  \"charFilters\" : []}', " +
-                               "'query_analyzer': '{" +
-                               "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
-                               "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 1, 'astra quick fox')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 2, 'astra2 quick fox')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 3, 'astra3 quick foxes')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 1, 'astra quick fox')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 2, 'astra2 quick fox')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 3, 'astra3 quick foxes')");
-        }).withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='ast'", 6);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='astra'", 6);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='astra2'", 2);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='fox'", 6);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE v='foxes'", 2);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='ast'", 3);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='astra'", 3);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='astra2'", 1);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='fox'", 3);
-            assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='foxes'", 1);
-        });
+        }).withIndex(keyspace -> createIndex(keyspace,
+                                             "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
+                                             "WITH OPTIONS = {" +
+                                             "'index_analyzer': '{" +
+                                             "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                                             "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
+                                             "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
+                                             "  \"charFilters\" : []}', " +
+                                             "'query_analyzer': '{" +
+                                             "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                                             "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}"))
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='ast'", 6);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='astra'", 6);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='astra2'", 2);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='fox'", 6);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE v='foxes'", 2);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='ast'", 3);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='astra'", 3);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='astra2'", 1);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='fox'", 3);
+              assertRowCount(keyspace, "SELECT * FROM %s WHERE k = 0 AND v='foxes'", 1);
+          });
     }
 
     @Test
@@ -194,16 +218,19 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>)");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
-                               "WITH OPTIONS = {'similarity_function' : 'euclidean'}");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (0, [1.0, 2.0])");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (1, [2.0, 3.0])");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (2, [3.0, 4.0])");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (3, [4.0, 5.0])");
-        }, Version.JVECTOR_EARLIEST, "JVector is not supported in V2OnDiskFormat").withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5] LIMIT 3", 3);
-            assertRowCount(keyspace, "SELECT k FROM %s WHERE GEO_DISTANCE(v, [2.5, 3.5]) < 157000", 2);
-        }, Version.JVECTOR_EARLIEST, "INDEX_NOT_AVAILABLE");
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
+                                                       "WITH OPTIONS = {'similarity_function' : 'euclidean'}"),
+                     Version.JVECTOR_EARLIEST,
+                     StorageAttachedIndex::vectorUnsupportedByVersionError,
+                     "JVector is not supported in V2OnDiskFormat")
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5] LIMIT 3", 3);
+              assertRowCount(keyspace, "SELECT k FROM %s WHERE GEO_DISTANCE(v, [2.5, 3.5]) < 157000", 2);
+          }, Version.JVECTOR_EARLIEST, "INDEX_NOT_AVAILABLE");
     }
 
     @Test
@@ -211,8 +238,6 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int, c int, v vector<float, 2>, PRIMARY KEY (k, c))");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
-                               "WITH OPTIONS = {'similarity_function' : 'euclidean'}");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 0, [1.0, 2.0])");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 1, [2.0, 3.0])");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 2, [3.0, 4.0])");
@@ -221,12 +246,17 @@ public class VersionSelectorTest extends SAITester
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 1, [2.0, 3.0])");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 2, [3.0, 4.0])");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 3, [4.0, 5.0])");
-        }, Version.JVECTOR_EARLIEST, "JVector is not supported in V2OnDiskFormat").withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5] LIMIT 3", 3);
-            assertRowCount(keyspace, "SELECT k FROM %s WHERE GEO_DISTANCE(v, [2.5, 3.5]) < 157000", 4);
-            assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v ANN OF [2.5, 3.5] LIMIT 3", 3);
-            assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 AND GEO_DISTANCE(v, [2.5, 3.5]) < 157000", 2);
-        }, Version.JVECTOR_EARLIEST, "INDEX_NOT_AVAILABLE");
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
+                                                       "WITH OPTIONS = {'similarity_function' : 'euclidean'}"),
+                     Version.JVECTOR_EARLIEST,
+                     StorageAttachedIndex::vectorUnsupportedByVersionError,
+                     "JVector is not supported in V2OnDiskFormat")
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5] LIMIT 3", 3);
+              assertRowCount(keyspace, "SELECT k FROM %s WHERE GEO_DISTANCE(v, [2.5, 3.5]) < 157000", 4);
+              assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v ANN OF [2.5, 3.5] LIMIT 3", 3);
+              assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 AND GEO_DISTANCE(v, [2.5, 3.5]) < 157000", 2);
+          }, Version.JVECTOR_EARLIEST, "INDEX_NOT_AVAILABLE");
     }
 
     @Test
@@ -234,20 +264,20 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int PRIMARY KEY, v text)");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
-                               "WITH OPTIONS = {" +
-                               "'index_analyzer': '{" +
-                               "\"tokenizer\" : {\"name\" : \"standard\"}, " +
-                               "\"filters\" : [{\"name\" : \"porterstem\"}]}'}");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (1, 'apple')");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (2, 'orange')");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (3, 'banana')");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (4, 'apple')");
-        }).withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3", 2);
-            assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'orange' LIMIT 3", 1);
-            assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'kiwi' LIMIT 3", 0);
-        }, Version.BM25_EARLIEST, "FEATURE_NEEDS_INDEX_REBUILD");
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
+                                                       "WITH OPTIONS = {" +
+                                                       "'index_analyzer': '{" +
+                                                       "\"tokenizer\" : {\"name\" : \"standard\"}, " +
+                                                       "\"filters\" : [{\"name\" : \"porterstem\"}]}'}"))
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3", 2);
+              assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'orange' LIMIT 3", 1);
+              assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'kiwi' LIMIT 3", 0);
+          }, Version.BM25_EARLIEST, "FEATURE_NEEDS_INDEX_REBUILD");
     }
 
     @Test
@@ -255,11 +285,6 @@ public class VersionSelectorTest extends SAITester
     {
         test(keyspace -> {
             createTable(keyspace, "CREATE TABLE %s (k int, c int, v text, PRIMARY KEY (k, c))");
-            createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
-                               "WITH OPTIONS = {" +
-                               "'index_analyzer': '{" +
-                               "\"tokenizer\" : {\"name\" : \"standard\"}, " +
-                               "\"filters\" : [{\"name\" : \"porterstem\"}]}'}");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 1, 'apple')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 2, 'orange')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (0, 3, 'banana')");
@@ -268,14 +293,19 @@ public class VersionSelectorTest extends SAITester
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 2, 'orange')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 3, 'banana')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 4, 'apple')");
-        }).withQueries(keyspace -> {
-            assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3", 3);
-            assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'orange' LIMIT 3", 2);
-            assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'kiwi' LIMIT 3", 0);
-            assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v BM25 OF 'apple' LIMIT 3", 2);
-            assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v BM25 OF 'orange' LIMIT 3", 1);
-            assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v BM25 OF 'kiwi' LIMIT 3", 0);
-        }, Version.BM25_EARLIEST, "FEATURE_NEEDS_INDEX_REBUILD");
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
+                                                       "WITH OPTIONS = {" +
+                                                       "'index_analyzer': '{" +
+                                                       "\"tokenizer\" : {\"name\" : \"standard\"}, " +
+                                                       "\"filters\" : [{\"name\" : \"porterstem\"}]}'}"))
+          .withQueries(keyspace -> {
+              assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3", 3);
+              assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'orange' LIMIT 3", 2);
+              assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'kiwi' LIMIT 3", 0);
+              assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v BM25 OF 'apple' LIMIT 3", 2);
+              assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v BM25 OF 'orange' LIMIT 3", 1);
+              assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v BM25 OF 'kiwi' LIMIT 3", 0);
+          }, Version.BM25_EARLIEST, "FEATURE_NEEDS_INDEX_REBUILD");
     }
 
     @Override
@@ -300,45 +330,62 @@ public class VersionSelectorTest extends SAITester
         assertRowCount(execute(keyspace, query), expected);
     }
 
-    /**
-     * @param schemaCreator the initial schema and data
-     */
-    private Tester test(Consumer<String> schemaCreator)
+    private TestCase test(Consumer<String> tableCreator)
     {
-        return test(schemaCreator, Version.AA, null);
+        return Operation.CREATE == operation
+               ? new CreateIndexTestCase(tableCreator)
+               : new RebuildIndexTestCase(tableCreator);
     }
 
-    /**
-     * @param schemaCreator the initial schema and data
-     * @param minVersionForIndexing the minimum index version required to support creating an index with the tested features
-     * @param indexingErrorIfUnsupported the error message expected during indexing if the index version does not support the tested features
-     */
-    private Tester test(Consumer<String> schemaCreator, Version minVersionForIndexing, String indexingErrorIfUnsupported)
+    private abstract class TestCase
     {
-        return new Tester(schemaCreator, minVersionForIndexing, indexingErrorIfUnsupported);
-    }
-
-    private class Tester
-    {
-        private final Consumer<String> schemaCreator;
-        private final Version minVersionForIndexing;
-        private final String indexingErrorIfUnsupported;
+        protected final Map<String, Version> versionsPerKeyspace;
+        protected Consumer<String> indexCreator;
+        protected Version minVersionForIndexing;
+        protected Function<Version, String> createIndexErrorIfUnsupported;
+        protected String rebuildIndexErrorIfUnsupported;
 
         /**
-         * @param schemaCreator the initial schema and data
-         * @param minVersionForIndexing the minimum index version required to support creating an index with the tested features
-         * @param indexingErrorIfUnsupported the error message expected during indexing if the index version does not support the tested features
+         * @param tableCreator the initial schema and data
          */
-        Tester(Consumer<String> schemaCreator,
-               Version minVersionForIndexing,
-               String indexingErrorIfUnsupported)
+        TestCase(Consumer<String> tableCreator)
         {
-            // we can skip the test case if the starting version does not support the tested index
-            Assume.assumeTrue(globalCurrentVersion.onOrAfter(minVersionForIndexing));
+            tableCreator.accept(KEYSPACE);
 
+            // create one keyspace, table and dataset per index version
+            versionsPerKeyspace = new HashMap<>();
+            for (Version version : Version.ALL)
+            {
+                String keyspace = "ks_" + version;
+                createKeyspace("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace);
+                tableCreator.accept(keyspace);
+                disableCompaction(keyspace, TABLE);
+                flush(keyspace, TABLE);
+                versionsPerKeyspace.put(keyspace, version);
+            }
+        }
+
+        TestCase withIndex(Consumer<String> indexCreator)
+        {
+            return withIndex(indexCreator, Version.AA, null, null);
+        }
+
+        /**
+         * @param indexCreator the index creation statement
+         * @param minVersionForIndexing the minimum index version required to create or rebuild the index
+         * @param createIndexErrorIfUnsupported the error message expected if the index version does not support the tested index
+         * @param rebuildIndexErrorIfUnsupported the error message expected if the index version does not support index rebuild
+         */
+        TestCase withIndex(Consumer<String> indexCreator,
+                           Version minVersionForIndexing,
+                           Function<Version, String> createIndexErrorIfUnsupported,
+                           String rebuildIndexErrorIfUnsupported)
+        {
+            this.indexCreator = indexCreator;
             this.minVersionForIndexing = minVersionForIndexing;
-            this.indexingErrorIfUnsupported = indexingErrorIfUnsupported;
-            this.schemaCreator = schemaCreator;
+            this.createIndexErrorIfUnsupported = createIndexErrorIfUnsupported;
+            this.rebuildIndexErrorIfUnsupported = rebuildIndexErrorIfUnsupported;
+            return this;
         }
 
         /**
@@ -354,65 +401,136 @@ public class VersionSelectorTest extends SAITester
          * @param minVersionForQuerying the minimum index version required to support the tested queries
          * @param queryingErrorIfUnsupported the error message expected if the index version does not support the tested queries
          */
+        abstract void withQueries(Consumer<String> queryResultsVerifier,
+                                  Version minVersionForQuerying,
+                                  String queryingErrorIfUnsupported);
+
+        protected void verifyQueries(Consumer<String> queryResultsVerifier,
+                                     String keyspace,
+                                     Version currentVersion,
+                                     Version minVersion,
+                                     String errorMessage)
+        {
+            if (currentVersion.onOrAfter(minVersion))
+                queryResultsVerifier.accept(keyspace);
+            else
+                Assertions.assertThatThrownBy(() -> queryResultsVerifier.accept(keyspace))
+                          .hasMessageContaining(errorMessage);
+        }
+    }
+
+    /**
+     * Test case for index creation.
+     */
+    private class CreateIndexTestCase extends TestCase
+    {
+        CreateIndexTestCase(Consumer<String> tableCreator)
+        {
+            super(tableCreator);
+        }
+
+        @Override
         void withQueries(Consumer<String> queryResultsVerifier,
                          Version minVersionForQuerying,
                          String queryingErrorIfUnsupported)
         {
-            // we can skip the test case if the starting version does not support the tested queries
-            Assume.assumeTrue(globalCurrentVersion.onOrAfter(minVersionForQuerying));
+            // set the per-keyspace current versions
+            SAIUtil.setCurrentVersion(globalCurrentVersion, versionsPerKeyspace);
+
+            // verify whether we can create the index in each keyspace,
+            // depending on whether the tested version supports it,
+            // and whether we can run the tested queries in case the index creation succeeds
+            versionsPerKeyspace.forEach((keyspace, version) -> {
+                if (version.onOrAfter(minVersionForIndexing))
+                {
+                    indexCreator.accept(keyspace);
+                    verifySAIVersionInUse(version, keyspace, TABLE);
+                    verifyQueries(queryResultsVerifier,
+                                  keyspace,
+                                  version,
+                                  minVersionForQuerying,
+                                  queryingErrorIfUnsupported);
+                }
+                else
+                {
+                    Assertions.assertThatThrownBy(() -> indexCreator.accept(keyspace))
+                              .hasMessageContaining(createIndexErrorIfUnsupported.apply(version));
+                    verifyNoIndexFiles(keyspace, TABLE);
+                }
+            });
+        }
+    }
+
+    /**
+     * Test case for index rebuild.
+     */
+    private class RebuildIndexTestCase extends TestCase
+    {
+        RebuildIndexTestCase(Consumer<String> tableCreator)
+        {
+            super(tableCreator);
+        }
+
+        @Override
+        void withQueries(Consumer<String> queryResultsVerifier,
+                         Version minVersionForQuerying,
+                         String queryingErrorIfUnsupported)
+        {
+            // if the starting version does not support the tested queries then we cannot even create the index
+            if (!globalCurrentVersion.onOrAfter(minVersionForIndexing))
+            {
+                Assertions.assertThatThrownBy(() -> indexCreator.accept(KEYSPACE))
+                          .hasMessageContaining(createIndexErrorIfUnsupported.apply(globalCurrentVersion));
+                verifyNoIndexFiles(KEYSPACE, TABLE);
+                return;
+            }
 
             // set the default current version, without any per-keyspace overrides
             SAIUtil.setCurrentVersion(globalCurrentVersion);
 
-            // create a series of keyspaces, all of them using the initial default current version,
-            // and verify the queries and the version of the index
-            Map<String, Version> versionsPerKeyspace = new HashMap<>();
-            for (Version version : Version.ALL)
-            {
-                // create and track the keyspace for the index version we will later upgrade to
-                String keyspace = "ks_" + version;
-                createKeyspace("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace);
-                versionsPerKeyspace.put(keyspace, version);
-
-                // create the schema and data, still using the initial version, and verify the queries
-                schemaCreator.accept(keyspace);
-                disableCompaction(keyspace, TABLE);
-                flush(keyspace, TABLE);
+            // create the index for each keyspace, which should use the default current version
+            versionsPerKeyspace.keySet().forEach(keyspace -> {
+                indexCreator.accept(keyspace);
                 verifySAIVersionInUse(globalCurrentVersion, keyspace, TABLE);
-                queryResultsVerifier.accept(keyspace);
-            }
+                verifyQueries(queryResultsVerifier,
+                              keyspace,
+                              globalCurrentVersion,
+                              minVersionForQuerying,
+                              queryingErrorIfUnsupported);
+            });
 
-            // assign a new version to each tested keyspace, so we end up with a different version for each keyspace,
+            // assign a new version to each tested keyspace,
+            // so we end up with a different version for each keyspace,
             // although their index files are still in the initial version
             SAIUtil.setCurrentVersion(globalCurrentVersion, versionsPerKeyspace);
 
-            // try to rebuild the indexes of each keyspace, which should leave them in their new version,
+            // try to rebuild the indexes of each keyspace,
+            // which should leave them in their new version if it's supported,
             // and verify the queries and the version of the index
             versionsPerKeyspace.forEach((keyspace, version) -> {
-                logger.debug("Testing index rebuild from {} to {} in keyspace {}", globalCurrentVersion, version, keyspace);
 
                 verifySAIVersionInUse(globalCurrentVersion, keyspace, TABLE);
 
                 // Verify if we can rebuild the index, depending on whether the new version supports it
-                passOrFail(() -> {
+                if (version.onOrAfter(minVersionForIndexing))
+                {
                     rebuildTableIndexes(keyspace, TABLE);
                     reloadSSTableIndexInPlace(keyspace, TABLE);
                     verifySAIVersionInUse(version, keyspace, TABLE);
-                }, version.onOrAfter(minVersionForIndexing), indexingErrorIfUnsupported);
+                }
+                else
+                {
+                    Assertions.assertThatThrownBy(() -> rebuildTableIndexes(keyspace, TABLE))
+                              .hasMessageContaining(rebuildIndexErrorIfUnsupported);
+                }
 
                 // Verify if we can query the index, depending on whether the new version supports the queries
-                passOrFail(() -> queryResultsVerifier.accept(keyspace),
-                           version.onOrAfter(minVersionForQuerying),
-                           queryingErrorIfUnsupported);
+                verifyQueries(queryResultsVerifier,
+                              keyspace,
+                              version,
+                              minVersionForQuerying,
+                              queryingErrorIfUnsupported);
             });
-        }
-
-        private void passOrFail(Runnable r, boolean shouldPass, String message)
-        {
-            if (shouldPass)
-                r.run();
-            else
-                Assertions.assertThatThrownBy(r::run).hasMessageContaining(message);
         }
     }
 }
