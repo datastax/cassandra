@@ -35,6 +35,7 @@ import org.apache.cassandra.db.marshal.ByteType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CounterColumnType;
+import org.apache.cassandra.db.marshal.DateRangeType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.DoubleType;
 import org.apache.cassandra.db.marshal.DurationType;
@@ -72,6 +73,7 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static java.util.stream.Collectors.toList;
+
 
 public interface CQL3Type
 {
@@ -430,7 +432,7 @@ public interface CQL3Type
 
     class UserDefined implements CQL3Type
     {
-        // Keeping this separatly from type just to simplify toString()
+        // Keeping this separately from type just to simplify toString()
         private final String name;
         private final UserType type;
 
@@ -749,6 +751,11 @@ public interface CQL3Type
             return false;
         }
 
+        public boolean isDateRange()
+        {
+            return false;
+        }
+
         public boolean isUDT()
         {
             return false;
@@ -964,6 +971,13 @@ public interface CQL3Type
             public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
             {
                 // no-op
+            }
+
+            @Override
+            public boolean isDateRange()
+            {
+                return DateRangeType.class.getSimpleName().equals(className) ||
+                       DateRangeType.class.getCanonicalName().equals(className);
             }
 
             @Override
