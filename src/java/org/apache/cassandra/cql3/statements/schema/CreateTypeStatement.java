@@ -134,6 +134,18 @@ public final class CreateTypeStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, typeName);
     }
 
+    // CNDB-14199: the method is needed for CNDB
+    public boolean containsDateRangeTypeColumn()
+    {
+        for (CQL3Type.Raw fieldType : rawFieldTypes)
+        {
+            if (fieldType.isDateRange())
+                return true;
+        }
+
+        return false;
+    }
+
     public static UserType parse(String cql, String keyspace)
     {
         return parse(cql, keyspace, Types.none());
