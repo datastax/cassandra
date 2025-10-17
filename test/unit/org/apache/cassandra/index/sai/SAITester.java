@@ -602,7 +602,12 @@ public class SAITester extends CQLTester
 
     protected void verifyNoIndexFiles()
     {
-        assertTrue(indexFiles().isEmpty());
+        verifyNoIndexFiles(KEYSPACE, currentTable());
+    }
+
+    protected void verifyNoIndexFiles(String keyspace, String table)
+    {
+        assertTrue(indexFiles(keyspace, table).isEmpty());
     }
 
     // Verify every sstables is indexed correctly and the components are valid.
@@ -697,7 +702,12 @@ public class SAITester extends CQLTester
 
     protected Set<File> indexFiles()
     {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        return indexFiles(KEYSPACE, currentTable());
+    }
+
+    protected Set<File> indexFiles(String keyspace, String table)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         return cfs.getDirectories().getCFDirectories()
                   .stream()
                   .flatMap(dir -> Arrays.stream(dir.tryList()))
