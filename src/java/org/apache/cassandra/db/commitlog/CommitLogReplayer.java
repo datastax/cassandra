@@ -612,11 +612,14 @@ public class CommitLogReplayer implements CommitLogReadHandler
         return false;
     }
 
-    public Set<String> getSegmentWithInvalidOrFailedMutations()
+    public Set<String> getSegmentWithFailedMutations()
     {
-        Set<String> union = new HashSet<>(segmentsWithFailedMutations);
-        union.addAll(commitLogReader.getSegmentsWithInvalidMutations());
-        return union;
+        return segmentsWithFailedMutations;
+    }
+
+    public Set<String> getSegmentWithInvalidMutations()
+    {
+        return commitLogReader.getSegmentsWithInvalidMutations();
     }
 
     public void handleInvalidMutation(TableId id)
