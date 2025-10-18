@@ -118,6 +118,7 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         return intersectionWith(that).size() > 0;
     }
 
+    @Override
     public boolean intersects(AbstractBounds<T> that)
     {
         // implemented for cleanup compaction membership test, so only Range + Bounds are supported for now
@@ -164,7 +165,12 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         // Same punishment than in Bounds.contains(), we must be carefull if that.left == that.right as
         // as new Range<T>(that.left, that.right) will then cover the full ring which is not what we
         // want.
-        return contains(that.left) || (!that.left.equals(that.right) && intersects(new Range<T>(that.left, that.right)));
+        if (contains(that.left))
+            return true;
+        else if (that.left.equals(that.right))
+            return that.right.isMinimum(); // [x, x] denotes a single point only, but [min, min] covers the full token range
+        else
+            return intersects(new Range<T>(that.left, that.right));
     }
 
     public static boolean intersects(Iterable<Range<Token>> l, Iterable<Range<Token>> r)

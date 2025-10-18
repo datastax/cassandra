@@ -24,7 +24,6 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 
 public interface ShardTracker
@@ -70,5 +69,10 @@ public interface ShardTracker
     {
         if (writer.first != null)
             writer.setTokenSpaceCoverage(rangeSpanned(writer.first, writer.last));
+    }
+
+    static ShardTracker createPreassignedBoundaries(Token[] sortedTokens)
+    {
+        return new SimpleShardTracker(sortedTokens);
     }
 }
