@@ -68,12 +68,11 @@ public class ShardBoundaries
      */
     public int getShardForToken(Token tk)
     {
-        for (int i = 0; i < boundaries.length; i++)
-        {
-            if (tk.compareTo(boundaries[i]) <= 0)   // boundaries are end-inclusive
-                return i;
-        }
-        return boundaries.length;
+        int idx = Arrays.binarySearch(boundaries, tk);
+        // boundaries are end-inclusive, so an exact match is the correct shard
+        if (idx >= 0)
+            return idx;
+        return -idx - 1;
     }
 
     /**
