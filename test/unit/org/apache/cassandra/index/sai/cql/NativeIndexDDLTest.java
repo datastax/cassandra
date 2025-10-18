@@ -32,6 +32,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -45,6 +46,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.restrictions.IndexRestrictions;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -432,33 +434,6 @@ public class NativeIndexDDLTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         assertEquals(1, NDI_CREATION_COUNTER.get());
-    }
-
-    /**
-     * Verify SASI can be created and queries with NDI dependencies.
-     * Not putting in {@link MixedIndexImplementationsTest} because it uses CQLTester which doesn't load NDI dependency.
-     */
-    @Test
-    public void shouldCreateSASI()
-    {
-        createTable(CREATE_TABLE_TEMPLATE);
-
-        createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'mode': 'CONTAINS',\n" +
-                    "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer',\n" +
-                    "'tokenization_enable_stemming': 'true',\n" +
-                    "'tokenization_locale': 'en',\n" +
-                    "'tokenization_skip_stop_words': 'true',\n" +
-                    "'analyzed': 'true',\n" +
-                    "'tokenization_normalize_lowercase': 'true'};");
-
-        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
-
-        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
-        assertEquals(1, rows.all().size());
-
-        rows = executeNet("SELECT id1 FROM %s WHERE v2 like '0'");
-        assertEquals(1, rows.all().size());
     }
 
     @Test

@@ -1417,7 +1417,9 @@ public class StatementRestrictions
                     for (ColumnMetadata column : restriction.getColumnDefs())
                     {
                         if (index.dependsOn(column))
+                        {
                             builder.add(column);
+                        }
                     }
                 }
             }
