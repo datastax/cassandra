@@ -33,7 +33,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.ToIntFunction;
-import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
@@ -50,7 +49,6 @@ import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
-import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
@@ -81,7 +79,6 @@ import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
@@ -125,7 +122,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private final InvalidVectorBehavior invalidVectorBehavior;
     private final IntHashSet deletedOrdinals;
     private volatile boolean hasDeletions;
-    private volatile boolean unitVectors;
+    private volatile boolean allVectorsAreUnitLength;
 
     // we don't need to explicitly close these since only on-heap resources are involved
     private final ThreadLocal<GraphSearcherAccessManager> searchers;
@@ -158,8 +155,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
 
-        // We start by assuming the vectors are unit vectors and then if they are not, we will correct it.
-        unitVectors = true;
+        // Assume true until we observe otherwise.
+        allVectorsAreUnitLength = true;
 
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         // This is only a warning since it's not a fatal error to write without hierarchy
@@ -274,10 +271,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 assert success : "postingsByOrdinal already contains an entry for ordinal " + ordinal;
                 bytesUsed += builder.addGraphNode(ordinal, vector);
 
-                // We safely added to the graph, check if we need to check for unit length
-                if (!sourceModel.hasKnownUnitLengthVectors() || unitVectors)
+                // If necessary, check if the vector is unit length.
+                if (!sourceModel.hasKnownUnitLengthVectors() && allVectorsAreUnitLength)
                     if (!(Math.abs(VectorUtil.dotProduct(vector, vector) - 1.0f) < 0.01))
-                        unitVectors = false;
+                        allVectorsAreUnitLength = false;
 
                 return bytesUsed;
             }
@@ -592,7 +589,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
 
         var actualType = compressor == null ? CompressionType.NONE : preferredCompression.type;
-        writePqHeader(writer, unitVectors, actualType, indexContext.version());
+        writePqHeader(writer, allVectorsAreUnitLength, actualType, indexContext.version());
         if (actualType == CompressionType.NONE)
             return writer.position();
 
