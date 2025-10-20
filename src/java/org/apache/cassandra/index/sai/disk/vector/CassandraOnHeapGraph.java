@@ -33,7 +33,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.ToIntFunction;
-import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
@@ -125,6 +124,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private final InvalidVectorBehavior invalidVectorBehavior;
     private final IntHashSet deletedOrdinals;
     private volatile boolean hasDeletions;
+    private volatile boolean allVectorsAreUnitLength;
 
     // we don't need to explicitly close these since only on-heap resources are involved
     private final ThreadLocal<GraphSearcherAccessManager> searchers;
@@ -158,6 +158,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
 
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
+        // Assume true until we observe otherwise.
+        allVectorsAreUnitLength = true;
         // This is only a warning since it's not a fatal error to write without hierarchy
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
@@ -269,6 +271,12 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 var success = postingsByOrdinal.compareAndPut(ordinal, null, postings);
                 assert success : "postingsByOrdinal already contains an entry for ordinal " + ordinal;
                 bytesUsed += builder.addGraphNode(ordinal, vector);
+
+                // If necessary, check if the vector is unit length.
+                if (!sourceModel.hasKnownUnitLengthVectors() && allVectorsAreUnitLength)
+                    if (!(Math.abs(VectorUtil.dotProduct(vector, vector) - 1.0f) < 0.01))
+                        allVectorsAreUnitLength = false;
+
                 return bytesUsed;
             }
             else
@@ -560,7 +568,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // Build encoder and compress vectors
         VectorCompressor<?> compressor; // will be null if we can't compress
         CompressedVectors cv = null;
-        boolean containsUnitVectors;
         // limit the PQ computation and encoding to one index at a time -- goal during flush is to
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
@@ -580,15 +587,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // encode (compress) the vectors to save
             if (compressor != null)
                 cv = compressor.encodeAll(new RemappedVectorValues(remapped, remapped.maxNewOrdinal, vectorValues));
-
-            containsUnitVectors = IntStream.range(0, vectorValues.size())
-                                           .parallel()
-                                           .mapToObj(vectorValues::getVector)
-                                           .allMatch(v -> Math.abs(VectorUtil.dotProduct(v, v) - 1.0f) < 0.01);
         }
 
         var actualType = compressor == null ? CompressionType.NONE : preferredCompression.type;
-        writePqHeader(writer, containsUnitVectors, actualType, indexContext.version());
+        writePqHeader(writer, allVectorsAreUnitLength, actualType, indexContext.version());
         if (actualType == CompressionType.NONE)
             return writer.position();
 
