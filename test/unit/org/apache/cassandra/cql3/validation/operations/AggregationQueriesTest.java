@@ -29,6 +29,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import com.datastax.driver.core.Row;
+import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.exceptions.ReadTimeoutException;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.DataStorageSpec;
@@ -156,7 +157,11 @@ public class AggregationQueriesTest extends CQLTester
             logger.info("Running aggregate, multi-page query");
 
             long queryStartTime = System.nanoTime();
-            List<Row> result = executeNet("SELECT a, count(c) FROM %s group by a").all();
+            // Use a custom read timeout that matches the aggregation timeout
+            // This ensures the driver won't timeout before the server completes the aggregation
+            SimpleStatement statement = new SimpleStatement(formatQuery("SELECT a, count(c) FROM %s group by a"));
+            statement.setReadTimeoutMillis(120000); // Match the server-side aggregation timeout
+            List<Row> result = sessionNet().execute(statement).all();
             long queryDuration = System.nanoTime() - queryStartTime;
             
             assertEquals("Should return 4 groups", 4, result.size());
