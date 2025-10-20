@@ -158,14 +158,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
 
-<<<<<<< HEAD
         // We start by assuming the vectors are unit vectors and then if they are not, we will correct it.
         unitVectors = true;
 
-        int jvectorVersion = Version.current().onDiskFormat().jvectorFileFormatVersion();
-=======
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
->>>>>>> datastax/main
         // This is only a warning since it's not a fatal error to write without hierarchy
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
