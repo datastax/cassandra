@@ -31,18 +31,19 @@ import static java.lang.Math.pow;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
-
 public enum VectorSourceModel
 {
-    ADA002((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.125), 1.25),
-    OPENAI_V3_SMALL((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.0625), 1.5),
-    OPENAI_V3_LARGE((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.0625), 1.25),
-    BERT(COSINE, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.25), __ -> 1.0),
-    GECKO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.125), 1.25),
-    NV_QA_4((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.125), 1.25),
-    COHERE_V3((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.0625), 1.25),
+    ADA002((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.125), 1.25, true),
+    OPENAI_V3_SMALL((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.0625), 1.5, true),
+    OPENAI_V3_LARGE((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.0625), 1.25, true),
+    // BERT is not known to have unit length vectors in all cases
+    BERT(COSINE, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.25), __ -> 1.0, false),
+    GECKO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.125), 1.25, true),
+    NV_QA_4((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.125), 1.25, false),
+    // Cohere does not officially say they have unit length vectors, but some users report that they do
+    COHERE_V3((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.0625), 1.25, false),
 
-    OTHER(COSINE, VectorSourceModel::genericCompressionFor, VectorSourceModel::genericOverquery);
+    OTHER(COSINE, VectorSourceModel::genericCompressionFor, VectorSourceModel::genericOverquery, false);
 
     /**
      * Default similarity function for this model.
@@ -58,18 +59,33 @@ public enum VectorSourceModel
      */
     public final Function<VectorCompression, Double> overqueryProvider;
 
-    VectorSourceModel(Function<Integer, VectorCompression> compressionProvider, double overqueryFactor)
+    /**
+     * Indicates that the model is known to have unit length vectors. When false, the runtime checks per graph
+     * until a non-unit length vector is found.
+     */
+    private final boolean knownUnitLength;
+
+    VectorSourceModel(Function<Integer, VectorCompression> compressionProvider,
+                      double overqueryFactor,
+                      boolean knownUnitLength)
     {
-        this(DOT_PRODUCT, compressionProvider, __ -> overqueryFactor);
+        this(DOT_PRODUCT, compressionProvider, __ -> overqueryFactor, knownUnitLength);
     }
 
     VectorSourceModel(VectorSimilarityFunction defaultSimilarityFunction,
                       Function<Integer, VectorCompression> compressionProvider,
-                      Function<VectorCompression, Double> overqueryProvider)
+                      Function<VectorCompression, Double> overqueryProvider,
+                      boolean knownUnitLength)
     {
         this.defaultSimilarityFunction = defaultSimilarityFunction;
         this.compressionProvider = compressionProvider;
         this.overqueryProvider = overqueryProvider;
+        this.knownUnitLength = knownUnitLength;
+    }
+
+    public boolean hasKnownUnitLengthVectors()
+    {
+        return knownUnitLength;
     }
 
     public static VectorSourceModel fromString(String value)
