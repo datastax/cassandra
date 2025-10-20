@@ -275,7 +275,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 bytesUsed += builder.addGraphNode(ordinal, vector);
 
                 // We safely added to the graph, check if we need to check for unit length
-                if (sourceModel.hasKnownUnitLengthVectors() || unitVectors)
+                if (!sourceModel.hasKnownUnitLengthVectors() || unitVectors)
                     if (!(Math.abs(VectorUtil.dotProduct(vector, vector) - 1.0f) < 0.01))
                         unitVectors = false;
 
