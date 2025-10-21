@@ -26,6 +26,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 public class QueryMonitorableDetails implements Monitorable.Details
 {
     private static final String INDENT = "  ";
+    private static final String DOUBLE_INDENT = INDENT + INDENT;
 
     private final QueryContext.Snapshot metrics;
     private final String plan;
@@ -73,12 +74,12 @@ public class QueryMonitorableDetails implements Monitorable.Details
 
     private static String toLogString(Plan plan)
     {
-        String s = plan.toStringRecursive(INDENT + INDENT);
+        String s = plan.toStringRecursive(DOUBLE_INDENT);
         return s.endsWith("\n") ? s.substring(0, s.length() - 1) : s;
     }
 
     private static void appendMetric(StringBuilder sb, String name, Object value)
     {
-        sb.append(INDENT).append(INDENT).append(name).append(": ").append(value).append('\n');
+        sb.append(DOUBLE_INDENT).append(name).append(": ").append(value).append('\n');
     }
 }
