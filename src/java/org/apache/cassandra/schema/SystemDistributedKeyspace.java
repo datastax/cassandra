@@ -189,7 +189,7 @@ public final class SystemDistributedKeyspace
                                       Joiner.on("','").join(cfnames),
                                       Joiner.on("','").join(ranges),
                                       toCQLMap(options.asMap(), RepairOption.RANGES_KEY, RepairOption.COLUMNFAMILIES_KEY));
-        processSilent(fmtQry);
+        processRepairHistoryInternal(fmtQry);
     }
 
     private static String toCQLMap(Map<String, String> options, String ... ignore)
@@ -219,14 +219,14 @@ public final class SystemDistributedKeyspace
         t.printStackTrace(pw);
         String fmtQuery = format(query, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, parent_id.toString());
         String message = t.getMessage();
-        processSilent(fmtQuery, message != null ? message : "", sw.toString());
+        processRepairHistoryInternal(fmtQuery, message != null ? message : "", sw.toString());
     }
 
     public static void successfulParentRepair(TimeUUID parent_id, Collection<Range<Token>> successfulRanges)
     {
         String query = "UPDATE %s.%s SET finished_at = to_timestamp(now()), successful_ranges = {'%s'} WHERE parent_id=%s";
         String fmtQuery = format(query, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, Joiner.on("','").join(successfulRanges), parent_id.toString());
-        processSilent(fmtQuery);
+        processRepairHistoryInternal(fmtQuery);
     }
 
     public static void startRepairs(TimeUUID id, TimeUUID parent_id, String keyspaceName, String[] cfnames, CommonRange commonRange)
@@ -285,7 +285,7 @@ public final class SystemDistributedKeyspace
                                     Joiner.on("', '").join(participants),
                                     RepairState.STARTED.toString());
                 }
-                processSilent(fmtQry);
+                processRepairHistoryInternal(fmtQry);
             }
         }
     }
@@ -304,7 +304,7 @@ public final class SystemDistributedKeyspace
                                         keyspaceName,
                                         cfname,
                                         id.toString());
-        processSilent(fmtQuery);
+        processRepairHistoryInternal(fmtQuery);
     }
 
     public static void failedRepairJob(TimeUUID id, String keyspaceName, String cfname, Throwable t)
@@ -321,7 +321,7 @@ public final class SystemDistributedKeyspace
         String message = t.getMessage();
         if (message == null)
             message = t.getClass().getName();
-        processSilent(fmtQry, message, sw.toString());
+        processRepairHistoryInternal(fmtQry, message, sw.toString());
     }
 
     public static void startViewBuild(String keyspace, String view, UUID hostId)
@@ -388,6 +388,24 @@ public final class SystemDistributedKeyspace
                 valueList.add(bytes(v));
             }
             QueryProcessor.process(fmtQry, ConsistencyLevel.ANY, valueList);
+        }
+        catch (Throwable t)
+        {
+            logger.error("Error executing query "+fmtQry, t);
+        }
+    }
+
+    /**
+     * Execute a repair history query using executeInternal() to bypass authorization and guardrails.
+     * This is necessary for repair operations that may run in offline/test mode where the full
+     * authorization infrastructure is not initialized. Repair history writes are internal system
+     * operations that should not require user authorization.
+     */
+    private static void processRepairHistoryInternal(String fmtQry, Object... values)
+    {
+        try
+        {
+            QueryProcessor.executeInternal(fmtQry, values);
         }
         catch (Throwable t)
         {
