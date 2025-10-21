@@ -32,6 +32,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.monitoring.MonitoringTask;
+import org.apache.cassandra.db.monitoring.MonitoringTaskTest;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
@@ -39,6 +40,7 @@ import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.index.sai.plan.QueryMonitorableDetails;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.assertj.core.api.AbstractIterableAssert;
 import org.assertj.core.api.Assertions;
@@ -47,6 +49,10 @@ import org.assertj.core.api.ListAssert;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
+/**
+ * Tests {@link QueryMonitorableDetails} combined with the {@link MonitoringTask} mechanism,
+ * the core functionality testing of that feature should is in {@link MonitoringTaskTest}.
+ */
 public class SlowSAIQueryLoggerTest extends TestBaseImpl
 {
     private static final int SLOW_QUERY_LOG_TIMEOUT_IN_MS = 100;
