@@ -401,7 +401,10 @@ public enum CassandraRelevantProperties
     /** Controls the maximum number of expressions that will be used in a SAI intersection operation. */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
 
-    /** Whether to log SAI-specific details when logging slow SAI queries */
+    /**
+     * Whether to log SAI-specific details when logging slow SAI queries.
+     * These details consist on the index query metrics and the query plan of the slow queries.
+     */
     SAI_SLOW_QUERY_LOG_DETAILS_ENABLED("cassandra.sai.slow_query_log.details_enabled", "true"),
 
     /** Whether vector type only allows float vectors. True by default. **/
