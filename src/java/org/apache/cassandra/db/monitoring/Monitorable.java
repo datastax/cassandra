@@ -35,32 +35,33 @@ public interface Monitorable
     boolean complete();
 
     /**
-     * Returns the specific {@link Details} for this monitorable operation.
+     * Returns the specific {@link ExecutionInfo} for this monitorable operation.
      *
-     * @return the execution details for this operation
+     * @return the execution info for this operation
      */
-    default Details details()
+    default ExecutionInfo executionInfo()
     {
-        return Details.EMPTY;
+        return ExecutionInfo.EMPTY;
     }
 
     /**
      * Specific execution details for a monitorable operation.
+     * </p>
      * {@link Monitorable} implementations should use this interface to hold and provide additional information about
      * the execution of the operation. This information will be logged when the operation is reported as slow.
      */
-    interface Details
+    interface ExecutionInfo
     {
         /**
          * An empty no-op implementation.
          */
-        Details EMPTY = unique -> "";
+        ExecutionInfo EMPTY = unique -> "";
 
         /**
-         * Returns a string representation of these execution details, suitable for logging.
+         * Returns a string representation of this execution info, suitable for logging.
          *
-         * @param unique whether the execution details are for a single operation or not
-         * @return a log-suitable string representation of these details
+         * @param unique whether the execution info is for a single operation or an aggregation of operations
+         * @return a log-suitable string representation of this execution info
          */
         String toLogString(boolean unique);
     }

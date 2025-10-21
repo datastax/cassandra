@@ -391,12 +391,12 @@ public class MonitoringTask
     private final static class SlowOperation extends Operation
     {
         /** The details of the slowest operation among the aggregated operations. */
-        private Monitorable.Details slowestOperationDetails;
+        private Monitorable.ExecutionInfo slowestOperationExecutionInfo;
 
         SlowOperation(Monitorable operation, long slowAtNanos)
         {
             super(operation, slowAtNanos);
-            slowestOperationDetails = operation.details();
+            slowestOperationExecutionInfo = operation.executionInfo();
         }
 
         public String getLogMessage()
@@ -407,7 +407,7 @@ public class MonitoringTask
                                      NANOSECONDS.toMillis(totalTimeNanos),
                                      NANOSECONDS.toMillis(operation.slowTimeoutNanos()),
                                      operation.isCrossNode() ? "msec/cross-node" : "msec",
-                                     slowestOperationDetails.toLogString(true));
+                                     slowestOperationExecutionInfo.toLogString(true));
             else
                 return String.format("<%s>, was slow %d times: avg/min/max %d/%d/%d msec - slow timeout %d %s%s",
                                      name(),
@@ -417,14 +417,14 @@ public class MonitoringTask
                                      NANOSECONDS.toMillis(maxTime),
                                      NANOSECONDS.toMillis(operation.slowTimeoutNanos()),
                                      operation.isCrossNode() ? "msec/cross-node" : "msec",
-                                     slowestOperationDetails.toLogString(false));
+                                     slowestOperationExecutionInfo.toLogString(false));
         }
 
         @Override
         void add(Operation operation)
         {
             if (operation.maxTime > maxTime)
-                slowestOperationDetails = operation.operation.details();
+                slowestOperationExecutionInfo = operation.operation.executionInfo();
 
             super.add(operation);
         }

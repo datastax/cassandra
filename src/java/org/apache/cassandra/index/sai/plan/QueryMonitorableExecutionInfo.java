@@ -20,10 +20,10 @@ import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.index.sai.QueryContext;
 
 /**
- * {@link Monitorable.Details} implementation for SAI queries.
+ * {@link Monitorable.ExecutionInfo} implementation for SAI queries.
  * It holds and prints the metrics from the {@link QueryContext} of the monitorized queries, and its {@link Plan}.
  */
-public class QueryMonitorableDetails implements Monitorable.Details
+public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
 {
     private static final String INDENT = "  ";
     private static final String DOUBLE_INDENT = INDENT + INDENT;
@@ -32,12 +32,12 @@ public class QueryMonitorableDetails implements Monitorable.Details
     private final String plan;
 
     /**
-     * Builds a new execution details object for a query.
+     * Builds a new execution info object for a query.
      *
      * @param context the query context
      * @param plan the query plan
      */
-    public QueryMonitorableDetails(QueryContext context, Plan plan)
+    public QueryMonitorableExecutionInfo(QueryContext context, Plan plan)
     {
         this.metrics = context.snapshot();
         this.plan = toLogString(plan);

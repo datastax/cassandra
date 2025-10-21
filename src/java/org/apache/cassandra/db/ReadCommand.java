@@ -277,11 +277,11 @@ public abstract class ReadCommand extends AbstractReadQuery
     }
 
     @Override
-    public Details details()
+    public ExecutionInfo executionInfo()
     {
         return indexSearcher == null
-               ? Details.EMPTY
-               : indexSearcher.monitorableDetails();
+               ? ExecutionInfo.EMPTY
+               : indexSearcher.monitorableExecutionInfo();
     }
 
     /**
