@@ -754,14 +754,15 @@ public interface Index
         UnfilteredPartitionIterator search(ReadExecutionController executionController);
 
         /**
-         * Returns the {@link Monitorable.Details} for this query, to be called by {@link ReadCommand#details()} at the
-         * end of the query to collect stats about the query execution in case it is considered too slow.
+         * Returns the {@link Monitorable.ExecutionInfo} for this query, to be called by
+         * {@link ReadCommand#executionInfo()} at the end of the query to collect details about the query execution in
+         * case it is considered too slow.
          *
-         * @return the execution details for this query
+         * @return the execution info for this query
          */
-        default Monitorable.Details monitorableDetails()
+        default Monitorable.ExecutionInfo monitorableExecutionInfo()
         {
-            return Monitorable.Details.EMPTY;
+            return Monitorable.ExecutionInfo.EMPTY;
         }
     }
 

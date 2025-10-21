@@ -402,10 +402,10 @@ public enum CassandraRelevantProperties
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
 
     /**
-     * Whether to log SAI-specific details when logging slow SAI queries.
-     * These details consist on the index query metrics and the query plan of the slow queries.
+     * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
+     * This execution info includes the query metrics and the query plan of the slow queries.
      */
-    SAI_SLOW_QUERY_LOG_DETAILS_ENABLED("cassandra.sai.slow_query_log.details_enabled", "true"),
+    SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
 
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),

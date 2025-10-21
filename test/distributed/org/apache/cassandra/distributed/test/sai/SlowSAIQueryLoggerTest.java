@@ -36,11 +36,10 @@ import org.apache.cassandra.db.monitoring.MonitoringTaskTest;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
-import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.index.sai.plan.QueryMonitorableDetails;
+import org.apache.cassandra.index.sai.plan.QueryMonitorableExecutionInfo;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.assertj.core.api.AbstractIterableAssert;
 import org.assertj.core.api.Assertions;
@@ -50,7 +49,7 @@ import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
- * Tests {@link QueryMonitorableDetails} combined with the {@link MonitoringTask} mechanism,
+ * Tests {@link QueryMonitorableExecutionInfo} combined with the {@link MonitoringTask} mechanism,
  * the core functionality testing of that feature should is in {@link MonitoringTaskTest}.
  */
 public class SlowSAIQueryLoggerTest extends TestBaseImpl
@@ -268,7 +267,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "LiteralIndexScan");
 
             // test changing data between identical queries, making one of them slower than the other,
-            // so we can check that only the details of the slowest query are reported
+            // so we can check that only the execution info of the slowest query are reported
             mark = node.logs().mark();
             coordinator.execute(numericQuery, ConsistencyLevel.ONE);
             node.runOnInstance(() -> BB.queryDelay.updateAndGet(x -> x * 4)); // make queries 4x slower
@@ -285,8 +284,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "rowsFiltered: 6");
             node.runOnInstance(() -> BB.queryDelay.updateAndGet(x -> x / 4)); // restore the query delay
 
-            // disable details logging and verify they are not logged
-            CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_DETAILS_ENABLED.setBoolean(false);
+            // disable execution info logging and verify they are not logged
+            CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(false);
             mark = node.logs().mark();
             coordinator.execute(numericQuery, ConsistencyLevel.ONE);
             coordinator.execute(textQuery, ConsistencyLevel.ONE);
