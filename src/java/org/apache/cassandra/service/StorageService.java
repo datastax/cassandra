@@ -5266,7 +5266,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         try
         {
-            setMode(Mode.DRAINING, "starting drain process", !isFinalShutdown);
+            logger.info("DRAINING: starting drain process");
+            setMode(Mode.DRAINING, "starting drain process", false);
 
             try
             {
@@ -5286,6 +5287,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Gossiper.instance.stop();
             ActiveRepairService.instance.stop();
 
+            logger.info("DRAINING: shutting down MessageService");
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "shutting down MessageService", false);
 
@@ -5303,6 +5305,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 logger.error("Messaging service timed out shutting down", t);
             }
 
+            logger.info("DRAINING: flushing column families");
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "flushing column families", false);
 
@@ -5359,6 +5362,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // mutations so let's wait for any pending mutations and then clear the stages. Note that the compaction
             // manager can generated mutations, for example because of the view builder or the sstable_activity updates
             // in the SSTableReader.GlobalTidy, so we do this step quite late, but before shutting down the CL
+            logger.info("DRAINING: stopping mutations");
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "stopping mutations", false);
 
@@ -5367,6 +5371,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                           .collect(Collectors.toList());
             barriers.forEach(OpOrder.Barrier::await); // we could parallelize this...
 
+            logger.info("DRAINING: clearing mutation stage");
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "clearing mutation stage", false);
             Stage.shutdownAndAwaitMutatingExecutors(false,
@@ -5391,7 +5396,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 logger.warn("Unable to terminate non-periodic tasks within 1 minute.");
 
             ColumnFamilyStore.shutdownPostFlushExecutor();
-            setMode(Mode.DRAINED, !isFinalShutdown);
+            logger.info("DRAINED");
+            setMode(Mode.DRAINED, false);
         }
         catch (Throwable t)
         {
