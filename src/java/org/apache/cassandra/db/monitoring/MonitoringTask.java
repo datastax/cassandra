@@ -328,11 +328,11 @@ public class MonitoringTask
          * this is set lazily as it takes time to build the query CQL */
         private String name;
 
-        Operation(Monitorable operation, long failedAtNanos)
+        Operation(Monitorable operation, long nowNanos)
         {
             this.operation = operation;
             numTimesReported = 1;
-            totalTimeNanos = failedAtNanos - operation.creationTimeNanos();
+            totalTimeNanos = nowNanos - operation.creationTimeNanos();
             minTime = totalTimeNanos;
             maxTime = totalTimeNanos;
         }
@@ -360,9 +360,9 @@ public class MonitoringTask
      */
     private final static class FailedOperation extends Operation
     {
-        FailedOperation(Monitorable operation, long nowNanos)
+        FailedOperation(Monitorable operation, long failedAtNanos)
         {
-            super(operation, nowNanos);
+            super(operation, failedAtNanos);
         }
 
         public String getLogMessage()
@@ -393,9 +393,9 @@ public class MonitoringTask
         /** The details of the slowest operation among the aggregated operations. */
         private Monitorable.Details slowestOperationDetails;
 
-        SlowOperation(Monitorable operation, long nowNanos)
+        SlowOperation(Monitorable operation, long slowAtNanos)
         {
-            super(operation, nowNanos);
+            super(operation, slowAtNanos);
             slowestOperationDetails = operation.details();
         }
 
