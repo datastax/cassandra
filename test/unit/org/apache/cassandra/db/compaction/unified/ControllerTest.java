@@ -914,4 +914,41 @@ public abstract class ControllerTest
         assertEquals(1, controller.getLargestFactorizedShardCount(-1.0));
         assertEquals(1, controller.getLargestFactorizedShardCount(-100.0));
     }
+
+    @Test
+    public void testScalingParameterPersistenceEnabled()
+    {
+        // Verify that by default (SCALING_PARAMETER_PERSISTENCE = true), storeOptions creates a file
+        assertTrue("Scaling parameter persistence should be enabled by default", Controller.SCALING_PARAMETER_PERSISTENCE);
+
+        TableMetadata testMetadata = standardCFMD("test_ks", "test_table").build();
+        int[] scalingParameters = new int[] { 0, 2, 4 };
+        long flushSize = 100 << 20; // 100 MB
+
+        // Store the options - should create a file when persistence is enabled
+        Controller.storeOptions(testMetadata, scalingParameters, flushSize);
+
+        // Verify the file was created
+        org.apache.cassandra.io.util.File configPath = Controller.getControllerConfigPath(testMetadata);
+        assertTrue("Config file should exist when persistence is enabled", configPath.exists());
+
+        // Clean up
+        configPath.delete();
+    }
+
+    @Test
+    public void testScalingParameterPersistenceSystemKeyspace()
+    {
+        // Verify that system keyspaces never write config files regardless of persistence setting
+        TableMetadata systemMetadata = standardCFMD("system", "test_table").build();
+        int[] scalingParameters = new int[] { 0, 2, 4 };
+        long flushSize = 100 << 20; // 100 MB
+
+        // Store the options - should not create a file for system keyspace
+        Controller.storeOptions(systemMetadata, scalingParameters, flushSize);
+
+        // Verify the file was NOT created
+        org.apache.cassandra.io.util.File configPath = Controller.getControllerConfigPath(systemMetadata);
+        assertFalse("Config file should not exist for system keyspace", configPath.exists());
+    }
 }
