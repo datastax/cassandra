@@ -64,8 +64,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
         System.setProperty(Config.PROPERTY_PREFIX + "monitoring_report_interval_ms", String.valueOf(TimeUnit.HOURS.toMillis(1)));
 
         try (Cluster cluster = init(Cluster.build(1)
-                                           .withConfig(c -> c.set("slow_query_log_timeout_in_ms", SLOW_QUERY_LOG_TIMEOUT_IN_MS)
-                                                             .with(Feature.NETWORK).with(Feature.GOSSIP))
+                                           .withConfig(c -> c.set("slow_query_log_timeout_in_ms", SLOW_QUERY_LOG_TIMEOUT_IN_MS))
                                            .withInstanceInitializer(BB::install)
                                            .start()))
         {
