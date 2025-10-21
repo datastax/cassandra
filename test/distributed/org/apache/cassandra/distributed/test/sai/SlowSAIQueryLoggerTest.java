@@ -288,11 +288,11 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             coordinator.execute(annQuery, ConsistencyLevel.ONE);
             coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node, "4 operations were slow");
-            assertLogsDoesNotContain(mark, node,
-                                     "SAI slow query metrics:",
-                                     "SAI slow query plan:",
-                                     "SAI slowest query metrics:",
-                                     "SAI slowest query plan:");
+            assertLogsDoNotContain(mark, node,
+                                   "SAI slow query metrics:",
+                                   "SAI slow query plan:",
+                                   "SAI slowest query metrics:",
+                                   "SAI slowest query plan:");
         }
     }
 
@@ -301,7 +301,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
         assertLogs(mark, node, AbstractIterableAssert::isNotEmpty, lines);
     }
 
-    private static void assertLogsDoesNotContain(long mark, IInvokableInstance node, String... lines)
+    private static void assertLogsDoNotContain(long mark, IInvokableInstance node, String... lines)
     {
         assertLogs(mark, node, AbstractIterableAssert::isEmpty, lines);
     }
