@@ -40,19 +40,16 @@ public class NotOnTruncatedKeyTest extends SAITester
     @Parameterized.Parameter(1)
     public String truncatedType;
 
-    private Version current;
-
     @Before
     public void setup() throws Throwable
     {
-        current = Version.current();
         SAIUtil.setCurrentVersion(version);
     }
 
     @After
     public void teardown() throws Throwable
     {
-        SAIUtil.setCurrentVersion(current);
+        SAIUtil.resetCurrentVersion();
     }
 
     @Test

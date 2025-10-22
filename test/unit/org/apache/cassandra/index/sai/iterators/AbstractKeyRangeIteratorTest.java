@@ -23,12 +23,19 @@ import java.util.stream.Collectors;
 
 import org.junit.Assert;
 
+
+import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.utils.Pair;
 
 public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
 {
+    private static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = SAIUtil.currentVersion().onDiskFormat()
+                                                                              .newPrimaryKeyFactory(new ClusteringComparator(LongType.instance));
+
     protected long[] arr(long... longArray)
     {
         return longArray;
