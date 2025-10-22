@@ -30,6 +30,8 @@ import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.SuperCall;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.monitoring.MonitoringTask;
 import org.apache.cassandra.db.monitoring.MonitoringTaskTest;
@@ -39,11 +41,12 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.plan.QueryMonitorableExecutionInfo;
-import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.assertj.core.api.AbstractIterableAssert;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ListAssert;
+import org.awaitility.Awaitility;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
@@ -68,7 +71,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                                            .start()))
         {
             // create a table with numeric, text and vector indexes
-            cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (k int, c int, n int, s text, v vector<float, 2>, PRIMARY KEY(k, c))"));
+            cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (k int, c int, n int, s text, v vector<float, 2>, l int, PRIMARY KEY(k, c))"));
             cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t (n) USING 'StorageAttachedIndex'"));
             cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t (s) USING 'StorageAttachedIndex'"));
             cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t (v) USING 'StorageAttachedIndex'"));
@@ -76,10 +79,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             // insert some data
             ICoordinator coordinator = cluster.coordinator(1);
             IInvokableInstance node = cluster.get(1);
-            coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v) VALUES (1, 1, 1, 's_1', [1, 1])"), ConsistencyLevel.ONE);
-            coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v) VALUES (1, 2, 2, 's_2', [1, 2])"), ConsistencyLevel.ONE);
-            coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v) VALUES (2, 1, 3, 's_3', [1, 3])"), ConsistencyLevel.ONE);
-            coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v) VALUES (2, 2, 4, 's_4', [1, 4])"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v, l) VALUES (1, 1, 1, 's_1', [1, 1], 1)"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v, l) VALUES (1, 2, 2, 's_2', [1, 2], 2)"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v, l) VALUES (2, 1, 3, 's_3', [1, 3], 3)"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v, l) VALUES (2, 2, 4, 's_4', [1, 4], 4)"), ConsistencyLevel.ONE);
             node.flush(KEYSPACE);
 
             // test single numeric query
@@ -292,11 +295,27 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             coordinator.execute(annQuery, ConsistencyLevel.ONE);
             coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node, "4 operations were slow");
-            assertLogsDoNotContain(mark, node,
-                                   "SAI slow query metrics:",
-                                   "SAI slow query plan:",
-                                   "SAI slowest query metrics:",
-                                   "SAI slowest query plan:");
+            assertLogsDoNotContainSAIExecutionInfo(mark, node);
+            CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(true);
+
+            // test with a legacy index, there should be no SAI execution info
+            cluster.schemaChange(withKeyspace("CREATE INDEX legacy_idx ON %s.t (l)"));
+            Awaitility.waitAtMost(1, TimeUnit.MINUTES).until(() -> cluster.get(1).callOnInstance(() -> {
+                SecondaryIndexManager sim = Keyspace.open(KEYSPACE).getColumnFamilyStore("t").indexManager;
+                return sim.isIndexQueryable("legacy_idx");
+            }));
+            mark = node.logs().mark();
+            String legacyIndexQuery = withKeyspace("SELECT * FROM %s.t WHERE l = 1");
+            coordinator.execute(legacyIndexQuery, ConsistencyLevel.ONE);
+            assertLogsContain(mark, node, "1 operations were slow", "WHERE l = 1");
+            assertLogsDoNotContainSAIExecutionInfo(mark, node);
+
+            // test with a regular, non-indexed query, there should be no SAI execution info
+            mark = node.logs().mark();
+            String regularQuery = withKeyspace("SELECT * FROM %s.t WHERE k = 1");
+            coordinator.execute(regularQuery, ConsistencyLevel.ONE);
+            assertLogsContain(mark, node, "1 operations were slow", "WHERE k = 1");
+            assertLogsDoNotContainSAIExecutionInfo(mark, node);
         }
     }
 
@@ -305,9 +324,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
         assertLogs(mark, node, AbstractIterableAssert::isNotEmpty, lines);
     }
 
-    private static void assertLogsDoNotContain(long mark, IInvokableInstance node, String... lines)
+    private static void assertLogsDoNotContainSAIExecutionInfo(long mark, IInvokableInstance node)
     {
-        assertLogs(mark, node, AbstractIterableAssert::isEmpty, lines);
+        assertLogs(mark, node, AbstractIterableAssert::isEmpty,
+                   "SAI slow query metrics:",
+                   "SAI slow query plan:",
+                   "SAI slowest query metrics:",
+                   "SAI slowest query plan:");
     }
 
     private static void assertLogs(long mark, IInvokableInstance node, Consumer<ListAssert<String>> listAssert, String... lines)
@@ -332,18 +355,19 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
         @SuppressWarnings("resource")
         public static void install(ClassLoader classLoader, int node)
         {
-            new ByteBuddy().rebase(StorageAttachedIndexSearcher.class)
-                           .method(named("search"))
+            new ByteBuddy().rebase(ReadCommand.class)
+                           .method(named("executeLocally"))
                            .intercept(MethodDelegation.to(SlowSAIQueryLoggerTest.BB.class))
                            .make()
                            .load(classLoader, ClassLoadingStrategy.Default.INJECTION);
         }
 
         @SuppressWarnings("unused")
-        public static UnfilteredPartitionIterator search(ReadExecutionController executionController,
-                                                         @SuperCall Callable<UnfilteredPartitionIterator> zuper)
+        public static UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController,
+                                                                 @SuperCall Callable<UnfilteredPartitionIterator> zuper)
         {
-            Uninterruptibles.sleepUninterruptibly(queryDelay.get(), TimeUnit.MILLISECONDS);
+            if (executionController.metadata().keyspace.equals(KEYSPACE))
+                Uninterruptibles.sleepUninterruptibly(queryDelay.get(), TimeUnit.MILLISECONDS);
             try
             {
                 return zuper.call();
