@@ -47,6 +47,7 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
  * We also log timed out operations, see CASSANDRA-7392.
  * Since CASSANDRA-12403 we also log queries that were slow.
  */
+@VisibleForTesting
 public class MonitoringTask
 {
     private static final String LINE_SEPARATOR = getProperty("line.separator");
