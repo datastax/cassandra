@@ -578,6 +578,14 @@ public class AlterTest extends CQLTester
         alterTable("alter table %s add v1 int");
     }
 
+    @Test(expected = InvalidRequestException.class)
+    public void testDropFixedCollectionAddVariableCollection() throws Throwable
+    {
+        createTable("create table %s (k int, c int, v list<int>, PRIMARY KEY (k, c))");
+        execute("alter table %s drop v");
+        execute("alter table %s add v list<varint>");
+    }
+
     @Test
     public void testInvalidDroppingAndAddingOfCollections() throws Throwable
     {

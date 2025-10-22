@@ -973,7 +973,7 @@ public class AbstractTypeTest
             {
                 if (upgradeFrom.expectCompatibleWith(l, r))
                     assertions.assertThat(upgradeTo.expectCompatibleWith(l, r)).describedAs(isCompatibleWithDesc(l, r)).isTrue();
-                if (serializationCompatibleWithSupported && upgradeFrom.expectSerializationCompatibleWith(l, r))
+                if (upgradeFrom.expectSerializationCompatibleWith(l, r))
                     assertions.assertThat(upgradeTo.expectSerializationCompatibleWith(l, r)).describedAs(isSerializationCompatibleWithDesc(l, r)).isTrue();
                 if (upgradeFrom.expectValueCompatibleWith(l, r))
                     assertions.assertThat(upgradeTo.expectValueCompatibleWith(l, r)).describedAs(isValueCompatibleWithDesc(l, r)).isTrue();
@@ -1610,6 +1610,8 @@ public class AbstractTypeTest
         @Override
         public boolean expectSerializationCompatibleWith(AbstractType left, AbstractType right)
         {
+            if (left.equals(right))
+              return true;
             return serializationCompatibleWith.containsEntry(left, right);
         }
 

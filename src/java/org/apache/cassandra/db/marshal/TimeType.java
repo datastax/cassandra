@@ -72,6 +72,15 @@ public class TimeType extends TemporalType<Long>
         return this == previous || previous == LongType.instance;
     }
 
+    @Override
+    public boolean isSerializationCompatibleWith(AbstractType<?> previous)
+    {
+        // TimeType is value-compatible with LongType for reading purposes, but they have
+        // different serialization semantics and should not be considered serialization compatible
+        // (i.e., you cannot drop a time column and re-add it as bigint or vice versa).
+        return this == previous;
+    }
+
     public Term fromJSONObject(Object parsed) throws MarshalException
     {
         try

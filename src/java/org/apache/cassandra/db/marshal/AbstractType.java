@@ -436,15 +436,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      */
     public final boolean isValueCompatibleWith(AbstractType<?> previous)
     {
-        if (previous == null)
-            return false;
-
-        AbstractType<T> unwrapped = this.unwrap();
-        AbstractType<?> previousUnwrapped = previous.unwrap();
-        if (unwrapped.equals(previousUnwrapped))
-            return true;
-
-        return unwrapped.isValueCompatibleWithInternal(previousUnwrapped);
+        AbstractType<?> thisType =          isReversed() ? ((ReversedType<?>)     this).baseType : this;
+        AbstractType<?> thatType = previous.isReversed() ? ((ReversedType<?>) previous).baseType : previous;
+        return thisType.isValueCompatibleWithInternal(thatType);
     }
 
     /**
