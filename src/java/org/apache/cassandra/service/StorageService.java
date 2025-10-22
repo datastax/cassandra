@@ -1040,14 +1040,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 try
                 {
                     sun.misc.Signal signal = new sun.misc.Signal(signalName);
-                    sun.misc.Signal.handle(signal, 
+                    // Use an array to hold the old handler reference so it can be captured in the inner class
+                    final sun.misc.SignalHandler[] oldHandlerHolder = new sun.misc.SignalHandler[1];
+                    oldHandlerHolder[0] = sun.misc.Signal.handle(signal,
                         new sun.misc.SignalHandler()
                         {
                             @Override
                             public void handle(sun.misc.Signal sig)
                             {
                                 logger.info("Received signal: SIG{} ({})", sig.getName(), sig.getNumber());
-                                // Note: We don't chain to previous handlers to avoid complexity
+                                // Chain to the previous handler to ensure normal shutdown proceeds
+                                if (oldHandlerHolder[0] != null && oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_DFL &&
+                                    oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_IGN)
+                                {
+                                    oldHandlerHolder[0].handle(sig);
+                                }
                             }
                         });
                 }
