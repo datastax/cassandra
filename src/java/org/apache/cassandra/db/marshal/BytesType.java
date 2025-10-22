@@ -91,6 +91,38 @@ public class BytesType extends AbstractType<ByteBuffer>
         return true;
     }
 
+    @Override
+    public boolean isSerializationCompatibleWith(AbstractType<?> previous)
+    {
+        // BytesType can read anything, but for serialization compatibility (i.e., when dropping
+        // and re-adding a column), we need to be very restrictive. We cannot be serialization
+        // compatible with geometric types or date ranges as they have different wire formats.
+        if (previous instanceof AbstractGeometricType || previous instanceof DateRangeType)
+            return false;
+
+        // BytesType is serialization-compatible with itself and with a specific set of types
+        // that have compatible serialization semantics, even though they may have different
+        // fixed-length properties.
+        if (this == previous)
+            return true;
+
+        if (isMultiCell() != previous.isMultiCell())
+            return false;
+
+        // BytesType is only compatible with simple scalar types, not complex
+        // structured types, even if they're variable-length.
+        return previous instanceof SimpleDateType
+            || previous instanceof ByteType
+            || previous instanceof AsciiType
+            || previous instanceof TimeType
+            || previous instanceof UTF8Type
+            || previous instanceof InetAddressType
+            || previous instanceof DurationType
+            || previous instanceof ShortType
+            || previous instanceof IntegerType
+            || previous instanceof DecimalType;
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.BLOB;
