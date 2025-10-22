@@ -136,7 +136,7 @@ public class IndexContext
 
     private final IndexViewManager viewManager;
     @Nullable
-    private final IndexMetrics indexMetrics;
+    private final Optional<IndexMetrics> indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
     private final boolean isAnalyzed;
@@ -188,7 +188,7 @@ public class IndexContext
             this.vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
 
-            this.indexMetrics = SAI_INDEX_METRICS_ENABLED.getBoolean() ? new IndexMetrics(this) : null;
+            this.indexMetrics = SAI_INDEX_METRICS_ENABLED.getBoolean() ? Optional.of(new IndexMetrics(this)) : Optional.empty();
             this.columnQueryMetrics = isVector() ? new ColumnQueryMetrics.VectorIndexMetrics(keyspace, table, getIndexName()) :
                                       isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                                   : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
@@ -206,7 +206,7 @@ public class IndexContext
             // null config indicates a "fake" index context. As such, it won't actually be used for indexing/accessing
             // data, leaving these metrics unused. This also eliminates the overhead of creating these metrics on the
             // query path.
-            this.indexMetrics = null;
+            this.indexMetrics = Optional.empty();
             this.columnQueryMetrics = null;
         }
 
@@ -240,7 +240,7 @@ public class IndexContext
 
     public Optional<IndexMetrics> getIndexMetrics()
     {
-        return Optional.ofNullable(indexMetrics);
+        return indexMetrics;
     }
 
     public ColumnQueryMetrics getColumnQueryMetrics()
@@ -301,8 +301,8 @@ public class IndexContext
             ByteBuffer value = getValueOf(key, row, FBUtilities.nowInSeconds());
             target.index(key, row.clustering(), value, memtable, opGroup);
         }
-        if (indexMetrics != null)
-            indexMetrics.memtableIndexWriteLatency.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+        if (indexMetrics!=null && indexMetrics.isPresent())
+            indexMetrics.get().memtableIndexWriteLatency.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
     }
 
     /**
@@ -694,8 +694,8 @@ public class IndexContext
         dropped = true;
         liveMemtables.clear();
         viewManager.invalidate(obsolete);
-        if (indexMetrics != null)
-            indexMetrics.release();
+        if (indexMetrics != null && indexMetrics.isPresent())
+            indexMetrics.get().release();
         if (columnQueryMetrics != null)
             columnQueryMetrics.release();
 
