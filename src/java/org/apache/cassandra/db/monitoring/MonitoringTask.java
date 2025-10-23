@@ -391,7 +391,7 @@ public class MonitoringTask
      */
     private final static class SlowOperation extends Operation
     {
-        /** The details of the slowest operation among the aggregated operations. */
+        /** Any specific execution info of the slowest operation among the aggregated operations. */
         private Monitorable.ExecutionInfo slowestOperationExecutionInfo;
 
         SlowOperation(Monitorable operation, long slowAtNanos)
