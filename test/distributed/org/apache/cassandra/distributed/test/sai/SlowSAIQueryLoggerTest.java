@@ -23,6 +23,7 @@ import java.util.function.Consumer;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.distributed.api.*;
 import org.apache.cassandra.distributed.shared.JMXUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndexConfig;
@@ -69,7 +70,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
     public void testSlowSAIQueryLogger() throws Throwable
     {
         // effectively disable the scheduled monitoring task so we control it manually for better test stability
-        System.setProperty(Config.PROPERTY_PREFIX + "monitoring_report_interval_ms", String.valueOf(TimeUnit.HOURS.toMillis(1)));
+        CassandraRelevantProperties.SLOW_QUERY_LOG_MONITORING_REPORT_INTERVAL_IN_MS.setInt((int) TimeUnit.HOURS.toMillis(1));
 
         try (Cluster cluster = init(Cluster.build(1)
                                            .withConfig(c -> c.set("slow_query_log_timeout_in_ms", SLOW_QUERY_LOG_TIMEOUT_IN_MS).with(Feature.JMX))
