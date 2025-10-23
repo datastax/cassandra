@@ -289,6 +289,11 @@ public enum CassandraRelevantProperties
     CUSTOM_HINTS_HANDLER("cassandra.custom_hints_handler"),
     CUSTOM_HINTS_RATE_LIMITER_FACTORY("cassandra.custom_hints_rate_limiter_factory"),
     CUSTOM_INDEX_BUILD_DECIDER("cassandra.custom_index_build_decider"),
+    /**
+     * Which class to use for internode metrics for {@link org.apache.cassandra.net.OutboundConnections}.
+     * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.InternodeOutboundMetrics}.
+     */
+    CUSTOM_INTERNODE_OUTBOUND_METRICS_PROVIDER_PROPERTY("cassandra.custom_internode_outbound_metrics_provider_class"),
     CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
     /**
      * Which class to use for messaging metrics for {@link org.apache.cassandra.net.MessagingService}.
