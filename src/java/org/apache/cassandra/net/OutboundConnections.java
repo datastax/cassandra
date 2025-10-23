@@ -106,7 +106,7 @@ public class OutboundConnections
 
             if (existing == null)
             {
-                connections.metrics = new InternodeOutboundMetrics(settings.to, connections);
+                connections.metrics = InternodeOutboundMetrics.create(settings.to, connections);
                 connections.metricsReady.signalAll();
             }
             else
