@@ -354,6 +354,12 @@ public enum CassandraRelevantProperties
     CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY("cassandra.custom_messaging_metrics_provider_class"),
 
     /**
+     * Which class to use for internode metrics for {@link org.apache.cassandra.net.OutboundConnections}.
+     * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.InternodeOutboundMetrics}.
+     */
+    CUSTOM_INTERNODE_OUTBOUND_METRICS_PROVIDER_PROPERTY("cassandra.custom_internode_outbound_metrics_provider_class"),
+
+    /**
      * Which class to use for creating guardrails
      */
     CUSTOM_GUARDRAILS_FACTORY_PROPERTY("cassandra.custom_guardrails_factory_class"),
