@@ -17,10 +17,14 @@
  */
 package org.apache.cassandra.metrics;
 
+import java.lang.reflect.InvocationTargetException;
+
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Meter;
 import org.apache.cassandra.net.OutboundConnections;
+import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_INTERNODE_OUTBOUND_METRICS_PROVIDER_PROPERTY;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -110,11 +114,40 @@ public class InternodeOutboundMetrics
     private final MetricNameFactory factory;
 
     /**
+     * Factory method to create InternodeOutboundMetrics instances.
+     * If a custom provider is configured, it will be used instead of the default implementation.
+     *
+     * @param ip IP address to use for metrics label
+     * @param messagingPool the OutboundConnections instance
+     * @return an InternodeOutboundMetrics instance
+     */
+    public static InternodeOutboundMetrics create(InetAddressAndPort ip, OutboundConnections messagingPool)
+    {
+        if (CUSTOM_INTERNODE_OUTBOUND_METRICS_PROVIDER_PROPERTY.isPresent())
+        {
+            Class<InternodeOutboundMetrics> klass = FBUtilities.classForName(CUSTOM_INTERNODE_OUTBOUND_METRICS_PROVIDER_PROPERTY.getString(), "Internode Outbound Metrics Provider");
+            try
+            {
+                return klass.getDeclaredConstructor(InetAddressAndPort.class, OutboundConnections.class).newInstance(ip, messagingPool);
+            }
+            catch (NoSuchMethodException | InstantiationException | IllegalAccessException |
+                   InvocationTargetException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+        else
+        {
+            return new InternodeOutboundMetrics(ip, messagingPool);
+        }
+    }
+
+    /**
      * Create metrics for given connection pool.
      *
      * @param ip IP address to use for metrics label
      */
-    public InternodeOutboundMetrics(InetAddressAndPort ip, final OutboundConnections messagingPool)
+    protected InternodeOutboundMetrics(InetAddressAndPort ip, final OutboundConnections messagingPool)
     {
         // ipv6 addresses will contain colons, which are invalid in a JMX ObjectName
         address = ip.getHostAddressAndPortForJMX();
