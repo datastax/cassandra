@@ -124,7 +124,7 @@ public class CassandraDiskAnn
                 // don't load full PQVectors, all we need is the metadata from the PQ at the start
                 pq = ProductQuantization.load(reader);
                 compression = new VectorCompression(VectorCompression.CompressionType.PRODUCT_QUANTIZATION,
-                                                    graph.getDimension() * Float.BYTES,
+                                                    rawGraph.getDimension() * Float.BYTES,
                                                     pq.compressedVectorSize());
             }
             else
