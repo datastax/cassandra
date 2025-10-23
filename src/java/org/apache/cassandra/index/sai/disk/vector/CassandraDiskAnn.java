@@ -27,7 +27,7 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.graph.GraphIndex;
+import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
@@ -74,7 +74,7 @@ public class CassandraDiskAnn
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final Set<FeatureId> features;
-    private final GraphIndex graph;
+    private final ImmutableGraphIndex graph;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -233,7 +233,7 @@ public class CassandraDiskAnn
         searcher.usePruning(usePruning);
         try
         {
-            var view = (GraphIndex.ScoringView) searcher.getView();
+            var view = (ImmutableGraphIndex.ScoringView) searcher.getView();
             SearchScoreProvider ssp;
             // FusedADC can no longer be written due to jvector upgrade. However, it's possible these index files
             // still exist, so we have to support them.
@@ -313,9 +313,9 @@ public class CassandraDiskAnn
         return ordinalsMap.getOrdinalsView();
     }
 
-    public GraphIndex.ScoringView getView()
+    public ImmutableGraphIndex.ScoringView getView()
     {
-        return (GraphIndex.ScoringView) graph.getView();
+        return (ImmutableGraphIndex.ScoringView) graph.getView();
     }
 
     public boolean containsUnitVectors()

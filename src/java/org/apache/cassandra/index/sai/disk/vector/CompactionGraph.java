@@ -373,7 +373,7 @@ public class CompactionGraph implements Closeable, Accountable
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
         // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
-        writer.writeHeader();
+        writer.writeHeader(builder.getGraph().getView());
         writer.close();
 
         int nInProgress = builder.insertsInProgress();
