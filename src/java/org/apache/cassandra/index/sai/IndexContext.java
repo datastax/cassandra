@@ -135,7 +135,7 @@ public class IndexContext
     private final ConcurrentMap<Memtable, MemtableIndex> liveMemtables = new ConcurrentHashMap<>();
 
     private final IndexViewManager viewManager;
-    @Nullable
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
     private final Optional<IndexMetrics> indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
