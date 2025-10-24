@@ -219,6 +219,12 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         return metrics.getDroppedMessages();
     }
+    
+    @Override
+    public Map<String, Long> getDroppedMutationsByTable()
+    {
+        return metrics.getDroppedMutationsByTable();
+    }
 
     @Override
     public long getTotalTimeouts()
