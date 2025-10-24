@@ -22,19 +22,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import com.google.common.util.concurrent.Uninterruptibles;
-
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.distributed.api.*;
-import org.apache.cassandra.distributed.shared.JMXUtil;
-import org.apache.cassandra.index.sai.StorageAttachedIndexConfig;
-
 import org.junit.Test;
 
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.SuperCall;
-import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
@@ -42,6 +36,9 @@ import org.apache.cassandra.db.monitoring.MonitoringTask;
 import org.apache.cassandra.db.monitoring.MonitoringTaskTest;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.distributed.api.ConsistencyLevel;
+import org.apache.cassandra.distributed.api.ICoordinator;
+import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.plan.QueryMonitorableExecutionInfo;
@@ -49,11 +46,6 @@ import org.assertj.core.api.AbstractIterableAssert;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ListAssert;
 import org.awaitility.Awaitility;
-
-import javax.management.Attribute;
-import javax.management.MBeanServerConnection;
-import javax.management.ObjectName;
-import javax.management.remote.JMXConnector;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
@@ -73,7 +65,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
         CassandraRelevantProperties.SLOW_QUERY_LOG_MONITORING_REPORT_INTERVAL_IN_MS.setInt((int) TimeUnit.HOURS.toMillis(1));
 
         try (Cluster cluster = init(Cluster.build(1)
-                                           .withConfig(c -> c.set("slow_query_log_timeout_in_ms", SLOW_QUERY_LOG_TIMEOUT_IN_MS).with(Feature.JMX))
+                                           .withConfig(c -> c.set("slow_query_log_timeout_in_ms", SLOW_QUERY_LOG_TIMEOUT_IN_MS))
                                            .withInstanceInitializer(BB::install)
                                            .start()))
         {
@@ -295,7 +287,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             node.runOnInstance(() -> BB.queryDelay.updateAndGet(x -> x / 4)); // restore the query delay
 
             // disable execution info logging and verify they are not logged
-            setSlowQueryLogExecutionInfo(node, false);
+            CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(false);
             mark = node.logs().mark();
             coordinator.execute(numericQuery, ConsistencyLevel.ONE);
             coordinator.execute(textQuery, ConsistencyLevel.ONE);
@@ -303,7 +295,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node, "4 operations were slow");
             assertLogsDoNotContainSAIExecutionInfo(mark, node);
-            setSlowQueryLogExecutionInfo(node, true);
+            CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(true);
 
             // test with a legacy index, there should be no SAI execution info
             cluster.schemaChange(withKeyspace("CREATE INDEX legacy_idx ON %s.t (l)"));
@@ -349,22 +341,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
         {
             List<String> matchingLines = node.logs().grep(mark, line).getResult();
             listAssert.accept(Assertions.assertThat(matchingLines));
-        }
-    }
-
-    private static void setSlowQueryLogExecutionInfo(IInvokableInstance node, boolean enabled)
-    {
-        IInstanceConfig config = node.config();
-        try (JMXConnector jmxc = JMXUtil.getJmxConnector(config))
-        {
-            MBeanServerConnection mbsc = jmxc.getMBeanServerConnection();
-            ObjectName objectName = new ObjectName(StorageAttachedIndexConfig.MBEAN_NAME);
-            Attribute attribute = new Attribute("SlowQueryLogExecutionInfoEnabled", enabled);
-            mbsc.setAttribute(objectName, attribute);
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException("Unable to set JMX property", e);
         }
     }
 
