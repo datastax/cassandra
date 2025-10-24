@@ -89,8 +89,9 @@ public class DroppedMessageMetrics
         }
     }
     
-    public DroppedMessageMetrics(MetricNameFactory factory, String type, String scope)
+    public DroppedMessageMetrics(String type, String scope)
     {
+        MetricNameFactory factory = new DefaultNameFactory(type, scope);
         dropped = Metrics.meter(factory.createMetricName("Dropped"));
         internalDroppedLatency = Metrics.timer(factory.createMetricName("InternalDroppedLatency"));
         crossNodeDroppedLatency = Metrics.timer(factory.createMetricName("CrossNodeDroppedLatency"));

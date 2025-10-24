@@ -170,11 +170,10 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
             for (org.apache.cassandra.db.partitions.PartitionUpdate update : mutation.getPartitionUpdates())
             {
                 String tableKey = update.metadata().keyspace + '.' + update.metadata().name;
-                DroppedMessageMetrics tableMetrics = droppedMutationsByTable.computeIfAbsent(tableKey, 
-                    k -> {
-                        DefaultNameFactory tableFactory = new DefaultNameFactory("DroppedMutations", tableKey);
-                        return new DroppedMessageMetrics(tableFactory, "DroppedMutations", tableKey);
-                    });
+                DroppedMessageMetrics tableMetrics = droppedMutationsByTable.get(tableKey);
+                if (tableMetrics == null)
+                    tableMetrics = droppedMutationsByTable.computeIfAbsent(tableKey,
+                        k -> new DroppedMessageMetrics("DroppedMutations", k));
                 tableMetrics.dropped.mark();
                 if (message.isCrossNode())
                     tableMetrics.crossNodeDroppedLatency.update(timeElapsed, timeUnit);
