@@ -37,7 +37,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-import org.apache.cassandra.index.sai.StorageAttachedIndexConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -205,7 +204,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @Override
     public Monitorable.ExecutionInfo monitorableExecutionInfo()
     {
-        return StorageAttachedIndexConfig.instance().isSlowQueryLogExecutionInfoEnabled()
+        return CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.getBoolean()
                ? new QueryMonitorableExecutionInfo(queryContext, controller.buildPlan())
                : Monitorable.ExecutionInfo.EMPTY;
     }

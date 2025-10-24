@@ -35,7 +35,6 @@ import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
 
-import org.apache.cassandra.index.sai.StorageAttachedIndexConfig;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
@@ -230,8 +229,6 @@ public class DatabaseDescriptor
         applyGuardrails(); // requires created directories
 
         AuthConfig.applyAuth();
-
-        StorageAttachedIndexConfig.instance().registerMBean();
     }
 
     /**
