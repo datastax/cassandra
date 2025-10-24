@@ -20,6 +20,7 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.index.Index;
 import org.assertj.core.api.Assertions;
 
 public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<PartitionRangeReadCommand>
@@ -101,5 +102,28 @@ public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<Parti
         ReadCommand command = parseReadCommand(query);
         Assertions.assertThat(command).isInstanceOf(PartitionRangeReadCommand.class);
         return (PartitionRangeReadCommand) command;
+    }
+
+    @Test
+    public void testGetIndexSearcher()
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        // without an index plan
+        ReadCommand command = parseCommand("SELECT * FROM %s");
+        Assertions.assertThat(command.indexQueryPlan()).isNull();
+        Assertions.assertThat(command.indexSearcher()).isNull();
+
+        // with an index plan, before execution
+        command = parseCommand("SELECT * FROM %s WHERE v = 1");
+        Assertions.assertThat(command.indexQueryPlan()).isNotNull();
+        Assertions.assertThat(command.indexSearcher()).isNotNull();
+
+        // with an index plan, after execution
+        command = parseCommand("SELECT * FROM %s WHERE v = 2");
+        command.executeLocally(ReadExecutionController.empty());
+        Assertions.assertThat(command.indexQueryPlan()).isNotNull();
+        Assertions.assertThat(command.indexSearcher()).isNotNull();
     }
 }

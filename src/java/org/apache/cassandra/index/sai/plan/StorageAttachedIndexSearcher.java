@@ -49,6 +49,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -198,6 +199,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 throw t;
             }
         }
+    }
+
+    @Override
+    public Monitorable.ExecutionInfo monitorableExecutionInfo()
+    {
+        return CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.getBoolean()
+               ? new QueryMonitorableExecutionInfo(queryContext, controller.buildPlan())
+               : Monitorable.ExecutionInfo.EMPTY;
     }
 
     /**

@@ -112,6 +112,9 @@ public abstract class ReadCommand extends AbstractReadQuery
     @Nullable
     protected final Index.QueryPlan indexQueryPlan;
 
+    @Nullable
+    private volatile Index.Searcher indexSearcher;
+
     protected static abstract class SelectionDeserializer
     {
         public abstract ReadCommand deserialize(DataInputPlus in,
@@ -264,7 +267,21 @@ public abstract class ReadCommand extends AbstractReadQuery
     @VisibleForTesting
     public Index.Searcher indexSearcher()
     {
-        return indexQueryPlan == null ? null : indexQueryPlan.searcherFor(this);
+        if (indexQueryPlan == null)
+            return null;
+
+        if (indexSearcher == null)
+            indexSearcher = indexQueryPlan.searcherFor(this);
+
+        return indexSearcher;
+    }
+
+    @Override
+    public ExecutionInfo executionInfo()
+    {
+        return indexSearcher == null
+               ? ExecutionInfo.EMPTY
+               : indexSearcher.monitorableExecutionInfo();
     }
 
     /**
