@@ -108,6 +108,11 @@ public interface MessagingServiceMBean
      * dropped message counts for server lifetime
      */
     public Map<String, Integer> getDroppedMessages();
+    
+    /**
+     * dropped mutation counts by table for server lifetime
+     */
+    public Map<String, Long> getDroppedMutationsByTable();
 
     /**
      * Total number of timeouts happened on this node
