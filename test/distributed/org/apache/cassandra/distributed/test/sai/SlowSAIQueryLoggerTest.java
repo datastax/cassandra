@@ -349,7 +349,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
      */
     public static class BB
     {
-        static AtomicInteger queryDelay = new AtomicInteger(SLOW_QUERY_LOG_TIMEOUT_IN_MS + 1);
+        static AtomicInteger queryDelay = new AtomicInteger(SLOW_QUERY_LOG_TIMEOUT_IN_MS * 2);
 
         @SuppressWarnings("resource")
         public static void install(ClassLoader classLoader, int node)
