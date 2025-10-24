@@ -113,7 +113,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     protected final Index.QueryPlan indexQueryPlan;
 
     @Nullable
-    protected Index.Searcher indexSearcher;
+    private volatile Index.Searcher indexSearcher;
 
     protected static abstract class SelectionDeserializer
     {
