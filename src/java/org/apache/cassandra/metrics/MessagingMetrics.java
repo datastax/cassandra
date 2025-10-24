@@ -99,6 +99,9 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
 
     // total dropped message counts for server lifetime
     private final Map<Verb, DroppedForVerb> droppedMessages = new ConcurrentHashMap<>();
+    
+    // dropped mutations by table
+    private final Map<String, DroppedMessageMetrics> droppedMutationsByTable = new ConcurrentHashMap<>();
 
     public MessagingMetrics()
     {
@@ -161,6 +164,24 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
     public void recordDroppedMessage(Message<?> message, long timeElapsed, TimeUnit timeUnit)
     {
         recordDroppedMessage(message.verb(), timeElapsed, timeUnit, message.isCrossNode());
+        
+        if (message.verb() == Verb.MUTATION_REQ && message.payload instanceof org.apache.cassandra.db.Mutation)
+        {
+            org.apache.cassandra.db.Mutation mutation = (org.apache.cassandra.db.Mutation) message.payload;
+            for (org.apache.cassandra.db.partitions.PartitionUpdate update : mutation.getPartitionUpdates())
+            {
+                String tableKey = update.metadata().keyspace + '.' + update.metadata().name;
+                DroppedMessageMetrics tableMetrics = droppedMutationsByTable.get(tableKey);
+                if (tableMetrics == null)
+                    tableMetrics = droppedMutationsByTable.computeIfAbsent(tableKey,
+                        k -> new DroppedMessageMetrics("DroppedMutations", k));
+                tableMetrics.dropped.mark();
+                if (message.isCrossNode())
+                    tableMetrics.crossNodeDroppedLatency.update(timeElapsed, timeUnit);
+                else
+                    tableMetrics.internalDroppedLatency.update(timeElapsed, timeUnit);
+            }
+        }
     }
 
     public void recordDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit, boolean isCrossNode)
@@ -201,6 +222,14 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
             map.put(entry.getKey().toString(), (int) entry.getValue().metrics.dropped.getCount());
         return map;
     }
+    
+    public Map<String, Long> getDroppedMutationsByTable()
+    {
+        Map<String, Long> map = new HashMap<>(droppedMutationsByTable.size());
+        for (Map.Entry<String, DroppedMessageMetrics> entry : droppedMutationsByTable.entrySet())
+            map.put(entry.getKey(), entry.getValue().dropped.getCount());
+        return map;
+    }
 
     private void logDroppedMessages()
     {
@@ -239,5 +268,6 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
     public void resetDroppedMessages()
     {
         droppedMessages.replaceAll((u, v) -> new DroppedForVerb(new DroppedMessageMetrics(u)));
+        droppedMutationsByTable.clear();
     }
 }
