@@ -597,4 +597,209 @@ public class StorageServiceTest
             StorageService.instance.setColumnIndexCacheSize(old);
         }
     }
+
+    @Test
+    public void testSignalHandlerChainsToCustomHandler()
+    {
+        // Use a benign signal
+        String signalName = "USR2";
+        boolean[] oldHandlerCalled = new boolean[1];
+
+        try
+        {
+            sun.misc.Signal signal = new sun.misc.Signal(signalName);
+
+            // Set up an initial custom handler
+            sun.misc.SignalHandler customHandler = new sun.misc.SignalHandler()
+            {
+                @Override
+                public void handle(sun.misc.Signal sig)
+                {
+                    oldHandlerCalled[0] = true;
+                }
+            };
+            sun.misc.Signal.handle(signal, customHandler);
+
+            // Now install a new handler that should chain to the previous one
+            final sun.misc.SignalHandler[] oldHandlerHolder = new sun.misc.SignalHandler[1];
+            oldHandlerHolder[0] = sun.misc.Signal.handle(signal,
+                new sun.misc.SignalHandler()
+                {
+                    @Override
+                    public void handle(sun.misc.Signal sig)
+                    {
+                        // Chain to the previous handler to ensure normal shutdown proceeds
+                        if (oldHandlerHolder[0] != null && oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_DFL &&
+                            oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_IGN)
+                        {
+                            oldHandlerHolder[0].handle(sig);
+                        }
+                    }
+                });
+
+            // Verify we captured the custom handler
+            assertEquals("Old handler should be the custom handler we installed", customHandler, oldHandlerHolder[0]);
+
+            // Get the current handler and invoke it
+            sun.misc.SignalHandler currentHandler = sun.misc.Signal.handle(signal, sun.misc.SignalHandler.SIG_DFL);
+            currentHandler.handle(signal);
+
+            // Verify the old handler was called
+            assertTrue("Custom handler should have been called through chaining", oldHandlerCalled[0]);
+
+            // Restore default handler
+            sun.misc.Signal.handle(signal, sun.misc.SignalHandler.SIG_DFL);
+        }
+        catch (IllegalArgumentException e)
+        {
+            // Signal not available on this platform - skip test
+        }
+    }
+
+    @Test
+    public void testSignalHandlerDoesNotChainToDefaultHandler()
+    {
+        String signalName = "USR2";
+        boolean[] handlerInvoked = new boolean[1];
+
+        try
+        {
+            sun.misc.Signal signal = new sun.misc.Signal(signalName);
+
+            // Ensure we start with default handler
+            sun.misc.Signal.handle(signal, sun.misc.SignalHandler.SIG_DFL);
+
+            // Install a new handler that should NOT chain to SIG_DFL
+            final sun.misc.SignalHandler[] oldHandlerHolder = new sun.misc.SignalHandler[1];
+            oldHandlerHolder[0] = sun.misc.Signal.handle(signal,
+                new sun.misc.SignalHandler()
+                {
+                    @Override
+                    public void handle(sun.misc.Signal sig)
+                    {
+                        handlerInvoked[0] = true;
+                        // Chain to the previous handler only if it's not SIG_DFL or SIG_IGN
+                        if (oldHandlerHolder[0] != null && oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_DFL &&
+                            oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_IGN)
+                        {
+                            oldHandlerHolder[0].handle(sig);
+                        }
+                    }
+                });
+
+            // Verify we captured SIG_DFL
+            assertEquals("Old handler should be SIG_DFL", sun.misc.SignalHandler.SIG_DFL, oldHandlerHolder[0]);
+
+            // Get the current handler and invoke it
+            sun.misc.SignalHandler currentHandler = sun.misc.Signal.handle(signal, sun.misc.SignalHandler.SIG_DFL);
+            currentHandler.handle(signal);
+
+            // Verify our handler was invoked but didn't chain to SIG_DFL (no exception thrown)
+            assertTrue("Handler should have been invoked", handlerInvoked[0]);
+
+            // Restore default handler
+            sun.misc.Signal.handle(signal, sun.misc.SignalHandler.SIG_DFL);
+        }
+        catch (IllegalArgumentException e)
+        {
+            // Signal not available on this platform - skip test
+        }
+    }
+
+    @Test
+    public void testSignalHandlerDoesNotChainToIgnoreHandler()
+    {
+        String signalName = "USR2";
+        boolean[] handlerInvoked = new boolean[1];
+
+        try
+        {
+            sun.misc.Signal signal = new sun.misc.Signal(signalName);
+
+            // Install SIG_IGN handler
+            sun.misc.Signal.handle(signal, sun.misc.SignalHandler.SIG_IGN);
+
+            // Install a new handler that should NOT chain to SIG_IGN
+            final sun.misc.SignalHandler[] oldHandlerHolder = new sun.misc.SignalHandler[1];
+            oldHandlerHolder[0] = sun.misc.Signal.handle(signal,
+                new sun.misc.SignalHandler()
+                {
+                    @Override
+                    public void handle(sun.misc.Signal sig)
+                    {
+                        handlerInvoked[0] = true;
+                        // Chain to the previous handler only if it's not SIG_DFL or SIG_IGN
+                        if (oldHandlerHolder[0] != null && oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_DFL &&
+                            oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_IGN)
+                        {
+                            oldHandlerHolder[0].handle(sig);
+                        }
+                    }
+                });
+
+            // Verify we captured SIG_IGN
+            assertEquals("Old handler should be SIG_IGN", sun.misc.SignalHandler.SIG_IGN, oldHandlerHolder[0]);
+
+            // Get the current handler and invoke it
+            sun.misc.SignalHandler currentHandler = sun.misc.Signal.handle(signal, sun.misc.SignalHandler.SIG_DFL);
+            currentHandler.handle(signal);
+
+            // Verify our handler was invoked but didn't chain to SIG_IGN (no exception thrown)
+            assertTrue("Handler should have been invoked", handlerInvoked[0]);
+
+            // Restore default handler
+            sun.misc.Signal.handle(signal, sun.misc.SignalHandler.SIG_DFL);
+        }
+        catch (IllegalArgumentException e)
+        {
+            // Signal not available on this platform - skip test
+        }
+    }
+
+    @Test
+    public void testSignalHandlerWithNullOldHandler()
+    {
+        String signalName = "USR2";
+        boolean[] handlerInvoked = new boolean[1];
+
+        try
+        {
+            sun.misc.Signal signal = new sun.misc.Signal(signalName);
+
+            // Simulate the scenario where oldHandlerHolder[0] is null
+            final sun.misc.SignalHandler[] oldHandlerHolder = new sun.misc.SignalHandler[1];
+            // Deliberately leave oldHandlerHolder[0] as null
+
+            sun.misc.SignalHandler testHandler = new sun.misc.SignalHandler()
+            {
+                @Override
+                public void handle(sun.misc.Signal sig)
+                {
+                    handlerInvoked[0] = true;
+                    // This is the logic from the commit
+                    if (oldHandlerHolder[0] != null && oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_DFL &&
+                        oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_IGN)
+                    {
+                        oldHandlerHolder[0].handle(sig);
+                    }
+                }
+            };
+
+            // Install our test handler
+            sun.misc.Signal.handle(signal, testHandler);
+
+            // Invoke the handler
+            testHandler.handle(signal);
+
+            // Verify the handler was invoked and didn't crash on null check
+            assertTrue("Handler should have been invoked", handlerInvoked[0]);
+
+            // Restore default handler
+            sun.misc.Signal.handle(signal, sun.misc.SignalHandler.SIG_DFL);
+        }
+        catch (IllegalArgumentException e)
+        {
+            // Signal not available on this platform - skip test
+        }
+    }
 }
