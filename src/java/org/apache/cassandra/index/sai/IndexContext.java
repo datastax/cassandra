@@ -68,6 +68,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableKeyRangeIterator;
+import org.apache.cassandra.index.sai.metrics.AbstractMetrics;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -301,8 +302,7 @@ public class IndexContext
             ByteBuffer value = getValueOf(key, row, FBUtilities.nowInSeconds());
             target.index(key, row.clustering(), value, memtable, opGroup);
         }
-        if (indexMetrics!=null && indexMetrics.isPresent())
-            indexMetrics.get().memtableIndexWriteLatency.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+        indexMetrics.ifPresent(metrics -> metrics.memtableIndexWriteLatency.update(System.nanoTime() - start, TimeUnit.NANOSECONDS));
     }
 
     /**
@@ -694,8 +694,7 @@ public class IndexContext
         dropped = true;
         liveMemtables.clear();
         viewManager.invalidate(obsolete);
-        if (indexMetrics != null && indexMetrics.isPresent())
-            indexMetrics.get().release();
+        indexMetrics.ifPresent(AbstractMetrics::release);
         if (columnQueryMetrics != null)
             columnQueryMetrics.release();
 
