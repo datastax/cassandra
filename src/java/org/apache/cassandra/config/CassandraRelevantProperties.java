@@ -335,6 +335,8 @@ public enum CassandraRelevantProperties
     /** Which class to use for token metadata provider */
     CUSTOM_TMD_PROVIDER_PROPERTY("cassandra.custom_token_metadata_provider_class"),
 
+    CUSTOM_REPLICA_PLAN_ITERATOR_PROVIDER_PROPERTY("cassandra.custom_replica_plan_iterator_provider_class"),
+
     /** Which class to use for failure detection */
     CUSTOM_FAILURE_DETECTOR_PROPERTY("cassandra.custom_failure_detector_class"),
 
