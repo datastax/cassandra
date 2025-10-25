@@ -477,6 +477,10 @@ public enum CassandraRelevantProperties
     // Allow restoring legacy behavior of deleting sai components before a rebuild (which implies a rebuild cannot be
     // done without first stopping reads on that index)
     IMMUTABLE_SAI_COMPONENTS("cassandra.sai.immutable_components", "false"),
+    // Minimum SAI index version to which immutable components can apply. If the SAI version used is strictly lower
+    // that the version configured here, then immutable components will _not_ be used even if the previous flag is set
+    // to `true`. You can set this to `aa` to enable immutable components on every version.
+    IMMUTABLE_SAI_COMPONENTS_MIN_VERSION("cassandra.sai.immutable_components.min_version", "ca"),
 
     // Enables parallel index read.
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),

@@ -212,10 +212,8 @@ public class Version implements Comparable<Version>
 
     public boolean useImmutableComponentFiles()
     {
-        // We only enable "immutable" components (meaning that new build don't delete or replace old versions) if the
-        // flag is set and even then, only starting at version CA. There is no reason to need it for older versions,
-        // and if older versions are involved, it means we likely want backward compatible behaviour.
-        return CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS.getBoolean() && onOrAfter(Version.CA);
+        return CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS.getBoolean()
+               && onOrAfter(parse(CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS_MIN_VERSION.getString()));
     }
 
     @Override
@@ -293,11 +291,15 @@ public class Version implements Comparable<Version>
     // Format: <sstable descriptor>-SAI(_<index name>)_<component name>.db
     //
     private static final String VERSION_AA_PER_SSTABLE_FORMAT = "SAI_%s.db";
+    private static final String VERSION_AA_PER_SSTABLE_WITH_GENERATION_FORMAT = "SAI_%s_%d.db";
     private static final String VERSION_AA_PER_INDEX_FORMAT = "SAI_%s_%s.db";
+    private static final String VERSION_AA_PER_INDEX_WITH_GENERATION_FORMAT = "SAI_%s_%s_%d.db";
 
     private static String aaFileNameFormat(IndexComponentType indexComponentType, @Nullable String indexName, int generation)
     {
-        Preconditions.checkArgument(generation == 0, "Generation is not supported for AA version");
+        if (generation > 0)
+            return (indexName == null ? String.format(VERSION_AA_PER_SSTABLE_WITH_GENERATION_FORMAT, indexComponentType.representation, generation)
+                                  : String.format(VERSION_AA_PER_INDEX_WITH_GENERATION_FORMAT, indexName, indexComponentType.representation, generation));
 
         return (indexName == null ? String.format(VERSION_AA_PER_SSTABLE_FORMAT, indexComponentType.representation)
                                   : String.format(VERSION_AA_PER_INDEX_FORMAT, indexName, indexComponentType.representation));
@@ -309,7 +311,19 @@ public class Version implements Comparable<Version>
         if (lastSepIdx == -1)
             return Optional.empty();
 
-        String indexComponentStr = componentStr.substring(lastSepIdx + 1, componentStr.length() - 3);
+        int generation = 0;
+        String maybeGenerationStr = componentStr.substring(lastSepIdx + 1, componentStr.length() - 3);
+        String indexComponentStr = maybeGenerationStr;
+        if (GENERATION_PATTERN.matcher(maybeGenerationStr).matches())
+        {
+            generation = Integer.parseInt(maybeGenerationStr);
+            int prevSepIdx = componentStr.substring(0, lastSepIdx).lastIndexOf('_');
+            if (prevSepIdx == -1)
+                return Optional.empty();
+            indexComponentStr = componentStr.substring(prevSepIdx + 1, lastSepIdx);
+            lastSepIdx = prevSepIdx;
+        }
+
         IndexComponentType indexComponentType = IndexComponentType.fromRepresentation(indexComponentStr);
 
         String indexName = null;
@@ -317,7 +331,7 @@ public class Version implements Comparable<Version>
         if (firstSepIdx != -1 && firstSepIdx != lastSepIdx)
             indexName = componentStr.substring(firstSepIdx + 1, lastSepIdx);
 
-        return Optional.of(new ParsedFileName(ComponentsBuildId.of(AA, 0), indexComponentType, indexName));
+        return Optional.of(new ParsedFileName(ComponentsBuildId.of(AA, generation), indexComponentType, indexName));
     }
 
     /**
