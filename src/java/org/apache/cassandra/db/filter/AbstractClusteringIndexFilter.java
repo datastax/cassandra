@@ -47,20 +47,25 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
         return false;
     }
 
-    protected abstract void serializeInternal(DataOutputPlus out, int version) throws IOException;
-    protected abstract long serializedSizeInternal(int version);
-
     protected void appendOrderByToCQLString(TableMetadata metadata, StringBuilder sb)
     {
         if (reversed)
         {
-            sb.append(" ORDER BY (");
+            if (sb.length() > 0)
+                sb.append(' ');
+            sb.append("ORDER BY ");
             int i = 0;
             for (ColumnMetadata column : metadata.clusteringColumns())
-                sb.append(i++ == 0 ? "" : ", ").append(column.name).append(column.type instanceof ReversedType ? " ASC" : " DESC");
-            sb.append(')');
+            {
+                sb.append(i++ == 0 ? "" : ", ")
+                  .append(column.name.toCQLString())
+                  .append(column.type instanceof ReversedType ? " ASC" : " DESC");
+            }
         }
     }
+
+    protected abstract void serializeInternal(DataOutputPlus out, int version) throws IOException;
+    protected abstract long serializedSizeInternal(int version);
 
     private static class FilterSerializer implements Serializer
     {
