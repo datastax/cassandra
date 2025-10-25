@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -39,24 +40,28 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
+import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
+import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.quantization.BQVectors;
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.MutableBQVectors;
 import io.github.jbellis.jvector.quantization.MutableCompressedVectors;
 import io.github.jbellis.jvector.quantization.MutablePQVectors;
+import io.github.jbellis.jvector.quantization.NVQuantization;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
@@ -67,6 +72,7 @@ import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -74,6 +80,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
@@ -85,7 +92,9 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.StorageService;
 
 import static java.lang.Math.max;
@@ -117,6 +126,8 @@ public class CompactionGraph implements Closeable, Accountable
     private final boolean unitVectors;
     private final int postingsEntriesAllocated;
     private final File postingsFile;
+    private final File vectorsByOrdinalTmpFile;
+    private final FileOutputStreamPlus vectorsByOrdinalOutput;
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
@@ -135,6 +146,8 @@ public class CompactionGraph implements Closeable, Accountable
     private VectorCompressor<?> compressor;
     private MutableCompressedVectors compressedVectors;
     private GraphIndexBuilder builder;
+
+    private final VectorFloat<?> globalMean;
 
     public CompactionGraph(IndexComponents.ForWrite perIndexComponents, VectorCompressor<?> compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
     {
@@ -181,6 +194,12 @@ public class CompactionGraph implements Closeable, Accountable
                                          .entries(postingsEntriesAllocated)
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
+        // TODO should we checksum vectors? How do we prevent concurrent overwrites?
+        // Formatted so that the full resolution vector is written at the ordinal * vector dimension offset
+        Component vectorsByOrdinalComponent = new Component(Component.Type.CUSTOM, "vectors_by_ordinal" + Descriptor.TMP_EXT);
+        vectorsByOrdinalTmpFile = dd.fileFor(vectorsByOrdinalComponent);
+        vectorsByOrdinalOutput = vectorsByOrdinalTmpFile.newOutputStream(File.WriteMode.OVERWRITE);
+
         // VSTODO add LVQ
         BuildScoreProvider bsp;
         if (compressor instanceof ProductQuantization)
@@ -217,17 +236,30 @@ public class CompactionGraph implements Closeable, Accountable
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
                       + SAICodecUtils.headerSize();
-        // placeholder writer, will be replaced at flush time when we finalize the index contents
-        writer = createTermsWriter(new OrdinalMapper.IdentityMapper(maxRowsInGraph));
-        writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
-        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()), perIndexComponents.version());
+
+        boolean enableNVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean() && jvectorVersion >= 4;
+        if (!enableNVQ)
+        {
+            // placeholder writer, will be replaced at flush time when we finalize the index contents
+            writer = createTermsWriter(new OrdinalMapper.IdentityMapper(maxRowsInGraph), new InlineVectors(dimension));
+            writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
+            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()), perIndexComponents.version());
+            // When NVQ is not enabled, we don't track of the global mean
+            globalMean = null;
+        }
+        else
+        {
+            // When NVQ is enabled, we don't create the writer until graph construction is complete.
+            writer = null;
+            globalMean = vts.createFloatVector(new float[dimension]);
+        }
     }
 
-    private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper) throws IOException
+    private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper, Feature feature) throws IOException
     {
         return new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                .withStartOffset(termsOffset)
-               .with(new InlineVectors(dimension))
+               .with(feature)
                .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
                .withMapper(ordinalMapper)
                .build();
@@ -237,9 +269,10 @@ public class CompactionGraph implements Closeable, Accountable
     public void close() throws IOException
     {
         // this gets called in `finally` blocks, so use closeQuietly to avoid generating additional exceptions
-        FileUtils.closeQuietly(writer);
         FileUtils.closeQuietly(postingsMap);
+        FileUtils.closeQuietly(vectorsByOrdinalOutput);
         Files.delete(postingsFile.toJavaIOFile().toPath());
+        Files.delete(vectorsByOrdinalTmpFile.toJavaIOFile().toPath());
     }
 
     public int size()
@@ -335,7 +368,20 @@ public class CompactionGraph implements Closeable, Accountable
                 pqFinetuned = true;
             }
 
-            writer.writeInline(ordinal, Feature.singleState(FeatureId.INLINE_VECTORS, new InlineVectors.State(vector)));
+            // When NVQ is enabled, we write the quantized vectors to disk later. When NVQ is not enabled, we write
+            // the full precision vectors to disk eagerly.
+            if (globalMean != null)
+            {
+                for (int i = 0; i < dimension; i++)
+                    vectorsByOrdinalOutput.writeFloat(vector.get(i));
+                // Update the global mean
+                VectorUtil.addInPlace(globalMean, vector);
+            }
+            else
+            {
+                writer.writeInline(ordinal, Feature.singleState(FeatureId.INLINE_VECTORS, new InlineVectors.State(vector)));
+            }
+
             // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
             while (compressedVectors.count() < ordinal)
                 compressedVectors.setZero(compressedVectors.count());
@@ -371,9 +417,17 @@ public class CompactionGraph implements Closeable, Accountable
 
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
-        // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
-        writer.writeHeader(builder.getGraph().getView());
-        writer.close();
+        if (writer != null)
+        {
+            // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
+            writer.writeHeader(builder.getGraph().getView());
+            writer.close();
+        }
+        else
+        {
+            // Close the temporary file so the reader will know it is the end of the file.
+            vectorsByOrdinalOutput.close();
+        }
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -407,56 +461,87 @@ public class CompactionGraph implements Closeable, Accountable
             var ordinalMapper = new AtomicReference<OrdinalMapper>();
             long postingsOffset = postingsOutput.getFilePointer();
             var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
-            long postingsLength;
-            try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createIndexBuildTimeFileHandle();
-                 var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
-            {
-                var postingsFuture = es.submit(() -> {
-                    // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
-                    // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
-                    // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
-                    // if a row with null vector in sstable A gets updated with a vector in sstable B)
-                    if (postingsStructure == Structure.ONE_TO_MANY
-                        && (!V5OnDiskFormat.writeV5VectorPostings(version) || useSyntheticOrdinals))
+            var postingsFuture = es.submit(() -> {
+                // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
+                // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
+                // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
+                // if a row with null vector in sstable A gets updated with a vector in sstable B)
+                if (postingsStructure == Structure.ONE_TO_MANY
+                    && (!V5OnDiskFormat.writeV5VectorPostings(version) || useSyntheticOrdinals))
+                {
+                    postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
+                }
+                var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
+                                                                      builder.getGraph().size(),
+                                                                      postingsMap);
+                ordinalMapper.set(rp.ordinalMapper);
+
+                if (globalMean == null)
+                {
+                    try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createIndexBuildTimeFileHandle();
+                         var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset);
+                         var vectorValues = index.getView())
                     {
-                        postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
+                        return writePostings(version, rp, postingsOutput, vectorValues);
                     }
-                    var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
-                                                                          builder.getGraph().size(),
-                                                                          postingsMap);
-                    ordinalMapper.set(rp.ordinalMapper);
-                    try (var view = index.getView())
+                }
+                else
+                {
+                    try (var termsReader = RandomAccessReader.open(vectorsByOrdinalTmpFile);
+                         var vectorValues = new OnDiskVectorValues(termsReader, dimension))
                     {
-                        if (V5OnDiskFormat.writeV5VectorPostings(version))
-                        {
-                            return new V5VectorPostingsWriter<Integer>(rp).writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);
-                        }
-                        else
-                        {
-                            assert postingsStructure == Structure.ONE_TO_ONE || postingsStructure == Structure.ZERO_OR_ONE_TO_MANY;
-                            return new V2VectorPostingsWriter<Integer>(postingsStructure == Structure.ONE_TO_ONE, builder.getGraph().size(), rp.ordinalMapper::newToOld)
-                                   .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, Set.of());
-                        }
+                        return writePostings(version, rp, postingsOutput, vectorValues);
                     }
-                });
+                }
+            });
 
-                // complete internal graph clean up
-                builder.cleanup();
+            // complete internal graph clean up
+            builder.cleanup();
 
-                // wait for postings to finish writing and clean up related resources
-                long postingsEnd = postingsFuture.get();
-                postingsLength = postingsEnd - postingsOffset;
-                es.shutdown();
-            }
-
-            // Recreate the writer with the final ordinalMapper
-            writer = createTermsWriter(ordinalMapper.get());
+            // wait for postings to finish writing and clean up related resources
+            long postingsEnd = postingsFuture.get();
+            long postingsLength = postingsEnd - postingsOffset;
+            es.shutdown();
 
             // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();
-            // Required becuase jvector 3 wrote the fused adc map here. We no longer write jvector 3, but we still
-            // write out the empty map.
-            writer.write(Map.of());
+
+            if (globalMean != null)
+            {
+                // Scale in place then create the NVQ
+                VectorUtil.scale(globalMean, 1.0f / compressedVectors.count());
+                NVQuantization nvq = NVQuantization.create(globalMean, 2);
+                writer = createTermsWriter(ordinalMapper.get(), new NVQ(nvq));
+                AtomicInteger counter = new AtomicInteger();
+                // TODO currently assumes vectorsByOrdinalReader will only be accessed by a single thread in
+                //  the supplier, but jvector has in flight work that may change that paradigm.
+                try (var vectorsByOrdinalReader = RandomAccessReader.open(vectorsByOrdinalTmpFile))
+                {
+                    var supplier = Feature.singleStateFactory(FeatureId.NVQ_VECTORS, ordinal -> {
+                        if (ordinal != counter.getAndIncrement())
+                            throw new IllegalStateException("Expected ordinal " + counter.get() + " but got " + ordinal);
+                        try
+                        {
+                            vectorsByOrdinalReader.seek(ordinal * Float.BYTES * (long) dimension);
+                            var vector = new float[dimension];
+                            vectorsByOrdinalReader.read(vector, 0, dimension);
+                            return new NVQ.State(nvq.encode(vts.createFloatVector(vector)));
+                        }
+                        catch (IOException e)
+                        {
+                            throw new RuntimeException(e);
+                        }
+                    });
+                    writer.write(supplier);
+                }
+            }
+            else
+            {
+                // Recreate the writer with the final ordinalMapper
+                writer = createTermsWriter(ordinalMapper.get(), new InlineVectors(dimension));
+                writer.write(Map.of());
+            }
+
             SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
             logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
             long termsLength = writer.getOutput().position() - termsOffset;
@@ -471,6 +556,21 @@ public class CompactionGraph implements Closeable, Accountable
         catch (ExecutionException | InterruptedException e)
         {
             throw new RuntimeException(e);
+        }
+    }
+
+    private long writePostings(Version version, V5VectorPostingsWriter.RemappedPostings rp, IndexOutputWriter postingsOutput,
+                              RandomAccessVectorValues vectorValues) throws IOException
+    {
+        if (V5OnDiskFormat.writeV5VectorPostings(version))
+        {
+            return new V5VectorPostingsWriter<Integer>(rp).writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap);
+        }
+        else
+        {
+            assert postingsStructure == Structure.ONE_TO_ONE || postingsStructure == Structure.ZERO_OR_ONE_TO_MANY;
+            return new V2VectorPostingsWriter<Integer>(postingsStructure == Structure.ONE_TO_ONE, builder.getGraph().size(), rp.ordinalMapper::newToOld)
+                   .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap, Set.of());
         }
     }
 
@@ -535,6 +635,67 @@ public class CompactionGraph implements Closeable, Accountable
         public InsertionResult(long bytesUsed)
         {
             this(bytesUsed, null, null);
+        }
+    }
+
+    private static class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseable
+    {
+        private final RandomAccessReader reader;
+        private final int dimension;
+        private final long vectorSize;
+
+        public OnDiskVectorValues(RandomAccessReader reader, int dimension)
+        {
+            this.reader = reader;
+            this.dimension = dimension;
+            this.vectorSize = 4 + dimension * 4L;
+        }
+
+        @Override
+        public int size()
+        {
+            return (int) (reader.length() / vectorSize);
+        }
+
+        @Override
+        public int dimension()
+        {
+            return dimension;
+        }
+
+        @Override
+        public VectorFloat<?> getVector(int i)
+        {
+            try
+            {
+                reader.seek(i * vectorSize);
+                var vector = new float[dimension];
+                for (int j = 0; j < dimension; j++)
+                    vector[j] = reader.readFloat();
+                return vts.createFloatVector(vector);
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public boolean isValueShared()
+        {
+            return false;
+        }
+
+        @Override
+        public RandomAccessVectorValues copy()
+        {
+            return this;
+        }
+
+        @Override
+        public void close()
+        {
+            reader.close();
         }
     }
 }
