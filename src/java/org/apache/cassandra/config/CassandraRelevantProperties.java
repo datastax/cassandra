@@ -721,6 +721,12 @@ public enum CassandraRelevantProperties
     SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(4 * 1024 * 1024)),
 
     /**
+     * Whether to enable SAI index metrics such as memtable flush metrics, compaction metrics, and disk usage metrics.
+     * These metrics include timers, histograms, counters, and gauges for index operations.
+     */
+    SAI_INDEX_METRICS_ENABLED("cassandra.sai.metrics.index.enabled", "true"),
+
+    /**
      * If true, the searcher object created when opening a SAI index will be replaced by a dummy object and index
      * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if
      * the node only compact sstables to avoid loading heavy index data structures in memory that are not used.
