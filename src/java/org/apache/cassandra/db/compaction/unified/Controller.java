@@ -322,14 +322,7 @@ public abstract class Controller
     static final String MAX_SSTABLES_PER_SHARD_FACTOR_OPTION = "max_sstables_per_shard_factor";
     static final double DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR = UCS_MAX_SSTABLES_PER_SHARD_FACTOR.getDoubleWithLegacyFallback();
 
-    /**
-     * Whether to use factorization-based shard count growth for smoother progression when base_shard_count is not power of 2.
-     * When enabled (default: true), instead of using power-of-two jumps like 1→2→8→1000, the system will
-     * use prime factorization to create smooth sequences like 1→5→25→125→250→500→1000 for num_shards=1000.
-     * This prevents the large jumps that were involved in the data loss incident caused by HCD-130
-     * <p>
-     */
-    static final boolean USE_FACTORIZATION_SHARD_COUNT_GROWTH = Boolean.parseBoolean(System.getProperty("use_factorization_shard_count_growth", "true"));
+    static final boolean USE_FACTORIZATION_SHARD_COUNT_GROWTH = CassandraRelevantProperties.USE_FACTORIZATION_SHARD_COUNT_GROWTH.getBoolean();
 
     protected final MonotonicClock clock;
     protected final Environment env;
