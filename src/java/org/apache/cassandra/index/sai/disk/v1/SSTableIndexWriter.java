@@ -193,12 +193,11 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
         finally
         {
-            if (indexContext.getIndexMetrics() != null)
-            {
-                indexContext.getIndexMetrics().segmentsPerCompaction.update(segments.size());
+            indexContext.getIndexMetrics().ifPresent(m -> {
+                m.segmentsPerCompaction.update(segments.size());
                 segments.clear();
-                indexContext.getIndexMetrics().compactionCount.inc();
-            }
+                m.compactionCount.inc();
+            });
         }
     }
 
@@ -327,12 +326,12 @@ public class SSTableIndexWriter implements PerIndexWriter
                 segments.add(segmentMetadata);
 
                 double rowCount = segmentMetadata.numRows;
-                if (indexContext.getIndexMetrics() != null)
-                    indexContext.getIndexMetrics().compactionSegmentCellsPerSecond.update((long)(rowCount / flushMillis * 1000.0));
-
                 double segmentBytes = segmentMetadata.componentMetadatas.indexSize();
-                if (indexContext.getIndexMetrics() != null)
-                    indexContext.getIndexMetrics().compactionSegmentBytesPerSecond.update((long)(segmentBytes / flushMillis * 1000.0));
+
+                indexContext.getIndexMetrics().ifPresent(m -> {
+                    m.compactionSegmentCellsPerSecond.update((long)(rowCount / flushMillis * 1000.0));
+                    m.compactionSegmentBytesPerSecond.update((long)(segmentBytes / flushMillis * 1000.0));
+                });
 
                 logger.debug("Flushed segment with {} cells for a total of {} in {} ms for index {} with starting row id {} for sstable {}",
                              (long) rowCount, FBUtilities.prettyPrintMemory((long) segmentBytes), flushMillis, indexContext.getIndexName(),
@@ -354,7 +353,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             logger.error("Failed to build index for SSTable {}", perIndexComponents.descriptor(), t);
             perIndexComponents.forceDeleteAllComponents();
 
-            indexContext.getIndexMetrics().segmentFlushErrors.inc();
+            indexContext.getIndexMetrics().ifPresent(m -> m.segmentFlushErrors.inc());
 
             throw t;
         }
