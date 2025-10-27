@@ -603,6 +603,12 @@ public enum CassandraRelevantProperties
     SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_query.enabled", "false"),
 
     /**
+     * Whether to enable SAI index metrics such as memtable flush metrics, compaction metrics, and disk usage metrics.
+     * These metrics include timers, histograms, counters, and gauges for index operations.
+     */
+    SAI_INDEX_METRICS_ENABLED("cassandra.sai.metrics.index.enabled", "true"),
+
+    /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
      * This is to remain compatible with older workflows that first change the replication before adding the nodes.
      * Otherwise, it will validate that the names match existing DCs before allowing replication change.
