@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -72,6 +73,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableKeyRangeIterator;
+import org.apache.cassandra.index.sai.metrics.AbstractMetrics;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -97,6 +99,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_VE
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_INDEX_READS_DISABLED;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_INDEX_METRICS_ENABLED;
 
 /**
  * Manage metadata for each column index.
@@ -143,7 +146,8 @@ public class IndexContext
     private final ConcurrentMap<Memtable, MemtableIndex> liveMemtables = new ConcurrentHashMap<>();
 
     private final IndexViewManager viewManager;
-    private final IndexMetrics indexMetrics;
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+    private final Optional<IndexMetrics> indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
     private final boolean isAnalyzed;
@@ -195,7 +199,7 @@ public class IndexContext
             this.vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
 
-            this.indexMetrics = new IndexMetrics(this);
+            this.indexMetrics = SAI_INDEX_METRICS_ENABLED.getBoolean() ? Optional.of(new IndexMetrics(this)) : Optional.empty();
             this.columnQueryMetrics = isVector() ? new ColumnQueryMetrics.VectorIndexMetrics(keyspace, table, getIndexName()) :
                                       isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                                   : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
@@ -213,7 +217,7 @@ public class IndexContext
             // null config indicates a "fake" index context. As such, it won't actually be used for indexing/accessing
             // data, leaving these metrics unused. This also eliminates the overhead of creating these metrics on the
             // query path.
-            this.indexMetrics = null;
+            this.indexMetrics = Optional.empty();
             this.columnQueryMetrics = null;
         }
 
@@ -245,7 +249,7 @@ public class IndexContext
         return clusteringComparator;
     }
 
-    public IndexMetrics getIndexMetrics()
+    public Optional<IndexMetrics> getIndexMetrics()
     {
         return indexMetrics;
     }
@@ -307,7 +311,7 @@ public class IndexContext
             ByteBuffer value = getValueOf(key, row, FBUtilities.nowInSeconds());
             target.index(key, row.clustering(), value, mt, opGroup);
         }
-        indexMetrics.memtableIndexWriteLatency.update(nanoTime() - start, TimeUnit.NANOSECONDS);
+        indexMetrics.ifPresent(metrics -> metrics.memtableIndexWriteLatency.update(nanoTime() - start, TimeUnit.NANOSECONDS));
     }
 
     /**
@@ -700,8 +704,9 @@ public class IndexContext
         dropped = true;
         liveMemtables.clear();
         viewManager.invalidate(obsolete);
-        indexMetrics.release();
-        columnQueryMetrics.release();
+        indexMetrics.ifPresent(AbstractMetrics::release);
+        if (columnQueryMetrics != null)
+            columnQueryMetrics.release();
 
         analyzerFactory.close();
         if (queryAnalyzerFactory != analyzerFactory)
