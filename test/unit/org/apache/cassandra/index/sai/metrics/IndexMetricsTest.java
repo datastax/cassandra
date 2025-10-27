@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
@@ -27,9 +28,14 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.Throwables;
 import org.assertj.core.api.Assertions;
 
+import javax.management.ObjectName;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
+
+import org.apache.cassandra.inject.Injection;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.index.sai.disk.v1.MemtableIndexWriter;
 
 public class IndexMetricsTest extends AbstractMetricsTest
 {
@@ -152,6 +158,73 @@ public class IndexMetricsTest extends AbstractMetricsTest
         waitForHistogramMeanBetween(objectName("CompactionSegmentCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1.0, 1000000.0);
     }
 
+    @Test
+    public void testIndexMetricsEnabledAndDisabled()
+    {
+        testIndexMetrics(true);
+        testIndexMetrics(false);
+    }
+
+    private void testIndexMetrics(boolean metricsEnabled)
+    {
+        // Set the property before creating any indexes
+        CassandraRelevantProperties.SAI_INDEX_METRICS_ENABLED.setBoolean(metricsEnabled);
+
+        try
+        {
+            String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                       "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+            String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+            // Test all Gauge metrics
+            assertMetricExistsIfEnabled(metricsEnabled, "SSTableCellCount", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "LiveMemtableIndexWriteCount", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "DiskUsedBytes", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "MemtableOnHeapIndexBytes", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "MemtableOffHeapIndexBytes", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "IndexFileCacheBytes", table, index);
+
+            // Test all Counter metrics
+            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCount", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "CompactionCount", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushErrors", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentFlushErrors", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "QueriesCount", table, index);
+
+            // Test all Histogram metrics
+            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCellsPerSecond", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "SegmentsPerCompaction", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentCellsPerSecond", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentBytesPerSecond", table, index);
+
+            // Test Timer metrics
+            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
+
+            // Test indexing operations to ensure null indexMetrics is handled gracefully
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '1')");
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 2, '2')");
+
+            // Verify MemtableIndexWriteLatency metric behavior after indexing operations
+            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
+        }
+        finally
+        {
+            // Reset property to default
+            CassandraRelevantProperties.SAI_INDEX_METRICS_ENABLED.setBoolean(true);
+        }
+    }
+
+    private void assertMetricExistsIfEnabled(boolean shouldExist, String metricName, String table, String index)
+    {
+        ObjectName name = objectName(metricName, KEYSPACE, table, index, "IndexMetrics");
+
+        if (shouldExist)
+            assertMetricExists(name);
+        else
+            assertMetricDoesNotExist(name);
+    }
+
     private void assertIndexQueryCount(String index, long expectedCount)
     {
         assertEquals(expectedCount,
@@ -197,5 +270,39 @@ public class IndexMetricsTest extends AbstractMetricsTest
         assertIndexQueryCount(indexV1, 4L);
         assertIndexQueryCount(indexV2, 2L);
         assertIndexQueryCount(indexV3, 1L);
+    }
+
+    @Test
+    public void testMemtableIndexFlushErrorIncrementsMetric() throws Throwable
+    {
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        // Write some data to ensure there is something to flush
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+
+        assertEquals(0L, getMetricValue(objectName("MemtableIndexFlushErrors", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Inject a failure at the entry of MemtableIndexWriter#flush(...) to force a flush error
+        Injection failure = newFailureOnEntry("sai_memtable_flush_error", MemtableIndexWriter.class, "flush", RuntimeException.class);
+        Injections.inject(failure);
+
+        try
+        {
+            // Trigger a flush, which should hit the injected failure
+            flush(KEYSPACE, table);
+        }
+        catch (Throwable ignored)
+        {
+            // Expected due to injected failure
+        }
+        finally
+        {
+            failure.disable();
+        }
+
+        // Verify the memtable index flush error metric is incremented
+        assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushErrors", KEYSPACE, table, index, "IndexMetrics")));
     }
 }
