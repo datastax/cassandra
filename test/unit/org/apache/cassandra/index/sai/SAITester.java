@@ -496,6 +496,11 @@ public class SAITester extends CQLTester
         return metricValue;
     }
 
+    protected void assertMetricExists(ObjectName name)
+    {
+        Assertions.assertThatNoException().isThrownBy(() -> getMetricValue(name));
+    }
+
     protected void assertMetricDoesNotExist(ObjectName name)
     {
         Assertions.assertThatThrownBy(() -> getMetricValue(name)).hasRootCauseInstanceOf(InstanceNotFoundException.class);
