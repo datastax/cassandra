@@ -99,7 +99,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
     private final Map<Keyspace, AtomicInteger> keyspacesReplayed;
     private final Queue<Future<Integer>> futures;
 
-    private final Set<String> segmentsWithFailedMutations;
+    private final Set<String> segmentsWithFailedMutations; // mutations that failed to apply
 
     private final Map<TableId, IntervalSet<CommitLogPosition>> cfPersisted;
     private final CommitLogPosition globalPosition;
@@ -571,6 +571,10 @@ public class CommitLogReplayer implements CommitLogReadHandler
         return segmentsWithFailedMutations;
     }
 
+    /**
+     * Get segments with invalid mutations.
+     * Invalid mutations are mutations for which the table can not be found.
+     */
     public Set<String> getSegmentWithInvalidMutations()
     {
         return commitLogReader.getSegmentsWithInvalidMutations();
