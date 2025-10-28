@@ -16,6 +16,9 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.util.function.Supplier;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.index.sai.QueryContext;
 
@@ -37,10 +40,19 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
      * @param context the query context
      * @param plan the query plan
      */
-    public QueryMonitorableExecutionInfo(QueryContext context, Plan plan)
+    private QueryMonitorableExecutionInfo(QueryContext context, String plan)
     {
         this.metrics = context.snapshot();
-        this.plan = toLogString(plan);
+        this.plan = plan;
+    }
+
+    public static Supplier<Monitorable.ExecutionInfo> supplier(QueryContext context, Plan plan)
+    {
+        if (!CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.getBoolean())
+            return Monitorable.ExecutionInfo.EMPTY_SUPPLIER;
+
+        String planAsString = toLogString(plan);
+        return () -> new QueryMonitorableExecutionInfo(context, planAsString);
     }
 
     @Override

@@ -424,8 +424,6 @@ public abstract class ReadCommand extends AbstractReadQuery
             cfs.indexManager.checkQueryability(indexQueryPlan);
             searcher = indexQueryPlan.searcherFor(this);
 
-            executionInfoSupplier = searcher.monitorableExecutionInfo();
-
             // trace the index(es) used for the query
             if (Tracing.isTracing())
             {
@@ -447,6 +445,10 @@ public abstract class ReadCommand extends AbstractReadQuery
         Context context = Context.from(this);
         var storageTarget = (null == searcher) ? queryStorage(cfs, executionController)
                                                : searchStorage(searcher, executionController);
+
+        if (searcher != null)
+            executionInfoSupplier = searcher.monitorableExecutionInfo();
+
         UnfilteredPartitionIterator iterator = Transformation.apply(storageTarget, new TrackingRowIterator(context));
         iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 

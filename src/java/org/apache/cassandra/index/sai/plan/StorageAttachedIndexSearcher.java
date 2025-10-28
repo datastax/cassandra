@@ -88,6 +88,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
+    private Supplier<Monitorable.ExecutionInfo> executionInfoSupplier;
 
     private static final FastThreadLocal<List<PrimaryKey>> nextKeys = new FastThreadLocal<>()
     {
@@ -156,6 +157,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 FilterTree filterTree = analyzeFilter();
                 Plan plan = controller.buildPlan();
+                executionInfoSupplier = QueryMonitorableExecutionInfo.supplier(queryContext, plan);
+
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
                 // Can't check for `command.isTopK()` because the planner could optimize sorting out
@@ -204,9 +207,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @Override
     public Supplier<Monitorable.ExecutionInfo> monitorableExecutionInfo()
     {
-        return CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.getBoolean()
-               ? () -> new QueryMonitorableExecutionInfo(queryContext, controller.buildPlan())
-               : Monitorable.ExecutionInfo.EMPTY_SUPPLIER;
+        return executionInfoSupplier;
     }
 
     /**
