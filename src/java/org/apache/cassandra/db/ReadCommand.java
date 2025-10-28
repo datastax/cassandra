@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.LongPredicate;
+import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -112,8 +113,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     @Nullable
     protected final Index.QueryPlan indexQueryPlan;
 
-    @Nullable
-    private volatile Index.Searcher indexSearcher;
+    private volatile Supplier<ExecutionInfo> executionInfoSupplier = ExecutionInfo.EMPTY_SUPPLIER;
 
     protected static abstract class SelectionDeserializer
     {
@@ -264,24 +264,10 @@ public abstract class ReadCommand extends AbstractReadQuery
      */
     public abstract boolean isSinglePartition();
 
-    @VisibleForTesting
-    public Index.Searcher indexSearcher()
-    {
-        if (indexQueryPlan == null)
-            return null;
-
-        if (indexSearcher == null)
-            indexSearcher = indexQueryPlan.searcherFor(this);
-
-        return indexSearcher;
-    }
-
     @Override
     public ExecutionInfo executionInfo()
     {
-        return indexSearcher == null
-               ? ExecutionInfo.EMPTY
-               : indexSearcher.monitorableExecutionInfo();
+        return executionInfoSupplier.get();
     }
 
     /**
@@ -436,7 +422,9 @@ public abstract class ReadCommand extends AbstractReadQuery
         if (indexQueryPlan != null)
         {
             cfs.indexManager.checkQueryability(indexQueryPlan);
-            searcher = indexSearcher();
+            searcher = indexQueryPlan.searcherFor(this);
+
+            executionInfoSupplier = searcher.monitorableExecutionInfo();
 
             // trace the index(es) used for the query
             if (Tracing.isTracing())

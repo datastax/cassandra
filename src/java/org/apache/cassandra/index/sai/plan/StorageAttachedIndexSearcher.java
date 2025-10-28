@@ -202,11 +202,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     }
 
     @Override
-    public Monitorable.ExecutionInfo monitorableExecutionInfo()
+    public Supplier<Monitorable.ExecutionInfo> monitorableExecutionInfo()
     {
         return CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.getBoolean()
-               ? new QueryMonitorableExecutionInfo(queryContext, controller.buildPlan())
-               : Monitorable.ExecutionInfo.EMPTY;
+               ? () -> new QueryMonitorableExecutionInfo(queryContext, controller.buildPlan())
+               : Monitorable.ExecutionInfo.EMPTY_SUPPLIER;
     }
 
     /**

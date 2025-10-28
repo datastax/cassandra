@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.monitoring;
 
+import java.util.function.Supplier;
+
 public interface Monitorable
 {
     String name();
@@ -56,6 +58,11 @@ public interface Monitorable
          * An empty no-op implementation.
          */
         ExecutionInfo EMPTY = unique -> "";
+
+        /**
+         * A supplier for the empty implementation.
+         */
+        Supplier<ExecutionInfo> EMPTY_SUPPLIER = () -> EMPTY;
 
         /**
          * Returns a string representation of this execution info, suitable for logging.
