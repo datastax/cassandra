@@ -37,22 +37,29 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
     /**
      * Builds a new execution info object for a query.
      *
-     * @param context the query context
+     * @param metrics a snapshot of the query context metrics
      * @param plan the query plan
      */
-    private QueryMonitorableExecutionInfo(QueryContext context, String plan)
+    private QueryMonitorableExecutionInfo(QueryContext.Snapshot metrics, String plan)
     {
-        this.metrics = context.snapshot();
+        this.metrics = metrics;
         this.plan = plan;
     }
 
+    /**
+     * Returns a supplier of {@link Monitorable.ExecutionInfo} for a query, to be used when logging slow queries.
+     *
+     * @param context the query context
+     * @param plan the query plan
+     * @return a supplier of {@link Monitorable.ExecutionInfo} for a query
+     */
     public static Supplier<Monitorable.ExecutionInfo> supplier(QueryContext context, Plan plan)
     {
         if (!CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.getBoolean())
             return Monitorable.ExecutionInfo.EMPTY_SUPPLIER;
 
         String planAsString = toLogString(plan);
-        return () -> new QueryMonitorableExecutionInfo(context, planAsString);
+        return () -> new QueryMonitorableExecutionInfo(context.snapshot(), planAsString);
     }
 
     @Override

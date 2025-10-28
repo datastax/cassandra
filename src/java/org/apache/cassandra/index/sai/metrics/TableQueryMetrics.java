@@ -107,7 +107,7 @@ public class TableQueryMetrics
      */
     public void record(QueryContext context, ReadCommand command)
     {
-        QueryContext.Snapshot snapshot = new QueryContext.Snapshot(context);
+        QueryContext.Snapshot snapshot = context.snapshot();
         perTableMetrics.values().forEach(m -> m.record(snapshot, command));
         perQueryMetrics.values().forEach(m -> m.record(snapshot, command));
 

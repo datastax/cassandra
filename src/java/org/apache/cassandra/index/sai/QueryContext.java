@@ -297,7 +297,7 @@ public class QueryContext
          *
          * @param context the query context to snapshot
          */
-        public Snapshot(QueryContext context)
+        private Snapshot(QueryContext context)
         {
             totalQueryTimeNs = context.totalQueryTimeNs();
             sstablesHit = context.sstablesHit();
