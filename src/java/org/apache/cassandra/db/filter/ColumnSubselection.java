@@ -91,9 +91,16 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
     @Override
     public String toString()
     {
-        return toString(false, true);
+        return toString(false, false);
     }
 
+    /**
+     * Returns a string representation of this subselection.
+     *
+     * @param cql if true, the string representation will be in CQL format
+     * @param redact if true, the string representation will redact sensitive data
+     * @return a string representation of this subselection
+     */
     protected abstract String toString(boolean cql, boolean redact);
 
     private static class Slice extends ColumnSubselection
