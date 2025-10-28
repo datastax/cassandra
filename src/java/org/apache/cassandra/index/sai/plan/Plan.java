@@ -292,7 +292,7 @@ abstract public class Plan
     }
 
     /**
-     * Formats the whole plan as a pretty tree, redacting the queried column values.
+     * Formats the whole plan as a pretty tree, not redacting the queried column values.
      */
     public final String toUnredactedStringRecursive()
     {
