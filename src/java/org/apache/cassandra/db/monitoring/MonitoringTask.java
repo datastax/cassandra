@@ -344,6 +344,8 @@ public class MonitoringTask
         }
 
         public abstract String getLogMessage();
+
+        protected abstract Monitorable.ExecutionInfo executionInfo();
     }
 
     /**
@@ -373,6 +375,12 @@ public class MonitoringTask
                                      NANOSECONDS.toMillis(maxTime),
                                      NANOSECONDS.toMillis(operation.timeoutNanos()),
                                      operation.isCrossNode() ? "msec/cross-node" : "msec");
+        }
+
+        @Override
+        protected Monitorable.ExecutionInfo executionInfo()
+        {
+            return Monitorable.ExecutionInfo.EMPTY;
         }
     }
 
@@ -412,10 +420,16 @@ public class MonitoringTask
         }
 
         @Override
+        protected Monitorable.ExecutionInfo executionInfo()
+        {
+            return slowestOperationExecutionInfo;
+        }
+
+        @Override
         void add(Operation operation)
         {
             if (operation.maxTime > maxTime)
-                slowestOperationExecutionInfo = operation.operation.executionInfo();
+                slowestOperationExecutionInfo = operation.executionInfo();
 
             super.add(operation);
         }
