@@ -153,6 +153,14 @@ public interface ClusteringIndexFilter
     public Kind kind();
 
     public String toString(TableMetadata metadata);
+
+    /**
+     * Returns a CQL string representing this clustering index filter and the specified {@link RowFilter}.
+     *
+     * @param metadata the table metadata
+     * @param rowFilter a row filter
+     * @return a CQL string representing this clustering index filter and the specified {@link RowFilter}
+     */
     String toCQLString(TableMetadata metadata, RowFilter rowFilter);
 
     public interface Serializer

@@ -148,6 +148,13 @@ public abstract class Slices implements Iterable<Slice>
      */
     public abstract boolean intersects(Slice slice);
 
+    /**
+     * Returns a CQL string representing this slice and the specified {@link RowFilter}.
+     *
+     * @param metadata the table metadata
+     * @param rowFilter a row filter
+     * @return a CQL string representing this slice and the specified {@link RowFilter}
+     */
     public abstract String toCQLString(TableMetadata metadata, RowFilter rowFilter);
 
     /**
