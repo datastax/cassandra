@@ -102,6 +102,7 @@ import org.apache.cassandra.db.rows.RowDiffListener;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index.IndexBuildingSupport;
 import org.apache.cassandra.index.internal.CassandraIndex;
@@ -129,9 +130,11 @@ import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.apache.cassandra.utils.concurrent.Promise;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.apache.cassandra.utils.concurrent.SyncPromise;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.config.CassandraRelevantProperties.FORCE_DEFAULT_INDEXING_PAGE_SIZE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE;
 import static org.apache.cassandra.utils.ExecutorUtils.awaitTermination;
 import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
 
@@ -201,7 +204,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * The indexes that are available for querying.
      */
     private final Set<String> queryableIndexes = Sets.newConcurrentHashSet();
-    
+
     /**
      * The indexes that are available for writing.
      */
@@ -268,6 +271,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     private synchronized Future<Void> createIndex(IndexMetadata indexDef, boolean isNewCF)
     {
         final Index index = createInstance(indexDef);
+        if (null == index)
+        {
+            assert INDEX_UNKNOWN_IGNORE.getBoolean();
+            logger.error("Index [{}] is not registered, custom index type [{}] not found.",
+                         indexDef.name, indexDef.options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
+
+            return new SyncPromise<>();
+        }
         index.register(this);
         if (writableIndexes.put(index.getIndexMetadata().name, index) == null)
             logger.info("Index [{}] registered and writable.", index.getIndexMetadata().name);
@@ -286,7 +297,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             try
             {
-                if (!index.shouldSkipInitialization()) 
+                if (!index.shouldSkipInitialization())
                 {
                     Callable<?> call = index.getInitializationTask();
                     if (call != null)
@@ -659,7 +670,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * <p>
      * If the index doesn't support ALL {@link Index.LoadType} it performs a recovery {@link Index#getRecoveryTaskSupport()}
      * instead of a build {@link Index#getBuildTaskSupport()}
-     * 
+     *
      * @param sstables      the SSTables to be (re)indexed
      * @param indexes       the indexes to be (re)built for the specifed SSTables
      * @param isFullRebuild True if this method is invoked as a full index rebuild, false otherwise
@@ -949,6 +960,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return indexes.get(indexName);
     }
 
+    @Nullable
     private Index createInstance(IndexMetadata indexDef)
     {
         Index newIndex;
@@ -967,6 +979,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             }
             catch (Exception e)
             {
+                if (e instanceof ConfigurationException && INDEX_UNKNOWN_IGNORE.getBoolean())
+                {
+                    logger.error("Cannot find index type {}, but PROPERTY is true so ignoring without error index {}", className, indexDef.name);
+                    return null;
+                }
                 throw new RuntimeException(e);
             }
         }

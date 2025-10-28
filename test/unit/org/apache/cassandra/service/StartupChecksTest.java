@@ -274,6 +274,26 @@ public class StartupChecksTest
         }
     }
 
+    @Test(expected = StartupException.class)
+    public void yamlConfigFailOnSASI() throws Exception
+    {
+        try
+        {
+            DatabaseDescriptor.setTransientReplicationEnabledUnsafe(false);
+            DatabaseDescriptor.getRawConfig().sasi_indexes_enabled = true;
+            try (WithProperties properties = new WithProperties().clear(TEST_CASSANDRA_TESTTAG))
+            {
+                startupChecks = startupChecks.withTest(StartupChecks.checkYamlConfig);
+                startupChecks.verify(options);
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setTransientReplicationEnabledUnsafe(true);
+            DatabaseDescriptor.getRawConfig().sasi_indexes_enabled = false;
+        }
+    }
+
     @Test
     public void yamlConfig() throws Exception
     {
@@ -336,7 +356,6 @@ public class StartupChecksTest
             assertWarningLogged("Not using murmur3 partitioner (org.apache.cassandra.dht.ByteOrderedPartitioner).");
             assertWarningLogged("num_tokens 17 too high. Values over 16 poorly impact repairs and node bootstrapping/decommissioning.");
             assertWarningLogged("Materialised Views should not be enabled.");
-            assertWarningLogged("SASI should not be enabled, use SAI instead.");
             assertWarningLogged("Using `DROP COMPACT STORAGE` on tables should not be enabled.");
             assertWarningLogged("Guardrails value 100001 for tombstone_failure_threshold is too high (>100000).");
             assertWarningLogged("Guardrails value 641 for batch_size_fail_threshold_in_kb is too high (>640).");

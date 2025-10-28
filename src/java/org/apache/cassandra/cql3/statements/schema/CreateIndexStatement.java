@@ -29,6 +29,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
@@ -42,6 +45,7 @@ import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.guardrails.Threshold;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -55,13 +59,16 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static com.google.common.collect.Iterables.transform;
 import static com.google.common.collect.Iterables.tryFind;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE;
 
 public final class CreateIndexStatement extends AlterSchemaStatement
 {
-    public static final String SASI_INDEX_DISABLED = "SASI indexes are disabled. Enable in cassandra.yaml to use.";
+    private static final Logger logger = LoggerFactory.getLogger(CreateIndexStatement.class);
+
     public static final String KEYSPACE_DOES_NOT_EXIST = "Keyspace '%s' doesn't exist";
     public static final String TABLE_DOES_NOT_EXIST = "Table '%s' doesn't exist";
     public static final String COUNTER_TABLES_NOT_SUPPORTED = "Secondary indexes on counter tables aren't supported";
@@ -212,6 +219,13 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options);
 
         String className = index.getIndexClassName();
+        if (isUnknownCustomIndexCreateStatement(className) && INDEX_UNKNOWN_IGNORE.getBoolean())
+        {
+            logger.error("Cannot find index type {}, but '{}' is true so ignoring index {} without error",
+                         className, INDEX_UNKNOWN_IGNORE.getKey(), indexName);
+            return schema;
+        }
+
         IndexGuardrails guardRails = IndexGuardrails.forClassName(className);
         String indexDescription = indexName == null ? String.format("on table %s", table.name) : String.format("%s on table %s", indexName, table.name);
 
@@ -260,6 +274,20 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private boolean isDseIndexCreateStatement()
     {
         return DSE_INDEXES.contains(attrs.customClass);
+    }
+
+    private boolean isUnknownCustomIndexCreateStatement(String className)
+    {
+        try
+        {
+            // mimic what IndexMetadata.validate(..) does
+            FBUtilities.classForName(className, "custom indexer");
+            return false;
+        }
+        catch (ConfigurationException ex)
+        {
+            return true;
+        }
     }
 
     private void validateIndexTarget(TableMetadata table, IndexMetadata.Kind kind, IndexTarget target)
