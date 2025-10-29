@@ -26,6 +26,7 @@ import org.junit.Test;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ErrorMessage;
 import org.apache.cassandra.transport.messages.OptionsMessage;
+import org.apache.cassandra.utils.concurrent.Future;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -134,9 +135,9 @@ public class CBUtilReadValueNativeProtocolTest extends NativeProtocolLimitsTestB
         }
 
         @Override
-        protected Message.Response execute(QueryState queryState,
-                                           Dispatcher.RequestTime requestTime,
-                                           boolean traceRequest)
+        protected Future<Message.Response> maybeExecuteAsync(QueryState queryState,
+                                                             Dispatcher.RequestTime requestTime,
+                                                             boolean traceRequest)
         {
             throw new AssertionError("execute not expected for a malformed AUTH_RESPONSE");
         }
