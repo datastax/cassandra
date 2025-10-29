@@ -460,10 +460,13 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
                     if (request.isTrackable())
                         CoordinatorWarnings.done();
 
-                    result.setStreamId(request.getStreamId());
-                    result.setWarnings(ClientWarn.instance.getWarnings());
-                    result.attach(connection);
-                    connection.applyStateTransition(request.type, result.type);
+                    if (result != null)
+                    {
+                        result.setStreamId(request.getStreamId());
+                        result.setWarnings(ClientWarn.instance.getWarnings());
+                        result.attach(connection);
+                        connection.applyStateTransition(request.type, result.type);
+                    }
                 }
                 finally
                 {
@@ -490,13 +493,20 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
 
         Message.logger.trace("Received: {}, v={}", request, connection.getVersion());
         connection.requests.inc();
+
+        // Capture ExecutorLocals containing thread-local state (TraceState, ClientWarn, RequestSensors,
+        // OperationContext) before async execution and restore in the callback, which may be on a different thread.
+        ExecutorLocals executorLocals = ExecutorLocals.current();
         return request.execute(qstate, requestTime).addCallback((result, ignored) -> {
-            try
+            try (Closeable close = executorLocals.get())
             {
-                result.setStreamId(request.getStreamId());
-                result.setWarnings(ClientWarn.instance.getWarnings());
-                result.attach(connection);
-                connection.applyStateTransition(request.type, result.type);
+                if (result != null)
+                {
+                    result.setStreamId(request.getStreamId());
+                    result.setWarnings(ClientWarn.instance.getWarnings());
+                    result.attach(connection);
+                    connection.applyStateTransition(request.type, result.type);
+                }
             }
             finally
             {
