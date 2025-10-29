@@ -178,6 +178,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
 
         sb.append(isSingleClustering ? " = " : " IN (");
         int i = 0;
+        int maxClusteringSize = 0;
         for (Clustering<?> clustering : clusterings)
         {
             sb.append(i++ == 0 ? "" : ", ")
@@ -185,11 +186,17 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
               .append(clustering.toCQLString(metadata))
               .append(isSingleColumn ? "" : ')');
 
-            for (int j = 0; j < clustering.size(); j++)
-                rowFilter = rowFilter.withoutFirstLevelExpression(metadata.clusteringColumns().get(j), Operator.EQ, clustering.bufferAt(j));
+            maxClusteringSize = Math.max(maxClusteringSize, clustering.size());
         }
         sb.append(isSingleClustering ? "" : ")");
-        rowFilter = rowFilter.withoutFirstLevelExpression(metadata.clusteringColumns().get(0), Operator.IN);
+
+        // Remove index restrictions for the clustering columns of this clustering filter from the row filter,
+        // so we don't print them twice. The row filter can contain expressions copying the clustering filter
+        // restrictions, because indexed clustering key restrictions are added to the row filter at the CQL layer for
+        // easier consumption downstream. However, due to CQL validation the row filter won't contain additional
+        // expressions for columns that are included in the clustering filter, besided the aformentioned copies.
+        for (i = 0; i < clusterings.first().size(); i++)
+            rowFilter = rowFilter.withoutFirstLevelExpression(metadata.clusteringColumns().get(i));
 
         if (!rowFilter.isEmpty())
         {

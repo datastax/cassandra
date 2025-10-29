@@ -618,7 +618,6 @@ public abstract class Slices implements Iterable<Slice>
                     if (values.size() == 1)
                     {
                         sb.append(" = ").append(column.type.toCQLString(first.startValue));
-                        rowFilter = rowFilter.withoutFirstLevelExpression(column, Operator.EQ, first.startValue);
                     }
                     else
                     {
@@ -627,7 +626,6 @@ public abstract class Slices implements Iterable<Slice>
                         for (ByteBuffer value : values)
                         {
                             sb.append(j++ == 0 ? "" : ", ").append(column.type.toCQLString(value));
-                            rowFilter = rowFilter.withoutFirstLevelExpression(column, Operator.EQ, value);
                         }
                         sb.append(')');
                     }
@@ -651,7 +649,6 @@ public abstract class Slices implements Iterable<Slice>
                             operator = first.startInclusive ? Operator.GTE : Operator.GT;
                         sb.append(' ').append(operator).append(' ')
                           .append(column.type.toCQLString(first.startValue));
-                        rowFilter = rowFilter.withoutFirstLevelExpression(column, operator, first.startValue);
                     }
                     if (first.endValue != null)
                     {
@@ -665,11 +662,16 @@ public abstract class Slices implements Iterable<Slice>
                             operator = first.endInclusive ? Operator.LTE : Operator.LT;
                         sb.append(' ').append(operator).append(' ')
                           .append(column.type.toCQLString(first.endValue));
-                        rowFilter = rowFilter.withoutFirstLevelExpression(column, operator, first.endValue);
                     }
                 }
+
+                // Remove index restrictions for this clustering column from the row filter, so we don't print them twice.
+                // The row filter can contain expressions copying the clustering filter restrictions, because indexed
+                // clustering key restrictions are added to the row filter at the CQL layer for easier consumption
+                // downstream. However, due to CQL validation the row filter won't contain additional expressions for
+                // columns that are included in the clustering filter, besided the aformentioned copies.
+                rowFilter = rowFilter.withoutFirstLevelExpression(column);
             }
-            rowFilter = rowFilter.withoutFirstLevelExpression(metadata.clusteringColumns().get(0), Operator.IN);
 
             // Append the row filter.
             if (!rowFilter.isEmpty())

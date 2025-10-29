@@ -298,26 +298,12 @@ public class RowFilter
     }
 
     /**
-     * Returns a copy of this filter but without first level expressions with the provided column, operator and value.
+     * Returns a copy of this filter but without first level expressions with the provided column.
      * If this filter doesn't contain the specified expressions this method will just return an identical copy of this filter.
      */
-    public RowFilter withoutFirstLevelExpression(ColumnMetadata column, Operator op, ByteBuffer value)
+    public RowFilter withoutFirstLevelExpression(ColumnMetadata column)
     {
-        return restrictFirstLevel(e -> !(e.column.equals(column) && e.operator == op && e.value.equals(value)));
-    }
-
-    /**
-     * Returns a copy of this filter but without first level expressions with the provided column and operator.
-     * If this filter doesn't contain the specified expressions this method will just return an identical copy of this filter.
-     */
-    public RowFilter withoutFirstLevelExpression(ColumnMetadata column, Operator op)
-    {
-        return restrictFirstLevel(e -> !(e.column.equals(column) && e.operator == op));
-    }
-
-    public RowFilter withoutExpressions()
-    {
-        return NONE;
+        return restrictFirstLevel(e -> !e.column.equals(column));
     }
 
     /**
