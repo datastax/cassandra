@@ -17,11 +17,15 @@
  */
 package org.apache.cassandra.index.sai.disk.format;
 
+import java.util.Optional;
+import javax.annotation.Nullable;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -96,5 +100,57 @@ public class VersionTest
 
         assertFalse(Version.AA.onOrAfter(Version.BA));
         assertFalse(Version.BA.onOrAfter(Version.CA));
+    }
+
+    // Specific test for AA because it doesn't use the same file formatter than other versions.
+    @Test
+    public void testAAFileFormatting()
+    {
+        assertFileFormatting("filename-SAI_GroupMeta.db", Version.AA, 0, IndexComponentType.GROUP_META, null);
+        assertFileFormatting("filename-SAI_TokenValues_1.db", Version.AA, 1, IndexComponentType.TOKEN_VALUES, null);
+
+        assertFileFormatting("filename-SAI_myIndex_Vector.db", Version.AA, 0, IndexComponentType.VECTOR, "myIndex");
+        assertFileFormatting("filename-SAI_saiIndex_TermsData_42.db", Version.AA, 42, IndexComponentType.TERMS_DATA, "saiIndex");
+    }
+
+    @Test
+    public void testFileFormatting()
+    {
+        for (Version version : Version.ALL)
+        {
+            // AA is tested separately above.
+            if (version == Version.AA)
+                continue;
+
+            assertFileFormatting("filename-SAI+" + version + "+GroupMeta.db", version, 0, IndexComponentType.GROUP_META, null);
+            assertFileFormatting("filename-SAI+" + version + "+1+TokenValues.db", version, 1, IndexComponentType.TOKEN_VALUES, null);
+
+            assertFileFormatting("filename-SAI+" + version + "+myIndex+Vector.db", version, 0, IndexComponentType.VECTOR, "myIndex");
+            assertFileFormatting("filename-SAI+" + version + "+42+saiIndex+TermsData.db", version, 42, IndexComponentType.TERMS_DATA, "saiIndex");
+        }
+    }
+
+    @Test
+    public void testInvalidFileFormatting()
+    {
+        assertThat(Version.tryParseFileName("")).isEmpty();
+        assertThat(Version.tryParseFileName("filename-SAI_")).isEmpty();
+        assertThat(Version.tryParseFileName("filemame-SAI_.db")).isEmpty();
+        assertThat(Version.tryParseFileName("filemame-SAI.db")).isEmpty();
+        assertThat(Version.tryParseFileName("filemame-SAI+foo.db")).isEmpty();
+    }
+
+    private void assertFileFormatting(String componentStr, Version version, int generation, IndexComponentType componentType, @Nullable String indexName)
+    {
+        Optional<Version.ParsedFileName> opt = Version.tryParseFileName(componentStr);
+        assertThat(opt).isPresent();
+
+        Version.ParsedFileName parsed = opt.get();
+        assertEquals(version, parsed.buildId.version());
+        assertEquals(generation, parsed.buildId.generation());
+        assertEquals(componentType, parsed.component);
+        assertEquals(indexName, parsed.indexName);
+
+        assertThat(componentStr).endsWith(version.fileNameFormatter().format(componentType, indexName, generation));
     }
 }
