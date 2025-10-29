@@ -481,9 +481,17 @@ public enum CassandraRelevantProperties
     /** @deprecated See CASSANDRA-17797 */
     @Deprecated(since = "4.1")
     IGNORE_RACK("cassandra.ignore_rack"),
-    // Allow restoring legacy behavior of deleting sai components before a rebuild (which implies a rebuild cannot be
-    // done without first stopping reads on that index)
+    /** Allows to force the creation of new component files when rebuilding SAI indexes. By default (when this is `false`),
+     * when a SAI index is rebuilt, the newly created component files overwrite the old ones, which implies a rebuild
+     * cannot be done without first stopping reads on that index. Enabling this option will instead keep the old
+     * files untouched, and create new files (with a different file name) instead.
+     */
     IMMUTABLE_SAI_COMPONENTS("cassandra.sai.immutable_components", "false"),
+    /** Minimum SAI index version to which immutable components can apply. If the SAI version used is strictly lower
+     * that the version configured here, then immutable components will _not_ be used even if the previous flag is set
+     * to `true`. You can set this to `aa` to enable immutable components on every version.
+     */
+    IMMUTABLE_SAI_COMPONENTS_MIN_VERSION("cassandra.sai.immutable_components.min_version", "ca"),
     INDEX_GUARDRAILS_TABLE_FAILURE_THRESHOLD("cassandra.index.guardrails.table_failure_threshold"),
     INDEX_GUARDRAILS_TOTAL_FAILURE_THRESHOLD("cassandra.index.guardrails.total_failure_threshold"),
     INDEX_SUMMARY_EXPECTED_KEY_SIZE("cassandra.index_summary_expected_key_size", "64"),
