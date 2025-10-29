@@ -27,22 +27,26 @@ import org.apache.cassandra.io.sstable.SSTableId;
 public class RowIdWithScore extends RowIdWithMeta
 {
     public final float score;
+    public final boolean isScoreApproximate;
 
-    public RowIdWithScore(int segmentRowId, float score)
+    public RowIdWithScore(int segmentRowId, float score, boolean isScoreApproximate)
     {
         super(segmentRowId);
         this.score = score;
+        this.isScoreApproximate = isScoreApproximate;
     }
 
     public static int compare(RowIdWithScore l, RowIdWithScore r)
     {
-        // Inverted comparison to sort in descending order
+        // Inverted comparison to sort in descending order.
+        // Note that we are fine comparing approximate and exact scores and accept this as part of the "appoximate"
+        // of the ANN search logic.
         return Float.compare(r.score, l.score);
     }
 
     @Override
     protected PrimaryKeyWithSortKey wrapPrimaryKey(IndexContext indexContext, SSTableId<?> sstableId, PrimaryKey primaryKey)
     {
-        return new PrimaryKeyWithScore(indexContext, sstableId, primaryKey, score);
+        return new PrimaryKeyWithScore(indexContext, sstableId, primaryKey, score, isScoreApproximate);
     }
 }
