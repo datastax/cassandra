@@ -303,7 +303,7 @@ public class BatchMessage extends Message.Request
     {
         QueryEvents.instance.notifyBatchFailure(prepared, batchType, queryOrIdList, values, options, state, e);
         JVMStabilityInspector.inspectThrowable(e);
-        return ErrorMessage.fromException(e);
+        return ErrorMessage.fromExceptionNoStreamId(e);
     }
 
     private void traceQuery(QueryState state)

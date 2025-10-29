@@ -196,7 +196,7 @@ public class QueryMessage extends Message.Request
         if (!((exception instanceof RequestValidationException) || (exception instanceof RequestExecutionException)))
             logger.error("Unexpected error during query", exception);
 
-        return ErrorMessage.fromException(exception);
+        return ErrorMessage.fromExceptionNoStreamId(exception);
     }
 
     private void traceQuery(QueryState state)

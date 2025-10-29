@@ -269,7 +269,7 @@ public class ExecuteMessage extends Message.Request
     {
         QueryEvents.instance.notifyExecuteFailure(prepared, options, queryState, e);
         JVMStabilityInspector.inspectThrowable(e);
-        return ErrorMessage.fromException(e);
+        return ErrorMessage.fromExceptionNoStreamId(e);
     }
 
     private void traceQuery(QueryState state, QueryHandler.Prepared prepared)

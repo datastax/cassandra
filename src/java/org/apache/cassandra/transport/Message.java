@@ -30,10 +30,12 @@ import com.google.common.annotations.VisibleForTesting;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 
+import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.metrics.ClientMetrics;
@@ -42,6 +44,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.TimeUUID;
@@ -157,6 +160,7 @@ public abstract class Message
 
     public final Type type;
     protected Connection connection;
+    private int streamId;
     private Envelope source;
     private Map<String, ByteBuffer> customPayload;
     protected ProtocolVersion forcedProtocolVersion = null;
@@ -196,10 +200,21 @@ public abstract class Message
         this.customPayload = customPayload;
     }
 
+    public Message setStreamId(int streamId)
+    {
+        this.streamId = streamId;
+        return this;
+    }
+
+    public int getStreamId()
+    {
+        return streamId;
+    }
+
     @Override
     public String toString()
     {
-        return String.format("(%s:%s)", type, connection == null ? "null" :  connection.getVersion().asInt());
+        return String.format("(%s:%s:%s)", type, streamId, connection == null ? "null" :  connection.getVersion().asInt());
     }
 
     public static abstract class Request extends Message
@@ -255,7 +270,7 @@ public abstract class Message
             if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
             {
                 ClientMetrics.instance.markTimedOutBeforeProcessing();
-                return ImmediateFuture.success(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));
+                return ImmediateFuture.success(ErrorMessage.fromExceptionNoStreamId(new OverloadedException("Query timed out before it could start")));
             }
 
             boolean shouldTrace = false;
@@ -279,13 +294,25 @@ public abstract class Message
             Tracing.trace("Initialized tracing in execute. Already elapsed {} ns", (Clock.Global.nanoTime() - requestTime.startedAtNanos()));
             boolean finalShouldTrace = shouldTrace;
             TimeUUID finalTracingSessionId = tracingSessionId;
+
+            // Capture ExecutorLocals containing thread-local state (TraceState, ClientWarn, RequestSensors,
+            // OperationContext) before async execution and restore in the callback, which may be on a different thread.
+            ExecutorLocals executorLocals = ExecutorLocals.current();
             return maybeExecuteAsync(queryState, requestTime, shouldTrace)
                    .addCallback((result, ignored) -> {
-                       if (finalShouldTrace)
-                           Tracing.instance.stopSession();
+                       try (Closeable close = executorLocals.get())
+                       {
+                           if (finalShouldTrace)
+                               Tracing.instance.stopSession();
 
-                       if (isTraceable() && isTracingRequested())
-                           result.setTracingId(finalTracingSessionId);
+                           if (result != null && isTraceable() && isTracingRequested())
+                               result.setTracingId(finalTracingSessionId);
+                       }
+                       catch (Throwable t)
+                       {
+                           JVMStabilityInspector.inspectThrowable(t);
+                           logger.error("Error in tracing cleanup", t);
+                       }
                    });
         }
 

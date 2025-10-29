@@ -149,20 +149,20 @@ public class InitialConnectionHandler extends ByteToMessageDecoder
                     }
 
                     ProtocolVersion version = inbound.header.version;
-                    Dispatcher.processInit((ServerConnection) connection, startup).addCallback((response, error) -> {
-                        if (error == null)
-                        {
-                            Envelope encoded = response.encode(version);
-                            ctx.writeAndFlush(encoded, promise);
-                            logger.debug("Configured pipeline: {}", ctx.pipeline());
-                        }
-                        else
-                        {
-                            ErrorMessage message = ErrorMessage.fromException(new ProtocolException(String.format("Unexpected error %s", error.getMessage())));
-                            Envelope encoded = message.encode(version);
-                            ctx.writeAndFlush(encoded);
-                        }
-                    });
+                    int streamId = inbound.header.streamId;
+                    try
+                    {
+                        Message.Response response = Dispatcher.processInit((ServerConnection) connection, startup);
+                        Envelope encoded = response.encode(version, streamId);
+                        ctx.writeAndFlush(encoded, promise);
+                        logger.debug("Configured pipeline: {}", ctx.pipeline());
+                    }
+                    catch (Throwable error)
+                    {
+                        ErrorMessage message = ErrorMessage.fromExceptionNoStreamId(new ProtocolException(String.format("Unexpected error %s", error.getMessage())));
+                        Envelope encoded = message.encode(version, streamId);
+                        ctx.writeAndFlush(encoded);
+                    }
                     break;
 
                 default:
