@@ -99,6 +99,7 @@ import org.apache.cassandra.service.StorageService;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
+import static org.apache.cassandra.index.sai.disk.vector.NVQUtil.NUM_SUB_VECTORS;
 
 public class CompactionGraph implements Closeable, Accountable
 {
@@ -237,8 +238,13 @@ public class CompactionGraph implements Closeable, Accountable
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
                       + SAICodecUtils.headerSize();
 
-        boolean enableNVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean() && jvectorVersion >= 4;
-        if (!enableNVQ)
+        if (NVQUtil.shouldWriteNVQ(dimension, jvectorVersion))
+        {
+            // When NVQ is enabled, we don't create the writer until graph construction is complete.
+            writer = null;
+            globalMean = vts.createFloatVector(new float[dimension]);
+        }
+        else
         {
             // placeholder writer, will be replaced at flush time when we finalize the index contents
             writer = createTermsWriter(new OrdinalMapper.IdentityMapper(maxRowsInGraph), new InlineVectors(dimension));
@@ -246,12 +252,6 @@ public class CompactionGraph implements Closeable, Accountable
             SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()), perIndexComponents.version());
             // When NVQ is not enabled, we don't track of the global mean
             globalMean = null;
-        }
-        else
-        {
-            // When NVQ is enabled, we don't create the writer until graph construction is complete.
-            writer = null;
-            globalMean = vts.createFloatVector(new float[dimension]);
         }
     }
 

@@ -417,6 +417,9 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
     // Use nvq when building graphs in compaction
     SAI_VECTOR_ENABLE_NVQ("cassandra.sai.vector.enable_nvq", "true"),
+    // NVQ number of subvectors. This isn't really expected to change much so we're only exposing
+    // it as a global variable in case it's needed.
+    SAI_VECTOR_NVQ_NUM_SUB_VECTORS("cassandra.sai.vector.nvq_num_sub_vectors", "2"),
     /**
      * Whether to disable auto-compaction
      */

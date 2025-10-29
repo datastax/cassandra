@@ -96,6 +96,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.StringHelper;
 
+import static org.apache.cassandra.index.sai.disk.vector.NVQUtil.NUM_SUB_VECTORS;
+
 public class CassandraOnHeapGraph<T> implements Accountable
 {
     // Cassandra's PQ features, independent of JVector's
@@ -103,9 +105,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
         V0, // initial version
         V1, // includes unit vector calculation
     }
-
-    /** Whether to use NVQ when writing indexes (assuming all other conditions are met) */
-    private static final boolean ENABLE_NVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean();
 
     /** minimum number of rows to perform PQ codebook generation */
     public static final int MIN_PQ_ROWS = 1024;
@@ -168,7 +167,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         // NVQ is only written during compaction to save on compute costs
-        writeNvq = ENABLE_NVQ && jvectorVersion >= 4 && !forSearching;
+        writeNvq = NVQUtil.shouldWriteNVQ(dimension, jvectorVersion) && !forSearching;
 
         // This is only a warning since it's not a fatal error to write without hierarchy
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
@@ -451,7 +450,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         OrdinalMapper ordinalMapper = remappedPostings.ordinalMapper;
 
         // Write the NVQ feature, optimize when https://github.com/datastax/jvector/pull/549 is merged
-        NVQuantization nvq = writeNvq ? NVQuantization.compute(vectorValues, 2) : null;
+        NVQuantization nvq = writeNvq ? NVQuantization.compute(vectorValues, NUM_SUB_VECTORS) : null;
 
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
         var indexFile = termsDataComponent.file();
