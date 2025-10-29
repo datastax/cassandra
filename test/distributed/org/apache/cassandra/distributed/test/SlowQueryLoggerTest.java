@@ -16,7 +16,9 @@
 
 package org.apache.cassandra.distributed.test;
 
+import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.function.Consumer;
 
 import org.junit.Test;
 
@@ -26,14 +28,19 @@ import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.SuperCall;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.monitoring.MonitoringTask;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ICoordinator;
+import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.utils.Throwables;
+import org.assertj.core.api.AbstractIterableAssert;
+import org.assertj.core.api.Assertions;
+import org.assertj.core.api.ListAssert;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
-import static org.junit.Assert.assertTrue;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 public class SlowQueryLoggerTest extends TestBaseImpl
 {
@@ -46,38 +53,51 @@ public class SlowQueryLoggerTest extends TestBaseImpl
     @Test
     public void testDoesNotLogSensitiveData() throws Throwable
     {
+        // effectively disable the scheduled monitoring task so we control it manually for better test stability
+        System.setProperty("cassandra.slow_query_log_interval_in_ms", "3600000");
+
         try (Cluster cluster = init(Cluster.build(2)
                                            .withInstanceInitializer(SlowQueryLoggerTest.BBHelper::install)
                                            .withConfig(config -> config.set("slow_query_log_timeout_in_ms", SLOW_QUERY_LOG_TIMEOUT_MS))
                                            .start()))
         {
             ICoordinator coordinator = cluster.coordinator(1);
+            IInvokableInstance node = cluster.get(2);
+
             cluster.schemaChange(format("CREATE TABLE %s.%s (k text, c text, v text, PRIMARY KEY (k, c))"));
             coordinator.execute(format("INSERT INTO %s.%s (k, c, v) VALUES ('secret_k', 'secret_c', 'secret_v')"), ALL);
 
-            // Query a few times to make sure the slow query logger gets it
-            for (int i = 0; i < 10; i++)
-            {
-                coordinator.execute(format("SELECT * FROM %s.%s WHERE k = 'secret_k' AND c = 'secret_c' AND v = 'secret_v' ALLOW FILTERING"), ALL);
-            }
+            long mark = node.logs().mark();
+            coordinator.execute(format("SELECT * FROM %s.%s WHERE k = 'secret_k' AND c = 'secret_c' AND v = 'secret_v' ALLOW FILTERING"), ALL);
+            node.runOnInstance(() -> MonitoringTask.instance.logOperations(approxTime.now()));
 
-            // Make sure the slow query logger logged the slow query
-            String pattern = format("<SELECT \\* FROM %s\\.%s WHERE k = \\? AND c = \\? AND v = \\? ALLOW FILTERING>, was slow");
-            cluster.get(2).logs().watchFor(pattern);
-            assertTrue(cluster.get(1).logs().grep(pattern).getResult().isEmpty());
-
-            // Make sure the sensitive data is not logged
-            cluster.forEach(i -> {
-                assertTrue(i.logs().grep("secret_k").getResult().isEmpty());
-                assertTrue(i.logs().grep("secret_c").getResult().isEmpty());
-                assertTrue(i.logs().grep("secret_v").getResult().isEmpty());
-            });
+            assertLogsContain(mark, node, "Some operations were slow", format("<SELECT \\* FROM %s\\.%s WHERE k = \\? AND c = \\? AND v = \\? ALLOW FILTERING>"));
+            assertLogsNotContain(mark, node, "secret_k", "secret_c", "secret_v");
         }
     }
 
     private static String format(String query)
     {
         return String.format(query, KEYSPACE, TABLE);
+    }
+
+    private static void assertLogsContain(long mark, IInvokableInstance node, String... lines)
+    {
+        assertLogs(mark, node, AbstractIterableAssert::isNotEmpty, lines);
+    }
+
+    private static void assertLogsNotContain(long mark, IInvokableInstance node, String... lines)
+    {
+        assertLogs(mark, node, AbstractIterableAssert::isEmpty, lines);
+    }
+
+    private static void assertLogs(long mark, IInvokableInstance node, Consumer<ListAssert<String>> listAssert, String... lines)
+    {
+        for (String line : lines)
+        {
+            List<String> matchingLines = node.logs().grep(mark, line).getResult();
+            listAssert.accept(Assertions.assertThat(matchingLines));
+        }
     }
 
     /**
@@ -105,7 +125,7 @@ public class SlowQueryLoggerTest extends TestBaseImpl
             try
             {
                 if (executionController.metadata().name.equals(TABLE))
-                    Thread.sleep(SLOW_QUERY_LOG_TIMEOUT_MS + 1);
+                    Thread.sleep(SLOW_QUERY_LOG_TIMEOUT_MS * 2);
 
                 return zuperCall.call();
             }
