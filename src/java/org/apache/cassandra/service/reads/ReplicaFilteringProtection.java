@@ -196,15 +196,23 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
                 // of cached rows we have had during the query.
                 if (!hitFailureThreshold && maxRowsCached > cachedRowsWarnThreshold)
                 {
-                    String message = String.format("Replica filtering protection has cached up to %d rows during query %s, " +
-                                                   "which is over the warning threshold of %d rows defined by " +
-                                                   "'cached_replica_rows_warn_threshold' in cassandra.yaml.",
-                                                   maxRowsCached, command.toCQLString(), cachedRowsWarnThreshold);
+                    String clearMessage = cachedRowsWarnMessage(false);
+                    String redactedMessage = cachedRowsWarnMessage(true);
 
-                    ClientWarn.instance.warn(message);
-                    oneMinuteLogger.warn(message);
-                    Tracing.trace(message);
+                    ClientWarn.instance.warn(clearMessage);
+                    oneMinuteLogger.warn(redactedMessage);
+                    Tracing.trace(clearMessage);
                 }
+            }
+
+            private String cachedRowsWarnMessage(boolean redact)
+            {
+                return String.format("Replica filtering protection has cached up to %d rows during query %s, " +
+                                     "which is over the warning threshold of %d rows defined by " +
+                                     "'cached_replica_rows_warn_threshold' in cassandra.yaml.",
+                                     maxRowsCached,
+                                     redact ? command.toRedactedCQLString() : command.toUnredactedCQLString(),
+                                     cachedRowsWarnThreshold);
             }
 
             @Override
@@ -286,15 +294,23 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
         if (currentRowsCached == cachedRowsFailThreshold + 1)
         {
             hitFailureThreshold = true;
-            String message = String.format("Replica filtering protection has cached %d rows during query %s, " +
-                                           "which is over the failure threshold of %d rows defined by " +
-                                           "'cached_replica_rows_fail_threshold' in cassandra.yaml.",
-                                           currentRowsCached, command.toCQLString(), cachedRowsFailThreshold);
+            String clearMessage = cachedRowsFailMessage(false);
+            String redactedMessage = cachedRowsFailMessage(true);
 
-            logger.error(message);
-            Tracing.trace(message);
-            throw new OverloadedException(message);
+            logger.error(redactedMessage);
+            Tracing.trace(clearMessage);
+            throw new OverloadedException(redactedMessage);
         }
+    }
+
+    private String cachedRowsFailMessage(boolean redact)
+    {
+        return String.format("Replica filtering protection has cached %d rows during query %s, " +
+                             "which is over the failure threshold of %d rows defined by " +
+                             "'cached_replica_rows_fail_threshold' in cassandra.yaml.",
+                             currentRowsCached,
+                             redact ? command.toRedactedCQLString() : command.toUnredactedCQLString(),
+                             cachedRowsFailThreshold);
     }
 
     private void releaseCachedRows(int count)

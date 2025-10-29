@@ -163,10 +163,10 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
     }
 
     @Override
-    public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
     {
         if (metadata.clusteringColumns().isEmpty() || clusterings.isEmpty())
-            return rowFilter.toCQLString();
+            return rowFilter.toCQLString(redact);
 
         boolean isSingleColumn = metadata.clusteringColumns().size() == 1;
         boolean isSingleClustering = clusterings.size() == 1;
@@ -183,7 +183,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         {
             sb.append(i++ == 0 ? "" : ", ")
               .append(isSingleColumn ? "" : '(')
-              .append(clustering.toCQLString(metadata))
+              .append(clustering.toCQLString(metadata, redact))
               .append(isSingleColumn ? "" : ')');
 
             maxClusteringSize = Math.max(maxClusteringSize, clustering.size());
@@ -200,7 +200,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
 
         if (!rowFilter.isEmpty())
         {
-            String filter = rowFilter.toCQLString();
+            String filter = rowFilter.toCQLString(redact);
             sb.append(filter.startsWith("ORDER BY") ? " " : " AND ");
             sb.append(filter);
         }
