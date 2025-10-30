@@ -3,6 +3,7 @@ Future version (tbd)
 Merged from 5.1:
  * Expose current compaction throughput in nodetool (CASSANDRA-13890)
 Merged from 5.0:
+ * Fix range queries on early-open BTI files (CASSANDRA-20976)
  * Improve error messages when initializing auth classes (CASSANDRA-20368 and CASSANDRA-20450)
  * Use ParameterizedClass for all auth-related implementations (CASSANDRA-19946 and partially CASSANDRA-18554)
  * Enables IAuthenticator's to return own AuthenticateMessage (CASSANDRA-19984)
