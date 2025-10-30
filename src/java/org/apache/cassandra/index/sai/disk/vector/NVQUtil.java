@@ -19,11 +19,11 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 public class NVQUtil
 {
-    private static final boolean ENABLE_NVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean();
-
+    public static final boolean ENABLE_NVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean();
     public static final int NUM_SUB_VECTORS = CassandraRelevantProperties.SAI_VECTOR_NVQ_NUM_SUB_VECTORS.getInt();
 
     /**
@@ -31,11 +31,16 @@ public class NVQUtil
      * With NVQ, we use M * (7 + D / M) bytes, where D is the number of dimensions and M is the number of subvectors.
      * For FP vectors, we trivially use 4D bytes
      * @param dimension vector dimension for the index
-     * @param jvectorVersion JVector disk format version
+     * @param version SAI on disk version, which internally determines the jvector version
      * @return true if NVQ should be used for the graph or false otherwise
      */
-    public static boolean shouldWriteNVQ(int dimension, int jvectorVersion)
+    public static boolean shouldWriteNVQ(int dimension, Version version)
     {
-        return ENABLE_NVQ && jvectorVersion >= 4 && NUM_SUB_VECTORS * (7 + dimension / NUM_SUB_VECTORS) < 4 * dimension;
+        return ENABLE_NVQ && versionSupportsNVQ(version) && NUM_SUB_VECTORS * (7 + dimension / NUM_SUB_VECTORS) < 4 * dimension;
+    }
+
+    public static boolean versionSupportsNVQ(Version version)
+    {
+        return version.onDiskFormat().jvectorFileFormatVersion() >= 4;
     }
 }

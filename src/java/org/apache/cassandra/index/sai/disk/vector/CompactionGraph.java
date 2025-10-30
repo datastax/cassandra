@@ -235,7 +235,7 @@ public class CompactionGraph implements Closeable, Accountable
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
                       + SAICodecUtils.headerSize();
 
-        if (NVQUtil.shouldWriteNVQ(dimension, jvectorVersion))
+        if (NVQUtil.shouldWriteNVQ(dimension, context.version()))
         {
             // When NVQ is enabled, we don't create the writer until graph construction is complete.
             writer = null;

@@ -165,10 +165,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // Assume true until we observe otherwise.
         allVectorsAreUnitLength = true;
 
-        int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         // NVQ is only written during compaction to save on compute costs
-        writeNvq = NVQUtil.shouldWriteNVQ(dimension, jvectorVersion) && !forSearching;
+        writeNvq = NVQUtil.shouldWriteNVQ(dimension, context.version()) && !forSearching;
 
+        int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         // This is only a warning since it's not a fatal error to write without hierarchy
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
