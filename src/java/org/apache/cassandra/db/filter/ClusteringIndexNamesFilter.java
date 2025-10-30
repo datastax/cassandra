@@ -20,6 +20,7 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 import java.util.*;
 
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
@@ -161,34 +162,48 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         return sb.append(')').toString();
     }
 
-    public String toCQLString(TableMetadata metadata)
+    @Override
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
     {
         if (metadata.clusteringColumns().isEmpty() || clusterings.isEmpty())
-            return "";
+            return rowFilter.toCQLString();
+
+        boolean isSingleColumn = metadata.clusteringColumns().size() == 1;
+        boolean isSingleClustering = clusterings.size() == 1;
 
         StringBuilder sb = new StringBuilder();
+        sb.append(isSingleColumn ? "" : '(')
+          .append(ColumnMetadata.toCQLString(metadata.clusteringColumns()))
+          .append(isSingleColumn ? "" : ')');
 
-        boolean multipleColumns = metadata.clusteringColumns().size() > 1;
-        boolean multipleClusterings = clusterings.size() > 1;
-
-        if (multipleColumns)
-            sb.append('(');
-        sb.append(ColumnMetadata.toCQLString(metadata.clusteringColumns()));
-        if (multipleColumns)
-            sb.append(')');
-        sb.append(multipleClusterings ? " IN (" : " = ");
+        sb.append(isSingleClustering ? " = " : " IN (");
         int i = 0;
+        int maxClusteringSize = 0;
         for (Clustering<?> clustering : clusterings)
         {
-            sb.append(i++ == 0 ? "" : ", ");
-            if (multipleColumns)
-                sb.append('(');
-            sb.append(clustering.toCQLString(metadata));
-            if (multipleColumns)
-                sb.append(')');
+            sb.append(i++ == 0 ? "" : ", ")
+              .append(isSingleColumn ? "" : '(')
+              .append(clustering.toCQLString(metadata))
+              .append(isSingleColumn ? "" : ')');
+
+            maxClusteringSize = Math.max(maxClusteringSize, clustering.size());
         }
-        if (multipleClusterings)
-            sb.append(')');
+        sb.append(isSingleClustering ? "" : ")");
+
+        // Remove index restrictions for the clustering columns of this clustering filter from the row filter,
+        // so we don't print them twice. The row filter can contain expressions copying the clustering filter
+        // restrictions, because indexed clustering key restrictions are added to the row filter at the CQL layer for
+        // easier consumption downstream. However, due to CQL validation the row filter won't contain additional
+        // expressions for columns that are included in the clustering filter, besided the aformentioned copies.
+        for (i = 0; i < clusterings.first().size(); i++)
+            rowFilter = rowFilter.withoutFirstLevelExpression(metadata.clusteringColumns().get(i));
+
+        if (!rowFilter.isEmpty())
+        {
+            String filter = rowFilter.toCQLString();
+            sb.append(filter.startsWith("ORDER BY") ? " " : " AND ");
+            sb.append(filter);
+        }
 
         appendOrderByToCQLString(metadata, sb);
         return sb.toString();
