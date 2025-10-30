@@ -993,6 +993,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }, "StorageServiceShutdownHook");
         JVMStabilityInspector.registerShutdownHook(drainOnShutdown, this::onShutdownHookRemoved);
 
+        // Register signal handlers to log received signals for shutdown investigation
+        registerSignalHandlers();
+
         replacing = isReplacing();
 
         if (!START_GOSSIP.getBoolean())
@@ -1111,6 +1114,57 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public static boolean isSeed()
     {
         return DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddressAndPort());
+    }
+
+    private void registerSignalHandlers()
+    {
+        registerSignalHandlersInternal(new String[]{"TERM", "INT", "HUP"});
+    }
+
+    @VisibleForTesting
+    void registerSignalHandlersForTest(String[] testSignals)
+    {
+        registerSignalHandlersInternal(testSignals);
+    }
+
+    private void registerSignalHandlersInternal(String[] signals)
+    {
+        try
+        {
+            for (String signalName : signals)
+            {
+                try
+                {
+                    sun.misc.Signal signal = new sun.misc.Signal(signalName);
+                    // Use an array to hold the old handler reference so it can be captured in the inner class
+                    final sun.misc.SignalHandler[] oldHandlerHolder = new sun.misc.SignalHandler[1];
+                    oldHandlerHolder[0] = sun.misc.Signal.handle(signal,
+                        new sun.misc.SignalHandler()
+                        {
+                            @Override
+                            public void handle(sun.misc.Signal sig)
+                            {
+                                logger.info("Received signal: SIG{} ({})", sig.getName(), sig.getNumber());
+                                // Chain to the previous handler to ensure normal shutdown proceeds
+                                if (oldHandlerHolder[0] != null && oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_DFL &&
+                                    oldHandlerHolder[0] != sun.misc.SignalHandler.SIG_IGN)
+                                {
+                                    oldHandlerHolder[0].handle(sig);
+                                }
+                            }
+                        });
+                }
+                catch (IllegalArgumentException e)
+                {
+                    logger.debug("Signal SIG{} is not available on this platform", signalName);
+                }
+            }
+        }
+        catch (Throwable t)
+        {
+            // Don't let signal handler registration failure prevent startup
+            logger.warn("Failed to register signal handlers for shutdown logging", t);
+        }
     }
 
     private void prepareToJoin() throws ConfigurationException
@@ -5750,13 +5804,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         assert !isShutdown;
         isShutdown = true;
 
+        logger.info("Running StorageService shutdown hook");
+
         Throwable preShutdownHookThrowable = Throwables.perform(null, preShutdownHooks.stream().map(h -> h::run));
         if (preShutdownHookThrowable != null)
             logger.error("Attempting to continue draining after pre-shutdown hooks returned exception", preShutdownHookThrowable);
 
         try
         {
-            setMode(Mode.DRAINING, "starting drain process", !isFinalShutdown);
+            logger.info("DRAINING: starting drain process");
+            setMode(Mode.DRAINING, "starting drain process", false);
 
             try
             {
@@ -5777,6 +5834,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Gossiper.instance.stop();
             ActiveRepairService.instance().stop();
 
+            logger.info("DRAINING: shutting down MessageService");
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "shutting down MessageService", false);
 
@@ -5794,6 +5852,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 logger.error("Messaging service timed out shutting down", t);
             }
 
+            logger.info("DRAINING: flushing column families");
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "flushing column families", false);
 
@@ -5850,6 +5909,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // mutations so let's wait for any pending mutations and then clear the stages. Note that the compaction
             // manager can generated mutations, for example because of the view builder or the sstable_activity updates
             // in the SSTableReader.GlobalTidy, so we do this step quite late, but before shutting down the CL
+            logger.info("DRAINING: stopping mutations");
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "stopping mutations", false);
 
@@ -5858,6 +5918,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                           .collect(Collectors.toList());
             barriers.forEach(OpOrder.Barrier::await); // we could parallelize this...
 
+            logger.info("DRAINING: clearing mutation stage");
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "clearing mutation stage", false);
             Stage.shutdownAndAwaitMutatingExecutors(false,
@@ -5893,7 +5954,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
             finally
             {
-                setMode(Mode.DRAINED, !isFinalShutdown);
+                logger.info("DRAINED");
+                setMode(Mode.DRAINED, false);
             }
         }
         catch (Throwable t)
