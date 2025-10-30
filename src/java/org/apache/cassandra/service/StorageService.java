@@ -1031,10 +1031,19 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private void registerSignalHandlers()
     {
+        registerSignalHandlersInternal(new String[]{"TERM", "INT", "HUP"});
+    }
+
+    @VisibleForTesting
+    void registerSignalHandlersForTest(String[] testSignals)
+    {
+        registerSignalHandlersInternal(testSignals);
+    }
+
+    private void registerSignalHandlersInternal(String[] signals)
+    {
         try
         {
-            String[] signals = {"TERM", "INT", "HUP"};
-            
             for (String signalName : signals)
             {
                 try
