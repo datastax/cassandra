@@ -36,7 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.System.getProperty;
