@@ -28,7 +28,6 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -38,6 +37,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
@@ -72,7 +72,6 @@ import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -92,14 +91,12 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.StorageService;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
-import static org.apache.cassandra.index.sai.disk.vector.NVQUtil.NUM_SUB_VECTORS;
 
 public class CompactionGraph implements Closeable, Accountable
 {
@@ -128,7 +125,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final int postingsEntriesAllocated;
     private final File postingsFile;
     private final File vectorsByOrdinalTmpFile;
-    private final FileOutputStreamPlus vectorsByOrdinalOutput;
+    private final BufferedRandomAccessWriter vectorsByOrdinalBufferedWriter;
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
@@ -199,7 +196,7 @@ public class CompactionGraph implements Closeable, Accountable
         // Formatted so that the full resolution vector is written at the ordinal * vector dimension offset
         Component vectorsByOrdinalComponent = new Component(Component.Type.CUSTOM, "vectors_by_ordinal" + Descriptor.TMP_EXT);
         vectorsByOrdinalTmpFile = dd.fileFor(vectorsByOrdinalComponent);
-        vectorsByOrdinalOutput = vectorsByOrdinalTmpFile.newOutputStream(File.WriteMode.OVERWRITE);
+        vectorsByOrdinalBufferedWriter = new BufferedRandomAccessWriter(vectorsByOrdinalTmpFile.toPath());
 
         // VSTODO add LVQ
         BuildScoreProvider bsp;
@@ -270,7 +267,7 @@ public class CompactionGraph implements Closeable, Accountable
     {
         // this gets called in `finally` blocks, so use closeQuietly to avoid generating additional exceptions
         FileUtils.closeQuietly(postingsMap);
-        FileUtils.closeQuietly(vectorsByOrdinalOutput);
+        FileUtils.closeQuietly(vectorsByOrdinalBufferedWriter);
         Files.delete(postingsFile.toJavaIOFile().toPath());
         Files.delete(vectorsByOrdinalTmpFile.toJavaIOFile().toPath());
     }
@@ -372,8 +369,10 @@ public class CompactionGraph implements Closeable, Accountable
             // the full precision vectors to disk eagerly.
             if (globalMean != null)
             {
+                // Skip to the correct position
+                vectorsByOrdinalBufferedWriter.seek(ordinal * Float.BYTES * (long) dimension);
                 for (int i = 0; i < dimension; i++)
-                    vectorsByOrdinalOutput.writeFloat(vector.get(i));
+                    vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
                 // Update the global mean
                 VectorUtil.addInPlace(globalMean, vector);
             }
@@ -426,7 +425,7 @@ public class CompactionGraph implements Closeable, Accountable
         else
         {
             // Close the temporary file so the reader will know it is the end of the file.
-            vectorsByOrdinalOutput.close();
+            vectorsByOrdinalBufferedWriter.close();
         }
 
         int nInProgress = builder.insertsInProgress();
@@ -512,14 +511,11 @@ public class CompactionGraph implements Closeable, Accountable
                 VectorUtil.scale(globalMean, 1.0f / compressedVectors.count());
                 NVQuantization nvq = NVQuantization.create(globalMean, 2);
                 writer = createTermsWriter(ordinalMapper.get(), new NVQ(nvq));
-                AtomicInteger counter = new AtomicInteger();
                 // TODO currently assumes vectorsByOrdinalReader will only be accessed by a single thread in
                 //  the supplier, but jvector has in flight work that may change that paradigm.
                 try (var vectorsByOrdinalReader = RandomAccessReader.open(vectorsByOrdinalTmpFile))
                 {
                     var supplier = Feature.singleStateFactory(FeatureId.NVQ_VECTORS, ordinal -> {
-                        if (ordinal != counter.getAndIncrement())
-                            throw new IllegalStateException("Expected ordinal " + counter.get() + " but got " + ordinal);
                         try
                         {
                             vectorsByOrdinalReader.seek(ordinal * Float.BYTES * (long) dimension);
@@ -648,7 +644,7 @@ public class CompactionGraph implements Closeable, Accountable
         {
             this.reader = reader;
             this.dimension = dimension;
-            this.vectorSize = 4 + dimension * 4L;
+            this.vectorSize = (long) dimension * Float.BYTES;
         }
 
         @Override
@@ -670,8 +666,7 @@ public class CompactionGraph implements Closeable, Accountable
             {
                 reader.seek(i * vectorSize);
                 var vector = new float[dimension];
-                for (int j = 0; j < dimension; j++)
-                    vector[j] = reader.readFloat();
+                reader.readFully(vector);
                 return vts.createFloatVector(vector);
             }
             catch (IOException e)
