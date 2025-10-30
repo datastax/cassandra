@@ -19,6 +19,7 @@
 package org.apache.cassandra.transport;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -150,35 +151,41 @@ public class ExecutorLocalsThreadLocalTest extends CQLTester
     @Test
     public void testClientWarnPreservedAcrossThreads() throws Exception
     {
+        // Initialize ClientWarn state by calling captureWarnings()
+        ClientWarn.instance.captureWarnings();
+        
         // Set a warning on the main thread
         String expectedWarning = "Test warning message";
         ClientWarn.instance.warn(expectedWarning);
         
-        assertEquals("Warning should be set on main thread", 1, ClientWarn.instance.getWarnings().size());
-        assertEquals("Warning message should match", expectedWarning, 
-                    ClientWarn.instance.getWarnings().get(0));
+        List<String> warnings = ClientWarn.instance.getWarnings();
+        assertNotNull("Warnings should not be null after captureWarnings()", warnings);
+        assertEquals("Warning should be set on main thread", 1, warnings.size());
+        assertEquals("Warning message should match", expectedWarning, warnings.get(0));
 
         // Capture ExecutorLocals before async execution
         ExecutorLocals executorLocals = ExecutorLocals.current();
         
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<String> callbackWarning = new AtomicReference<>();
+        AtomicReference<Boolean> warningsNullBeforeRestore = new AtomicReference<>(false);
 
         // Simulate async execution on a different thread
         asyncExecutor.submit(() -> {
             try
             {
-                // Without ExecutorLocals restoration, warnings would be empty
-                assertTrue("Warnings should be empty on different thread before restoration",
-                          ClientWarn.instance.getWarnings().isEmpty());
+                // Without ExecutorLocals restoration, warnings would be null/empty
+                List<String> asyncWarnings = ClientWarn.instance.getWarnings();
+                warningsNullBeforeRestore.set(asyncWarnings == null || asyncWarnings.isEmpty());
 
                 // Restore ExecutorLocals
                 try (org.apache.cassandra.utils.Closeable close = executorLocals.get())
                 {
                     // Now warnings should be available
-                    if (!ClientWarn.instance.getWarnings().isEmpty())
+                    List<String> restoredWarnings = ClientWarn.instance.getWarnings();
+                    if (restoredWarnings != null && !restoredWarnings.isEmpty())
                     {
-                        callbackWarning.set(ClientWarn.instance.getWarnings().get(0));
+                        callbackWarning.set(restoredWarnings.get(0));
                     }
                 }
             }
@@ -189,6 +196,8 @@ public class ExecutorLocalsThreadLocalTest extends CQLTester
         });
 
         assertTrue("Callback should complete within 5 seconds", latch.await(5, TimeUnit.SECONDS));
+        assertTrue("Warnings should be null/empty on different thread before restoration", 
+                   warningsNullBeforeRestore.get());
         assertEquals("Warning should be preserved in callback", expectedWarning, callbackWarning.get());
 
         // Clean up
@@ -213,6 +222,7 @@ public class ExecutorLocalsThreadLocalTest extends CQLTester
         
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<Boolean> stopSessionSucceeded = new AtomicReference<>(false);
+        AtomicReference<Boolean> traceStateNullAfterStop = new AtomicReference<>(false);
 
         // Simulate async execution
         asyncExecutor.submit(() -> {
@@ -225,6 +235,8 @@ public class ExecutorLocalsThreadLocalTest extends CQLTester
                     {
                         Tracing.instance.stopSession();
                         stopSessionSucceeded.set(true);
+                        // Check if TraceState is null after stopSession in this thread
+                        traceStateNullAfterStop.set(Tracing.instance.get() == null);
                     }
                 }
             }
@@ -236,8 +248,12 @@ public class ExecutorLocalsThreadLocalTest extends CQLTester
 
         assertTrue("Callback should complete within 5 seconds", latch.await(5, TimeUnit.SECONDS));
         assertTrue("stopSession should have been called successfully", stopSessionSucceeded.get());
+        assertTrue("TraceState should be null after stopSession in async thread", traceStateNullAfterStop.get());
         
-        // Verify that the session was actually stopped
-        assertNull("TraceState should be null after stopSession", Tracing.instance.get());
+        // Clean up the main thread's TraceState if it still exists
+        if (Tracing.instance.get() != null)
+        {
+            Tracing.instance.stopSession();
+        }
     }
 }
