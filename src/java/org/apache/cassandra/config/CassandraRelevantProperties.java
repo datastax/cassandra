@@ -479,9 +479,15 @@ public enum CassandraRelevantProperties
 
     // Allow disabling deletions of corrupt index components for troubleshooting
     DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
-    // Allow restoring legacy behavior of deleting sai components before a rebuild (which implies a rebuild cannot be
-    // done without first stopping reads on that index)
+    // Allows to force the creation of new component files when rebuilding SAI indexes. By default (when this is `false`),
+    // when a SAI index is rebuilt, the newly created component files overwrite the old ones, which implies a rebuild
+    // cannot be done without first stopping reads on that index. Enabling this option will instead keep the old
+    // files untouched, and create new files (with a different file name) instead.
     IMMUTABLE_SAI_COMPONENTS("cassandra.sai.immutable_components", "false"),
+    // Minimum SAI index version to which immutable components can apply. If the SAI version used is strictly lower
+    // that the version configured here, then immutable components will _not_ be used even if the previous flag is set
+    // to `true`. You can set this to `aa` to enable immutable components on every version.
+    IMMUTABLE_SAI_COMPONENTS_MIN_VERSION("cassandra.sai.immutable_components.min_version", "ca"),
 
     // Enables parallel index read.
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
@@ -606,6 +612,12 @@ public enum CassandraRelevantProperties
      * timers.
      */
     SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_query.enabled", "false"),
+
+    /**
+     * Whether to enable SAI index metrics such as memtable flush metrics, compaction metrics, and disk usage metrics.
+     * These metrics include timers, histograms, counters, and gauges for index operations.
+     */
+    SAI_INDEX_METRICS_ENABLED("cassandra.sai.metrics.index.enabled", "true"),
 
     /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
