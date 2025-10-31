@@ -221,7 +221,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         String className = index.getIndexClassName();
         if (isUnknownCustomIndexCreateStatement(className) && INDEX_UNKNOWN_IGNORE.getBoolean())
         {
-            logger.error("Cannot find index type {}, but '{}' is true so ignoring index {} without error",
+            logger.error("Cannot find index type {}, but '{}' is true so ignoring index {} creation",
                          className, INDEX_UNKNOWN_IGNORE.getKey(), indexName);
             return schema;
         }

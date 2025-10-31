@@ -21,6 +21,8 @@ package org.apache.cassandra.distributed.upgrade;
 import org.junit.Test;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.apache.cassandra.distributed.shared.DistributedTestBase.KEYSPACE;
@@ -73,13 +75,15 @@ public class IndexUnknownIgnoreTest extends UpgradeTestBase
                         cluster.get(1).executeInternal("DESCRIBE INDEX " + KEYSPACE + ".index_name");
                 })
                 .run();
-            throw new RuntimeException("expected failure, schema with SASI should not be readable in upgraded version");
+            fail("expected failure, schema with SASI should not be readable in upgraded version");
         }
         catch(AssertionError error)
         {
-            assertTrue(error.getCause() instanceof RuntimeException);
-            assertTrue("ConfigurationException".equals(error.getCause().getCause().getClass().getSimpleName()));
-            assertTrue(error.getCause().getCause().getCause() instanceof ClassNotFoundException);
+            // expecting a RuntimeException -> ConfigurationException -> ClassNotFoundException
+            if (!(error.getCause() instanceof RuntimeException
+                    && "ConfigurationException".equals(error.getCause().getCause().getClass().getSimpleName())
+                    && error.getCause().getCause().getCause() instanceof ClassNotFoundException))
+                throw error;
         }
     }
 }

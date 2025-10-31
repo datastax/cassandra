@@ -981,7 +981,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             {
                 if (e instanceof ConfigurationException && INDEX_UNKNOWN_IGNORE.getBoolean())
                 {
-                    logger.error("Cannot find index type {}, but PROPERTY is true so ignoring without error index {}", className, indexDef.name);
+                    logger.error("Cannot find index type {}, but '{}' is true so ignoring index {} creation",
+                                 className, INDEX_UNKNOWN_IGNORE.getKey(), indexDef.name);
                     return null;
                 }
                 throw new RuntimeException(e);
