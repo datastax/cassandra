@@ -84,10 +84,10 @@ public class CassandraDiskAnn
 
     private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
-    public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
+    public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata segmentMetadata, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
     {
         this.source = sstableContext.sstable().getId();
-        this.componentMetadatas = componentMetadatas;
+        this.componentMetadatas = segmentMetadata.componentMetadatas;
         this.indexFiles = indexFiles;
         this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) context.getColumnQueryMetrics();
 
@@ -99,6 +99,10 @@ public class CassandraDiskAnn
         features = rawGraph.getFeatureSet();
         graph = rawGraph;
         usesNVQ = features.contains(FeatureId.NVQ_VECTORS);
+
+        // This is helpful for understanding what features are enabled for a given index. Features is an EnumSet
+        // so the toString() method will print all the enabled features.
+        logger.debug("Opened graph for {} for sstable row id offset {} with {} features", source, segmentMetadata.segmentRowIdOffset, features);
 
         long pqSegmentOffset = this.componentMetadatas.get(IndexComponentType.PQ).offset;
         try (var pqFile = indexFiles.pq();
