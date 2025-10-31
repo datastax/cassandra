@@ -37,6 +37,7 @@ import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -46,6 +47,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
+import org.apache.cassandra.index.sai.disk.vector.NVQUtil;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -187,13 +189,21 @@ public class VectorTester extends SAITester
         @Parameterized.Parameter
         public Version version;
 
-        @Parameterized.Parameters(name = "{0}")
+        @Parameterized.Parameter(1)
+        public boolean ENABLE_NVQ;
+
+        @Parameterized.Parameters(name = "{0} {1}")
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
             return Version.ALL.stream()
                               .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
-                              .map(v -> new Object[]{ v })
+                              .flatMap(v -> {
+                                  var enableNVQ = NVQUtil.versionSupportsNVQ(v)
+                                              ? new Boolean[]{ true, false }
+                                              : new Boolean[]{ false };
+                                  return Arrays.stream(enableNVQ).map(b -> new Object[]{ v, b });
+                              })
                               .collect(Collectors.toList());
         }
 
@@ -201,6 +211,12 @@ public class VectorTester extends SAITester
         public void setCurrentVersion() throws Throwable
         {
             SAIUtil.setCurrentVersion(version);
+        }
+
+        @Before
+        public void setEnableNVQ()
+        {
+            SAIUtil.setEnableNVQ(ENABLE_NVQ);
         }
     }
 

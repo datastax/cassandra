@@ -87,7 +87,7 @@ public class BM25Utils
 
         public PrimaryKeyWithSortKey primaryKey(IndexContext context, SSTableId<?> source, float score)
         {
-            return new PrimaryKeyWithScore(context, source, pk, score);
+            return new PrimaryKeyWithScore(context, source, pk, score, false);
         }
 
         @Nullable
