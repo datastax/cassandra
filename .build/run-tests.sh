@@ -200,6 +200,7 @@ _build_all_dtest_jars() {
     [ "${java_version}" -eq 11 ] && export CASSANDRA_USE_JDK11=true
 
     pushd ${TMP_DIR}/cassandra-dtest-jars >/dev/null
+    # Converged Core skips its corresponding branch (e.g. cassandra-5.0) as its always behind it
     # Note: cassandra-5.0.7 tag is used instead of cassandra-5.0 branch to enable
     # testing upgrades from 5.0.7 to the current local build for autorepair feature
     for branch in cassandra-4.0 cassandra-4.1 cassandra-5.0.7 ; do
