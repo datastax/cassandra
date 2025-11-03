@@ -863,6 +863,8 @@ public enum CassandraRelevantProperties
     SYSTEM_VIEWS_INCLUDE_ALL("cassandra.system_view.include_all", "true"),
     //This only applies if include all is false
     SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes"),
+    //This only applies if include all is false
+    SYSTEM_VIEWS_INCLUDE_LOCAL_AND_PEERS("cassandra.system_view.include_local_and_peers"),
     // Default metric aggegration strategy for tables without aggregation explicitly set.
     TABLE_METRICS_DEFAULT_HISTOGRAMS_AGGREGATION("cassandra.table_metrics_default_histograms_aggregation", TableMetrics.MetricsAggregation.INDIVIDUAL.name()),
     // Determines if table metrics should be also exported to shared global metric

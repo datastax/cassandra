@@ -43,6 +43,7 @@ public final class LocalInfo extends NodeInfo<LocalInfo> implements ILocalInfo
     private volatile InetAddressAndPort listenAddressAndPort;
     private volatile ProtocolVersion nativeProtocolVersion;
     private volatile Class<? extends IPartitioner> partitionerClass;
+    private volatile String partitioner; // For backward compatibility with cc-main
     private volatile ImmutableMap<UUID, TruncationRecord> truncationRecords = ImmutableMap.of();
 
     @Override
@@ -132,7 +133,19 @@ public final class LocalInfo extends NodeInfo<LocalInfo> implements ILocalInfo
     public LocalInfo setPartitionerClass(Class<? extends IPartitioner> partitionerClass)
     {
         this.partitionerClass = partitionerClass;
+        this.partitioner = partitionerClass == null ? null : partitionerClass.getName();
         return this;
+    }
+
+    /**
+     * Returns the partitioner class name as a String.
+     * This method provides compatibility with cc-main's LocalInfo API.
+     *
+     * @return the fully qualified class name of the partitioner, or null if not set
+     */
+    public String getPartitioner()
+    {
+        return partitionerClass == null ? null : partitionerClass.getName();
     }
 
     @Override

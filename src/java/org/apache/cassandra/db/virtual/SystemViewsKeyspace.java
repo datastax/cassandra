@@ -23,6 +23,9 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.virtual.IndexesSystemView;
 import org.apache.cassandra.index.sai.virtual.SSTablesSystemView;
 import org.apache.cassandra.index.sai.virtual.StorageAttachedIndexTables;
+import org.apache.cassandra.nodes.virtual.LegacyPeersSystemView;
+import org.apache.cassandra.nodes.virtual.LocalNodeSystemView;
+import org.apache.cassandra.nodes.virtual.PeersSystemView;
 
 import java.util.Collection;
 
@@ -67,6 +70,11 @@ public final class SystemViewsKeyspace extends VirtualKeyspace
                     .addAll(LocalRepairTables.getAll(VIRTUAL_VIEWS))
                     .addAll(CIDRFilteringMetricsTable.getAll(VIRTUAL_VIEWS))
                     .addAll(StorageAttachedIndexTables.getAll(VIRTUAL_VIEWS));
+        if (CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_ALL.getBoolean()
+            || CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_LOCAL_AND_PEERS.getBoolean())
+            tables.add(new LocalNodeSystemView())
+                  .add(new PeersSystemView())
+                  .add(new LegacyPeersSystemView());
         if (CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_ALL.getBoolean()
             || CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_INDEXES.getBoolean())
             tables.add(new IndexesSystemView(VIRTUAL_VIEWS));

@@ -44,6 +44,14 @@ public interface ILocalInfo extends INodeInfo<LocalInfo>
 
     Class<? extends IPartitioner> getPartitionerClass();
 
+    /**
+     * Returns the partitioner class name as a String.
+     * This method provides compatibility with cc-main's LocalInfo API.
+     *
+     * @return the fully qualified class name of the partitioner, or null if not set
+     */
+    String getPartitioner();
+
     ImmutableMap<UUID, TruncationRecord> getTruncationRecords();
 
     @Override
