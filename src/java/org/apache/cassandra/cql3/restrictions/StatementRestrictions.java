@@ -1383,9 +1383,26 @@ public class StatementRestrictions
 
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
 
+        // Check if there's at least one index group that can be used AND supports disjunctions
+        boolean hasIndexSupportingDisjunction = false;
+        boolean hasIndexBeingUsed = false;
+
         for (Index.Group group : indexRegistry.listIndexGroups())
-            if (filterRestrictions.indexBeingUsed(group, indexHints) && !group.supportsDisjunction())
-                return true;
+        {
+            if (filterRestrictions.indexBeingUsed(group, indexHints))
+            {
+                hasIndexBeingUsed = true;
+                if (group.supportsDisjunction())
+                {
+                    hasIndexSupportingDisjunction = true;
+                    break;
+                }
+            }
+        }
+
+        // If we have at least one index that can be used and supports disjunctions, we're good
+        if (hasIndexBeingUsed && !hasIndexSupportingDisjunction)
+            return true;
 
         for (StatementRestrictions child : children)
             if (child.needsDisjunctionSupport(table))
