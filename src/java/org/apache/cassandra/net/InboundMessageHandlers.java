@@ -128,7 +128,7 @@ public final class InboundMessageHandlers
         largeCallbacks  = makeMessageCallbacks(peer, largeCounters,  globalMetricCallbacks, messageConsumer);
         legacyCallbacks = makeMessageCallbacks(peer, legacyCounters, globalMetricCallbacks, messageConsumer);
 
-        metrics = new InternodeInboundMetrics(peer, this);
+        metrics = InternodeInboundMetrics.create(peer, this);
     }
 
     InboundMessageHandler createHandler(FrameDecoder frameDecoder, ConnectionType type, Channel channel, int version)
