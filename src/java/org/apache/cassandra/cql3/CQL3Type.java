@@ -393,7 +393,7 @@ public interface CQL3Type
 
     class UserDefined implements CQL3Type
     {
-        // Keeping this separatly from type just to simplify toString()
+        // Keeping this separately from type just to simplify toString()
         private final String name;
         private final UserType type;
 
@@ -701,6 +701,11 @@ public interface CQL3Type
             return false;
         }
 
+        public boolean isDateRange()
+        {
+            return false;
+        }
+
         public boolean isUDT()
         {
             return false;
@@ -914,6 +919,13 @@ public interface CQL3Type
             public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
             {
                 // no-op
+            }
+
+            @Override
+            public boolean isDateRange()
+            {
+                return DateRangeType.class.getSimpleName().equals(className) ||
+                       DateRangeType.class.getCanonicalName().equals(className);
             }
 
             @Override

@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
@@ -344,5 +345,24 @@ public class MultipleColumnIndexTest extends SAITester
         assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Johann'").uses(analyzedIndex).doesntWarn();
         assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Richard'", row1).uses(analyzedIndex).doesntWarn();
         assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Debussy'", row1, row2).uses(analyzedIndex).doesntWarn();
+    }
+
+    @Test
+    public void shouldPickIndexWithDisjunctionSupportToServeTheQuery()
+    {
+        // given schema with both SAI and table-based secondary indexes
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int)");
+        createIndex("CREATE CUSTOM INDEX ON %s (a) USING 'StorageAttachedIndex'");
+        createIndex("CREATE INDEX ON %s (b)");
+        // insert some sample data
+        for (int i = 0; i < 5; i++)
+        {
+            execute(String.format("INSERT INTO %%s(k, a, b) values (%d, %d, %d)", i, i, i));
+        }
+        // when query using OR operator
+        UntypedResultSet result = execute("SELECT * FROM %s WHERE a = 1 OR a = 2");
+        // then
+        // query should not fail and contain row 1 and 2
+        assertRowsIgnoringOrder(result, row(1, 1, 1), row(2, 2, 2));
     }
 }

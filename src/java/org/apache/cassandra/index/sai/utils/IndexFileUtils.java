@@ -35,6 +35,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.compress.BufferType;
@@ -77,11 +78,11 @@ public class IndexFileUtils
         this.writerOption = writerOption;
     }
 
-    public IndexOutputWriter openOutput(File file, ByteOrder order, boolean append) throws IOException
+    public IndexOutputWriter openOutput(File file, ByteOrder order, boolean append, Version version) throws IOException
     {
         assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
         var checksumWriter = new IncrementalChecksumSequentialWriter(file, writerOption, append);
-        return new IndexOutputWriter(checksumWriter, order);
+        return new IndexOutputWriter(checksumWriter, order, version);
     }
 
     public BufferedRandomAccessWriter openRandomAccessOutput(File file, boolean append) throws IOException

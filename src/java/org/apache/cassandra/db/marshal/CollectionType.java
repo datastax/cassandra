@@ -180,6 +180,15 @@ public abstract class CollectionType<T> extends MultiCellCapableType<T>
                && valueComparator().isValueCompatibleWith(prev.valueComparator());
     }
 
+    @Override
+    public boolean isSerializationCompatibleWith(AbstractType<?> previous)
+    {
+        if (!isValueCompatibleWith(previous))
+            return false;
+
+        return valueComparator().isSerializationCompatibleWith(((CollectionType<?>)previous).valueComparator());
+    }
+
     public CQL3Type asCQL3Type()
     {
         return new CQL3Type.Collection(this);

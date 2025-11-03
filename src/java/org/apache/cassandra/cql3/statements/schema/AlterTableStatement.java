@@ -102,6 +102,13 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         return schema.withAddedOrUpdated(apply(keyspace, table));
     }
 
+    // CNDB-14199: the method is needed for CNDB
+    public boolean containsDateRangeTypeColumn()
+    {
+        // Classes that need this method exposed have to override it
+        return false;
+    }
+
     public ResultMessage execute(QueryState state, boolean locally)
     {
         return super.execute(state, locally);
@@ -226,7 +233,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             {
                 // After #8099, not safe to re-add columns of incompatible types - until *maybe* deser logic with dropped
                 // columns is pushed deeper down the line. The latter would still be problematic in cases of schema races.
-                if (!type.isValueCompatibleWith(droppedColumn.type))
+                if (!type.isSerializationCompatibleWith(droppedColumn.type))
                 {
                     throw ire("Cannot re-add previously dropped column '%s' of type %s, incompatible with previous type %s",
                               name,
@@ -263,6 +270,18 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
                     }
                 }
             }
+        }
+
+        @Override
+        public boolean containsDateRangeTypeColumn()
+        {
+            for (AddColumns.Column column : newColumns)
+            {
+                if (column.type.isDateRange())
+                    return true;
+            }
+
+            return false;
         }
     }
 

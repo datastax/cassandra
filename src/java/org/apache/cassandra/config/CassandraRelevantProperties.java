@@ -348,10 +348,22 @@ public enum CassandraRelevantProperties
     CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY("cassandra.custom_client_request_metrics_provider_class"),
 
     /**
+     * Which class to use for internode metrics for {@link org.apache.cassandra.net.OutboundConnections}.
+     * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.InternodeOutboundMetrics}.
+     */
+    CUSTOM_INTERNODE_INBOUND_METRICS_PROVIDER_PROPERTY("cassandra.custom_internode_inbound_metrics_provider_class"),
+
+    /**
      * Which class to use for messaging metrics for {@link org.apache.cassandra.net.MessagingService}.
      * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.MessagingMetrics}.
      */
     CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY("cassandra.custom_messaging_metrics_provider_class"),
+
+    /**
+     * Which class to use for internode metrics for {@link org.apache.cassandra.net.OutboundConnections}.
+     * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.InternodeOutboundMetrics}.
+     */
+    CUSTOM_INTERNODE_OUTBOUND_METRICS_PROVIDER_PROPERTY("cassandra.custom_internode_outbound_metrics_provider_class"),
 
     /**
      * Which class to use for creating guardrails
@@ -373,6 +385,9 @@ public enum CassandraRelevantProperties
 
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
+
+    /** The class to use for selecting the current version of the SAI on-disk index format on a per-keyspace basis. */
+    SAI_VERSION_SELECTOR_CLASS("cassandra.sai.version.selector.class", ""),
 
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
@@ -467,9 +482,15 @@ public enum CassandraRelevantProperties
 
     // Allow disabling deletions of corrupt index components for troubleshooting
     DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
-    // Allow restoring legacy behavior of deleting sai components before a rebuild (which implies a rebuild cannot be
-    // done without first stopping reads on that index)
+    // Allows to force the creation of new component files when rebuilding SAI indexes. By default (when this is `false`),
+    // when a SAI index is rebuilt, the newly created component files overwrite the old ones, which implies a rebuild
+    // cannot be done without first stopping reads on that index. Enabling this option will instead keep the old
+    // files untouched, and create new files (with a different file name) instead.
     IMMUTABLE_SAI_COMPONENTS("cassandra.sai.immutable_components", "false"),
+    // Minimum SAI index version to which immutable components can apply. If the SAI version used is strictly lower
+    // that the version configured here, then immutable components will _not_ be used even if the previous flag is set
+    // to `true`. You can set this to `aa` to enable immutable components on every version.
+    IMMUTABLE_SAI_COMPONENTS_MIN_VERSION("cassandra.sai.immutable_components.min_version", "ca"),
 
     // Enables parallel index read.
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
@@ -594,6 +615,12 @@ public enum CassandraRelevantProperties
      * timers.
      */
     SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_query.enabled", "false"),
+
+    /**
+     * Whether to enable SAI index metrics such as memtable flush metrics, compaction metrics, and disk usage metrics.
+     * These metrics include timers, histograms, counters, and gauges for index operations.
+     */
+    SAI_INDEX_METRICS_ENABLED("cassandra.sai.metrics.index.enabled", "true"),
 
     /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.

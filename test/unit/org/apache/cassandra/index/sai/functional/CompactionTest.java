@@ -67,7 +67,6 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Refs;
 
@@ -326,8 +325,8 @@ public class CompactionTest extends AbstractMetricsTest
 
         assertNumRows(num, "SELECT id1 FROM %%s WHERE v1>=0");
         assertNumRows(num, "SELECT id1 FROM %%s WHERE v2='0'");
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), sstables);
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), sstables);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V1_COLUMN_IDENTIFIER), sstables);
+        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(KEYSPACE, currentTable(), V2_COLUMN_IDENTIFIER), sstables);
     }
 
     @Test
