@@ -350,7 +350,7 @@ public class MultipleColumnIndexTest extends SAITester
     @Test
     public void shouldPickIndexWithDisjunctionSupportToServeTheQuery()
     {
-        // given schema with both SAI and secondary indexes
+        // given schema with both SAI and table-based secondary indexes
         createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int)");
         createIndex("CREATE CUSTOM INDEX ON %s (a) USING 'StorageAttachedIndex'");
         createIndex("CREATE INDEX ON %s (b)");
