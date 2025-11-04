@@ -348,6 +348,12 @@ public enum CassandraRelevantProperties
     CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY("cassandra.custom_client_request_metrics_provider_class"),
 
     /**
+     * Which class to use for internode metrics for {@link org.apache.cassandra.net.OutboundConnections}.
+     * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.InternodeOutboundMetrics}.
+     */
+    CUSTOM_INTERNODE_INBOUND_METRICS_PROVIDER_PROPERTY("cassandra.custom_internode_inbound_metrics_provider_class"),
+
+    /**
      * Which class to use for messaging metrics for {@link org.apache.cassandra.net.MessagingService}.
      * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.MessagingMetrics}.
      */
