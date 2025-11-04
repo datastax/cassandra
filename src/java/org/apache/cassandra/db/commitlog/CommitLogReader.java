@@ -56,7 +56,7 @@ public class CommitLogReader
     @VisibleForTesting
     public static final int ALL_MUTATIONS = -1;
     private final CRC32 checksum;
-    private final Map<TableId, AtomicInteger> invalidMutations;
+    private final Map<TableId, AtomicInteger> invalidMutations; // if we can't find a table for a mutation, we count it here
     private final Set<String> segmentsWithInvalidMutations;
 
     private byte[] buffer;
