@@ -74,8 +74,8 @@ public class CommitLogReplayerTest
         when(descriptor.fileName()).thenReturn(failedSegment);
         Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
         Assert.assertThrows(ExecutionException.class, () -> mutationFuture.get());
-        Assert.assertTrue(!replayer.getSegmentWithInvalidOrFailedMutations().isEmpty());
-        Assert.assertTrue(replayer.getSegmentWithInvalidOrFailedMutations().contains(failedSegment));
+        Assert.assertTrue(!replayer.getSegmentWithFailedMutations().isEmpty());
+        Assert.assertTrue(replayer.getSegmentWithFailedMutations().contains(failedSegment));
     }
 
     /**

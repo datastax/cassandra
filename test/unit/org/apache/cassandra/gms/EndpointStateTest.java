@@ -177,8 +177,8 @@ public class EndpointStateTest
         String c3safeVersionString = "4.0.11.0";
         VersionedValue releaseVersion = valueFactory.releaseVersion(versionString);
 
-        assertEquals(versionString, EndpointStateSerializer.filterValue(ApplicationState.RELEASE_VERSION, releaseVersion, MessagingService.VERSION_40).value);
-        assertEquals(c3safeVersionString, EndpointStateSerializer.filterValue(ApplicationState.RELEASE_VERSION, releaseVersion, MessagingService.VERSION_3014).value);
+        assertEquals(versionString, EndpointState.serializerFilterValue(ApplicationState.RELEASE_VERSION, releaseVersion, MessagingService.VERSION_40).value);
+        assertEquals(c3safeVersionString, EndpointState.serializerFilterValue(ApplicationState.RELEASE_VERSION, releaseVersion, MessagingService.VERSION_3014).value);
 
         HeartBeatState hb = new HeartBeatState(0);
         EndpointState state = new EndpointState(hb);
