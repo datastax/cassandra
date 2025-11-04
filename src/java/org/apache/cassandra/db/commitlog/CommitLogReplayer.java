@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
@@ -97,7 +96,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
     private final Map<Keyspace, AtomicInteger> keyspacesReplayed;
     private final Queue<Future<Integer>> futures;
 
-    private final Set<String> segmentsWithFailedMutations;
+    private final Set<String> segmentsWithFailedMutations; // mutations that failed to apply
 
     private final Map<TableId, IntervalSet<CommitLogPosition>> cfPersisted;
     private final CommitLogPosition globalPosition;
@@ -672,11 +671,18 @@ public class CommitLogReplayer implements CommitLogReadHandler
         return false;
     }
 
-    public Set<String> getSegmentWithInvalidOrFailedMutations()
+    public Set<String> getSegmentWithFailedMutations()
     {
-        Set<String> union = new HashSet<>(segmentsWithFailedMutations);
-        union.addAll(commitLogReader.getSegmentsWithInvalidMutations());
-        return union;
+        return segmentsWithFailedMutations;
+    }
+
+    /**
+     * Get segments with invalid mutations.
+     * Invalid mutations are mutations for which the table can not be found.
+     */
+    public Set<String> getSegmentWithInvalidMutations()
+    {
+        return commitLogReader.getSegmentsWithInvalidMutations();
     }
 
     public void handleInvalidMutation(TableId id)
