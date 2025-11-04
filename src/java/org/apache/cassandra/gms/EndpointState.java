@@ -474,6 +474,12 @@ public class EndpointState
 
         return Gossiper.getMaxEndpointStateVersion(that) > Gossiper.getMaxEndpointStateVersion(this);
     }
+
+    @VisibleForTesting // delegates package-protected static access for tests to EndpointStateSerializer.filterValue
+    static VersionedValue serializerFilterValue(ApplicationState state, VersionedValue value, int version)
+    {
+        return EndpointStateSerializer.filterValue(state, value, version);
+    }
 }
 
 class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
