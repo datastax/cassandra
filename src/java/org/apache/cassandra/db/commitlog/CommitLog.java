@@ -92,8 +92,8 @@ public class CommitLog implements CommitLogMBean
     public final CommitLogArchiver archiver;
     public final CommitLogMetrics metrics;
     final AbstractCommitLogService executor;
-    private Set<String> segmentsWithInvalidOrFailedMutations;
-
+    private Set<String> segmentsWithInvalidMutations;
+    private Set<String> segmentsWithFailedMutations;
     volatile Configuration configuration;
     private boolean started = false;
 
@@ -245,8 +245,7 @@ public class CommitLog implements CommitLogMBean
 
             for (File f : files)
             {
-                boolean hasInvalidOrFailedMutations = segmentsWithInvalidOrFailedMutations.contains(f.name());
-                segmentManager.handleReplayedSegment(f, hasInvalidOrFailedMutations);
+                segmentManager.handleReplayedSegment(f, segmentsWithInvalidMutations.contains(f.name()), segmentsWithFailedMutations.contains(f.name()));
             }
         }
 
@@ -268,7 +267,8 @@ public class CommitLog implements CommitLogMBean
         replayer.replayFiles(clogs);
 
         Map<Keyspace, Integer> res = replayer.blockForWrites(flushReason);
-        segmentsWithInvalidOrFailedMutations = replayer.getSegmentWithInvalidOrFailedMutations();
+        segmentsWithFailedMutations = replayer.getSegmentWithFailedMutations();
+        segmentsWithInvalidMutations = replayer.getSegmentWithInvalidMutations();
         return res;
     }
 
@@ -290,6 +290,11 @@ public class CommitLog implements CommitLogMBean
     public void recover(String path) throws IOException
     {
         recoverPath(path, false);
+    }
+
+    public void setCommitLogSegmentHandler(CommitLogSegmentHandler handler)
+    {
+        AbstractCommitLogSegmentManager.commitLogSegmentHandler = handler;
     }
 
     /**

@@ -112,6 +112,8 @@ public abstract class AbstractCommitLogSegmentManager
      */
     private final AtomicLong size = new AtomicLong();
 
+    public static volatile CommitLogSegmentHandler commitLogSegmentHandler = new CommitLogSegmentHandler();
+
     @VisibleForTesting
     Interruptible executor;
     private final CommitLog commitLog;
@@ -475,21 +477,12 @@ public abstract class AbstractCommitLogSegmentManager
      */
     void handleReplayedSegment(final File file)
     {
-        handleReplayedSegment(file, false);
+        handleReplayedSegment(file, false, false);
     }
 
-    void handleReplayedSegment(final File file, boolean hasInvalidOrFailedMutations)
+    void handleReplayedSegment(final File file, boolean hasInvalidMutations, boolean hasFailedMutations)
     {
-        if (!hasInvalidOrFailedMutations)
-        {
-            // (don't decrease managed size, since this was never a "live" segment)
-            logger.trace("(Unopened) segment {} is no longer needed and will be deleted now", file);
-            FileUtils.deleteWithConfirm(file);
-        }
-        else
-        {
-            logger.debug("File {} should not be deleted as it contains invalid or failed mutations", file.name());
-        }
+        commitLogSegmentHandler.handleReplayedSegment(file, hasInvalidMutations, hasFailedMutations);
     }
 
     /**
