@@ -59,6 +59,7 @@ import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
+import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
@@ -192,7 +193,6 @@ public class CompactionGraph implements Closeable, Accountable
                                          .entries(postingsEntriesAllocated)
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
-        // TODO should we checksum vectors? How do we prevent concurrent overwrites?
         // Formatted so that the full resolution vector is written at the ordinal * vector dimension offset
         Component vectorsByOrdinalComponent = new Component(Component.Type.CUSTOM, "vectors_by_ordinal" + Descriptor.TMP_EXT);
         vectorsByOrdinalTmpFile = dd.fileFor(vectorsByOrdinalComponent);
@@ -369,8 +369,10 @@ public class CompactionGraph implements Closeable, Accountable
             // the full precision vectors to disk eagerly.
             if (globalMean != null)
             {
-                // Skip to the correct position
-                vectorsByOrdinalBufferedWriter.seek(ordinal * Float.BYTES * (long) dimension);
+                // Skip to the correct position (ensuring that we only skip forward)
+                long targetPosition = ordinal * Float.BYTES * (long) dimension;
+                assert vectorsByOrdinalBufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + vectorsByOrdinalBufferedWriter.position() + " > targetPosition=" + targetPosition;
+                vectorsByOrdinalBufferedWriter.seek(targetPosition);
                 for (int i = 0; i < dimension; i++)
                     vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
                 // Update the global mean
@@ -486,8 +488,7 @@ public class CompactionGraph implements Closeable, Accountable
                 }
                 else
                 {
-                    try (var termsReader = RandomAccessReader.open(vectorsByOrdinalTmpFile);
-                         var vectorValues = new OnDiskVectorValues(termsReader, dimension))
+                    try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
                     {
                         return writePostings(version, rp, postingsOutput, vectorValues);
                     }
@@ -511,24 +512,18 @@ public class CompactionGraph implements Closeable, Accountable
                 VectorUtil.scale(globalMean, 1.0f / compressedVectors.count());
                 NVQuantization nvq = NVQuantization.create(globalMean, 2);
                 writer = createTermsWriter(ordinalMapper.get(), new NVQ(nvq));
-                // TODO currently assumes vectorsByOrdinalReader will only be accessed by a single thread in
-                //  the supplier, but jvector has in flight work that may change that paradigm.
-                try (var vectorsByOrdinalReader = RandomAccessReader.open(vectorsByOrdinalTmpFile))
+                // Use thread local readers as we do not control which thread jvector uses
+                try (var threadLocalReaders = ExplicitThreadLocal.withInitial(() -> new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension)))
                 {
                     var supplier = Feature.singleStateFactory(FeatureId.NVQ_VECTORS, ordinal -> {
-                        try
-                        {
-                            vectorsByOrdinalReader.seek(ordinal * Float.BYTES * (long) dimension);
-                            var vector = new float[dimension];
-                            vectorsByOrdinalReader.read(vector, 0, dimension);
-                            return new NVQ.State(nvq.encode(vts.createFloatVector(vector)));
-                        }
-                        catch (IOException e)
-                        {
-                            throw new RuntimeException(e);
-                        }
+                        return new NVQ.State(nvq.encode(threadLocalReaders.get().getVector(ordinal)));
                     });
                     writer.write(supplier);
+                }
+                catch (Exception e)
+                {
+                    // Closing threadLocalReaders can throw Exception, but we don't expect it to.
+                    throw new RuntimeException(e);
                 }
             }
             else
@@ -640,9 +635,9 @@ public class CompactionGraph implements Closeable, Accountable
         private final int dimension;
         private final long vectorSize;
 
-        public OnDiskVectorValues(RandomAccessReader reader, int dimension)
+        public OnDiskVectorValues(File vectorsByOrdinalTmpFile, int dimension)
         {
-            this.reader = reader;
+            this.reader = RandomAccessReader.open(vectorsByOrdinalTmpFile);
             this.dimension = dimension;
             this.vectorSize = (long) dimension * Float.BYTES;
         }
@@ -690,7 +685,7 @@ public class CompactionGraph implements Closeable, Accountable
         @Override
         public void close()
         {
-            reader.close();
+            FileUtils.closeQuietly(reader);
         }
     }
 }
