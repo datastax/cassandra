@@ -266,6 +266,7 @@ public class CompactionGraph implements Closeable, Accountable
     public void close() throws IOException
     {
         // this gets called in `finally` blocks, so use closeQuietly to avoid generating additional exceptions
+        FileUtils.closeQuietly(writer);
         FileUtils.closeQuietly(postingsMap);
         FileUtils.closeQuietly(vectorsByOrdinalBufferedWriter);
         Files.delete(postingsFile.toJavaIOFile().toPath());
