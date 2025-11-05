@@ -298,4 +298,36 @@ class RangeIntersectionCursor<S extends RangeState<S>> implements RangeCursor<S>
                 throw new AssertionError();
         }
     }
+
+    static class TrieSet extends RangeIntersectionCursor<TrieSetCursor.RangeState> implements TrieSetCursor
+    {
+        public TrieSet(TrieSetCursor src, TrieSetCursor set)
+        {
+            super(src, set);
+        }
+
+        @Override
+        public RangeState state()
+        {
+            RangeState s = super.state();
+            return s != null ? s : RangeState.START_END_PREFIX;
+        }
+
+        @Override
+        public TrieSetCursor tailCursor(Direction direction)
+        {
+            TrieSetCursor source = (TrieSetCursor) src;
+            switch (state)
+            {
+                case MATCHING:
+                    return new TrieSet(source.tailCursor(direction), set.tailCursor(direction));
+                case SET_AHEAD:
+                    return source.tailCursor(direction);
+                case SOURCE_AHEAD:
+                    return set.tailCursor(direction);
+                default:
+                    throw new AssertionError();
+            }
+        }
+    }
 }

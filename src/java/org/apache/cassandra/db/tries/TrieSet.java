@@ -96,12 +96,16 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
 
     default TrieSet union(TrieSet other)
     {
-        return dir -> new TrieSetIntersectionCursor.UnionCursor(cursor(dir), other.cursor(dir));
+        // This method is currently only used for tests. It could be done more efficiently if we have an intersection
+        // variation that flips the state values internally.
+        return weakNegation().intersection(other.weakNegation()).weakNegation();
     }
 
     default TrieSet intersection(TrieSet other)
     {
-        return dir -> new TrieSetIntersectionCursor(cursor(dir), other.cursor(dir));
+        // This method is currently only used for tests. Should we need it for (performance-sensitive) production uses,
+        // we should switch to a more direct set-specific intersection implementation.
+        return dir -> new RangeIntersectionCursor.TrieSet(cursor(dir), other.cursor(dir));
     }
 
     /// Represents the set inverse of the given set plus all prefixes and descendants of all boundaries of the set.

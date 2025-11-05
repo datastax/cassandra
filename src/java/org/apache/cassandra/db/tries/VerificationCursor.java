@@ -423,8 +423,7 @@ public interface VerificationCursor
         TrieSet(TrieSetCursor source)
         {
             super(source);
-            // start state can be non-null for sets
-            Preconditions.checkNotNull(currentPrecedingState, "Preceding state for trie sets must not be null\n%s", this);
+            // start and end state can be non-null for sets
         }
 
         @Override

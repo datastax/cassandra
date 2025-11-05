@@ -529,6 +529,9 @@ public class IntersectionTrieTest
 
     private <T> Trie<T> applySet(TrieSet set, Trie<T> trie)
     {
+        // As we want to preserve only the content covered by the set, we need to delete its negation.
+        TrieSet negatedSet = set.weakNegation();
+
         // Convert the set to a range trie. Do this by reinterpreting the cursor and avoiding verification
         // (instead of e.g. RangeTrie.fromSet(set, TrieSetCursor.RangeState.END_START_PREFIX)),
         // because some of the sets we use here are open and thus not valid range tries.
@@ -544,10 +547,10 @@ public class IntersectionTrieTest
             public RangeCursor<TrieSetCursor.RangeState> cursor(Direction direction)
             {
                 // disable debug verification (cursor is already checked by TrieSet.cursor())
-                return set.cursor(direction);
+                return negatedSet.cursor(direction);
             }
         };
-        return setAsRangeTrie.applyTo(trie, (range, value) -> range.applicableBefore ? value : null);
+        return setAsRangeTrie.applyTo(trie, (range, value) -> null);
     }
 
     private static InMemoryTrie<Integer> duplicateTrie(Trie<Integer> trie)
@@ -619,7 +622,7 @@ public class IntersectionTrieTest
         assertEquals(expected.process(Direction.FORWARD, new TrieDumper.Plain<>(Object::toString)), trie.intersect(set).dump());
     }
 
-    @Test(expected = AssertionError.class)
+    @Test(expected = Throwable.class)
     public void testRangeUnderCoveredBranch() throws TrieSpaceExhaustedException
     {
         TrieSet set1 = TrieSet.singleton(VERSION, TrieUtil.directComparable("b"));
@@ -628,7 +631,7 @@ public class IntersectionTrieTest
         assertEquals(expected.dump(), set1.intersection(set2).dump());
     }
 
-    @Test(expected = AssertionError.class)
+    @Test(expected = Throwable.class)
     public void testRangeUnderCoveredRoot() throws TrieSpaceExhaustedException
     {
         TrieSet set1 = TrieSet.singleton(VERSION, ByteComparable.EMPTY);

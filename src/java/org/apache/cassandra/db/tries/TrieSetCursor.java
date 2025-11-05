@@ -118,7 +118,7 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         @Override
         public RangeState precedingState(Direction direction)
         {
-            return precedingIncluded(direction) ? END_START_PREFIX : START_END_PREFIX;
+            return precedingIncluded(direction) ? END_START_PREFIX : null;
         }
 
         @Override
