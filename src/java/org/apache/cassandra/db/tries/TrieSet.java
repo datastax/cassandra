@@ -98,7 +98,7 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
     {
         // This method is currently only used for tests. It could be done more efficiently if we have an intersection
         // variation that flips the state values internally.
-        return weakNegation().intersection(other.weakNegation()).weakNegation();
+        return dir -> new RangeIntersectionCursor.TrieSet(cursor(dir).negated(), other.cursor(dir).negated()).negated();
     }
 
     default TrieSet intersection(TrieSet other)
@@ -115,7 +115,7 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
     /// True negation is not feasible in this design (exact points are always included together with all their descendants).
     default TrieSet weakNegation()
     {
-        return dir -> new TrieSetNegatedCursor(cursor(dir));
+        return dir -> cursor(dir).negated();
     }
 
     /// Constuct a textual representation of the trie.

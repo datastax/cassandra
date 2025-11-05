@@ -189,6 +189,80 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
     @Override
     TrieSetCursor tailCursor(Direction direction);
 
+    /// Returns a negated version of this cursor (where every returned state is inverted).
+    default TrieSetCursor negated()
+    {
+        return new Negated(this);
+    }
+
+    /// Negation of trie set cursors.
+    ///
+    /// Achieved by simply inverting the [#state()] values.
+    class Negated implements TrieSetCursor
+    {
+        final TrieSetCursor source;
+
+        Negated(TrieSetCursor source)
+        {
+            this.source = source;
+        }
+
+        @Override
+        public int depth()
+        {
+            return source.depth();
+        }
+
+        @Override
+        public int incomingTransition()
+        {
+            return source.incomingTransition();
+        }
+
+        @Override
+        public Direction direction()
+        {
+            return source.direction();
+        }
+
+        @Override
+        public ByteComparable.Version byteComparableVersion()
+        {
+            return source.byteComparableVersion();
+        }
+
+        @Override
+        public RangeState state()
+        {
+            return source.state().weakNegation();
+        }
+
+        @Override
+        public int advance()
+        {
+            return source.advance();
+        }
+
+        @Override
+        public int skipTo(int skipDepth, int skipTransition)
+        {
+            return source.skipTo(skipDepth, skipTransition);
+        }
+
+        // Sets don't implement advanceMultiple as they are only meant to limit data tries.
+
+        @Override
+        public TrieSetCursor tailCursor(Direction direction)
+        {
+            return new Negated(source.tailCursor(direction));
+        }
+    }
+
+    static TrieSetCursor empty(Direction direction, ByteComparable.Version version)
+    {
+        return new Empty(TrieSetCursor.RangeState.START_END_PREFIX, version, direction);
+    }
+
     class Empty extends Cursor.Empty<RangeState> implements TrieSetCursor
     {
         final RangeState coveringState;
@@ -216,10 +290,5 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         {
             return new TrieSetCursor.Empty(coveringState, byteComparableVersion(), direction);
         }
-    }
-
-    static TrieSetCursor empty(Direction direction, ByteComparable.Version version)
-    {
-        return new Empty(TrieSetCursor.RangeState.START_END_PREFIX, version, direction);
     }
 }

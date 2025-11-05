@@ -529,12 +529,10 @@ public class IntersectionTrieTest
 
     private <T> Trie<T> applySet(TrieSet set, Trie<T> trie)
     {
-        // As we want to preserve only the content covered by the set, we need to delete its negation.
-        TrieSet negatedSet = set.weakNegation();
-
-        // Convert the set to a range trie. Do this by reinterpreting the cursor and avoiding verification
+        // Convert the set to a range trie of its negation to apply deletion to anything that is not in the set.
+        // Do this by reinterpreting the cursor and avoiding verification
         // (instead of e.g. RangeTrie.fromSet(set, TrieSetCursor.RangeState.END_START_PREFIX)),
-        // because some of the sets we use here are open and thus not valid range tries.
+        // because some of the sets we use here are open and thus technically not valid range tries.
         RangeTrie<TrieSetCursor.RangeState> setAsRangeTrie = new RangeTrie<>()
         {
             @Override
@@ -546,8 +544,10 @@ public class IntersectionTrieTest
             @Override
             public RangeCursor<TrieSetCursor.RangeState> cursor(Direction direction)
             {
-                // disable debug verification (cursor is already checked by TrieSet.cursor())
-                return negatedSet.cursor(direction);
+                // We are overriding cursor to disable debug verification (the source cursor is already checked by
+                // TrieSet.cursor()).
+                // We also want to negate the cursor in order to delete anything that is not contained in the set.
+                return set.cursor(direction).negated();
             }
         };
         return setAsRangeTrie.applyTo(trie, (range, value) -> null);
