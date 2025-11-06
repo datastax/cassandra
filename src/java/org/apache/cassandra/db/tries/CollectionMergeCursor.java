@@ -119,9 +119,6 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         assert Arrays.stream(heap).allMatch(x -> equalCursor(head, x));
     }
 
-    // TODO: consider if making these return boolean would be an optimization for some calls
-    // TODO: consider if head call can be included in these
-
     /// Interface for internal operations that can be applied to selected top elements of the heap.
     interface HeapOp<T, C extends Cursor<T>>
     {
@@ -133,12 +130,33 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         }
     }
 
-    /// Apply a non-interfering operation, i.e. one that does not change the cursor state, to all inputs in the heap
-    /// that satisfy the [HeapOp#shouldContinueWithChild] condition (by default, being equal to the head).
-    /// For interfering operations like advancing the cursors, use [#advanceSelectedAndRestoreHeap(AdvancingHeapOp)].
-    void applyToSelectedInHeap(HeapOp<T, C> action)
+    /// Interface for non-interfering operations that can be applied to the source cursors.
+    interface SourceOp<T, C extends Cursor<T>> extends HeapOp<T, C>
     {
+        void apply(C cursor);
+
+        default void apply(CollectionMergeCursor<T, C> self, C cursor, int index)
+        {
+            apply(cursor);
+        }
+    }
+
+    /// Apply a non-interfering operation, i.e. one that does not change the cursor state, to the head and all inputs
+    /// in the heap that satisfy the [SourceOp#shouldContinueWithChild] condition (by default, being equal to the head).
+    /// For interfering operations like advancing the cursors, use [#advanceSelectedAndRestoreHeap(AdvancingHeapOp)].
+    void applyToSelectedSources(SourceOp<T, C> action)
+    {
+        action.apply(head);
         applyToSelectedElementsInHeap(action, 0);
+    }
+
+    /// Apply a non-interfering operation, i.e. one that does not change the cursor state, to the head and all inputs
+    /// in the heap.
+    void applyToAllSources(SourceOp<T, C> action)
+    {
+        action.apply(head);
+        for (int i = 0; i < heap.length; i++)
+            action.apply(heap[i]);
     }
 
     /// Interface for internal advancing operations that can be applied to the heap cursors. This interface provides
@@ -161,8 +179,10 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
     }
 
 
-    /// Advance the state of all inputs in the heap that satisfy the [#shouldContinueWithChild] condition
+    /// Advance the state of all inputs in the heap that satisfy the [SourceOp#shouldContinueWithChild] condition
     /// (by default, being equal to the head) and restore the heap invariant.
+    ///
+    /// Note that this does not apply the operation to [#head].
     void advanceSelectedAndRestoreHeap(AdvancingHeapOp<T, C> action)
     {
         applyToSelectedElementsInHeap(action, 0);
@@ -192,12 +212,6 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         // Apply the action. This is done on the reverse direction to give the action a chance to form proper
         // subheaps and combine them on processing the parent.
         action.apply(this, item, index);
-    }
-
-    void applyToAllOnHeap(HeapOp<T, C> action)
-    {
-        for (int i = 0; i < heap.length; i++)
-            action.apply(this, heap[i], i);
     }
 
     /// Push the given state down in the heap from the given index until it finds its proper place among
@@ -396,8 +410,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
 
     T collectContent()
     {
-        applyToSelectedInHeap(CollectionMergeCursor::collectContent);
-        collectContent(head, -1);
+        applyToSelectedSources(this::collectContent);
         return resolveContent();
     }
 
@@ -420,7 +433,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         return toReturn;
     }
 
-    void collectContent(C item, int index)
+    void collectContent(C item)
     {
         T itemContent = getContent(item);
         if (itemContent != null)
@@ -472,8 +485,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
                 return head.tailCursor(dir);
 
             List<Cursor<T>> inputs = new ArrayList<>(heap.length + 1);
-            inputs.add(head);
-            applyToSelectedInHeap((self, cursor, index) -> inputs.add(cursor));
+            applyToSelectedSources(inputs::add);
 
             return new Plain<>(resolver, dir, inputs, Cursor::tailCursor);
         }
@@ -500,8 +512,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         {
             // Unlike the parent method, we need to collect the state of all cursors on the heap
             // (state for equal cursors, and preceding state for the ones that have moved ahead).
-            applyToAllOnHeap(CollectionMergeCursor::collectContent);
-            collectContent(head, -1);
+            applyToAllSources(this::collectContent);
             return resolveContent();
         }
 
@@ -515,8 +526,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         public RangeCursor<S> tailCursor(Direction direction)
         {
             List<RangeCursor<S>> inputs = new ArrayList<>(heap.length + 1);
-            inputs.add(head);
-            applyToAllOnHeap((self, cursor, index) ->
+            applyToAllSources(cursor ->
                              {
                                  if (equalCursor(head, cursor))
                                      inputs.add(cursor);
@@ -561,10 +571,6 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
 
         Range<D> relevantDeletions;
         int deletionBranchDepth = -1;
-
-        // TODO: Keep track of deletion state to avoid repeated calls to `relevantDeletions.precedingState`
-        // TODO: Consider not applying deletions to live and making a `Shadowable` deletion-aware variation, delaying
-        // the deleted data removal to after transformations have been applied.
 
         enum DeletionState
         {
@@ -673,10 +679,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
             // point on the current path.
             if (branchHasMultipleSources() && (!deletionsAtFixedPoints || deletionDepth < 0))
             {
-                maybeAddDeletionsBranch(head, 0);
-                applyToSelectedInHeap((self, cursor, index) -> ((DeletionAware<T, D>) self).maybeAddDeletionsBranch(cursor, index));
-                // TODO: if using boolean return from above, also optimize addCursor to not do heapification, calling
-                // the downward process here instead.
+                applyToSelectedSources(this::maybeAddDeletionsBranch);
                 if (relevantDeletions != null)
                     deletionDepth = relevantDeletions.depth();  // newly inserted cursors may have adjusted the deletion cursor's position
             }
@@ -713,7 +716,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
 
         /// Adds deletion branches from individual cursors to the collection merge.
         /// This method implements the core deletion merging logic with optimization support.
-        void maybeAddDeletionsBranch(DeletionAwareCursor<T, D> cursor, int ignoredIndex)
+        void maybeAddDeletionsBranch(DeletionAwareCursor<T, D> cursor)
         {
             RangeCursor<D> deletionsBranch = cursor.deletionBranchCursor(direction);
             if (deletionsBranch == null)
@@ -759,10 +762,9 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
             List<RangeCursor<D>> deletions = new ArrayList<>(heap.length + 1);
             // Note: during the data path walk we add cursors to relevantDeletions as we find them. This copy,
             // however, is walked independently, so we need to make sure it has the ability to walk the data trie
-            // to find and lower-level deletion sources.
+            // to find any lower-level deletion sources.
 
-            maybeAddDeletionTrieBranch(head, 0, deletions);
-            applyToSelectedInHeap((self, cursor, index) -> maybeAddDeletionTrieBranch(cursor, index, deletions));
+            applyToSelectedSources(cursor -> maybeAddDeletionTrieBranch(cursor, deletions));
             if (deletions.isEmpty())
                 return null;
 
@@ -773,7 +775,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         /// Adds a deletion trie branch for the given cursor. This means either the deletion branch that it presents,
         /// or, in the case where we accept non-aligned deletions, any deletion branch that may be present in its
         /// substructure.
-        void maybeAddDeletionTrieBranch(DeletionAwareCursor<T,D> cursor, int ignoredIndex, List<RangeCursor<D>> deletions)
+        void maybeAddDeletionTrieBranch(DeletionAwareCursor<T,D> cursor, List<RangeCursor<D>> deletions)
         {
             RangeCursor<D> deletionsBranch = cursor.deletionBranchCursor(direction);
             if (deletionsBranch != null)
@@ -825,8 +827,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
                 else
                 {
                     List<DeletionAwareCursor<T, D>> inputs = new ArrayList<>(heap.length + 1);
-                    inputs.add(head);
-                    applyToSelectedInHeap((self, cursor, index) -> inputs.add(cursor));
+                    applyToSelectedSources(inputs::add);
 
                     source = new Plain<>(resolver, dir, inputs, DeletionAwareCursor::tailCursor);
                 }
@@ -839,8 +840,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
                     return head.tailCursor(dir);
 
                 List<DeletionAwareCursor<T, D>> inputs = new ArrayList<>(heap.length + 1);
-                inputs.add(head);
-                applyToSelectedInHeap((self, cursor, index) -> inputs.add(cursor));
+                applyToSelectedSources(inputs::add);
 
                 return new DeletionAware<>(resolver, deletionResolver, deleter, deletionsAtFixedPoints, dir, inputs, DeletionAwareCursor::tailCursor);
             }
