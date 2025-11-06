@@ -50,7 +50,7 @@ public interface Clustering<V> extends ClusteringPrefix<V>, IMeasurableMemory
         ByteBuffer[] newValues = new ByteBuffer[size()];
         for (int i = 0; i < size(); i++)
         {
-            ByteBuffer val = accessor().toBuffer(get(i));
+            ByteBuffer val = bufferAt(i);
             newValues[i] = val == null ? null : cloner.clone(val);
         }
         return new BufferClustering(newValues);

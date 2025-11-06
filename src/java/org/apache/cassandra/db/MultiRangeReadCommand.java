@@ -58,7 +58,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
  * Note: digest is not supported because each replica is responsible for different token ranges, there is no point on
  * sending digest.
  */
-public class MultiRangeReadCommand extends ReadCommand
+public class MultiRangeReadCommand extends ReadCommand implements MultiPartitionReadQuery
 {
     protected static final SelectionDeserializer selectionDeserializer = new Deserializer();
 
@@ -159,6 +159,7 @@ public class MultiRangeReadCommand extends ReadCommand
     /**
      * @return all token ranges to be queried
      */
+    @Override
     public List<DataRange> ranges()
     {
         return dataRanges;
@@ -373,31 +374,9 @@ public class MultiRangeReadCommand extends ReadCommand
     }
 
     @Override
-    protected void appendCQLWhereClause(CqlBuilder builder)
+    public void appendCQLWhereClause(CqlBuilder builder)
     {
-        if (ranges().size() == 1 && ranges().get(0).isUnrestricted(metadata()) && rowFilter().isEmpty())
-            return;
-
-        builder.append(" WHERE ");
-        // We put the row filter first because the data range can end by "ORDER BY"
-        if (!rowFilter().isEmpty())
-        {
-            builder.append(rowFilter().toCQLString());
-            builder.append(" AND ");
-        }
-
-        boolean isFirst = true;
-        for (int i = 0; i < ranges().size(); i++)
-        {
-            DataRange dataRange = ranges().get(i);
-            if (!dataRange.isUnrestricted(metadata()))
-            {
-                if (!isFirst)
-                    builder.append(" AND ");
-                isFirst = false;
-                builder.append(dataRange.toCQLString(metadata(), rowFilter()));
-            }
-        }
+        MultiPartitionReadQuery.super.appendCQLWhereClause(builder);
     }
 
     @Override
