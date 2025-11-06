@@ -829,6 +829,17 @@ be achieved by dropping the node (`Chain`), by putting the `NONE` value as the c
 to switch its type or remove a child. This may in turn result in an empty node, which returns `NONE` as the child
 pointer, continuing the removal upwards in the recursive chain.
 
+The example below shows the deletion of "tractor" from one of the modified tries above.
+
+![graph](InMemoryTrie.md.d1.svg)
+
+The associated value is set to `null`, resulting in `NONE` being returned from the recursive application, which removes
+the only child of node `0x01B`, resulting in an empty node i.e. `NONE`. This propagates up until the sparse node
+`0x0DE`, where one child remains after the removal. Since sparse nodes cannot have only one child, this node is freed,
+and a chain node is created for the remaining `v` transition -- this child node is placed within the child chain cell,
+which has room for further transitions. The pointer to this chain node is passed back up the recursive application
+chain, and the parent node is updated to point to it.
+
 ### Memory management and cell reuse
 
 As mentioned in the beginning, in order to avoid long garbage collection pauses due to large long-lasting content in
