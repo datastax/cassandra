@@ -19,6 +19,7 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -47,14 +48,13 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
         return false;
     }
 
-    protected abstract void serializeInternal(DataOutputPlus out, int version) throws IOException;
-    protected abstract long serializedSizeInternal(int version);
-
-    protected void appendOrderByToCQLString(TableMetadata metadata, StringBuilder sb)
+    protected void appendOrderByToCQLString(TableMetadata metadata, CqlBuilder sb)
     {
         if (reversed)
         {
-            sb.append(" ORDER BY ");
+            if (sb.length() > 0)
+                sb.append(' ');
+            sb.append("ORDER BY ");
             int i = 0;
             for (ColumnMetadata column : metadata.clusteringColumns())
             {
@@ -64,6 +64,9 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
             }
         }
     }
+
+    protected abstract void serializeInternal(DataOutputPlus out, int version) throws IOException;
+    protected abstract long serializedSizeInternal(int version);
 
     private static class FilterSerializer implements Serializer
     {
