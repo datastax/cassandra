@@ -15,6 +15,8 @@
  */
 package org.apache.cassandra.db;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.cql3.CQLTester;
 import org.assertj.core.api.Assertions;
 
@@ -24,9 +26,19 @@ public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTes
 
     protected void assertToCQLString(String query, String expected)
     {
+        assertToCQLString(query, expected, null);
+    }
+
+    protected void assertToCQLString(String query, String expected, @Nullable String expectedErrorMessage)
+    {
         T command = parseCommand(query);
-        Assertions.assertThat(command.toCQLString())
-                  .isEqualTo(formatQuery(expected));
+        String actual = command.toCQLString();
+
+        Assertions.assertThat(actual).isEqualTo(formatQuery(expected));
+
+        if (expectedErrorMessage == null)
+            execute(actual);
+        else
+            Assertions.assertThatThrownBy(() -> execute(actual)).hasMessageContaining(expectedErrorMessage);
     }
 }
-
