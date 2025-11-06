@@ -28,7 +28,7 @@ import java.util.function.IntFunction;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-/// A merged view of multiple tries.
+/// A merged view of multiple trie cursors.
 ///
 /// This is accomplished by walking the cursors in parallel; the merged cursor takes the position and features of the
 /// smallest and advances with it; when multiple cursors are equal, all of them are advanced. The ordered view of the

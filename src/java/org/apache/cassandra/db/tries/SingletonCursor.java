@@ -223,7 +223,6 @@ class SingletonCursor<T> implements Cursor<T>
 
         DeletionBranch(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, RangeTrie<D> deletionBranch)
         {
-
             super(direction, firstByte, src, byteComparableVersion, null);
             this.deletionBranch = deletionBranch;
         }

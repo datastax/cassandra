@@ -84,7 +84,7 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
         return dir -> {
             Cursor<T> cursor = cursor(dir);
             return new IntersectionCursor.PlainSlice<>(cursor,
-                                                       new RangesCursor(dir, cursor.byteComparableVersion(), left, right),
+                                                       RangesCursor.create(dir, cursor.byteComparableVersion(), left, right),
                                                        inclusiveLeft,
                                                        inclusiveRight);
         };
@@ -222,26 +222,21 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
             return mergeDistinct(t1, t2);
         }
         default:
-            return mergeDistinctTrie(sources);
+            return new Trie<T>()
+            {
+                @Override
+                public Cursor<T> makeCursor(Direction direction)
+                {
+                    return new CollectionMergeCursor.Plain<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
+                }
+
+                @Override
+                public Iterable<T> valuesUnordered()
+                {
+                    return Iterables.concat(Iterables.transform(sources, Trie::valuesUnordered));
+                }
+            };
         }
-    }
-
-    private static <T> Trie<T> mergeDistinctTrie(Collection<? extends Trie<T>> sources)
-    {
-        return new Trie<T>()
-        {
-            @Override
-            public Cursor<T> makeCursor(Direction direction)
-            {
-                return new CollectionMergeCursor.Plain<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
-            }
-
-            @Override
-            public Iterable<T> valuesUnordered()
-            {
-                return Iterables.concat(Iterables.transform(sources, Trie::valuesUnordered));
-            }
-        };
     }
 
     @Override

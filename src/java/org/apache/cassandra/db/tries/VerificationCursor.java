@@ -198,6 +198,7 @@ public interface VerificationCursor
 
         private void addByte(int nextByte, int depth)
         {
+            advanceMultipleCalledReceiver = true;
             int index = depth - minDepth - 1;
             if (index >= path.length)
                 path = Arrays.copyOf(path, path.length * 2);

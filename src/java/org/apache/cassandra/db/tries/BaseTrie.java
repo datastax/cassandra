@@ -80,7 +80,7 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     /// Call the given consumer on all content values in the trie in order.
     default void forEachValue(ValueConsumer<? super T> consumer)
     {
-        process(Direction.FORWARD, consumer);
+        forEachValue(Direction.FORWARD, consumer);
     }
 
     /// Call the given consumer on all content values in the trie in order.

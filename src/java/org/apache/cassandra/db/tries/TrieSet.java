@@ -35,17 +35,17 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
 {
     static TrieSet singleton(ByteComparable.Version version, ByteComparable b)
     {
-        return dir -> new RangesCursor(dir, version, b, b);
+        return ranges(version, b, b);
     }
 
     static TrieSet range(ByteComparable.Version version, ByteComparable left, ByteComparable right)
     {
-        return dir -> new RangesCursor(dir, version, left, right);
+        return ranges(version, left, right);
     }
 
     static TrieSet ranges(ByteComparable.Version version, ByteComparable... boundaries)
     {
-        return dir -> new RangesCursor(dir, version, boundaries);
+        return dir -> RangesCursor.create(dir, version, boundaries);
     }
 
     static TrieSet empty(ByteComparable.Version byteComparableVersion)
@@ -58,13 +58,6 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
     default boolean strictlyContains(ByteComparable key)
     {
         return contains(key) == ContainsResult.CONTAINED;
-    }
-
-    /// Returns true if the given key is weaky contained in this set, i.e. it falls inside a covered range or branch, or
-    /// is a prefix of a set boundary.
-    default boolean weaklyContains(ByteComparable key)
-    {
-        return contains(key) != ContainsResult.NOT_CONTAINED;
     }
 
     enum ContainsResult
@@ -96,9 +89,12 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
 
     default TrieSet union(TrieSet other)
     {
-        // This method is currently only used for tests. It could be done more efficiently if we have an intersection
-        // variation that flips the state values internally.
-        return dir -> new RangeIntersectionCursor.TrieSet(cursor(dir).negated(), other.cursor(dir).negated()).negated();
+        // This method is currently only used for tests. Implemented by deMorgan's rule (`A u B = ~(~A x ~B)`).
+        // It could be done more efficiently if we have an intersection variation that flips the state values
+        // internally.
+        return dir -> new RangeIntersectionCursor.TrieSet(cursor(dir).negated(),
+                                                          other.cursor(dir).negated())
+                      .negated();
     }
 
     default TrieSet intersection(TrieSet other)

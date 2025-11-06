@@ -297,6 +297,7 @@ public class RangesTrieSetTest
     @Test
     public void testFullInterval()
     {
+        check(new String[0]);
         check((String) null, null);
     }
 

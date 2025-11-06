@@ -35,7 +35,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// forward as well as backward order. This in turn makes it possible to have simple range trie and intersection
 /// implementations where the representations of range trie sets do not differ when iterated in the two directions.
 ///
-/// Thes types of ranges are actually preferable to us, because we use prefix-free keys with terminators that leave
+/// These types of ranges are actually preferable to us, because we use prefix-free keys with terminators that leave
 /// room for greater- and less-than positions, and at prefix nodes we store metadata applicable to the whole branch.
 ///
 /// The ranges are specified by passing a sequence of boundaries, where each even boundary is the opening boundary, and
@@ -76,49 +76,45 @@ class RangesCursor implements TrieSetCursor
     /// Current range state, returned by [#state].
     RangeState currentState;
 
-    public RangesCursor(Direction direction, ByteComparable.Version byteComparableVersion, ByteComparable... boundaries)
+    public static RangesCursor create(Direction direction, ByteComparable.Version byteComparableVersion, ByteComparable... boundaries)
     {
-        this.byteComparableVersion = byteComparableVersion;
-        this.direction = direction;
-        // handle empty array (== full range) and nulls at the end (same as not there, odd length == open end range)
+        // handle empty array (== full range) and nulls at the ends (same as not there, odd length == open end range)
         int length = boundaries.length;
-        if (length == 0)
-        {
-            boundaries = new ByteComparable[]{ null };
-            length = 1;
-        }
+
         if (length > 1 && boundaries[length - 1] == null)
             --length;
 
-        nexts = new int[length];
-        depths = new int[length];
-        sources = new ByteSource[length];
         int first = 0;
-        if (boundaries[0] == null)
-        {
+        if (length > 0 && boundaries[0] == null)
             first = 1;
-            sources[0] = null;
-            nexts[0] = ByteSource.END_OF_STREAM;
-        }
-        currentIdx = direction.select(first, length - 1);
+
+        if (first >= length) // no boundaries on either side, report END_START_PREFIX on root and exhausted state
+            return new RangesCursor(direction, byteComparableVersion,
+                                    null, null, null,
+                                    1, 1,
+                                    0, -1,
+                                    RangeState.END_START_PREFIX);
+
+        int[] nexts = new int[length];
+        int[] depths = new int[length];
+        ByteSource[] sources = new ByteSource[length];
         for (int i = first; i < length; ++i)
         {
             depths[i] = 1;
-            if (boundaries[i] != null)
-            {
-                sources[i] = boundaries[i].asComparableBytes(byteComparableVersion);
-                nexts[i] = sources[i].next();
-            }
-            else
+            if (boundaries[i] == null)
                 throw new AssertionError("Null can only be used as the first or last boundary.");
+
+            sources[i] = boundaries[i].asComparableBytes(byteComparableVersion);
+            nexts[i] = sources[i].next();
         }
-        currentDepth = 0;
-        currentTransition = -1;
-        completedIdx = direction.select(length - 1, first);
-        // If this cursor is already exhausted (i.e. it is a [null, null] range), use 0 as next character to not report
-        // a boundary at the root.
-        skipCompletedAndSelectContained(direction.le(currentIdx, completedIdx) ? nexts[currentIdx] : 0,
-                                        completedIdx);
+
+        RangesCursor cursor = new RangesCursor(direction, byteComparableVersion,
+                                               nexts, depths, sources,
+                                               first, length,
+                                               0, -1,
+                                               RangeState.START_END_PREFIX);
+        cursor.skipCompletedAndSelectContained(nexts[cursor.currentIdx], cursor.completedIdx);
+        return cursor;
     }
 
     private RangesCursor(Direction direction,
@@ -204,11 +200,15 @@ class RangesCursor implements TrieSetCursor
     {
         int containedSelection = 0;
         // in reverse direction the roles of current and end idx are swapped
-        containedSelection |= (direction.select(currentIdx, endIdx) & 1); // even left index means not valid before
-        containedSelection |= ((direction.select(endIdx, currentIdx) & 1) ^ 1) << 1; // even end index means not valid after
+        if ((direction.select(currentIdx, endIdx) & 1) != 0) // even left index means not valid before
+            containedSelection |= RangeState.APPLICABLE_BEFORE;
+
+        if ((direction.select(endIdx, currentIdx) & 1) == 0) // even end index means not valid after
+            containedSelection |= RangeState.APPLICABLE_AFTER;
+
         if (next == ByteSource.END_OF_STREAM)
         {
-            containedSelection |= 4; // exact match, point and children included; reportable node
+            containedSelection |= RangeState.IS_BOUNDARY; // exact match, point and children included; reportable node
             while (direction.le(currentIdx, endIdx))
             {
                 assert nexts[currentIdx] == ByteSource.END_OF_STREAM : "Prefixes are not allowed in trie ranges.";

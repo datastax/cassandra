@@ -33,7 +33,7 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
     enum RangeState implements org.apache.cassandra.db.tries.RangeState<RangeState>
     {
         // Note: the states must be ordered so that
-        //   `values()[applicableBefore * 1 + applicableAfter * 2 + isBoundary * 4]`
+        //   `values()[applicableBefore * APPLICABLE_BEFORE + applicableAfter * APPLICABLE_AFTER + isBoundary * IS_BOUNDARY]`
         // produces a state with the requested flags
 
         /// The cursor is at a prefix of a contained range, and neither the branches to the left or right are contained.
@@ -56,6 +56,10 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         /// The cursor is positioned at a non-effective boundary (an end boundary for the previous range, as well as
         /// a start for the next). Branches before, after and below this point is covered.
         COVERED(true, true, true);
+
+        public static int APPLICABLE_BEFORE = 1 << 0;
+        public static int APPLICABLE_AFTER  = 1 << 1;
+        public static int IS_BOUNDARY       = 1 << 2;
 
         /// Whether the set applied to positions before the cursor's in forward order.
         final boolean applicableBefore;
@@ -105,12 +109,14 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         /// and right, and the boundary points. See [TrieSet#weakNegation] for more details.
         public RangeState weakNegation()
         {
-            return values()[ordinal() ^ 3];
+            return values()[ordinal() ^ (APPLICABLE_BEFORE | APPLICABLE_AFTER)];
         }
 
         public static RangeState fromProperties(boolean applicableBefore, boolean applicableAfter, boolean isBoundary)
         {
-            return values()[(applicableBefore ? 1 : 0) + (applicableAfter ? 2 : 0) + (isBoundary ? 4 : 0)];
+            return values()[(applicableBefore ? APPLICABLE_BEFORE : 0) |
+                            (applicableAfter ? APPLICABLE_AFTER : 0) |
+                            (isBoundary ? IS_BOUNDARY : 0)];
         }
 
         // RangeState implementations (used for verification)

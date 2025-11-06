@@ -458,7 +458,7 @@ public class RangeTrieIntersectionTest
         for (String s : points)
         {
             ByteComparable bc = TrieUtil.directComparable(s);
-            assertEquals(s, set.strictlyContains(bc) ? trie.applicableRange(bc) != null : false, ix.applicableRange(bc) != null);
+            assertEquals(s, set.strictlyContains(bc) && trie.applicableRange(bc) != null, ix.applicableRange(bc) != null);
         }
     }
 }
