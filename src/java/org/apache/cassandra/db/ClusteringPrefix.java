@@ -360,11 +360,11 @@ public interface ClusteringPrefix<V> extends IMeasurableMemory, Clusterable
     default ByteBuffer serializeAsPartitionKey()
     {
         if (size() == 1)
-            return accessor().toBuffer(get(0));
+            return bufferAt(0);
 
         ByteBuffer[] values = new ByteBuffer[size()];
         for (int i = 0; i < size(); i++)
-            values[i] = accessor().toBuffer(get(i));
+            values[i] = bufferAt(i);
         return CompositeType.build(ByteBufferAccessor.instance, values);
     }
 
