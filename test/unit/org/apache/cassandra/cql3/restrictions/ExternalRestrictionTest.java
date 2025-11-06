@@ -144,7 +144,7 @@ public class ExternalRestrictionTest extends CQLTester
         }
 
         @Override
-        public String toCQLString() {
+        public String toCQLString(boolean redact) {
             return String.format("%s %s %s",
                     column.name.toCQLString(),
                     operator,

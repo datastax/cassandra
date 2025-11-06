@@ -646,7 +646,7 @@ public class OperationTest extends IndexingSchemaLoader
         }
 
         @Override
-        public String toCQLString()
+        public String toCQLString(boolean redact)
         {
             return String.format("%s %s %s",
                     column.name.toCQLString(),

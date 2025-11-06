@@ -165,27 +165,28 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
      * Returns a CQL representation of this key.
      *
      * @param metadata the metadata of the table that this key belogs to
+     * @param redact whether to redact the key value, as in "k1 = ? AND k2 = ?".
      * @return a CQL representation of this key
      */
-    public String toCQLString(TableMetadata metadata)
+    public String toCQLString(TableMetadata metadata, boolean redact)
     {
         List<ColumnMetadata> columns = metadata.partitionKeyColumns();
 
         if (columns.size() == 1)
-            return toCQLString(columns.get(0), getKey());
+            return toCQLString(columns.get(0), getKey(), redact);
 
         ByteBuffer[] values = ((CompositeType) metadata.partitionKeyType).split(getKey());
         StringJoiner joiner = new StringJoiner(" AND ");
 
         for (int i = 0; i < columns.size(); i++)
-            joiner.add(toCQLString(columns.get(i), values[i]));
+            joiner.add(toCQLString(columns.get(i), values[i], redact));
 
         return joiner.toString();
     }
 
-    private static String toCQLString(ColumnMetadata metadata, ByteBuffer key)
+    private static String toCQLString(ColumnMetadata metadata, ByteBuffer key, boolean redact)
     {
-        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.toCQLString(key));
+        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.toCQLString(key, redact));
     }
 
     public Token getToken()
