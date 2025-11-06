@@ -221,6 +221,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public static class INRestriction extends SingleColumnRestriction
     {
+        public static final String CANNOT_BE_MERGED_ERROR = "%s cannot be restricted by more than one relation if it includes a IN";
         protected final MarkerOrTerms terms;
 
         public INRestriction(ColumnMetadata columnDef, MarkerOrTerms terms)
@@ -238,7 +239,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public final SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes a IN", columnDef.name);
+            throw invalidRequest(CANNOT_BE_MERGED_ERROR, columnDef.name);
         }
 
         @Override
