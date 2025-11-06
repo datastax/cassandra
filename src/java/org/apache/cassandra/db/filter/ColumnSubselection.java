@@ -132,7 +132,7 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
         @Override
         protected String toString(boolean cql)
         {
-            // This assert we're dealing with a collection since that's the only thing it's used for so far.
+            // This asserts we're dealing with a collection since that's the only thing it's used for so far.
             AbstractType<?> type = ((CollectionType<?>)column().type).nameComparator();
             return String.format("[%s:%s]",
                                  from == CellPath.BOTTOM ? "" : (cql ? type.toCQLString(from.get(0)) : type.getString(from.get(0))),
