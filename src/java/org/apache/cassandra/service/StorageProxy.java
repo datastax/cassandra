@@ -2582,7 +2582,7 @@ public class StorageProxy implements StorageProxyMBean
         @Override
         public String description()
         {
-            return command.toCQLString();
+            return command.toRedactedCQLString();
         }
     }
 
@@ -3048,7 +3048,7 @@ public class StorageProxy implements StorageProxyMBean
                          () -> new Object[]
                                {
                                    exception.getMessage(),
-                                   commands.stream().map(ReadCommand::toCQLString).collect(Collectors.joining("; "))
+                                   commands.stream().map(ReadCommand::toRedactedCQLString).collect(Collectors.joining("; "))
                                });
     }
 
