@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -543,7 +544,7 @@ public abstract class Slices implements Iterable<Slice>
         @Override
         public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
         {
-            StringBuilder sb = new StringBuilder();
+            CqlBuilder sb = new CqlBuilder();
 
             // In CQL, condition are expressed by column, so first group things that way,
             // i.e. for each column, we create a list of what each slice contains on that column
@@ -644,14 +645,17 @@ public abstract class Slices implements Iterable<Slice>
                         rowFilter = rowFilter.without(column, operator, first.endValue);
                     }
                 }
+
+                // Remove index restrictions for this clustering column from the row filter, so we don't print them twice.
+                // The row filter can contain expressions copying the clustering filter restrictions, because indexed
+                // clustering key restrictions are added to the row filter at the CQL layer for easier consumption
+                // downstream. However, due to CQL validation the row filter won't contain additional expressions for
+                // columns that are included in the clustering filter, besided the aformentioned copies.
+                rowFilter = rowFilter.withoutFirstLevelExpression(column);
             }
 
-            if (!rowFilter.isEmpty())
-            {
-                if (needAnd)
-                    sb.append(" AND ");
-                sb.append(rowFilter.toCQLString());
-            }
+            // Append the row filter.
+            sb.append(rowFilter, true);
 
             return sb.toString();
         }
