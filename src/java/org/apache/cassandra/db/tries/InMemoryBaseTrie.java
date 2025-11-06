@@ -519,14 +519,14 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         // first check if this is an update and modify in-place if so
         for (index = 0; index < SPARSE_CHILD_COUNT; ++index)
         {
-            if (isNull(getIntVolatile(node + SPARSE_CHILDREN_OFFSET + index * 4)))
+            if (isNull(getIntVolatile(node + SPARSE_CHILDREN_OFFSET + index * Integer.BYTES)))
                 break;
             final int existing = getUnsignedByte(node + SPARSE_BYTES_OFFSET + index);
             if (existing == trans)
             {
                 if (isNull(newChild))
                     return removeSparseChild(node, index);
-                putIntVolatile(node + SPARSE_CHILDREN_OFFSET + index * 4, newChild);
+                putIntVolatile(node + SPARSE_CHILDREN_OFFSET + index * Integer.BYTES, newChild);
                 return node;
             }
             else if (existing < trans)
@@ -558,7 +558,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         // correct value (see getSparseChild).
 
         // setting child enables reads to start seeing the new branch
-        putIntVolatile(node + SPARSE_CHILDREN_OFFSET + childCount * 4, newChild);
+        putIntVolatile(node + SPARSE_CHILDREN_OFFSET + childCount * Integer.BYTES, newChild);
 
         // some readers will decide whether to check the pointer based on the order word
         // write that volatile to make sure they see the new change too
@@ -576,7 +576,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         {
             int survivingIndex = index ^ 1;
             return expandOrCreateChainNode(getUnsignedByte(node + SPARSE_BYTES_OFFSET + survivingIndex),
-                                           getIntVolatile(node + SPARSE_CHILDREN_OFFSET + survivingIndex * 4));
+                                           getIntVolatile(node + SPARSE_CHILDREN_OFFSET + survivingIndex * Integer.BYTES));
         }
 
         // Because we need the smallest child to not be the last (which can happen if we just remove entries), we will
@@ -591,7 +591,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             order /= SPARSE_CHILD_COUNT;
             if (next == index)
                 continue;
-            putInt(newNode + SPARSE_CHILDREN_OFFSET + i * 4, getIntVolatile(node + SPARSE_CHILDREN_OFFSET + next * 4));
+            putInt(newNode + SPARSE_CHILDREN_OFFSET + i * Integer.BYTES, getIntVolatile(node + SPARSE_CHILDREN_OFFSET + next * Integer.BYTES));
             putInt(newNode + SPARSE_BYTES_OFFSET + i, getUnsignedByte(node + SPARSE_BYTES_OFFSET + next));
             newOrder += i * mul;
             mul *= SPARSE_CHILD_COUNT;
@@ -612,7 +612,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         // first check if this is an update and modify in-place if so
         for (index = 0; index < SPARSE_CHILD_COUNT; ++index)
         {
-            if (isNull(getIntVolatile(node + SPARSE_CHILDREN_OFFSET + index * 4)))
+            if (isNull(getIntVolatile(node + SPARSE_CHILDREN_OFFSET + index * Integer.BYTES)))
                 break;
             final int existing = getUnsignedByte(node + SPARSE_BYTES_OFFSET + index);
             if (existing == trans)
@@ -620,7 +620,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 if (isNull(newChild))
                     return removeSparseChild(node, index);
                 node = copyIfOriginal(node, originalNode);
-                putInt(node + SPARSE_CHILDREN_OFFSET + index * 4, newChild);
+                putInt(node + SPARSE_CHILDREN_OFFSET + index * Integer.BYTES, newChild);
                 return node;
             }
             else if (existing < trans)
@@ -644,7 +644,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         // Add a new transition. They are not kept in order, so append it at the first free position.
         putByte(node + SPARSE_BYTES_OFFSET + childCount,  (byte) trans);
 
-        putInt(node + SPARSE_CHILDREN_OFFSET + childCount * 4, newChild);
+        putInt(node + SPARSE_CHILDREN_OFFSET + childCount * Integer.BYTES, newChild);
 
         // Update order word.
         int order = getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET);
@@ -660,7 +660,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         for (int i = 0; i < SPARSE_CHILD_COUNT; ++i)
         {
             int t = getUnsignedByte(node + SPARSE_BYTES_OFFSET + i);
-            int p = getIntVolatile(node + SPARSE_CHILDREN_OFFSET + i * 4);
+            int p = getIntVolatile(node + SPARSE_CHILDREN_OFFSET + i * Integer.BYTES);
             attachChildToSplitNonVolatile(split, t, p);
         }
         attachChildToSplitNonVolatile(split, trans, newChild);
@@ -799,8 +799,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         int node = allocateCell() + SPARSE_OFFSET;
         putByte(node + SPARSE_BYTES_OFFSET + 0,  (byte) byte1);
         putByte(node + SPARSE_BYTES_OFFSET + 1,  (byte) byte2);
-        putInt(node + SPARSE_CHILDREN_OFFSET + 0 * 4, child1);
-        putInt(node + SPARSE_CHILDREN_OFFSET + 1 * 4, child2);
+        putInt(node + SPARSE_CHILDREN_OFFSET + 0 * Integer.BYTES, child1);
+        putInt(node + SPARSE_CHILDREN_OFFSET + 1 * Integer.BYTES, child2);
         putShort(node + SPARSE_ORDER_OFFSET,  (short) (1 * 6 + 0));
         // Note: this does not need a volatile write as it is a new node, returning a new pointer, which needs to be
         // put in an existing node or the root. That action ends in a happens-before enforcing write.
@@ -966,37 +966,39 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// writers.
     class ApplyState implements KeyProducer<T>
     {
-        int[] data = new int[16 * 5];
+        static final int STATE_SIZE = 5;
+
+        int[] data = new int[16 * STATE_SIZE];
         int currentDepth = -1;
 
         /// Pointer to the existing node before skipping over content nodes, i.e. this is either the same as
         /// existingPostContentNode or a pointer to a prefix or leaf node whose child is `existingPostContentNode`.
         int existingFullNode()
         {
-            return data[currentDepth * 5 + 0];
+            return data[currentDepth * STATE_SIZE + 0];
         }
         void setExistingFullNode(int value)
         {
-            data[currentDepth * 5 + 0] = value;
+            data[currentDepth * STATE_SIZE + 0] = value;
         }
         int existingFullNodeAtDepth(int stackDepth)
         {
-            return data[stackDepth * 5 + 0];
+            return data[stackDepth * STATE_SIZE + 0];
         }
 
         /// Pointer to the existing node being updated, after any content nodes have been skipped and before any
         /// modification have been applied. Always a non-content node.
         int existingPostContentNode()
         {
-            return data[currentDepth * 5 + 1];
+            return data[currentDepth * STATE_SIZE + 1];
         }
         void setExistingPostContentNode(int value)
         {
-            data[currentDepth * 5 + 1] = value;
+            data[currentDepth * STATE_SIZE + 1] = value;
         }
         int existingPostContentNodeAtDepth(int stackDepth)
         {
-            return data[stackDepth * 5 + 1];
+            return data[stackDepth * STATE_SIZE + 1];
         }
 
         /// The updated node, i.e. the node to which the relevant modifications are being applied. This will change as
@@ -1007,29 +1009,29 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// pointer. Always a non-content node.
         int updatedPostContentNode()
         {
-            return data[currentDepth * 5 + 2];
+            return data[currentDepth * STATE_SIZE + 2];
         }
         void setUpdatedPostContentNode(int value)
         {
-            data[currentDepth * 5 + 2] = value;
+            data[currentDepth * STATE_SIZE + 2] = value;
         }
         int updatedPostContentNodeAtDepth(int stackDepth)
         {
-            return data[stackDepth * 5 + 2];
+            return data[stackDepth * STATE_SIZE + 2];
         }
 
         /// The transition we took on the way down.
         int transition()
         {
-            return data[currentDepth * 5 + 3];
+            return data[currentDepth * STATE_SIZE + 3];
         }
         void setTransition(int transition)
         {
-            data[currentDepth * 5 + 3] = transition;
+            data[currentDepth * STATE_SIZE + 3] = transition;
         }
         int transitionAtDepth(int stackDepth)
         {
-            return data[stackDepth * 5 + 3];
+            return data[stackDepth * STATE_SIZE + 3];
         }
         int incomingTransition()
         {
@@ -1040,15 +1042,15 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// attach it until we ascend from the node.
         int contentId()
         {
-            return data[currentDepth * 5 + 4];
+            return data[currentDepth * STATE_SIZE + 4];
         }
         void setContentId(int value)
         {
-            data[currentDepth * 5 + 4] = value;
+            data[currentDepth * STATE_SIZE + 4] = value;
         }
         int contentIdAtDepth(int stackDepth)
         {
-            return data[stackDepth * 5 + 4];
+            return data[stackDepth * STATE_SIZE + 4];
         }
 
         int alternateBranchToAttach = NONE;
@@ -1153,8 +1155,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         private void descendInto(int existingFullNode)
         {
             ++currentDepth;
-            if (currentDepth * 5 >= data.length)
-                data = Arrays.copyOf(data, currentDepth * 5 * 2);
+            if (currentDepth * STATE_SIZE >= data.length)
+                data = Arrays.copyOf(data, currentDepth * STATE_SIZE * 2);
             setExistingFullNode(existingFullNode);
 
             int existingContentId = NONE;

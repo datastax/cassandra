@@ -312,9 +312,9 @@ class RangesCursor implements TrieSetCursor
 
         return new RangesCursor(newDirection,
                                 copyFrom.byteComparableVersion,
-                                new int[0],
-                                new int[0],
-                                new ByteSource[0],
+                                null,
+                                null,
+                                null,
                                 currentIdx,
                                 currentIdx,
                                 0,

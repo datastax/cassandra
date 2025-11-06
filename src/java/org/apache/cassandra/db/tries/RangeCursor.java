@@ -24,7 +24,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 ///
 /// The main difference between normal and range cursors is the addition of a [#precedingState] method, which returns a
 /// range for prefixes of start or end positions and is used to determine whether a position that has been skipped to
-/// falls inside one the trie's ranges.
+/// falls inside one of the trie's ranges.
 ///
 /// As an example, consider the following range trie:
 ///

@@ -929,3 +929,43 @@ and should be discarded; because the strategy works with blocks, it will actuall
 happen often, but any users of tries that expect them to live indefinitely (unlike memtables which are flushed
 regularly; an example would be the chunk cache map when/if we switch it to `InMemoryTrie`) must ensure that exceptions
 cannot happen during mutation, otherwise waste can slowly accumulate to bring the node down.
+
+### Range tries
+
+Range tries differ from plain ones in being able to present preceding state for any position in the trie. In-memory
+range tries do not store this additional information, but instead construct it during cursor iteration.
+
+When a range trie is stored in an in-memory trie, it stores only content values. The range cursors created keep track of
+the currently active covering state (which is equal to the succeeding side of any visited boundary during advance) and
+report it as `precedingState`. This information, however, is no longer valid when a `skipTo` operation is performed, as
+it may skip over arbitrarily many boundaries and end up in a covered range. If `precedingState` is requested after such
+a skip, the cursor needs to obtain the applicable state. This is done by descending into the current branch (in
+iteration order) until the closest boundary is found, and using its preceding side. For this to work, all in-memory trie
+branches must terminate in a boundary state with content, which is something that in-memory tries do maintain (see
+below).
+
+Because singletons don't really make sense for range tries (a range will have different start and end paths), all
+insertions into a range trie are done using the `apply` method. The application itself is more elaborate than the case
+of simple data tries: when `apply` is called with a range trie argument, the in-memory trie has to walk all existing
+positions that fall under ranges of the trie and apply the active state to them. Additionally, it must track any active
+existing range to combine it with incoming content.
+
+Because the incoming content is often expected to be a (newer) deletion, the resolver is expected to often return null
+for combined content. This triggers removal of nodes and paths up the relevant branch (which may also result in changing
+the type of a node e.g. from sparse to chain), which in turn guarantees that we remove branches that do not terminate in
+non-null content.
+
+### Deletion-aware tries
+
+Deletion-aware tries are tries that contain parallel deletion branch range tries at some of their nodes. In in-memory
+deletion-aware tries, the parallel branches are stored using the alternate branch pointers of prefix nodes.
+
+When a deletion-aware trie needs to be applied to an in-memory trie, it proceeds as normal while a deletion branch is
+not seen in either source or target. When a deletion branch is found, the procedure must:
+- check if the other source has a deletion branch at the same point, and if it doesn't (and `deletionsAtFixedPoints` is
+  not set), hoist its descendant deletion branches to this position.
+- merge the two deletion branches into the new deletion branch (using range trie merge logic).
+- apply the source deletion branch to the data trie to apply any incoming deletions.
+- merge the source data branch, with the target's deletion branch applied to it (to make sure any preexisting deletions
+  are also taken into account for incoming data if that happens to be older), into the data trie (using plain trie merge
+  logic, i.e. no longer checking for deletion branches).

@@ -154,7 +154,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             S nearestContent = getNearestContent();
             // Note: the nearest content may change between the time we fetch it and when we reach that node, e.g.
             // if someone deletes aa-cd where there existed an abc-acd deletion, and we fetched the latter while at "a".
-            // This, though, should only be possible of the preceding state of the nearest content is null.
+            // This, though, should only be possible if the preceding state of the nearest content is null.
             activeRange = nearestContent != null ? nearestContent.precedingState(direction) : null;
             prevContent = null;
             activeIsSet = true;
@@ -171,14 +171,12 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         public InMemoryRangeCursor<S> tailCursor(Direction direction)
         {
             InMemoryRangeCursor<S> cursor = new InMemoryRangeCursor<>(trie, direction, currentFullNode, 0, -1);
+            cursor.activeIsSet = activeIsSet;
             if (activeIsSet)
             {
                 // Copy the state we have already compiled to the child cursor.
-                cursor.activeIsSet = true;
                 cursor.activeRange = activeRange;
             }
-            else
-                cursor.activeIsSet = false;
 
             return cursor;
         }

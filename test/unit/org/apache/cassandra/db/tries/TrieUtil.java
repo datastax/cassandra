@@ -57,10 +57,6 @@ import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencode
 
 public class TrieUtil
 {
-    // Set this to true (in combination with smaller count) to dump the tries while debugging a problem.
-    // Do not commit the code with VERBOSE = true.
-    static final boolean VERBOSE = false;
-    static final int COUNT = 100000;
     static final ByteComparable.Version VERSION = ByteComparable.Version.OSS50;
     public static final Comparator<Preencoded> REVERSE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(invert(bytes1), invert(bytes2), VERSION);
     public static final Comparator<Preencoded> FORWARD_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, VERSION);

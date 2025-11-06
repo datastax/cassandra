@@ -21,9 +21,9 @@ package org.apache.cassandra.db.tries;
 /// A range state interface used for range tries.
 ///
 /// This interface combines two logical concepts:
-/// - A range marker / boundary point, which is a point in the trie that or starts or ends a range, or switches between
-///   ranges. Such markers are the content of a range trie and by themselves are sufficient to define and recreate the
-///   trie.
+/// - A range marker / boundary point, which is a point in the trie that either starts or ends a range, or switches
+///   between ranges. Such markers are the content of a range trie and by themselves are sufficient to define and
+///   recreate the trie.
 ///
 ///   Markers return `true` for [#isBoundary()] and usually return different values for [#precedingState] in the two
 ///   directions (which can be `null` if no range applies). It is also possible for a marker to specify a point of
@@ -31,9 +31,9 @@ package org.apache.cassandra.db.tries;
 ///
 /// - A covering range state, which describes the range that applies to an iteration position which is inside a covered
 ///   range. These are necessary to be able to efficiently jump inside range tries, for example when constructing the
-///   intersection between a range trie and a set trie to answer a query. When a cursor skips over a requested point,
-///   the preceding state that the cursor returns is a covering state, which describes the range that applies to (i.e.
-///   covers) the position the user requested.
+///   intersection between a range trie and a set trie to answer a query. When a cursor skips to a position after a
+///   point requested in a [Cursor#skipTo] call, the preceding state that the cursor returns is a covering state,
+///   which describes the range that applies to (i.e. covers) the position the user requested.
 ///
 ///   Covering states return `false` for [#isBoundary()] and must return themselves for [#precedingState] in both
 ///   directions.
@@ -47,7 +47,7 @@ public interface RangeState<S extends RangeState<S>>
 
     /// Returns the state that applies to the positions preceding this marker in the given iteration order, if any.
     ///
-    /// This must always be a non-boundary state (i.e. [#isBoundary()] must be `false` and the forward and reverse
+    /// This must always be a covering state (i.e. [#isBoundary()] must be `false` and the forward and reverse
     /// preceding states are equal to itself).
     S precedingState(Direction direction);
 

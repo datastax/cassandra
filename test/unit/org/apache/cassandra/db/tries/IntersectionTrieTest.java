@@ -236,6 +236,30 @@ public class IntersectionTrieTest
             testIntersection("", asList(1, 2), trie,
                              TrieSet.range(VERSION, before(1), before(3)),
                              TrieSet.range(VERSION, before(0), before(7)));
+            // nulls
+            testIntersection("", asList(1, 2), trie,
+                             TrieSet.range(VERSION, before(1), before(3)),
+                             TrieSet.range(VERSION, null, null));
+
+            // null left
+            testIntersection("", asList(1, 2), trie,
+                             TrieSet.range(VERSION, before(1), before(7)),
+                             TrieSet.range(VERSION, null, before(3)));
+
+            // null left contained
+            testIntersection("", asList(1, 2), trie,
+                             TrieSet.range(VERSION, before(1), before(3)),
+                             TrieSet.range(VERSION, null, before(7)));
+
+            // null right
+            testIntersection("", asList(1, 2), trie,
+                             TrieSet.range(VERSION, before(0), before(3)),
+                             TrieSet.range(VERSION, before(1), null));
+
+            // null right contained
+            testIntersection("", asList(1, 2), trie,
+                             TrieSet.range(VERSION, before(1), before(3)),
+                             TrieSet.range(VERSION, before(0), null));
         }
     }
 
@@ -271,12 +295,6 @@ public class IntersectionTrieTest
 
             testIntersection("", asList(3, 7, 8), trie,
                              TrieSet.ranges(VERSION, before(3), before(4), before(7), before(9), before(12), before(15)));
-
-            testIntersection("", asList(3, 4, 5, 6, 7, 8), trie,
-                             TrieSet.ranges(VERSION, before(3), before(9)));
-
-            testIntersection("", asList(3), trie,
-                             TrieSet.ranges(VERSION, before(3), before(4)));
 
             testIntersection("", asList(0, 1, 2, 3, 4, 5, 7, 8), trie,
                              TrieSet.ranges(VERSION, null, before(6), before(7), before(9)));

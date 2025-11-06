@@ -421,8 +421,8 @@ a -> END_START_PREFIX
 END_START_PREFIX
 ```
 (The END_START_PREFIX before the trie describes the result of calling `state` on the root node, and the one at the end,
-the result of calling state when the iteration is exhausted; these are START_END_STATE for sets that are limited on the
-respective side. Also note that the inversion of an array of boundaries is the array with "null" appended on both
+the result of calling `state()` when the iteration is exhausted; these are `START_END_STATE` for sets that are limited
+on the respective side. Also note that the inversion of an array of boundaries is the array with `null` appended on both
 sides.)
 
 Using De Morgan's law, this weak negation also lets us perform set union.
@@ -457,8 +457,15 @@ a ->
     c -> end(555)
 ```
 
-This dump only lists the content of the range trie. If we also include the preceding state by reporting all `state`
-values, the trie will look like this in the forward direction:
+This dump only lists the content of the range trie. This information is sufficient to track the deletion state if we
+are advancing through the cursor in either direction without skipping, but isn't sufficient to know what deletion state
+applies if the user needs to `skipTo` positions inside the trie. For example, if a cursor is positioned on "a" and the
+user performs `skipTo(2, c)` to advance to "ac", this range cursor does not list this position but must still be able to
+present the fact that the requested position is covered by the deletion 555. This is achieved by the `precedingState`
+reported by the cursor.
+
+If we also include the preceding state by reporting all `state` values, the trie will look like this in the forward
+direction:
 ```
 a ->
   b ->
@@ -474,11 +481,13 @@ a ->
   b -> covering(555)
     c -> start(555)
 ```
-Note that any content must be the same in both directions, but preceding state applies to preceding positions in
-iteration order and thus will be different in the two directions.
+This ensures that when we skip to any position between the two bounds, the position where the cursor ends up (either
+"ad" or "adc" in forward direction, "ab" or "abc" in the reverse) has 555 as its preceding deletion state. Note that any
+content must be the same in both directions, but preceding state applies to preceding positions in iteration order and
+thus will be different in the two directions.
 
-The range state used in this representation will be such that `end(dt)` has a `null` state on the left (i.e. returned
-by `precedingState(FORWARD)`) and has `covering(dt)` on the right (`precedingState(REVERSE)`), `start(dt)` has
+The range state used in this representation will be such that `start(dt)` has a `null` state on the left (i.e. returned
+by `precedingState(FORWARD)`) and has `covering(dt)` on the right (`precedingState(REVERSE)`), `end(dt)` has
 `covering(dt)` on the left and `null` on the right. `covering(dt)` is a non-boundary state that returns itself for the
 preceding state in both directions. To support touching ranges, we also need a `switch(ldt, rdt)` state that has
 `covering(ldt)` on the left and `covering(rdt)` on the right.
@@ -552,7 +561,7 @@ combine their states. There are two differences from the normal trie merge proce
 - When one of the range cursors is ahead, we pass its `precedingState` as an argument to the merge resolver to modify
   all reported states.
 
-As an example, consider once again the `[abc, adc]` range with deeltion 555, merged with the following trie for the
+As an example, consider once again the `[abc, adc]` range with deletion 555, merged with the following trie for the
 `[aaa, acc]` range with deletion 666:
 ```
 a ->
@@ -603,31 +612,9 @@ Note that the "abc" path adds no information. We don't, however, know that befor
 can't easily remove it. This could be done using a special `cleanup` operation over a trie which must buffer descents
 until effective content is found, which is best done as a separate transformation rather than as part of the merge.
 
-## In-memory range tries
-
-When a range trie is stored in an in-memory trie, it stores only content values. The range cursors created keep track of
-the currently active covering state (which is equal to the succeeding side of any visited boundary during advance) and
-report it as `precedingState`. This information, however, is no longer valid when a `skipTo` operation is performed, as
-it may skip over arbitrarily many boundaries and end up in a covered range. If `precedingState` is requested after such
-a skip, the cursor needs to obtain the applicable state. This is done by descending into the current branch (in
-iteration order) until the closest boundary is found, and using its preceding side. For this to work, all in-memory trie
-branches must terminate in a boundary state with content, which is something that in-memory tries do maintain (see 
-below).
-
-Because singletons don't really make sense for range tries (a range will have different start and end paths), all
-insertions into a range trie are done using the `apply` method. The application itself is more elaborate than the case
-of simple data tries: when `apply` is called with a range trie argument, the in-memory trie has to walk all existing
-positions that fall under ranges of the trie and apply the active state to them. Additionally, it must track any active
-existing range to combine it with incoming content.
-
-Because the incoming content is often expected to be a (newer) deletion, the resolver is expected to often return null
-for combined content. This triggers removal of nodes and paths up the relevant branch (which may also result in changing
-the type of a node e.g. from sparse to chain), which in turn guarantees that we remove branches that do not terminate in
-non-null content.
-
 ## Relation to trie sets
 
-`TrieSetCursor` is a subclass of `RangeTrieCursor`, and the trie set is a special case of a range trie. It uses a
+`TrieSetCursor` is a subclass of `RangeCursor`, and the trie set is a special case of a range trie. It uses a
 richer state, which contains information for both iteration directions, which also makes it possible to present the same
 state for both forward and reverse iteration directions.
 
@@ -650,10 +637,8 @@ merges implement an option that exploits this property to avoid some inefficienc
 It is also forbidden for live branches to contain data that is deleted by the trie's own deletion branches (aka
 shadowed data).
 
-## Alternatives
-
-Perhaps the easiest way to describe why we chose this approach is to discuss the alternatives and discuss the reasons
-we chose the structure and features of the option we went with.
+Perhaps the easiest way to describe the approach is to discuss its alternatives and the reasons we preferred the
+structure and features of the option we went with.
 
 ### Why not mix deletion ranges with live data?
 
@@ -728,7 +713,7 @@ The approach we ultimately took is an evolution of this to avoid a couple of per
 a little inefficient to walk the same path in two separate tries, and it would be helpful if we can do this only once
 for at least some part of the key. On the other, there is a concurrency chokepoint at the root of this structure, because
 whenever a deletion actually finds live data to remove in an in-memory trie, to achieve atomicity of the operation we
-need to prepare and swap snapshots for the two full tries, which can waste work and limits caching efficiency.
+need to prepare and swap snapshots for the two full tries, which can also waste work and limits caching efficiency.
 
 In Cassandra we use partitions as the unit of consistency, and also the limit that range deletions are not allowed to
 cross. It is natural, then, to split the live and deletion branches at the partition level rather than at the trie root.

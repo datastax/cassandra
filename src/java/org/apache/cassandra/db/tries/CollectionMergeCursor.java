@@ -498,6 +498,8 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         @Override
         S collectContent()
         {
+            // Unlike the parent method, we need to collect the state of all cursors on the heap
+            // (state for equal cursors, and preceding state for the ones that have moved ahead).
             applyToAllOnHeap(CollectionMergeCursor::collectContent);
             collectContent(head, -1);
             return resolveContent();

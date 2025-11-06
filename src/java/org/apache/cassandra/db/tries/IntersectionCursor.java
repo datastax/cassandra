@@ -62,6 +62,21 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
         if (state == State.SET_AHEAD)
             return advanceInCoveredBranch(set.depth(), source.advance());
 
+        return advanceWhenMatching();
+    }
+
+    @Override
+    public int advanceMultiple(Cursor.TransitionsReceiver receiver)
+    {
+        // We can only apply advanceMultiple if we are fully inside a covered branch.
+        if (state == State.SET_AHEAD)
+            return advanceInCoveredBranch(set.depth(), source.advanceMultiple(receiver));
+
+        return advanceWhenMatching();
+    }
+
+    private int advanceWhenMatching()
+    {
         // The set is assumed sparser, so we advance that first.
         int setDepth = set.advance();
         if (set.precedingIncluded())
@@ -79,20 +94,6 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
         int setDepth = set.skipTo(skipDepth, skipTransition);
         if (set.precedingIncluded())
             return advanceInCoveredBranch(setDepth, source.skipTo(skipDepth, skipTransition));
-        else
-            return advanceSourceToIntersection(setDepth, set.incomingTransition());
-    }
-
-    @Override
-    public int advanceMultiple(Cursor.TransitionsReceiver receiver)
-    {
-        // We can only apply advanceMultiple if we are fully inside a covered branch.
-        if (state == State.SET_AHEAD)
-            return advanceInCoveredBranch(set.depth(), source.advanceMultiple(receiver));
-
-        int setDepth = set.advance();
-        if (set.precedingIncluded())
-            return advanceInCoveredBranch(setDepth, source.advance());
         else
             return advanceSourceToIntersection(setDepth, set.incomingTransition());
     }
