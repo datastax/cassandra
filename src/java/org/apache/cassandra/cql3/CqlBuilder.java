@@ -27,6 +27,7 @@ import java.util.function.Consumer;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 
 /**
@@ -61,6 +62,11 @@ public final class CqlBuilder
     public CqlBuilder(int capacity)
     {
         builder = new StringBuilder(capacity);
+    }
+
+    public int length()
+    {
+        return builder.length();
     }
 
     public CqlBuilder append(Object o)
@@ -276,6 +282,40 @@ public final class CqlBuilder
     {
         builder.accept(new OptionsBuilder(this));
         return this;
+    }
+
+    /**
+     * Appends a row filter to the CQL string we are building.
+     *
+     * @param filter the row filter to append
+     * @param hasKeyRestrictions whether the query has key restrictions that have already been appended
+     * @return this CQL builder after appending the row filter
+     */
+    public CqlBuilder append(RowFilter filter, boolean hasKeyRestrictions)
+    {
+        return filter.isEmpty() ? this : appendRestrictions(filter.toCQLString(), hasKeyRestrictions);
+    }
+
+    /**
+     * Appends the specified CQL restrictions to the CQL string we are building.
+     *
+     * @param filter the CQL restrictions to append
+     * @param hasMoreRestrictions whether the CQL query already has other restrictions appended
+     * @return this CQL builder after appending the row filter
+     */
+    public CqlBuilder appendRestrictions(String filter, boolean hasMoreRestrictions)
+    {
+        if (filter.isEmpty())
+            return this;
+
+        if (filter.startsWith("ORDER BY"))
+            append(' ');
+        else if (hasMoreRestrictions)
+            append(" AND ");
+        else
+            append(" WHERE ");
+
+        return append(filter);
     }
 
     public static class OptionsBuilder
