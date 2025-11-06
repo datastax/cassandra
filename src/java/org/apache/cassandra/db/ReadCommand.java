@@ -684,7 +684,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 Threshold guardrail = shouldRespectTombstoneThresholds()
                                                 ? Guardrails.scannedTombstones
                                                 : Threshold.NEVER_TRIGGERED;
-                return guardrail.newCounter(ReadCommand.this::toCQLString, true, null);
+                return guardrail.newCounter(ReadCommand.this::toRedactedCQLString, false, null);
             }
 
             private MetricRecording()
@@ -748,7 +748,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 {
                     metric.tombstoneFailures.inc();
                     throw new TombstoneOverwhelmingException(tombstones.get(),
-                                                             ReadCommand.this.toCQLString(),
+                                                             ReadCommand.this.toRedactedCQLString(),
                                                              ReadCommand.this.metadata(),
                                                              currentKey,
                                                              clustering);
@@ -848,7 +848,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 if (failBytes != -1 && this.sizeInBytes >= failBytes)
                 {
                     String msg = String.format("Query %s attempted to read %d bytes but max allowed is %s; query aborted  (see local_read_size_fail_threshold)",
-                                               ReadCommand.this.toCQLString(), this.sizeInBytes, failThreshold);
+                                               ReadCommand.this.toRedactedCQLString(), this.sizeInBytes, failThreshold);
                     Tracing.trace(msg);
                     MessageParams.remove(ParamType.LOCAL_READ_SIZE_WARN);
                     MessageParams.add(ParamType.LOCAL_READ_SIZE_FAIL, this.sizeInBytes);

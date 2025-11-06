@@ -58,7 +58,7 @@ public class DefaultOperationContext implements OperationContext
         @Override
         public OperationContext forRead(ReadCommand command, ColumnFamilyStore cfs)
         {
-            return new DefaultOperationContext(command::toCQLString);
+            return new DefaultOperationContext(command::toUnredactedCQLString);
         }
     }
 }

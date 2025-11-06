@@ -374,9 +374,9 @@ public class MultiRangeReadCommand extends ReadCommand implements MultiPartition
     }
 
     @Override
-    public void appendCQLWhereClause(CqlBuilder builder)
+    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
     {
-        MultiPartitionReadQuery.super.appendCQLWhereClause(builder);
+        MultiPartitionReadQuery.super.appendCQLWhereClause(builder, redact);
     }
 
     @Override
