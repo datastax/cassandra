@@ -39,7 +39,7 @@ public class InMemoryRangeTrieThreadedTest extends ThreadedTestBase<TestRangeSta
     @Override
     TestRangeState value(ByteComparable b)
     {
-        return new TestRangeState(b, 1, 1, false);
+        return new TestRangeState(b, 1, 1, 1, false);
     }
 
     @Override

@@ -55,16 +55,18 @@ public class InMemoryRangeTrieTest
 
     static TestRangeState toMarker(String string, int delTime)
     {
-        return new TestRangeState(TrieUtil.directComparable(string), delTime, delTime, false);
+        return new TestRangeState(TrieUtil.directComparable(string), delTime, delTime, delTime, false);
     }
 
     static TestRangeState addMarkerStrings(TestRangeState a, TestRangeState b)
     {
         assert a.leftSide == b.leftSide;
+        assert a.at == b.at;
         assert a.rightSide == b.rightSide;
         assert a.isBoundary == b.isBoundary;
         return new TestRangeState(TrieUtil.directComparable(fromMarker(a) + fromMarker(b)),
                                   a.leftSide,
+                                  a.at,
                                   a.rightSide,
                                   a.isBoundary);
     }

@@ -64,17 +64,26 @@ public class RangeTrieMergeTest
 
     private TestRangeState from(int where, int value)
     {
-        return new TestRangeState(of(where), -1, value, true);
+        return new TestRangeState(of(where), -1, value, value, true);
     }
 
     private TestRangeState to(int where, int value)
     {
-        return new TestRangeState(of(where), value, -1, true);
+        return new TestRangeState(of(where), value, value, -1, true);
     }
 
     private TestRangeState change(int where, int from, int to)
     {
-        return new TestRangeState(of(where), from, to, true);
+        return new TestRangeState(of(where), from, to, to, true);
+    }
+
+    private TestRangeState point(int where, int value)
+    {
+        return pointInside(where, value, -1);
+    }
+    private TestRangeState pointInside(int where, int value, int active)
+    {
+        return new TestRangeState(of(where), active, value, active, true);
     }
 
     private List<TestRangeState> deletedRanges(ByteComparable... dataPoints)
@@ -90,9 +99,9 @@ public class RangeTrieMergeTest
             if (pos == null)
                 pos = i % 2 == 0 ? of(0) : of((1<<bitsNeeded) - 1);
             if (i % 2 == 0)
-                markers.add(new TestRangeState(pos, -1, 100, true));
+                markers.add(new TestRangeState(pos, -1, 100, 100, true));
             else
-                markers.add(new TestRangeState(pos, 100, -1, true));
+                markers.add(new TestRangeState(pos, 100, 100, -1, true));
         }
         return verify(markers);
     }
@@ -246,13 +255,11 @@ public class RangeTrieMergeTest
 
     private List<TestRangeState> getTestRanges()
     {
-        TestRangeState testRangeState = to(38, 14);
-        TestRangeState testRangeState1 = from(33, 13);
-        TestRangeState testRangeState2 = change(28, 11, 12);
-        return asList(from(21, 10), to(24, 10),
-                      from(26, 11), testRangeState2, to(30, 12),
-                      testRangeState1, to(34, 13),
-                      from(36, 14), testRangeState);
+        return asList(point(17, 20),
+                      from(21, 10), pointInside(22, 21, 10), to(24, 10),
+                      from(26, 11), change(28, 11, 12).withPoint(22), to(30, 12),
+                      from(33, 13).withPoint(23), to(34, 13),
+                      from(36, 14), to(38, 14).withPoint(24));
     }
 
     private void testMerges()
@@ -315,7 +322,7 @@ public class RangeTrieMergeTest
     {
         System.out.println("Markers: " + merged);
         verify(merged);
-        // Test that intersecting the given trie with the given sets, in any order, results in the expected list.
+        // Test that merging the given trie with the given sets, in any order, results in the expected list.
         // Checks both forward and reverse iteration direction.
         if (sets.length == 0)
         {
@@ -422,7 +429,7 @@ public class RangeTrieMergeTest
     {
         System.out.println("Markers: " + merged);
         verify(merged);
-        // Test that intersecting the given trie with the given sets, in any order, results in the expected list.
+        // Test that merging the given trie with the given sets, in any order, results in the expected list.
         // Checks both forward and reverse iteration direction.
         if (sets.length == 0)
         {
@@ -472,12 +479,13 @@ public class RangeTrieMergeTest
             return marker;
 
         int newLeft = delete(deletionTime, marker.leftSide);
+        int newAt = delete(deletionTime, marker.at);
         int newRight = delete(deletionTime, marker.rightSide);
-        if (newLeft < 0 && newRight < 0 || newLeft == newRight)
+        if (newLeft < 0 && newAt < 0 && newRight < 0 || newAt == newLeft && newLeft == newRight)
             return null;
-        if (newLeft == marker.leftSide && newRight == marker.rightSide)
+        if (newLeft == marker.leftSide && newAt == marker.at && newRight == marker.rightSide)
             return marker;
-        return new TestRangeState(marker.position, newLeft, newRight, marker.isBoundary);
+        return new TestRangeState(marker.position, newLeft, newAt, newRight, marker.isBoundary);
     }
 
 
@@ -515,7 +523,7 @@ public class RangeTrieMergeTest
                     // Must close active if it becomes covered, and must open active if it is no longer covered.
                     if (active >= 0)
                     {
-                        TestRangeState activeMarker = new TestRangeState(nextRight.position, active, active, true);
+                        TestRangeState activeMarker = new TestRangeState(nextRight.position, active, active, active, true);
                         nextRight = TestRangeState.combine(activeMarker, nextRight).toContent();
                     }
                     maybeAdd(result, nextRight);

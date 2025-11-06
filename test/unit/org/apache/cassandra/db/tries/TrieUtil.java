@@ -412,7 +412,7 @@ public class TrieUtil
         {
             // special case to make a singleton trie
             ByteComparable bc = directComparable(keys[0]);
-            return RangeTrie.range(bc, bc, VERSION, new TestRangeState(bc, value, value, false));
+            return RangeTrie.range(bc, bc, VERSION, new TestRangeState(bc, value, value, value, false));
         }
 
         try
@@ -422,7 +422,7 @@ public class TrieUtil
             for (String s : keys)
             {
                 trie.putRecursive(directComparable(s),
-                                  new TestRangeState(directComparable(s), left ? -1 : value, left ? value : -1, true),
+                                  new TestRangeState(directComparable(s), left ? -1 : value, value, left ? value : -1, true),
                                   (e, n) -> e != null ? e.restrict(n.leftSide >= 0, n.rightSide >= 0) : n);
                 left = !left;
             }
