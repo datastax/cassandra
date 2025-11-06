@@ -22,7 +22,6 @@ import java.io.Serializable;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -66,7 +65,7 @@ final class ReadRepairEvent extends DiagnosticEvent
     {
         this.keyspace = readRepair.cfs.keyspace;
         this.tableName = readRepair.cfs.getTableName();
-        this.cqlCommand = readRepair.command.toCQLString();
+        this.cqlCommand = readRepair.command.toRedactedCQLString();
         this.consistency = readRepair.replicaPlan().consistencyLevel();
         this.speculativeRetry = readRepair.cfs.metadata().params.speculativeRetry.kind();
         this.destinations = destinations;

@@ -607,7 +607,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 Threshold guardrail = shouldRespectTombstoneThresholds()
                                                 ? Guardrails.scannedTombstones
                                                 : DefaultGuardrail.DefaultThreshold.NEVER_TRIGGERED;
-                return guardrail.newCounter(ReadCommand.this::toCQLString, true, null);
+                return guardrail.newCounter(ReadCommand.this::toRedactedCQLString, false, null);
             }
 
             private MetricRecording()
@@ -671,7 +671,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 {
                     metric.tombstoneFailures.inc();
                     throw new TombstoneOverwhelmingException(tombstones.get(),
-                                                             ReadCommand.this.toCQLString(),
+                                                             ReadCommand.this.toRedactedCQLString(),
                                                              ReadCommand.this.metadata(),
                                                              currentKey,
                                                              clustering);

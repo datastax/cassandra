@@ -19,6 +19,8 @@ package org.apache.cassandra.db;
 
 import java.util.Set;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.SelectOptions;
@@ -62,7 +64,7 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     // Monitorable interface
     public String name()
     {
-        return toCQLString();
+        return toRedactedCQLString();
     }
 
     @Override
@@ -96,23 +98,53 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     }
 
     /**
-     * Recreate the CQL string corresponding to this query.
+     * Recreates the CQL string corresponding to this query, representing any specific values with '?',
+     * to prevent leaking sensitive data.
+     * @see #toCQLString(boolean)
+     */
+    public String toRedactedCQLString()
+    {
+        return toCQLString(true);
+    }
+
+    /**
+     * Recreates the CQL string corresponding to this query, printing specific values without any redaction.
+     * This might leak sensitive data if the query string ends up in logs or any other unprotected place, so this only
+     * should be used for debugging purposes or to present the query string to the same end user that created the query.
+     * @see #toCQLString(boolean)
+     */
+    public String toUnredactedCQLString()
+    {
+        return toCQLString(false);
+    }
+
+    /**
+     * Recreates the CQL string corresponding to this query.
+     * </p>
+     * If the {@code redact} parameter is set to {@code true}, the query string will be redacted, replacing any specific
+     * column values with '?'. If set to {@code false}, the query string will not be redacted, and it might expose the
+     * queried column values which might contain sensitive data. The latter will be problematic if the query string ends
+     * up in logs or any other unprotected place. Therefore, non-redaction should only be used for debugging purposes or
+     * to present the query string to the same end user that created the query.
      * <p>
      * Note that in general the returned string will not be exactly the original user string, first
-     * because there isn't always a single syntax for a given query,  but also because we don't have
+     * because there isn't always a single syntax for a given query, but also because we don't have
      * all the information needed (we know the non-PK columns queried but not the PK ones as internally
-     * we query them all). So this shouldn't be relied too strongly, but this should be good enough for
-     * debugging purpose which is what this is for.
+     * we query them all). So this shouldn't be relied upon too strongly, but this should be good enough for
+     * debugging purposes which is what this is for.
+     *
+     * @param redact whether to redact the queried column values.
      */
-    public String toCQLString()
+    @VisibleForTesting
+    protected String toCQLString(boolean redact)
     {
         CqlBuilder builder = new CqlBuilder();
-        builder.append("SELECT ").append(columnFilter().toCQLString());
+        builder.append("SELECT ").append(columnFilter().toCQLString(redact));
         builder.append(" FROM ").append(ColumnIdentifier.maybeQuote(metadata().keyspace))
                .append('.')
                .append(ColumnIdentifier.maybeQuote(metadata().name));
 
-        appendCQLWhereClause(builder);
+        appendCQLWhereClause(builder, redact);
 
         if (limits() != DataLimits.NONE)
             builder.append(' ').append(limits());
@@ -132,5 +164,5 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
         return builder.toString();
     }
 
-    protected abstract void appendCQLWhereClause(CqlBuilder builder);
+    protected abstract void appendCQLWhereClause(CqlBuilder builder, boolean redact);
 }

@@ -190,22 +190,22 @@ public class ANNOptionsTest extends CQLTester
         // without ANN options
         String formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1]");
         ReadCommand command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString()).doesNotContain("WITH ann_options");
+        Assertions.assertThat(command.toRedactedCQLString()).doesNotContain("WITH ann_options");
 
         // with rerank_k option
         formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 1 WITH ann_options = {'rerank_k': 2}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString()).contains("WITH ann_options = {'rerank_k': 2}");
+        Assertions.assertThat(command.toRedactedCQLString()).contains("WITH ann_options = {'rerank_k': 2}");
 
         // with use_pruning option
         formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': true}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString()).contains("WITH ann_options = {'use_pruning': true}");
+        Assertions.assertThat(command.toRedactedCQLString()).contains("WITH ann_options = {'use_pruning': true}");
 
         // with both options
         formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 1 WITH ann_options = {'rerank_k': 2, 'use_pruning': false}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString()).contains("WITH ann_options = {'rerank_k': 2, 'use_pruning': false}");
+        Assertions.assertThat(command.toRedactedCQLString()).contains("WITH ann_options = {'rerank_k': 2, 'use_pruning': false}");
     }
 
     /**
@@ -233,9 +233,9 @@ public class ANNOptionsTest extends CQLTester
         testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 0}", ANNOptions.create(0, null));
 
         // test use_pruning values
-        testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': true}", 
+        testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': true}",
                      ANNOptions.create(null, true));
-        testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': false}", 
+        testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': false}",
                      ANNOptions.create(null, false));
 
         // test combinations of rerank_k and use_pruning

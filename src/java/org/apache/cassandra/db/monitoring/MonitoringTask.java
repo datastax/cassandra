@@ -47,7 +47,7 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
  * We also log timed out operations, see CASSANDRA-7392.
  * Since CASSANDRA-12403 we also log queries that were slow.
  */
-class MonitoringTask
+public class MonitoringTask
 {
     private static final String LINE_SEPARATOR = getProperty("line.separator");
     private static final Logger logger = LoggerFactory.getLogger(MonitoringTask.class);
@@ -65,7 +65,7 @@ class MonitoringTask
     private static final int MAX_OPERATIONS = Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "monitoring_max_operations", "50"));
 
     @VisibleForTesting
-    static MonitoringTask instance = make(REPORT_INTERVAL_MS, MAX_OPERATIONS);
+    public static MonitoringTask instance = make(REPORT_INTERVAL_MS, MAX_OPERATIONS);
 
     private final ScheduledFuture<?> reportingTask;
     private final OperationsQueue failedOperationsQueue;
@@ -133,7 +133,7 @@ class MonitoringTask
     }
 
     @VisibleForTesting
-    private void logOperations(long approxCurrentTimeNanos)
+    public void logOperations(long approxCurrentTimeNanos)
     {
         logSlowOperations(approxCurrentTimeNanos);
         logFailedOperations(approxCurrentTimeNanos);
