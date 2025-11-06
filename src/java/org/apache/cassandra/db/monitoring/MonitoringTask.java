@@ -47,7 +47,7 @@ import static org.apache.cassandra.utils.concurrent.BlockingQueues.newBlockingQu
  * We also log timed out operations, see CASSANDRA-7392.
  * Since CASSANDRA-12403 we also log queries that were slow.
  */
-class MonitoringTask
+public class MonitoringTask
 {
     private static final String LINE_SEPARATOR = CassandraRelevantProperties.LINE_SEPARATOR.getString();
     private static final Logger logger = LoggerFactory.getLogger(MonitoringTask.class);
@@ -65,7 +65,7 @@ class MonitoringTask
     private static final int MAX_OPERATIONS = MONITORING_MAX_OPERATIONS.getInt();
 
     @VisibleForTesting
-    static MonitoringTask instance = make(REPORT_INTERVAL_MS, MAX_OPERATIONS);
+    public static MonitoringTask instance = make(REPORT_INTERVAL_MS, MAX_OPERATIONS);
 
     private final ScheduledFuture<?> reportingTask;
     private final OperationsQueue failedOperationsQueue;
@@ -133,7 +133,7 @@ class MonitoringTask
     }
 
     @VisibleForTesting
-    private void logOperations(long approxCurrentTimeNanos)
+    public void logOperations(long approxCurrentTimeNanos)
     {
         logSlowOperations(approxCurrentTimeNanos);
         logFailedOperations(approxCurrentTimeNanos);

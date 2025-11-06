@@ -102,7 +102,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("*/*", filter.toString());
-            assertEquals("*", filter.toCQLString());
+            assertEquals("*", filter.toCQLString(false));
+            assertEquals("*", filter.toCQLString(true));
             assertFetchedQueried(true, true, filter, v1, v2, s1, s2);
             assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path3, path4);
             assertCellFetchedQueried(true, true, filter, s2, path0, path1, path2, path3, path4);
@@ -121,7 +122,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[]", filter.toString());
-            assertEquals("*", filter.toCQLString());
+            assertEquals("*", filter.toCQLString(true));
+            assertEquals("*", filter.toCQLString(false));
             assertFetchedQueried(false, false, filter, v1, v2, s1, s2);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
             assertCellFetchedQueried(false, false, filter, s2, path0, path1, path2, path3, path4);
@@ -137,7 +139,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[v1]", filter.toString());
-            assertEquals("v1", filter.toCQLString());
+            assertEquals("v1", filter.toCQLString(true));
+            assertEquals("v1", filter.toCQLString(false));
             assertFetchedQueried(true, true, filter, v1);
             assertFetchedQueried(false, false, filter, v2, s1, s2);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -154,7 +157,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[Escaped Name]", filter.toString());
-            assertEquals("\"Escaped Name\"", filter.toCQLString());
+            assertEquals("\"Escaped Name\"", filter.toCQLString(false));
+            assertEquals("\"Escaped Name\"", filter.toCQLString(true));
             assertFetchedQueried(true, true, filter, escaped);
             assertFetchedQueried(false, false, filter, v2, s1, s2);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -171,7 +175,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[v2]", filter.toString());
-            assertEquals("v2", filter.toCQLString());
+            assertEquals("v2", filter.toCQLString(false));
+            assertEquals("v2", filter.toCQLString(true));
             assertFetchedQueried(true, true, filter, v2);
             assertFetchedQueried(false, false, filter, v1, s1, s2);
             assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path3, path4);
@@ -188,7 +193,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[s1]", filter.toString());
-            assertEquals("s1", filter.toCQLString());
+            assertEquals("s1", filter.toCQLString(false));
+            assertEquals("s1", filter.toCQLString(true));
             assertFetchedQueried(true, true, filter, s1);
             assertFetchedQueried(false, false, filter, v1, v2, s2);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -205,7 +211,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[s2]", filter.toString());
-            assertEquals("s2", filter.toCQLString());
+            assertEquals("s2", filter.toCQLString(false));
+            assertEquals("s2", filter.toCQLString(true));
             assertFetchedQueried(true, true, filter, s2);
             assertFetchedQueried(false, false, filter, v1, v2, s1);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -222,7 +229,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[s1, s2, v1, v2]", filter.toString());
-            assertEquals("s1, s2, v1, v2", filter.toCQLString());
+            assertEquals("s1, s2, v1, v2", filter.toCQLString(false));
+            assertEquals("s1, s2, v1, v2", filter.toCQLString(true));
             assertFetchedQueried(true, true, filter, v1, v2, s1, s2);
             assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path3, path4);
             assertCellFetchedQueried(true, true, filter, s2, path0, path1, path2, path3, path4);
@@ -238,7 +246,8 @@ public class ColumnFilterTest
         ColumnFilter filter = ColumnFilter.selectionBuilder().select(v2, path1).select(v2, path3).build();
         testRoundTrips(filter);
         assertEquals("[v2[1], v2[3]]", filter.toString());
-        assertEquals("v2[1], v2[3]", filter.toCQLString());
+        assertEquals("v2[1], v2[3]", filter.toCQLString(false));
+        assertEquals("v2[?], v2[?]", filter.toCQLString(true));
         assertFetchedQueried(true, true, filter, v2);
         assertFetchedQueried(false, false, filter, v1, s1, s2);
         assertCellFetchedQueried(true, true, filter, v2, path1, path3);
@@ -252,7 +261,8 @@ public class ColumnFilterTest
         ColumnFilter filter = ColumnFilter.selectionBuilder().select(s2, path1).select(s2, path3).build();
         testRoundTrips(filter);
         assertEquals("[s2[1], s2[3]]", filter.toString());
-        assertEquals("s2[1], s2[3]", filter.toCQLString());
+        assertEquals("s2[1], s2[3]", filter.toCQLString(false));
+        assertEquals("s2[?], s2[?]", filter.toCQLString(true));
         assertFetchedQueried(true, true, filter, s2);
         assertFetchedQueried(false, false, filter, v1, v2, s1);
         assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -266,7 +276,8 @@ public class ColumnFilterTest
         ColumnFilter filter = ColumnFilter.selectionBuilder().slice(v2, path1, path3).build();
         testRoundTrips(filter);
         assertEquals("[v2[1:3]]", filter.toString());
-        assertEquals("v2[1:3]", filter.toCQLString());
+        assertEquals("v2[1:3]", filter.toCQLString(false));
+        assertEquals("v2[?:?]", filter.toCQLString(true));
         assertFetchedQueried(true, true, filter, v2);
         assertFetchedQueried(false, false, filter, v1, s1, s2);
         assertCellFetchedQueried(true, true, filter, v2, path1, path2, path3);
@@ -280,7 +291,8 @@ public class ColumnFilterTest
         ColumnFilter filter = ColumnFilter.selectionBuilder().slice(s2, path1, path3).build();
         testRoundTrips(filter);
         assertEquals("[s2[1:3]]", filter.toString());
-        assertEquals("s2[1:3]", filter.toCQLString());
+        assertEquals("s2[1:3]", filter.toCQLString(false));
+        assertEquals("s2[?:?]", filter.toCQLString(true));
         assertFetchedQueried(true, true, filter, s2);
         assertFetchedQueried(false, false, filter, v1, v2, s1);
         assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -301,7 +313,8 @@ public class ColumnFilterTest
                                           .build();
         testRoundTrips(filter);
         assertEquals("[s1, s2[0], s2[2:4], v1, v2[0:2], v2[4]]", filter.toString());
-        assertEquals("s1, s2[0], s2[2:4], v1, v2[0:2], v2[4]", filter.toCQLString());
+        assertEquals("s1, s2[0], s2[2:4], v1, v2[0:2], v2[4]", filter.toCQLString(false));
+        assertEquals("s1, s2[?], s2[?:?], v1, v2[?:?], v2[?]", filter.toCQLString(true));
         assertFetchedQueried(true, true, filter, v1, v2, s1, s2);
         assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path4);
         assertCellFetchedQueried(false, false, filter, v2, path3);
@@ -331,7 +344,8 @@ public class ColumnFilterTest
             if (returnStaticContentOnPartitionWithNoRows)
             {
                 assertEquals("*/[v1]", filter.toString());
-                assertEquals("v1", filter.toCQLString());
+                assertEquals("v1", filter.toCQLString(false));
+                assertEquals("v1", filter.toCQLString(true));
                 assertFetchedQueried(true, false, filter, s1, s2, v2);
                 assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
                 assertCellFetchedQueried(true, false, filter, s2, path0, path1, path2, path3, path4);
@@ -339,7 +353,8 @@ public class ColumnFilterTest
             else
             {
                 assertEquals("<all regulars>/[v1]", filter.toString());
-                assertEquals("v1", filter.toCQLString());
+                assertEquals("v1", filter.toCQLString(false));
+                assertEquals("v1", filter.toCQLString(true));
                 assertFetchedQueried(true, false, filter, v2);
                 assertFetchedQueried(false, false, filter, s1, s2);
                 assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
@@ -371,7 +386,8 @@ public class ColumnFilterTest
             if (returnStaticContentOnPartitionWithNoRows)
             {
                 assertEquals("*/[s1]", filter.toString());
-                assertEquals("s1", filter.toCQLString());
+                assertEquals("s1", filter.toCQLString(false));
+                assertEquals("s1", filter.toCQLString(true));
                 assertFetchedQueried(true, false, filter, v1, v2, s2);
                 assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
                 assertCellFetchedQueried(false, false, filter, s2, path0, path1, path2, path3, path4);
@@ -379,7 +395,8 @@ public class ColumnFilterTest
             else
             {
                 assertEquals("<all regulars>+[s1]/[s1]", filter.toString());
-                assertEquals("s1", filter.toCQLString());
+                assertEquals("s1", filter.toCQLString(false));
+                assertEquals("s1", filter.toCQLString(true));
                 assertFetchedQueried(true, false, filter, v1, v2);
                 assertFetchedQueried(false, false, filter, s2);
                 assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
@@ -411,9 +428,10 @@ public class ColumnFilterTest
         testRoundTrips(filter);
         assertFetchedQueried(true, true, filter, v2);
         if (returnStaticContentOnPartitionWithNoRows)
-        {
+            {
             assertEquals("*/[v2[1]]", filter.toString());
-            assertEquals("v2[1]", filter.toCQLString());
+            assertEquals("v2[1]", filter.toCQLString(false));
+            assertEquals("v2[?]", filter.toCQLString(true));
             assertFetchedQueried(true, false, filter, s1, s2, v1);
             assertCellFetchedQueried(true, true, filter, v2, path1);
             assertCellFetchedQueried(true, false, filter, v2, path0, path2, path3, path4);
@@ -422,7 +440,8 @@ public class ColumnFilterTest
         else
         {
             assertEquals("<all regulars>/[v2[1]]", filter.toString());
-            assertEquals("v2[1]", filter.toCQLString());
+            assertEquals("v2[1]", filter.toCQLString(false));
+            assertEquals("v2[?]", filter.toCQLString(true));
             assertFetchedQueried(true, false, filter, v1);
             assertFetchedQueried(false, false, filter, s1, s2);
             assertCellFetchedQueried(true, true, filter, v2, path1);
@@ -453,7 +472,8 @@ public class ColumnFilterTest
         if (returnStaticContentOnPartitionWithNoRows)
         {
             assertEquals("*/[s2[1]]", filter.toString());
-            assertEquals("s2[1]", filter.toCQLString());
+            assertEquals("s2[1]", filter.toCQLString(false));
+            assertEquals("s2[?]", filter.toCQLString(true));
             assertFetchedQueried(true, false, filter, v1, v2, s1);
             assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
             assertCellFetchedQueried(true, true, filter, s2, path1);
@@ -462,7 +482,8 @@ public class ColumnFilterTest
         else
         {
             assertEquals("<all regulars>+[s2[1]]/[s2[1]]", filter.toString());
-            assertEquals("s2[1]", filter.toCQLString());
+            assertEquals("s2[1]", filter.toCQLString(false));
+            assertEquals("s2[?]", filter.toCQLString(true));
             assertFetchedQueried(true, false, filter, v1, v2);
             assertFetchedQueried(false, false, filter, s1);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
