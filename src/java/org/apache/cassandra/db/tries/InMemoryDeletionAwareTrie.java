@@ -257,7 +257,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         private void applyDeletions(RangeCursor<E> incomingAlternateBranch) throws TrieSpaceExhaustedException
         {
             // Apply the deletion branch to our data.
-            InMemoryTrie.DeleteMutation<T, E, RangeCursor<E>> deleteMutation = new InMemoryTrie.DeleteMutation<>(
+            InMemoryTrie.RangeMutation<T, E, RangeCursor<E>> deleteMutation = new InMemoryTrie.RangeMutation<>(
                     deleter,
                     (Predicate<NodeFeatures<E>>) (Predicate) needsForcedCopy,
                     incomingAlternateBranch,

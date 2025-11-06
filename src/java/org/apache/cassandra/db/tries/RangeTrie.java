@@ -131,6 +131,11 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
     /// Applies these ranges to a given data trie. The meaning of the application is defined by the given mapper:
     /// whenever the trie's content falls under a range, the mapper is called to return the content that should be
     /// presented.
+    ///
+    /// This operation will only list positions that are present in the source trie. This means, on one hand,
+    /// that it is not possible to add new content from the range trie, only to augment (usually delete) existing.
+    /// On the other, that the size of the range trie does not affect the size of the output or the complexity of
+    /// processing it.
     default <T> Trie<T> applyTo(Trie<T> source, BiFunction<S, T, T> mapper)
     {
         return dir -> new RangeApplyCursor<>(mapper, cursor(dir), source.cursor(dir));

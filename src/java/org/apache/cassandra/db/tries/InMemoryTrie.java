@@ -183,7 +183,9 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     /// Delete all entries covered under the specified TrieSet
     public void delete(TrieSet set) throws TrieSpaceExhaustedException
     {
-        apply(set.cursor(Direction.FORWARD), (UpsertTransformer<T, TrieSetCursor.RangeState>) DeleteMutation::deleteEntry, NodeFeatures::isBranching);
+        apply(set.cursor(Direction.FORWARD),
+              (UpsertTransformer<T, TrieSetCursor.RangeState>) RangeMutation::deleteEntry,
+              NodeFeatures::isBranching);
     }
 
     /// Apply the given range trie to this in-memory trie. Any existing content that falls under the ranges of the given
@@ -209,10 +211,10 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     {
         try
         {
-            DeleteMutation<T, S, RangeCursor<S>> m = new DeleteMutation<>(transformer,
-                                                                          needsForcedCopy,
-                                                                          cursor,
-                                                                          applyState.start());
+            RangeMutation<T, S, RangeCursor<S>> m = new RangeMutation<>(transformer,
+                                                                        needsForcedCopy,
+                                                                        cursor,
+                                                                        applyState.start());
             m.apply();
             m.complete();
             completeMutation();
@@ -224,23 +226,23 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
         }
     }
 
-    static class DeleteMutation<T, S extends RangeState<S>, C extends RangeCursor<S>> extends Mutation<T, S, C>
+    static class RangeMutation<T, S extends RangeState<S>, C extends RangeCursor<S>> extends Mutation<T, S, C>
     {
         final int initialDepth;
 
-        DeleteMutation(UpsertTransformerWithKeyProducer<T, S> transformer,
-                       Predicate<NodeFeatures<S>> needsForcedCopy,
-                       C mutationCursor,
-                       InMemoryBaseTrie<T>.ApplyState state)
+        RangeMutation(UpsertTransformerWithKeyProducer<T, S> transformer,
+                      Predicate<NodeFeatures<S>> needsForcedCopy,
+                      C mutationCursor,
+                      InMemoryBaseTrie<T>.ApplyState state)
         {
             this(transformer, needsForcedCopy, mutationCursor, state, Integer.MAX_VALUE);
         }
 
-        DeleteMutation(UpsertTransformerWithKeyProducer<T, S> transformer,
-                       Predicate<NodeFeatures<S>> needsForcedCopy,
-                       C mutationCursor,
-                       InMemoryBaseTrie<T>.ApplyState state,
-                       int initialForcedCopyDepth)
+        RangeMutation(UpsertTransformerWithKeyProducer<T, S> transformer,
+                      Predicate<NodeFeatures<S>> needsForcedCopy,
+                      C mutationCursor,
+                      InMemoryBaseTrie<T>.ApplyState state,
+                      int initialForcedCopyDepth)
         {
             super(transformer, needsForcedCopy, mutationCursor, state);
             initialDepth = state.currentDepth;
