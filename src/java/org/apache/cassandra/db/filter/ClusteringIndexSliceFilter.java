@@ -19,6 +19,7 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.Partition;
@@ -136,7 +137,7 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
     @Override
     public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
     {
-        StringBuilder sb = new StringBuilder();
+        CqlBuilder sb = new CqlBuilder();
 
         sb.append(slices.toCQLString(metadata, rowFilter));
         appendOrderByToCQLString(metadata, sb);

@@ -19,7 +19,6 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.filter.*;
@@ -307,10 +306,6 @@ public class DataRange
         if (isUnrestricted(metadata))
             return rowFilter.toCQLString();
 
-        CqlBuilder builder = new CqlBuilder();
-
-        boolean needAnd = false;
-
         if (isSinglePartition())
         {
             /*
@@ -318,33 +313,30 @@ public class DataRange
              * key are the same. If that is the case, we want to print the query as an equality on the partition key
              * rather than a token range, as if it was a partition query, for better readability.
              */
-            builder.append(((DecoratedKey) startKey()).toCQLString(metadata));
-            needAnd = true;
+            return ((DecoratedKey) startKey()).toCQLString(metadata);
         }
         else
         {
+            StringBuilder builder = new StringBuilder();
             if (!startKey().isMinimum())
             {
-                appendClause(startKey(), builder, metadata, true, keyRange.isStartInclusive());
-                needAnd = true;
+                appendCQLClause(startKey(), builder, metadata, true, keyRange.isStartInclusive());
             }
             if (!stopKey().isMinimum())
             {
-                if (needAnd)
+                if (builder.length() > 0)
                     builder.append(" AND ");
-                appendClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive());
-                needAnd = true;
+                appendCQLClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive());
             }
+            return builder.toString();
         }
-
-        String filterString = clusteringIndexFilter.toCQLString(metadata, rowFilter);
-        if (!filterString.isEmpty())
-            builder.append(needAnd ? " AND " : "").append(filterString);
-
-        return builder.toString();
     }
 
-    private void appendClause(PartitionPosition pos, CqlBuilder builder, TableMetadata metadata, boolean isStart, boolean isInclusive)
+    private void appendCQLClause(PartitionPosition pos,
+                                 StringBuilder builder,
+                                 TableMetadata metadata,
+                                 boolean isStart,
+                                 boolean isInclusive)
     {
         builder.append("token(");
         builder.append(ColumnMetadata.toCQLString(metadata.partitionKeyColumns()));
@@ -373,22 +365,7 @@ public class DataRange
 
     // TODO: this is reused in SinglePartitionReadCommand but this should not really be here. Ideally
     // we need a more "native" handling of composite partition keys.
-    public static void appendKeyString(StringBuilder sb, AbstractType<?> type, ByteBuffer key)
-    {
-        if (type instanceof CompositeType)
-        {
-            CompositeType ct = (CompositeType)type;
-            ByteBuffer[] values = ct.split(key);
-            for (int i = 0; i < ct.subTypes().size(); i++)
-                sb.append(i == 0 ? "" : ", ").append(ct.subTypes().get(i).toCQLString(values[i]));
-        }
-        else
-        {
-            sb.append(type.toCQLString(key));
-        }
-    }
-
-    public static void appendKeyString(CqlBuilder builder, AbstractType<?> type, ByteBuffer key)
+    public static void appendKeyString(StringBuilder builder, AbstractType<?> type, ByteBuffer key)
     {
         if (type instanceof CompositeType)
         {

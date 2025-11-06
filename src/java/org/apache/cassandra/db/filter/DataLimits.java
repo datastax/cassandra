@@ -712,7 +712,7 @@ public abstract class DataLimits
             if (bytesLimit != NO_LIMIT)
                 limits.add("BYTES LIMIT " + bytesLimit);
             if (rowLimit != NO_LIMIT)
-                limits.add("ROWS LIMIT " + rowLimit);
+                limits.add("LIMIT " + rowLimit);
             if (perPartitionLimit != NO_LIMIT)
                 limits.add("PER PARTITION LIMIT " + perPartitionLimit);
 
