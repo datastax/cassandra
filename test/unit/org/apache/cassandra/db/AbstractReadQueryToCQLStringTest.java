@@ -823,12 +823,12 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         if (readQuery instanceof SinglePartitionReadCommand.Group)
         {
             SinglePartitionReadCommand.Group group = (SinglePartitionReadCommand.Group) readQuery;
-            return group.queries.stream().map(AbstractReadQuery::toCQLString).collect(Collectors.toList());
+            return group.queries.stream().map(AbstractReadQuery::toUnredactedCQLString).collect(Collectors.toList());
         }
         else
         {
             assertTrue(readQuery instanceof AbstractReadQuery);
-            return Collections.singletonList(((AbstractReadQuery) readQuery).toCQLString());
+            return Collections.singletonList(((AbstractReadQuery) readQuery).toUnredactedCQLString());
         }
     }
 
