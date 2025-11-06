@@ -646,12 +646,18 @@ public class OperationTest extends IndexingSchemaLoader
         }
 
         @Override
-        public String toString(boolean cql)
+        public String toCQLString()
         {
             return String.format("%s %s %s",
-                    cql ? column.name.toCQLString() : column.name.toString(),
+                    column.name.toCQLString(),
                     operator,
                     ByteBufferUtil.bytesToHex(value));
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("%s %s %s", column.name.toString(), operator, ByteBufferUtil.bytesToHex(value));
         }
     }
 
