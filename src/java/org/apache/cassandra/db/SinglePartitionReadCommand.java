@@ -1263,30 +1263,9 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @Override
-    protected void appendCQLWhereClause(CqlBuilder builder)
+    public void appendCQLWhereClause(CqlBuilder builder)
     {
-        builder.append(" WHERE ");
-
-        builder.append(partitionKey().toCQLString(metadata()));
-
-        // For queries with clustering columns in the rowFilter (e.g., ALLOW FILTERING or secondary index),
-        // remove those conditions to avoid duplication since they'll be handled by the clusteringIndexFilter
-        RowFilter adjustedFilter = rowFilter();
-        for (RowFilter.Expression expr : rowFilter().expressions())
-        {
-            if (metadata().clusteringColumns().contains(expr.column()))
-                adjustedFilter = adjustedFilter.without(expr);
-        }
-        
-        String filterString = clusteringIndexFilter().toCQLString(metadata(), adjustedFilter);
-        if (!filterString.isEmpty())
-        {
-            // Add AND if we have clustering restrictions or row filters. The filterString may contain
-            // clustering conditions, remaining non-clustering filters, and/or ORDER BY clause.
-            if (!clusteringIndexFilter().selectsAllPartition() || !rowFilter().isEmpty())
-                builder.append(" AND ");
-            builder.append(filterString);
-        }
+        SinglePartitionReadQuery.super.appendCQLWhereClause(builder);
     }
 
     @Override

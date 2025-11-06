@@ -224,9 +224,14 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return truncate ? truncateString(s) : s;
     }
 
+    /**
+     * Generates a CQL literal representing the specified binary value.
+     *
+     * @param bytes the value to convert to a CQL literal.
+     */
     public String toCQLString(ByteBuffer bytes)
     {
-        return asCQL3Type().toCQLLiteral(bytes);
+        return bytes == null ? "null" : asCQL3Type().toCQLLiteral(bytes);
     }
 
     public String toCQLString(ByteBuffer bytes, boolean truncate)
