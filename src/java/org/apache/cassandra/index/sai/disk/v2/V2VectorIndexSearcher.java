@@ -135,13 +135,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
     }
 
     @Override
-    public KeyRangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
-    {
-        PostingList results = searchPosting(context, exp, keyRange);
-        return toPrimaryKeyIterator(results, context);
-    }
-
-    private PostingList searchPosting(QueryContext context, Expression exp, AbstractBounds<PartitionPosition> keyRange) throws IOException
+    protected PostingList searchInternal(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);

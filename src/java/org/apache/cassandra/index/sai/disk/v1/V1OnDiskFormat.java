@@ -163,7 +163,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
         return perIndexComponents.isEmpty()
-               ? new EmptyIndex()
+               ? new EmptyIndex(sstableContext)
                : new V1SearchableIndex(sstableContext, perIndexComponents);
     }
 

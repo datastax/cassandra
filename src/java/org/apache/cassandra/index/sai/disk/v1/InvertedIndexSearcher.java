@@ -134,13 +134,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     }
 
     @SuppressWarnings("resource")
-    public KeyRangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
-    {
-        PostingList postingList = searchPosting(exp, context);
-        return toPrimaryKeyIterator(postingList, context);
-    }
-
-    private PostingList searchPosting(Expression exp, QueryContext context)
+    protected PostingList searchInternal(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);

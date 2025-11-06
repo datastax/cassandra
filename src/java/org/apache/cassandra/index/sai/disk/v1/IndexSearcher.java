@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PostingListKeyRangeIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.disk.v1.postings.ComplementPostingList;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.RowIdToPrimaryKeyWithSortKeyIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -96,7 +97,28 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * @param defer        create the iterator in a deferred state
      * @return {@link KeyRangeIterator} that matches given expression
      */
-    public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer) throws IOException;
+    public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer) throws IOException
+    {
+        if (expression.getOp().isNonEquality())
+        {
+            var negated = expression.negated();
+            var postingList = searchInternal(negated, keyRange, queryContext, defer);
+            // TODO handle the complexity of which row ids to use here.
+            int minSegmentRowId = metadata.toSegmentRowId(0);
+            int maxSegmentRowId = metadata.toSegmentRowId(primaryKeyMapFactory.count() - 1);
+
+            var complement = new ComplementPostingList(minSegmentRowId, maxSegmentRowId, postingList);
+            // TODO this needs to use min/max keys for the whole table
+            return toPrimaryKeyIterator(complement, queryContext);
+        }
+        else
+        {
+            var postingList = searchInternal(expression, keyRange, queryContext, defer);
+            return toPrimaryKeyIterator(postingList, queryContext);
+        }
+    }
+
+    protected abstract PostingList searchInternal(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer) throws IOException;
 
     /**
      * Order the rows by the given Orderer.  Used for ORDER BY clause when

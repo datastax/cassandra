@@ -95,7 +95,7 @@ public class SSTableIndex
         if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
         {
             logger.info("Creating dummy (empty) index searcher for sstable {} as SAI index reads are disabled", sstableContext.sstable.descriptor);
-            return new EmptyIndex();
+            return new EmptyIndex(sstableContext);
         }
 
         return perIndexComponents.onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
@@ -252,17 +252,10 @@ public class SSTableIndex
                                               QueryContext context,
                                               boolean defer) throws IOException
     {
-        KeyRangeIterator allKeys = allSSTableKeys(keyRange);
         if (TypeUtil.supportsRounding(expression.validator))
-        {
-            return allKeys;
-        }
+            return allSSTableKeys(keyRange);
         else
-        {
-            Expression negExpression = expression.negated();
-            KeyRangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer);
-            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
-        }
+            return searchableIndex.search(expression, keyRange, context, defer);
     }
 
     public KeyRangeIterator search(Expression expression,
