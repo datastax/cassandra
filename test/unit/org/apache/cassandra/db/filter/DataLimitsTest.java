@@ -89,17 +89,17 @@ public class DataLimitsTest
         String lastRetKeyStr = String.format("lastReturnedKey=%s", ByteBufferUtil.bytesToHex(lastReturnedKey));
         String lastRetKeyRemainingStr = "lastReturnedKeyRemaining=5";
 
-        assertThat(cqlLimits.toString()).contains("ROWS LIMIT 19").contains("PER PARTITION LIMIT 17").doesNotContain("BYTES LIMIT");
-        assertThat(cqlLimitsForPagingInRows.toString()).contains("ROWS LIMIT 13").contains("PER PARTITION LIMIT 17").doesNotContain("BYTES LIMIT");
-        assertThat(cqlLimitsForPagingInBytes.toString()).contains("BYTES LIMIT 13").contains("ROWS LIMIT 19").contains("PER PARTITION LIMIT 17");
-        assertThat(cqlLimitsForPagingInRowsWithLastRow.toString()).contains("ROWS LIMIT 13").contains("PER PARTITION LIMIT 17").doesNotContain("BYTES LIMIT").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
-        assertThat(cqlLimitsForPagingInBytesWithLastRow.toString()).contains("BYTES LIMIT 13").contains("ROWS LIMIT 19").contains("PER PARTITION LIMIT 17").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
+        assertThat(cqlLimits.toString()).contains("LIMIT 19").contains("PER PARTITION LIMIT 17").doesNotContain("BYTES LIMIT");
+        assertThat(cqlLimitsForPagingInRows.toString()).contains("LIMIT 13").contains("PER PARTITION LIMIT 17").doesNotContain("BYTES LIMIT");
+        assertThat(cqlLimitsForPagingInBytes.toString()).contains("BYTES LIMIT 13").contains("LIMIT 19").contains("PER PARTITION LIMIT 17");
+        assertThat(cqlLimitsForPagingInRowsWithLastRow.toString()).contains("LIMIT 13").contains("PER PARTITION LIMIT 17").doesNotContain("BYTES LIMIT").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
+        assertThat(cqlLimitsForPagingInBytesWithLastRow.toString()).contains("BYTES LIMIT 13").contains("LIMIT 19").contains("PER PARTITION LIMIT 17").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
 
-        assertThat(groupByLimits.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").doesNotContain("ROWS LIMIT").doesNotContain("BYTES LIMIT");
-        assertThat(groupByLimitsForPagingInRows.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").contains("ROWS LIMIT 13").doesNotContain("BYTES LIMIT");
-        assertThat(groupByLimitsForPagingInBytes.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").doesNotContain("ROWS LIMIT").contains("BYTES LIMIT 13");
-        assertThat(groupByLimitsForPagingInRowsWithLastRow.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").contains("ROWS LIMIT 13").doesNotContain("BYTES LIMIT").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
-        assertThat(groupByLimitsForPagingInBytesWithLastRow.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").doesNotContain("ROWS LIMIT").contains("BYTES LIMIT 13").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
+        assertThat(groupByLimits.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").doesNotContain("BYTES LIMIT");
+        assertThat(groupByLimitsForPagingInRows.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").contains("LIMIT 13").doesNotContain("BYTES LIMIT");
+        assertThat(groupByLimitsForPagingInBytes.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").contains("BYTES LIMIT 13");
+        assertThat(groupByLimitsForPagingInRowsWithLastRow.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").contains("LIMIT 13").doesNotContain("BYTES LIMIT").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
+        assertThat(groupByLimitsForPagingInBytesWithLastRow.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").contains("BYTES LIMIT 13").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
     }
 
     private void checkSerialization(MessagingService.Version version, DataLimits limits, String name, TableMetadata metadata)
