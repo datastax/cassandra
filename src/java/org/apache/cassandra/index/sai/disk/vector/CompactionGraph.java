@@ -523,7 +523,7 @@ public class CompactionGraph implements Closeable, Accountable
             return null;
         // Scale in place then create the NVQ
         VectorUtil.scale(globalMean, 1.0f / compressedVectors.count());
-        return NVQuantization.create(globalMean, 2); // todo use config
+        return NVQuantization.create(globalMean, NVQUtil.NUM_SUB_VECTORS);
     }
 
     private long writePostings(Version version, V5VectorPostingsWriter.RemappedPostings rp, IndexOutputWriter postingsOutput,
