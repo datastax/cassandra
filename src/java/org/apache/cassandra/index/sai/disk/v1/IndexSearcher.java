@@ -161,8 +161,6 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
 
         IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
                                                                         metadata.maxKey,
-                                                                        metadata.minSSTableRowId,
-                                                                        metadata.maxSSTableRowId,
                                                                         metadata.segmentRowIdOffset,
                                                                         queryContext,
                                                                         postingList);
@@ -179,8 +177,6 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
 
         IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
                                                                         metadata.maxKey,
-                                                                        metadata.minSSTableRowId,
-                                                                        metadata.maxSSTableRowId,
                                                                         metadata.segmentRowIdOffset,
                                                                         queryContext,
                                                                         null);
