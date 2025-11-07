@@ -452,7 +452,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // Write the NVQ feature. We could compute this at insert time, but because the graph allows for parallel
         // insertions, it would be a bit more complicated. All vectors are in memory, so the computation to build the
         // mean vector should be pretty fast, and this path is only used when we don't have an existing
-        // ProdcutQuantization or when we're using BQ.
+        // ProductQuantization or when we're using BQ.
         NVQuantization nvq = writeNvq ? NVQuantization.compute(vectorValues, NUM_SUB_VECTORS) : null;
 
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
