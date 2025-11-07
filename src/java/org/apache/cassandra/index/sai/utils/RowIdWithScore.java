@@ -29,6 +29,12 @@ public class RowIdWithScore extends RowIdWithMeta
     public final float score;
     public final boolean isScoreApproximate;
 
+    /**
+     * @param segmentRowId the row id
+     * @param score the score
+     * @param isScoreApproximate whether the score is approximate. If it is, the score will be recalculated from the live
+     * data when the row is read.
+     */
     public RowIdWithScore(int segmentRowId, float score, boolean isScoreApproximate)
     {
         super(segmentRowId);

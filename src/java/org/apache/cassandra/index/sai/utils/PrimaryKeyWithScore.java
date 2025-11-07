@@ -35,11 +35,20 @@ public class PrimaryKeyWithScore extends PrimaryKeyWithSortKey
     public final float indexScore;
     public final boolean isScoreApproximate;
 
+    /**
+     * Constructs a new {@link PrimaryKeyWithScore} for a memtable source. Memtables always have exact scores, so
+     * we do not parameterize the isScoreApproximate flag.
+     */
     public PrimaryKeyWithScore(IndexContext context, Memtable source, PrimaryKey primaryKey, float indexScore)
     {
         this(context, (Object) source, primaryKey, indexScore, false);
     }
 
+    /**
+     * Constructs a new {@link PrimaryKeyWithScore} for an sstable source. SStables may have approximate scores, so
+     * we parameterize the isScoreApproximate flag. Setting the isScoreApproximate flag to true will cause the score to be
+     * recalculated from the live data when the row is read.
+     */
     public PrimaryKeyWithScore(IndexContext context, SSTableId<?> source, PrimaryKey primaryKey, float indexScore, boolean isScoreApproximate)
     {
         this(context, (Object) source, primaryKey, indexScore, isScoreApproximate);

@@ -87,6 +87,7 @@ public class BM25Utils
 
         public PrimaryKeyWithSortKey primaryKey(IndexContext context, SSTableId<?> source, float score)
         {
+            // BM25 scores are exact.
             return new PrimaryKeyWithScore(context, source, pk, score, false);
         }
 
