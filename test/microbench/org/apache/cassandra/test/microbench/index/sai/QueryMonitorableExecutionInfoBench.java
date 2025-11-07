@@ -68,7 +68,7 @@ import org.openjdk.jmh.annotations.Warmup;
 public class QueryMonitorableExecutionInfoBench extends SAITester
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(QueryMonitorableExecutionInfoBench.class);
-    private static final Random RANDOM = new Random();
+    private static final Random RANDOM = new Random(1234);
 
     /**
      * Whether to enable the extended SAI execution info logging.
