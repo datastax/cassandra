@@ -37,6 +37,10 @@ import com.google.common.collect.Maps;
 
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -658,6 +662,15 @@ public class Paxos
     {
         SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
         TableMetadata metadata = readCommand.metadata();
+
+        // Register sensors for CAS operations so coordinator can aggregate replica sensor values
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+        {
+            Context context = Context.from(metadata);
+            sensors.registerSensor(context, Type.READ_BYTES);
+            sensors.registerSensor(context, Type.WRITE_BYTES);
+        }
 
         consistencyForConsensus.validateForCas(metadata.keyspace, clientState);
         consistencyForCommit.validateForCasCommit(Keyspace.open(metadata.keyspace).getReplicationStrategy(), metadata.keyspace, clientState);
