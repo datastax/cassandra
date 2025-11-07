@@ -181,6 +181,8 @@ public class KDTreeIndexBuilder
             metadataBuilder.setKeyRange(SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")).getToken()),
                                         SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")).getToken()));
             metadataBuilder.setNumRows(size);
+            // Because the primary key map has Long.MAX_VALUE rows, this is not the last segment.
+            metadataBuilder.setIsLastSegmentInSSTable(false);
             metadata = metadataBuilder.build();
         }
 

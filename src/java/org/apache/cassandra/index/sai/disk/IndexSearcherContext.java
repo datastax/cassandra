@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 public class IndexSearcherContext
@@ -32,6 +33,17 @@ public class IndexSearcherContext
     final PrimaryKey maximumKey;
     final long segmentRowIdOffset;
     final long maxPartitionOffset;
+
+    public IndexSearcherContext(SegmentMetadata metadata,
+                                QueryContext context,
+                                PostingList postingList) throws IOException
+    {
+        this(metadata.minKey,
+             metadata.maxKey,
+             metadata.segmentRowIdOffset,
+             context,
+             postingList);
+    }
 
     public IndexSearcherContext(PrimaryKey minimumKey,
                                 PrimaryKey maximumKey,

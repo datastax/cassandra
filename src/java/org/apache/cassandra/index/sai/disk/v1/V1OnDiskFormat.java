@@ -176,7 +176,7 @@ public class V1OnDiskFormat implements OnDiskFormat
         if (indexContext.isLiteral())
             // We filter because the CA format wrote maps acording to a different order than their abstract type.
             return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, Version.AA, true);
-        return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
+        return new KDTreeIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
     }
 
     @Override

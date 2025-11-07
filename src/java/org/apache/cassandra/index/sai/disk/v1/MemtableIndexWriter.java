@@ -211,6 +211,7 @@ public class MemtableIndexWriter implements PerIndexWriter
         metadataBuilder.setRowIdRange(terms.getMinSSTableRowId(), terms.getMaxSSTableRowId());
         metadataBuilder.setTermRange(terms.getMinTerm(), terms.getMaxTerm());
         metadataBuilder.setComponentsMetadata(indexMetas);
+        metadataBuilder.setIsLastSegmentInSSTable(true); // We only write one segment, so it must be the last one.
         SegmentMetadata metadata = metadataBuilder.build();
 
         try (MetadataWriter writer = new MetadataWriter(perIndexComponents))
@@ -250,7 +251,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                        null,
                                                        metadataMap,
                                                        rowMapping.size(),
-                                                       perIndexComponents.version());
+                                                       perIndexComponents.version(),
+                                                       true); // We only write one segment, so it must be the last one.
 
         try (MetadataWriter writer = new MetadataWriter(perIndexComponents))
         {

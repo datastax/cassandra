@@ -149,7 +149,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         boolean emptySegment = currentBuilder == null || currentBuilder.isEmpty();
         logger.debug("Flushing index {} with {}buffered data on sstable writer switched...", indexContext.getIndexName(), emptySegment ? "no " : "");
         if (!emptySegment)
-            flushSegment();
+            flushSegment(true);
     }
 
     @Override
@@ -169,7 +169,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             // parts are present but there is something still in memory, let's flush that inline
             if (!emptySegment)
             {
-                flushSegment();
+                flushSegment(true);
                 elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
                 logger.debug("Completed flush of final segment for SSTable {}. Duration: {} ms. Total elapsed: {} ms",
                              perIndexComponents.descriptor(),
@@ -266,7 +266,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
         else if (shouldFlush(sstableRowId))
         {
-            flushSegment();
+            flushSegment(false);
             currentBuilder = newSegmentBuilder(sstableRowId);
         }
 
@@ -297,7 +297,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         return reachMemoryLimit || currentBuilder.exceedsSegmentLimit(sstableRowId) || currentBuilder.requiresFlush();
     }
 
-    private void flushSegment() throws IOException
+    private void flushSegment(boolean isLastSegmentInSSTable) throws IOException
     {
         currentBuilder.awaitAsyncAdditions();
         if (currentBuilder.supportsAsyncAdd()
@@ -316,7 +316,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         try
         {
             long bytesAllocated = currentBuilder.totalBytesAllocated();
-            SegmentMetadata segmentMetadata = currentBuilder.flush();
+            SegmentMetadata segmentMetadata = currentBuilder.flush(isLastSegmentInSSTable);
             long flushMillis = Math.max(1, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
 
             if (segmentMetadata != null)

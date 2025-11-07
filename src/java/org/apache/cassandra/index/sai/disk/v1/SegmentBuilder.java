@@ -452,7 +452,7 @@ public abstract class SegmentBuilder
         minimumFlushBytes = limiter.limitBytes() / ACTIVE_BUILDER_COUNT.getAndIncrement();
     }
 
-    public SegmentMetadata flush() throws IOException
+    public SegmentMetadata flush(boolean isLastSegmentInSSTable) throws IOException
     {
         assert !flushed;
         flushed = true;
@@ -469,6 +469,7 @@ public abstract class SegmentBuilder
         metadataBuilder.setTermRange(minTerm, maxTerm);
         metadataBuilder.setNumRows(getRowCount());
         metadataBuilder.setTotalTermCount(totalTermCount);
+        metadataBuilder.setIsLastSegmentInSSTable(isLastSegmentInSSTable);
 
         flushInternal(metadataBuilder);
         return metadataBuilder.build();

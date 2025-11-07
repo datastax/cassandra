@@ -33,6 +33,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PostingListKeyRangeIterator;
@@ -64,6 +65,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  */
 public abstract class IndexSearcher implements Closeable, SegmentOrdering
 {
+    private final SSTableContext sstableContext;
     protected final PrimaryKeyMap.Factory primaryKeyMapFactory;
     final PerIndexFiles indexFiles;
     protected final SegmentMetadata metadata;
@@ -71,16 +73,35 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
 
     protected final ColumnFilter columnFilter;
 
-    protected IndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+    // These row ids are inclusive of all rows in the sstable, not just rows that are indexed. They are used
+    // to determine the first and last row ids for a non-equality query.
+    private final boolean isFirstSegment;
+    private final boolean isLastSegment;
+    private final int firstSegmentRowId;
+    private final int lastSegmentRowId;
+
+    protected IndexSearcher(SSTableContext sstableContext,
                             PerIndexFiles perIndexFiles,
                             SegmentMetadata segmentMetadata,
                             IndexContext indexContext)
     {
-        this.primaryKeyMapFactory = primaryKeyMapFactory;
+        this.sstableContext = sstableContext;
+        this.primaryKeyMapFactory = sstableContext.primaryKeyMapFactory();
         this.indexFiles = perIndexFiles;
         this.metadata = segmentMetadata;
         this.indexContext = indexContext;
         columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition()));
+
+        // TODO how do we deal with version AA here?? Is NEQ supported on AA? It seems like it can't be, but I haven't
+        // been able to confirm the behavior.
+
+        // The first segment's minimum row id and the last segment's maximum row id need to be adjusted when searching
+        // for non-equality queries because the SegmentMetadata's min/max row ids do not include rows that do not have
+        // values for the indexed column.
+        this.isFirstSegment = metadata.segmentRowIdOffset == 0;
+        this.isLastSegment = metadata.isLastSegmentInSSTable;
+        this.firstSegmentRowId = metadata.toSegmentRowId(isFirstSegment ? 0 : metadata.minSSTableRowId);
+        this.lastSegmentRowId = metadata.toSegmentRowId(isLastSegment ? primaryKeyMapFactory.count() - 1 : metadata.minSSTableRowId);
     }
 
     /**
@@ -99,23 +120,30 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      */
     public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer) throws IOException
     {
+        IndexSearcherContext searcherContext;
         if (expression.getOp().isNonEquality())
         {
-            var negated = expression.negated();
-            var postingList = searchInternal(negated, keyRange, queryContext, defer);
-            // TODO handle the complexity of which row ids to use here.
-            int minSegmentRowId = metadata.toSegmentRowId(0);
-            int maxSegmentRowId = metadata.toSegmentRowId(primaryKeyMapFactory.count() - 1);
+            var negatedPostingList = searchInternal(expression.negated(), keyRange, queryContext, defer);
+            var postingList = new ComplementPostingList(firstSegmentRowId, lastSegmentRowId, negatedPostingList);
+            if (postingList.isEmpty())
+                return KeyRangeIterator.empty();
 
-            var complement = new ComplementPostingList(minSegmentRowId, maxSegmentRowId, postingList);
-            // TODO this needs to use min/max keys for the whole table
-            return toPrimaryKeyIterator(complement, queryContext);
+            // Use the appropriate min and max keys for the first and last segments.
+            searcherContext = new IndexSearcherContext(isFirstSegment ? sstableContext.minSSTableKey() : metadata.minKey,
+                                                       isLastSegment ? sstableContext.maxSSTableKey() : metadata.maxKey,
+                                                       metadata.segmentRowIdOffset,
+                                                       queryContext,
+                                                       postingList);
         }
         else
         {
             var postingList = searchInternal(expression, keyRange, queryContext, defer);
-            return toPrimaryKeyIterator(postingList, queryContext);
+            if (postingList == null || postingList.isEmpty())
+                return KeyRangeIterator.empty();
+
+            searcherContext = new IndexSearcherContext(metadata, queryContext, postingList);
         }
+        return new PostingListKeyRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
     }
 
     protected abstract PostingList searchInternal(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer) throws IOException;
@@ -176,19 +204,6 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
                                         : v -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), v);
     }
 
-    protected KeyRangeIterator toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
-    {
-        if (postingList == null || postingList.size() == 0)
-            return KeyRangeIterator.empty();
-
-        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
-                                                                        metadata.maxKey,
-                                                                        metadata.segmentRowIdOffset,
-                                                                        queryContext,
-                                                                        postingList);
-        return new PostingListKeyRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
-    }
-
     protected CloseableIterator<PrimaryKeyWithSortKey> toMetaSortedIterator(CloseableIterator<? extends RowIdWithMeta> rowIdIterator, QueryContext queryContext) throws IOException
     {
         if (rowIdIterator == null || !rowIdIterator.hasNext())
@@ -197,9 +212,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
             return CloseableIterator.emptyIterator();
         }
 
-        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
-                                                                        metadata.maxKey,
-                                                                        metadata.segmentRowIdOffset,
+        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata,
                                                                         queryContext,
                                                                         null);
         var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();

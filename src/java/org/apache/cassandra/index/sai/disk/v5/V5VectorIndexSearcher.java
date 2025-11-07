@@ -38,7 +38,7 @@ public class V5VectorIndexSearcher extends V2VectorIndexSearcher
                                  IndexContext indexContext) throws IOException
     {
         // inherits from V2 instead of V3 because the difference between V5 and V3 is the OnDiskOrdinalsMap that they use
-        super(sstableContext.primaryKeyMapFactory(),
+        super(sstableContext,
               perIndexFiles,
               segmentMetadata,
               indexContext,

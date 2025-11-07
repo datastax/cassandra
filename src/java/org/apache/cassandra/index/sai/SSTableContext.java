@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.index.sai;
 
+import java.io.IOException;
+
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -43,17 +45,30 @@ public class SSTableContext extends SharedCloseableImpl
     public final PrimaryKey.Factory primaryKeyFactory;
     public final PrimaryKeyMap.Factory primaryKeyMapFactory;
 
+    // The first and last key for the whole sstable
+    private final PrimaryKey minSSTableKey;
+    private final PrimaryKey maxSSTableKey;
+
     private SSTableContext(SSTableReader sstable,
                            IndexComponents.ForRead perSSTableComponents,
                            PrimaryKey.Factory primaryKeyFactory,
                            PrimaryKeyMap.Factory primaryKeyMapFactory,
-                           Cleanup cleanup)
+                           Cleanup cleanup) throws IOException
     {
         super(cleanup);
         this.sstable = sstable;
         this.perSSTableComponents = perSSTableComponents;
         this.primaryKeyFactory = primaryKeyFactory;
         this.primaryKeyMapFactory = primaryKeyMapFactory;
+
+        // If we throw, the caller releases the sstable ref and runs the cleanup.
+        try (var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
+        {
+            PrimaryKey min = pkm.primaryKeyFromRowId(0);
+            PrimaryKey max = pkm.primaryKeyFromRowId(pkm.count() - 1);
+            minSSTableKey = pkm.primaryKeyFromRowId(0, min, max).loadDeferred();
+            maxSSTableKey = pkm.primaryKeyFromRowId(pkm.count() - 1, min, max).loadDeferred();
+        }
     }
 
     private SSTableContext(SSTableContext copy)
@@ -63,6 +78,8 @@ public class SSTableContext extends SharedCloseableImpl
         this.perSSTableComponents = copy.perSSTableComponents;
         this.primaryKeyFactory = copy.primaryKeyFactory;
         this.primaryKeyMapFactory = copy.primaryKeyMapFactory;
+        this.minSSTableKey = copy.minSSTableKey;
+        this.maxSSTableKey = copy.maxSSTableKey;
     }
 
     @SuppressWarnings("resource")
@@ -139,6 +156,16 @@ public class SSTableContext extends SharedCloseableImpl
     public PrimaryKeyMap.Factory primaryKeyMapFactory()
     {
         return primaryKeyMapFactory;
+    }
+
+    public PrimaryKey minSSTableKey()
+    {
+        return minSSTableKey;
+    }
+
+    public PrimaryKey maxSSTableKey()
+    {
+        return maxSSTableKey;
     }
 
     /**

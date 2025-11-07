@@ -43,6 +43,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
@@ -56,7 +57,6 @@ import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
 import org.apache.cassandra.index.sai.disk.vector.NodeQueueRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -105,13 +105,13 @@ public class V2VectorIndexSearcher extends IndexSearcher
     private final ThreadLocal<SparseBits> cachedBits;
     private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
 
-    protected V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+    protected V2VectorIndexSearcher(SSTableContext sstableContext,
                                     PerIndexFiles perIndexFiles,
                                     SegmentMetadata segmentMetadata,
                                     IndexContext indexContext,
                                     CassandraDiskAnn graph)
     {
-        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexContext);
+        super(sstableContext, perIndexFiles, segmentMetadata, indexContext);
         this.graph = graph;
         this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
         this.cachedBits = ThreadLocal.withInitial(SparseBits::new);
