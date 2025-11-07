@@ -64,10 +64,18 @@ public class SSTableContext extends SharedCloseableImpl
         // If we throw, the caller releases the sstable ref and runs the cleanup.
         try (var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
-            PrimaryKey min = pkm.primaryKeyFromRowId(0);
-            PrimaryKey max = pkm.primaryKeyFromRowId(pkm.count() - 1);
-            minSSTableKey = pkm.primaryKeyFromRowId(0, min, max).loadDeferred();
-            maxSSTableKey = pkm.primaryKeyFromRowId(pkm.count() - 1, min, max).loadDeferred();
+            if (pkm.count() == 0)
+            {
+                minSSTableKey = null;
+                maxSSTableKey = null;
+            }
+            else
+            {
+                PrimaryKey min = pkm.primaryKeyFromRowId(0);
+                PrimaryKey max = pkm.primaryKeyFromRowId(pkm.count() - 1);
+                minSSTableKey = pkm.primaryKeyFromRowId(0, min, max).loadDeferred();
+                maxSSTableKey = pkm.primaryKeyFromRowId(pkm.count() - 1, min, max).loadDeferred();
+            }
         }
     }
 
