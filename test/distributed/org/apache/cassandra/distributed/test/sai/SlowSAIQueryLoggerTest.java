@@ -182,8 +182,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             coordinator.execute(annQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
                               "SAI slow query metrics:",
-                              "sstablesHit: 0", // TODO: should be fixed by CNDB-15620
-                              "segmentsHit: 0", // TODO: should be fixed by CNDB-15620
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
                               "partitionsRead: 4",
                               "rowsFiltered: 4",
                               "rowsPreFiltered: 0",
@@ -205,8 +205,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                 coordinator.execute(annQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
                               "SAI slowest query metrics:",
-                              "sstablesHit: 0", // TODO: should be fixed by CNDB-15620
-                              "segmentsHit: 0", // TODO: should be fixed by CNDB-15620
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
                               "partitionsRead: 4",
                               "rowsFiltered: 4",
                               "rowsPreFiltered: 0",
@@ -228,8 +228,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
                               "SAI slow query metrics:",
-                              "sstablesHit: 0", // TODO: should be fixed by CNDB-15620
-                              "segmentsHit: 0", // TODO: should be fixed by CNDB-15620
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
                               "partitionsRead: 4",
                               "rowsFiltered: 5",
                               "rowsPreFiltered: 0",
@@ -251,8 +251,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                 coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
                               "SAI slowest query metrics:",
-                              "sstablesHit: 0", // TODO: should be fixed by CNDB-15620
-                              "segmentsHit: 0", // TODO: should be fixed by CNDB-15620
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
                               "partitionsRead: 4",
                               "rowsFiltered: 5",
                               "rowsPreFiltered: 0",
@@ -267,6 +267,52 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "shadowedPrimaryKeyCount: 1",
                               "SAI slowest query plan:",
                               "LiteralIndexScan");
+
+            // test single hybrid ANN query (WHERE + ORDER BY ANN) - this triggers orderResultsBy
+            mark = node.logs().mark();
+            String hybridAnnQuery = withKeyspace("SELECT * FROM %s.t WHERE n > 1 ORDER BY v ANN OF [1, 1] LIMIT 10");
+            coordinator.execute(hybridAnnQuery, ConsistencyLevel.ONE);
+            assertLogsContain(mark, node,
+                              "SAI slow query metrics:",
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
+                              "partitionsRead: 4",
+                              "rowsFiltered: 5",
+                              "rowsPreFiltered: 0",
+                              "trieSegmentsHit: 0",
+                              "bkdPostingListsHit: 0",
+                              "bkdSegmentsHit: 0",
+                              "bkdPostingsSkips: 0",
+                              "bkdPostingsDecodes: 0",
+                              "triePostingsSkips: 0",
+                              "triePostingsDecodes: 0",
+                              "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
+                              "shadowedPrimaryKeyCount: 1",
+                              "SAI slow query plan:",
+                              "AnnIndexScan");
+
+            // test aggregated hybrid ANN query
+            mark = node.logs().mark();
+            for (int i = 0; i < 2; i++)
+                coordinator.execute(hybridAnnQuery, ConsistencyLevel.ONE);
+            assertLogsContain(mark, node,
+                              "SAI slowest query metrics:",
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
+                              "partitionsRead: 4",
+                              "rowsFiltered: 5",
+                              "rowsPreFiltered: 0",
+                              "trieSegmentsHit: 0",
+                              "bkdPostingListsHit: 0",
+                              "bkdSegmentsHit: 0",
+                              "bkdPostingsSkips: 0",
+                              "bkdPostingsDecodes: 0",
+                              "triePostingsSkips: 0",
+                              "triePostingsDecodes: 0",
+                              "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
+                              "shadowedPrimaryKeyCount: 1",
+                              "SAI slowest query plan:",
+                              "AnnIndexScan");
 
             // test changing data between identical queries, making one of them slower than the other,
             // so we can check that only the execution info of the slowest query are reported
