@@ -306,15 +306,26 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             mark = node.logs().mark();
             String legacyIndexQuery = withKeyspace("SELECT * FROM %s.t WHERE l = 1");
             coordinator.execute(legacyIndexQuery, ConsistencyLevel.ONE);
-            assertLogsContain(mark, node, "1 operations were slow", "WHERE l = 1");
+            assertLogsContain(mark, node, "1 operations were slow", "WHERE l = ?");
             assertLogsDoNotContainSAIExecutionInfo(mark, node);
 
             // test with a regular, non-indexed query, there should be no SAI execution info
             mark = node.logs().mark();
             String regularQuery = withKeyspace("SELECT * FROM %s.t WHERE k = 1");
             coordinator.execute(regularQuery, ConsistencyLevel.ONE);
-            assertLogsContain(mark, node, "1 operations were slow", "WHERE k = 1");
+            assertLogsContain(mark, node, "1 operations were slow", "WHERE k = ?");
             assertLogsDoNotContainSAIExecutionInfo(mark, node);
+
+            // test that queries with the same relations and different values get grouped due to redaction
+            mark = node.logs().mark();
+            coordinator.execute(withKeyspace("SELECT * FROM %s.t WHERE n = 1"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("SELECT * FROM %s.t WHERE n = 2"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("SELECT * FROM %s.t WHERE n > 1"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("SELECT * FROM %s.t WHERE n > 2"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("SELECT * FROM %s.t WHERE n > 3"), ConsistencyLevel.ONE);
+            assertLogsContain(mark, node, "was slow 2 times", "WHERE n = ?", "SAI slowest query metrics:");
+            assertLogsContain(mark, node, "was slow 3 times", "WHERE n > ?", "SAI slowest query metrics:");
+            assertLogsDoNotContain(mark, node, "WHERE n = 1", "WHERE n = 2", "WHERE n > 1", "WHERE n > 2", "WHERE n > 3");
         }
     }
 
@@ -323,13 +334,18 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
         assertLogs(mark, node, AbstractIterableAssert::isNotEmpty, lines);
     }
 
+    private static void assertLogsDoNotContain(long mark, IInvokableInstance node, String... lines)
+    {
+        assertLogs(mark, node, AbstractIterableAssert::isEmpty, lines);
+    }
+
     private static void assertLogsDoNotContainSAIExecutionInfo(long mark, IInvokableInstance node)
     {
-        assertLogs(mark, node, AbstractIterableAssert::isEmpty,
-                   "SAI slow query metrics:",
-                   "SAI slow query plan:",
-                   "SAI slowest query metrics:",
-                   "SAI slowest query plan:");
+        assertLogsDoNotContain(mark, node,
+                               "SAI slow query metrics:",
+                               "SAI slow query plan:",
+                               "SAI slowest query metrics:",
+                               "SAI slowest query plan:");
     }
 
     private static void assertLogs(long mark, IInvokableInstance node, Consumer<ListAssert<String>> listAssert, String... lines)
