@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -31,6 +32,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.IntFunction;
 import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -130,7 +132,6 @@ public class CompactionGraph implements Closeable, Accountable
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
-    private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
     private int lastRowId = -1;
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
@@ -235,25 +236,13 @@ public class CompactionGraph implements Closeable, Accountable
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
                       + SAICodecUtils.headerSize();
 
-        if (NVQUtil.shouldWriteNVQ(dimension, context.version()))
-        {
-            // When NVQ is enabled, we don't create the writer until graph construction is complete.
-            writer = null;
-            globalMean = vts.createFloatVector(new float[dimension]);
-        }
-        else
-        {
-            // placeholder writer, will be replaced at flush time when we finalize the index contents
-            writer = createTermsWriter(new OrdinalMapper.IdentityMapper(maxRowsInGraph), new InlineVectors(dimension));
-            writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
-            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()), perIndexComponents.version());
-            // When NVQ is not enabled, we don't track of the global mean
-            globalMean = null;
-        }
+        globalMean = NVQUtil.shouldWriteNVQ(dimension, context.version()) ? vts.createFloatVector(new float[dimension])
+                                                                          : null;
     }
 
-    private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper, Feature feature) throws IOException
+    private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper, NVQuantization nvq) throws IOException
     {
+        var feature = nvq != null ? new NVQ(nvq) : new InlineVectors(dimension);
         return new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                .withStartOffset(termsOffset)
                .with(feature)
@@ -266,7 +255,6 @@ public class CompactionGraph implements Closeable, Accountable
     public void close() throws IOException
     {
         // this gets called in `finally` blocks, so use closeQuietly to avoid generating additional exceptions
-        FileUtils.closeQuietly(writer);
         FileUtils.closeQuietly(postingsMap);
         FileUtils.closeQuietly(vectorsByOrdinalBufferedWriter);
         Files.delete(postingsFile.toJavaIOFile().toPath());
@@ -366,23 +354,18 @@ public class CompactionGraph implements Closeable, Accountable
                 pqFinetuned = true;
             }
 
-            // When NVQ is enabled, we write the quantized vectors to disk later. When NVQ is not enabled, we write
-            // the full precision vectors to disk eagerly.
+            // Update the global mean, if we're tracking it (which is currently only done when we will write using NVQ)
             if (globalMean != null)
-            {
-                // Skip to the correct position (ensuring that we only skip forward)
-                long targetPosition = ordinal * Float.BYTES * (long) dimension;
-                assert vectorsByOrdinalBufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + vectorsByOrdinalBufferedWriter.position() + " > targetPosition=" + targetPosition;
-                vectorsByOrdinalBufferedWriter.seek(targetPosition);
-                for (int i = 0; i < dimension; i++)
-                    vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
-                // Update the global mean
                 VectorUtil.addInPlace(globalMean, vector);
-            }
-            else
-            {
-                writer.writeInline(ordinal, Feature.singleState(FeatureId.INLINE_VECTORS, new InlineVectors.State(vector)));
-            }
+
+            // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
+            // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
+            // with the posting list logic.
+            long targetPosition = ordinal * Float.BYTES * (long) dimension;
+            assert vectorsByOrdinalBufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + vectorsByOrdinalBufferedWriter.position() + " > targetPosition=" + targetPosition;
+            vectorsByOrdinalBufferedWriter.seek(targetPosition);
+            for (int i = 0; i < dimension; i++)
+                vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
 
             // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
             while (compressedVectors.count() < ordinal)
@@ -419,17 +402,8 @@ public class CompactionGraph implements Closeable, Accountable
 
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
-        if (writer != null)
-        {
-            // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
-            writer.writeHeader(builder.getGraph().getView());
-            writer.close();
-        }
-        else
-        {
-            // Close the temporary file so the reader will know it is the end of the file.
-            vectorsByOrdinalBufferedWriter.close();
-        }
+        // Close the temporary file so the reader will know it is the end of the file.
+        vectorsByOrdinalBufferedWriter.close();
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -477,22 +451,9 @@ public class CompactionGraph implements Closeable, Accountable
                                                                       builder.getGraph().size(),
                                                                       postingsMap);
                 ordinalMapper.set(rp.ordinalMapper);
-
-                if (globalMean == null)
+                try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
                 {
-                    try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createIndexBuildTimeFileHandle();
-                         var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset);
-                         var vectorValues = index.getView())
-                    {
-                        return writePostings(version, rp, postingsOutput, vectorValues);
-                    }
-                }
-                else
-                {
-                    try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
-                    {
-                        return writePostings(version, rp, postingsOutput, vectorValues);
-                    }
+                    return writePostings(version, rp, postingsOutput, vectorValues);
                 }
             });
 
@@ -507,18 +468,29 @@ public class CompactionGraph implements Closeable, Accountable
             // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();
 
-            if (globalMean != null)
+            // Null if we not using nvq
+            NVQuantization nvq = createNVQ();
+            long termsLength;
+            try(var writer = createTermsWriter(ordinalMapper.get(), nvq))
             {
-                // Scale in place then create the NVQ
-                VectorUtil.scale(globalMean, 1.0f / compressedVectors.count());
-                NVQuantization nvq = NVQuantization.create(globalMean, 2);
-                writer = createTermsWriter(ordinalMapper.get(), new NVQ(nvq));
+                writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
+                SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()), perIndexComponents.version());
                 // Use thread local readers as we do not control which thread jvector uses
                 try (var threadLocalReaders = ExplicitThreadLocal.withInitial(() -> new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension)))
                 {
-                    var supplier = Feature.singleStateFactory(FeatureId.NVQ_VECTORS, ordinal -> {
-                        return new NVQ.State(nvq.encode(threadLocalReaders.get().getVector(ordinal)));
-                    });
+                    EnumMap<FeatureId, IntFunction<Feature.State>> supplier;
+                    if (nvq != null)
+                    {
+                        supplier = Feature.singleStateFactory(FeatureId.NVQ_VECTORS, ordinal -> {
+                            return new NVQ.State(nvq.encode(threadLocalReaders.get().getVector(ordinal)));
+                        });
+                    }
+                    else
+                    {
+                        supplier = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, ordinal -> {
+                            return new InlineVectors.State(threadLocalReaders.get().getVector(ordinal));
+                        });
+                    }
                     writer.write(supplier);
                 }
                 catch (Exception e)
@@ -526,18 +498,11 @@ public class CompactionGraph implements Closeable, Accountable
                     // Closing threadLocalReaders can throw Exception, but we don't expect it to.
                     throw new RuntimeException(e);
                 }
-            }
-            else
-            {
-                // Recreate the writer with the final ordinalMapper
-                writer = createTermsWriter(ordinalMapper.get(), new InlineVectors(dimension));
-                writer.write(Map.of());
-            }
 
-            SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
-            logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
-            long termsLength = writer.getOutput().position() - termsOffset;
-
+                SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
+                logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
+                termsLength = writer.getOutput().position() - termsOffset;
+            }
             // write remaining footers/checksums
             SAICodecUtils.writeFooter(pqOutput);
             SAICodecUtils.writeFooter(postingsOutput);
@@ -549,6 +514,16 @@ public class CompactionGraph implements Closeable, Accountable
         {
             throw new RuntimeException(e);
         }
+    }
+
+    private NVQuantization createNVQ()
+    {
+        // If we don't have a global mean, we are not using NVQ
+        if (globalMean == null)
+            return null;
+        // Scale in place then create the NVQ
+        VectorUtil.scale(globalMean, 1.0f / compressedVectors.count());
+        return NVQuantization.create(globalMean, 2); // todo use config
     }
 
     private long writePostings(Version version, V5VectorPostingsWriter.RemappedPostings rp, IndexOutputWriter postingsOutput,
