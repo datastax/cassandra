@@ -655,7 +655,7 @@ public class CompactionGraph implements Closeable, Accountable
         @Override
         public RandomAccessVectorValues copy()
         {
-            return this;
+            return new OnDiskVectorValues(reader.getFile(), dimension);
         }
 
         @Override
