@@ -47,6 +47,7 @@ import static org.apache.cassandra.utils.concurrent.BlockingQueues.newBlockingQu
  * We also log timed out operations, see CASSANDRA-7392.
  * Since CASSANDRA-12403 we also log queries that were slow.
  */
+@VisibleForTesting
 public class MonitoringTask
 {
     private static final String LINE_SEPARATOR = CassandraRelevantProperties.LINE_SEPARATOR.getString();
@@ -71,7 +72,6 @@ public class MonitoringTask
     private final OperationsQueue failedOperationsQueue;
     private final OperationsQueue slowOperationsQueue;
     private long approxLastLogTimeNanos;
-
 
     @VisibleForTesting
     static MonitoringTask make(int reportIntervalMillis, int maxTimedoutOperations)
@@ -328,11 +328,11 @@ public class MonitoringTask
          * this is set lazily as it takes time to build the query CQL */
         private String name;
 
-        Operation(Monitorable operation, long failedAtNanos)
+        Operation(Monitorable operation, long nowNanos)
         {
             this.operation = operation;
             numTimesReported = 1;
-            totalTimeNanos = failedAtNanos - operation.creationTimeNanos();
+            totalTimeNanos = nowNanos - operation.creationTimeNanos();
             minTime = totalTimeNanos;
             maxTime = totalTimeNanos;
         }
@@ -353,6 +353,8 @@ public class MonitoringTask
         }
 
         public abstract String getLogMessage();
+
+        protected abstract Monitorable.ExecutionInfo executionInfo();
     }
 
     /**
@@ -383,35 +385,64 @@ public class MonitoringTask
                                      NANOSECONDS.toMillis(operation.timeoutNanos()),
                                      operation.isCrossNode() ? "msec/cross-node" : "msec");
         }
+
+        @Override
+        protected Monitorable.ExecutionInfo executionInfo()
+        {
+            return Monitorable.ExecutionInfo.EMPTY;
+        }
     }
 
     /**
      * An operation (query) that was reported as slow.
      */
-    private final static class SlowOperation extends Operation
+    @VisibleForTesting
+    public final static class SlowOperation extends Operation
     {
-        SlowOperation(Monitorable operation, long failedAt)
+        /** Any specific execution info of the slowest operation among the aggregated operations. */
+        private Monitorable.ExecutionInfo slowestOperationExecutionInfo;
+
+        @VisibleForTesting
+        public SlowOperation(Monitorable operation, long slowAtNanos)
         {
-            super(operation, failedAt);
+            super(operation, slowAtNanos);
+            slowestOperationExecutionInfo = operation.executionInfo();
         }
 
         public String getLogMessage()
         {
             if (numTimesReported == 1)
-                return String.format("<%s>, time %d msec - slow timeout %d %s",
+                return String.format("<%s>, time %d msec - slow timeout %d %s%s",
                                      name(),
                                      NANOSECONDS.toMillis(totalTimeNanos),
                                      NANOSECONDS.toMillis(operation.slowTimeoutNanos()),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     operation.isCrossNode() ? "msec/cross-node" : "msec",
+                                     slowestOperationExecutionInfo.toLogString(true));
             else
-                return String.format("<%s>, was slow %d times: avg/min/max %d/%d/%d msec - slow timeout %d %s",
+                return String.format("<%s>, was slow %d times: avg/min/max %d/%d/%d msec - slow timeout %d %s%s",
                                      name(),
                                      numTimesReported,
                                      NANOSECONDS.toMillis(totalTimeNanos/ numTimesReported),
                                      NANOSECONDS.toMillis(minTime),
                                      NANOSECONDS.toMillis(maxTime),
                                      NANOSECONDS.toMillis(operation.slowTimeoutNanos()),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     operation.isCrossNode() ? "msec/cross-node" : "msec",
+                                     slowestOperationExecutionInfo.toLogString(false));
+        }
+
+        @Override
+        protected Monitorable.ExecutionInfo executionInfo()
+        {
+            return slowestOperationExecutionInfo;
+        }
+
+        @Override
+        void add(Operation operation)
+        {
+            if (operation.maxTime > maxTime)
+                slowestOperationExecutionInfo = operation.executionInfo();
+
+            super.add(operation);
         }
     }
 }

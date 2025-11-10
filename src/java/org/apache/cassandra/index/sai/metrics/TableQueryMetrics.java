@@ -108,7 +108,7 @@ public class TableQueryMetrics
      */
     public void record(QueryContext context, ReadCommand command)
     {
-        Snapshot snapshot = new Snapshot(context);
+        QueryContext.Snapshot snapshot = context.snapshot();
         perTableMetrics.values().forEach(m -> m.record(snapshot, command));
         perQueryMetrics.values().forEach(m -> m.record(snapshot, command));
 
@@ -169,13 +169,13 @@ public class TableQueryMetrics
             this.filter = filter;
         }
 
-        public final void record(Snapshot snapshot, ReadCommand command)
+        public final void record(QueryContext.Snapshot snapshot, ReadCommand command)
         {
             if (filter.test(command))
                 record(snapshot);
         }
 
-        protected abstract void record(Snapshot snapshot);
+        protected abstract void record(QueryContext.Snapshot snapshot);
 
         public static String makeName(String scope, QueryKind queryKind)
         {
@@ -217,7 +217,7 @@ public class TableQueryMetrics
         }
 
         @Override
-        public void record(Snapshot snapshot)
+        public void record(QueryContext.Snapshot snapshot)
         {
             if (snapshot.queryTimeouts > 0)
             {
@@ -311,7 +311,7 @@ public class TableQueryMetrics
         }
 
         @Override
-        public void record(Snapshot snapshot)
+        public void record(QueryContext.Snapshot snapshot)
         {
             queryLatency.update(snapshot.totalQueryTimeNs, TimeUnit.NANOSECONDS);
             sstablesHit.update(snapshot.sstablesHit);
@@ -345,61 +345,6 @@ public class TableQueryMetrics
 
             shadowedKeysScannedHistogram.update(snapshot.shadowedPrimaryKeyCount);
             postFilteringReadLatency.update(snapshot.postFilteringReadLatency, TimeUnit.NANOSECONDS);
-        }
-    }
-
-    /**
-     * A snapshot of all relevant metrics in a {@link QueryContext} at a specific point in time.
-     * This class memoizes the values of those metrics so that we can record them later in the
-     * {@link AbstractQueryMetrics#record(Snapshot)} method of as many {@link AbstractQueryMetrics}
-     * instances as needed, without calculating the same values once and again.
-     */
-    public static class Snapshot
-    {
-        private final long totalQueryTimeNs;
-        private final long sstablesHit;
-        private final long segmentsHit;
-        private final long partitionsRead;
-        private final long rowsFiltered;
-        private final long rowsPreFiltered;
-        private final long trieSegmentsHit;
-        private final long bkdPostingListsHit;
-        private final long bkdSegmentsHit;
-        private final long bkdPostingsSkips;
-        private final long bkdPostingsDecodes;
-        private final long triePostingsSkips;
-        private final long triePostingsDecodes;
-        private final long queryTimeouts;
-        private final long annGraphSearchLatency;
-        private final long shadowedPrimaryKeyCount;
-        private final long postFilteringReadLatency;
-        private final QueryContext.FilterSortOrder filterSortOrder;
-
-        /**
-         * Creates a snapshot of all long-valued metrics from the given QueryContext.
-         *
-         * @param context the QueryContext to snapshot
-         */
-        public Snapshot(QueryContext context)
-        {
-            totalQueryTimeNs = context.totalQueryTimeNs();
-            sstablesHit = context.sstablesHit();
-            segmentsHit = context.segmentsHit();
-            partitionsRead = context.partitionsRead();
-            rowsFiltered = context.rowsFiltered();
-            rowsPreFiltered = context.rowsPreFiltered();
-            trieSegmentsHit = context.trieSegmentsHit();
-            bkdPostingListsHit = context.bkdPostingListsHit();
-            bkdSegmentsHit = context.bkdSegmentsHit();
-            bkdPostingsSkips = context.bkdPostingsSkips();
-            bkdPostingsDecodes = context.bkdPostingsDecodes();
-            triePostingsSkips = context.triePostingsSkips();
-            triePostingsDecodes = context.triePostingsDecodes();
-            queryTimeouts = context.queryTimeouts();
-            annGraphSearchLatency = context.annGraphSearchLatency();
-            shadowedPrimaryKeyCount = context.getShadowedPrimaryKeyCount();
-            postFilteringReadLatency = context.getPostFilteringReadLatency();
-            filterSortOrder = context.filterSortOrder();
         }
     }
 }
