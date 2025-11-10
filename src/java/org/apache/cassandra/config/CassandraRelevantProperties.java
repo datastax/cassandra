@@ -785,6 +785,13 @@ public enum CassandraRelevantProperties
 
     SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
     SAI_REDUCE_TOPK_ACROSS_SSTABLES("cassandra.sai.reduce_topk_across_sstables", "true"),
+
+    /**
+     * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
+     * This execution info includes the query metrics and the query plan of the slow queries.
+     */
+    SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
+
     SAI_TEST_DISABLE_TIMEOUT("cassandra.sai.test.timeout_disabled", "false"),
     SAI_TEST_LAST_VALID_SEGMENTS("cassandra.sai.test_last_valid_segments", "-1"),
     SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
@@ -845,6 +852,16 @@ public enum CassandraRelevantProperties
     SKIP_PAXOS_STATE_REBUILD("cassandra.skip_paxos_state_rebuild"),
     /** Whether to skip rewriting hints when original host id left the cluster */
     SKIP_REWRITING_HINTS_ON_HOST_LEFT("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left"),
+
+    /** Defines the interval for reporting any operations that have timed out.  */
+    SLOW_QUERY_LOG_MONITORING_REPORT_INTERVAL_IN_MS("cassandra.monitoring_report_interval_ms", "5000"),
+
+    /**
+     * Defines the maximum number of unique timed out queries that will be reported in the logs.
+     * Use a negative number to remove any limit.
+     */
+    SLOW_QUERY_LOG_MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
+
     /** snapshots ttl cleanup initial delay in seconds */
     SNAPSHOT_CLEANUP_INITIAL_DELAY_SECONDS("cassandra.snapshot.ttl_cleanup_initial_delay_seconds", "5"),
     /** snapshots ttl cleanup period in seconds */
