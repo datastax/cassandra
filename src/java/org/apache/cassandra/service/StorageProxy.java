@@ -2106,10 +2106,15 @@ public class StorageProxy implements StorageProxyMBean
                                                                                       group.queries,
                                                                                       consistencyLevel);
         // Request sensors are utilized to track usages from replicas serving a read request
-        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
+        // Check if RequestSensors already exists (e.g., from CAS operation) and reuse it
+        RequestSensors requestSensors = RequestTracker.instance.get();
+        if (requestSensors == null)
+        {
+            requestSensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
+            RequestTracker.instance.set(requestSensors);
+        }
         Context context = Context.from(group.metadata());
         requestSensors.registerSensor(context, Type.READ_BYTES);
-        RequestTracker.instance.set(requestSensors);
         PartitionIterator partitions = read(group, consistencyLevel, clientState, requestTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
         return PartitionIterators.doOnClose(partitions, readTracker::onDone);
