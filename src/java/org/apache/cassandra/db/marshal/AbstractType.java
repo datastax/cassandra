@@ -191,7 +191,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public String toCQLString(ByteBuffer bytes, boolean redact)
     {
         if (redact)
-            return "?";
+            return RedactionUtil.redact(bytes, isValueLengthFixed());
 
         if (bytes == null)
             return "null";
