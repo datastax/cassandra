@@ -283,30 +283,38 @@ abstract public class Plan
      */
     protected abstract double estimateSelectivity();
 
+    public final String toUnredactedStringRecursive()
+    {
+        return toStringRecursive(false, null);
+    }
+
     /**
      * Formats the whole plan as a pretty tree, redacting the queried column values.
      */
     public final String toRedactedStringRecursive()
     {
-        return toStringRecursive(true);
+        return toRedactedStringRecursive(null);
     }
 
     /**
-     * Formats the whole plan as a pretty tree, not redacting the queried column values.
+     * Formats the whole plan as a pretty tree, redacting the queried column values, with indentation.
+     *
+     * @param indent a string used for indentation
      */
-    public final String toUnredactedStringRecursive()
+    public final String toRedactedStringRecursive(String indent)
     {
-        return toStringRecursive(false);
+        return toStringRecursive(true, indent);
     }
 
     /**
-     * Formats the whole plan as a pretty tree
+     * Formats the whole plan as a pretty tree, with indentation
      *
      * @param redact whether to redact the queried column values.
+     * @param indent a string used for indentation
      */
-    private final String toStringRecursive(boolean redact)
+    private String toStringRecursive(boolean redact, String indent)
     {
-        TreeFormatter<Plan> formatter = new TreeFormatter<>(plan -> plan.toString(redact), Plan::subplans);
+        TreeFormatter<Plan> formatter = new TreeFormatter<>(plan -> plan.toString(redact), Plan::subplans, indent);
         return formatter.format(this);
     }
 
