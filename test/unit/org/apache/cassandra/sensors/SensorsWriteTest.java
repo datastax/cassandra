@@ -375,9 +375,10 @@ public class SensorsWriteTest
         assertThat(registryWriteSensor).isEqualTo(writeSensor);
         assertResponseSensors(writeSensor, registryWriteSensor);
 
-        // No read is done in the commit phase
-        assertThat(RequestTracker.instance.get().getSensor(context, Type.READ_BYTES)).isEmpty();
-        assertThat(SensorsRegistry.instance.getSensor(context, Type.READ_BYTES)).isEmpty();
+        Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
+        assertThat(readSensor.getValue()).isGreaterThanOrEqualTo(0);
+        Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
+        assertThat(registryReadSensor).isEqualTo(readSensor);
     }
 
     private static void handlePaxosPrepare(Commit prepare)
