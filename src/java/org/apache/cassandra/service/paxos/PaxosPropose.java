@@ -37,6 +37,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
@@ -159,6 +160,11 @@ public class PaxosPropose<OnDone extends Consumer<? super PaxosPropose.Status>> 
         this.participants = participants;
         this.required = required;
         this.onDone = onDone;
+    }
+
+    public TableMetadata getTableMetadata()
+    {
+        return proposal.update.metadata();
     }
 
     /**
