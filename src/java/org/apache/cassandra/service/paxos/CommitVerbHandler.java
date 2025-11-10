@@ -42,6 +42,9 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         // Initialize the sensor and set ExecutorLocals
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
         Context context = Context.from(message.payload.update.metadata());
+
+        // Commit phase reads from the Paxos table and writes the proposal to the user table
+        sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
@@ -52,7 +55,8 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
 
-        // no need to calculate outbound internode bytes because the response is NoPayload
+        // No need to calculate outbound internode bytes for NoPayload response
+        sensors.syncAllSensors();
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }

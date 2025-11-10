@@ -38,6 +38,13 @@ import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Paxos.Participants;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.concurrent.ConditionAsConsumer;
@@ -123,6 +130,11 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
         this.required = participants.requiredFor(consistencyForCommit);
         if (required == 0)
             onDone.accept(status());
+    }
+
+    public TableMetadata getTableMetadata()
+    {
+        return commit.update.metadata();
     }
 
     /**
@@ -304,12 +316,33 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
         @Override
         public void doVerb(Message<Agreed> message)
         {
+            // Initialize the sensor and set ExecutorLocals
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
+            Context context = Context.from(message.payload.update.metadata());
+
+            // Commit phase writes the proposal to the table, so a read sensor is registered in addition to the write sensor
+            sensors.registerSensor(context, Type.READ_BYTES);
+            sensors.registerSensor(context, Type.WRITE_BYTES);
+            sensors.registerSensor(context, Type.INTERNODE_BYTES);
+            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+            RequestTracker.instance.set(sensors);
+
             NoPayload response = execute(message.payload, message.from());
-            // NOTE: for correctness, this must be our last action, so that we cannot throw an error and send both a response and a failure response
-            if (response == null)
-                MessagingService.instance().respondWithFailure(UNKNOWN, message);
+
+            // calculate outbound internode bytes before adding the sensor to the response
+            if (response != null)
+            {
+                Message.Builder<NoPayload> reply = message.responseWithBuilder(response);
+                int size = reply.currentPayloadSize(MessagingService.current_version);
+                sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+                sensors.syncAllSensors();
+                SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
+                MessagingService.instance().send(reply.build(), message.from());
+            }
             else
-                MessagingService.instance().respond(response, message);
+            {
+                MessagingService.instance().respondWithFailure(UNKNOWN, message);
+            }
         }
 
         private static NoPayload execute(Agreed agreed, InetAddressAndPort from)

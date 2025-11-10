@@ -318,6 +318,11 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
         this.onDone = onDone;
     }
 
+    public TableMetadata getTableMetadata()
+    {
+        return request.table;
+    }
+
     private boolean hasInProgressProposal()
     {
         // no need to commit a no-op; either it
