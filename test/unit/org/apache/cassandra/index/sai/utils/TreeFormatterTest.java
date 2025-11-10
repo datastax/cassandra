@@ -83,4 +83,26 @@ public class TreeFormatterTest
                      "    child 2 line 2\n", formattedTree);
     }
 
+    @Test
+    public void formatTreeWithIndent()
+    {
+        TreeNode root = new TreeNode("root", List.of(
+        new TreeNode("child 1", List.of(
+        new TreeNode("child 1a", Collections.emptyList()),
+        new TreeNode("child 1b", Collections.emptyList()))),
+        new TreeNode("child 2", List.of(
+        new TreeNode("child 2a", Collections.emptyList()),
+        new TreeNode("child 2b", Collections.emptyList())))));
+
+        TreeFormatter<TreeNode> formatter = new TreeFormatter<>(t -> t.label, t -> t.children, "\t");
+        String formattedTree = formatter.format(root);
+
+        assertEquals("\troot\n" +
+                     "\t ├─ child 1\n" +
+                     "\t │   ├─ child 1a\n" +
+                     "\t │   └─ child 1b\n" +
+                     "\t └─ child 2\n" +
+                     "\t     ├─ child 2a\n" +
+                     "\t     └─ child 2b\n", formattedTree);
+    }
 }

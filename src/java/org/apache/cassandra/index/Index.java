@@ -49,6 +49,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -833,6 +834,18 @@ public interface Index
          * @return partitions from the base table matching the criteria of the search.
          */
         UnfilteredPartitionIterator search(ReadExecutionController executionController);
+
+        /**
+         * Returns a supplier for the {@link Monitorable.ExecutionInfo} for this query, to be used by
+         * {@link ReadCommand#executionInfo()} at the end of the query to collect details about the query execution in
+         * case it is considered too slow.
+         *
+         * @return a supplier for the execution info for this query
+         */
+        default Supplier<Monitorable.ExecutionInfo> monitorableExecutionInfo()
+        {
+            return Monitorable.ExecutionInfo.EMPTY_SUPPLIER;
+        }
     }
 
     /**
