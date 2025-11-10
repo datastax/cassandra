@@ -58,6 +58,7 @@ public class Component
         public final String repr;
         public final boolean streamable;
         private final Component singleton;
+        private final Pattern pattern;
 
         @SuppressWarnings("rawtypes")
         public final Class<? extends SSTableFormat> formatClass;
@@ -96,6 +97,7 @@ public class Component
             this.id = typesCollector.size();
             this.formatClass = formatClass == null ? SSTableFormat.class : formatClass;
             this.singleton = isSingleton ? new Component(this) : null;
+            this.pattern = (repr != null) ? Pattern.compile(repr) : null;
 
             registerType(this);
         }
@@ -124,9 +126,13 @@ public class Component
         @VisibleForTesting
         public static Type fromRepresentation(String repr, SSTableFormat<?, ?> format)
         {
+            if (repr == null)
+                throw new IllegalArgumentException("Component representation cannot be null");
+
             for (Type type : Type.all)
             {
-                if (type.repr != null && Pattern.matches(type.repr, repr) && type.formatClass.isAssignableFrom(format.getClass()))
+                if (type.pattern != null && type.pattern.matcher(repr).matches() 
+                        && type.formatClass.isAssignableFrom((null != format ? format.getClass() : SSTableFormat.class)))
                     return type;
             }
             return Types.CUSTOM;
