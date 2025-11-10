@@ -29,6 +29,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.Component.Type;
 import org.apache.cassandra.io.sstable.SSTableFormatTest.Format1;
 import org.apache.cassandra.io.sstable.SSTableFormatTest.Format2;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.mockito.Mockito;
@@ -36,6 +37,10 @@ import org.mockito.Mockito;
 import static org.apache.cassandra.io.sstable.SSTableFormatTest.factory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 
 public class ComponentTest
 {
@@ -126,5 +131,137 @@ public class ComponentTest
 
         assertThat(Sets.newHashSet(Component.getSingletonsFor(DatabaseDescriptor.getSSTableFormats().get(FIRST)))).isEqualTo(s1);
         assertThat(Sets.newHashSet(Component.getSingletonsFor(DatabaseDescriptor.getSSTableFormats().get("second")))).isEqualTo(s2);
+    }
+
+    @Test
+    public void testFromRepresentationSame()
+    {
+        // Test exact string matches for standard components
+        assertSame(SSTableFormat.Components.Types.DATA, Component.Type.fromRepresentation("Data.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.DATA, Component.Type.fromRepresentation("Data.db", null));
+        assertSame(BtiFormat.Components.Types.PARTITION_INDEX, Component.Type.fromRepresentation("Partitions.db", BtiFormat.getInstance()));
+        assertSame(BtiFormat.Components.Types.ROW_INDEX, Component.Type.fromRepresentation("Rows.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.FILTER, Component.Type.fromRepresentation("Filter.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.FILTER, Component.Type.fromRepresentation("Filter.db", null));
+        assertSame(SSTableFormat.Components.Types.COMPRESSION_INFO, Component.Type.fromRepresentation("CompressionInfo.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.COMPRESSION_INFO, Component.Type.fromRepresentation("CompressionInfo.db", null));
+        assertSame(SSTableFormat.Components.Types.STATS, Component.Type.fromRepresentation("Statistics.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.STATS, Component.Type.fromRepresentation("Statistics.db", null));
+        assertSame(SSTableFormat.Components.Types.DIGEST, Component.Type.fromRepresentation("Digest.crc32", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.DIGEST, Component.Type.fromRepresentation("Digest.crc32", null));
+        assertSame(SSTableFormat.Components.Types.CRC, Component.Type.fromRepresentation("CRC.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.CRC, Component.Type.fromRepresentation("CRC.db", null));
+        assertSame(SSTableFormat.Components.Types.TOC, Component.Type.fromRepresentation("TOC.txt", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.TOC, Component.Type.fromRepresentation("TOC.txt", null));
+    }
+
+    @Test
+    public void testFromRepresentationSecondaryIndexPattern()
+    {
+        // Test regex pattern matching for SECONDARY_INDEX
+        assertEquals(BtiFormat.Components.Types.SECONDARY_INDEX, Component.Type.fromRepresentation("SI_.db", BtiFormat.getInstance()));
+        assertEquals(BtiFormat.Components.Types.SECONDARY_INDEX, Component.Type.fromRepresentation("SI_something.db", BtiFormat.getInstance()));
+        assertEquals(BtiFormat.Components.Types.SECONDARY_INDEX, Component.Type.fromRepresentation("SI_idx_name.db", BtiFormat.getInstance()));
+        assertEquals(BtiFormat.Components.Types.SECONDARY_INDEX, Component.Type.fromRepresentation("SI_a1b2c3.db", BtiFormat.getInstance()));
+        assertEquals(BtiFormat.Components.Types.SECONDARY_INDEX, Component.Type.fromRepresentation("SI_test_index_123.db", BtiFormat.getInstance()));
+    }
+
+    @Test
+    public void testFromRepresentationCustomComponent()
+    {
+        // Test that unknown components return CUSTOM
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("Unknown.db", BtiFormat.getInstance()));
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("CustomComponent.db", BtiFormat.getInstance()));
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("SomethingElse.txt", BtiFormat.getInstance()));
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("Random-File.dat", BtiFormat.getInstance()));
+    }
+
+    @Test
+    public void testFromRepresentationEmptyString()
+    {
+        // Test that empty string returns CUSTOM
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("", BtiFormat.getInstance()));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testFromRepresentationNullInput()
+    {
+        // Test that null input throws IllegalArgumentException
+        Component.Type.fromRepresentation(null, BtiFormat.getInstance());
+    }
+
+    @Test
+    public void testFromRepresentationNonMatches()
+    {
+        // Test that similar but not exact matches return CUSTOM
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("data.db", BtiFormat.getInstance()));  // lowercase
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("Data.DB", BtiFormat.getInstance()));  // different case
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("DataExtra.db", BtiFormat.getInstance()));  // extra chars
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("SI.db", BtiFormat.getInstance()));  // missing underscore
+        assertEquals(BtiFormat.Components.Types.CUSTOM, Component.Type.fromRepresentation("SI_", BtiFormat.getInstance()));  // missing .db
+    }
+
+    @Test
+    public void testComponentParse()
+    {
+        // Test the parse method which uses fromRepresentation internally
+        Component data = Component.parse("Data.db", BtiFormat.getInstance());
+        assertEquals(BtiFormat.Components.Types.DATA, data.type);
+        assertEquals("Data.db", data.name);
+
+        Component secondaryIndex = Component.parse("SI_myindex.db", BtiFormat.getInstance());
+        assertEquals(BtiFormat.Components.Types.SECONDARY_INDEX, secondaryIndex.type);
+        assertEquals("SI_myindex.db", secondaryIndex.name);
+
+        Component custom = Component.parse("CustomFile.db", BtiFormat.getInstance());
+        assertEquals(BtiFormat.Components.Types.CUSTOM, custom.type);
+        assertEquals("CustomFile.db", custom.name);
+    }
+
+    @Test
+    public void testComponentEquality()
+    {
+        Component comp1 = new Component(SSTableFormat.Components.Types.DATA, "test");
+        Component comp2 = new Component(SSTableFormat.Components.Types.DATA, "test");
+
+        assertEquals(comp1, comp2);
+        assertEquals(comp1.hashCode(), comp2.hashCode());
+
+        // Test singletons
+        assertSame(SSTableFormat.Components.Types.DATA, Component.parse("Data.db", null).type);
+        assertSame(SSTableFormat.Components.Types.FILTER, Component.parse("Filter.db", null).type);
+    }
+
+    @Test
+    public void testComponentName()
+    {
+        assertEquals("DATA", BtiFormat.Components.Types.DATA.name);
+        assertEquals("FILTER", BtiFormat.Components.Types.FILTER.name);
+        assertEquals("STATS", BtiFormat.Components.Types.STATS.name);
+    }
+
+    @Test
+    public void testSecondaryIndexNotSingleton()
+    {
+        // Secondary index components should not be singletons
+        Component si1 = Component.parse("SI_index1.db", BtiFormat.getInstance());
+        Component si2 = Component.parse("SI_index2.db", BtiFormat.getInstance());
+
+        assertEquals(BtiFormat.Components.Types.SECONDARY_INDEX, si1.type);
+        assertEquals(BtiFormat.Components.Types.SECONDARY_INDEX, si2.type);
+        assertNotEquals(si1, si2);  // Different names
+        assertNotSame(si1, si2);  // Different instances
+    }
+
+    @Test
+    public void testFromRepresentationConsistency()
+    {
+        String[] inputs = {"Data.db", "SI_test.db", "CustomFile.db"};
+
+        for (String input : inputs) {
+            Component.Type type1 = Component.Type.fromRepresentation(input, BtiFormat.getInstance());
+            Component.Type type2 = Component.Type.fromRepresentation(input, BtiFormat.getInstance());
+            assertSame("Same input should return same enum instance", type1, type2);
+        }
     }
 }
