@@ -49,6 +49,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -87,6 +88,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
+    private Supplier<Monitorable.ExecutionInfo> executionInfoSupplier;
 
     private static final FastThreadLocal<List<PrimaryKey>> nextKeys = new FastThreadLocal<>()
     {
@@ -155,6 +157,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 FilterTree filterTree = analyzeFilter();
                 Plan plan = controller.buildPlan();
+                executionInfoSupplier = QueryMonitorableExecutionInfo.supplier(queryContext, plan);
+
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
                 // Can't check for `command.isTopK()` because the planner could optimize sorting out
@@ -198,6 +202,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 throw t;
             }
         }
+    }
+
+    @Override
+    public Supplier<Monitorable.ExecutionInfo> monitorableExecutionInfo()
+    {
+        return executionInfoSupplier;
     }
 
     /**

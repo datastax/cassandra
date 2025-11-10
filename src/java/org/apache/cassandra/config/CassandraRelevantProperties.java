@@ -383,6 +383,15 @@ public enum CassandraRelevantProperties
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
+    /** Defines the interval for reporting any operations that have timed out.  */
+    SLOW_QUERY_LOG_MONITORING_REPORT_INTERVAL_IN_MS("cassandra.monitoring_report_interval_ms", "5000"),
+
+    /**
+     * Defines the maximum number of unique timed out queries that will be reported in the logs.
+     * Use a negative number to remove any limit.
+     */
+    SLOW_QUERY_LOG_MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
+
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
 
@@ -406,6 +415,12 @@ public enum CassandraRelevantProperties
 
     /** Controls the maximum number of expressions that will be used in a SAI intersection operation. */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
+
+    /**
+     * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
+     * This execution info includes the query metrics and the query plan of the slow queries.
+     */
+    SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
 
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
