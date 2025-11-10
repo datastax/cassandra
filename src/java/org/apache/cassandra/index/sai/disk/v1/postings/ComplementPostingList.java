@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.v1.postings;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.io.util.FileUtils;
 
 public class ComplementPostingList implements PostingList
 {
@@ -74,5 +75,11 @@ public class ComplementPostingList implements PostingList
         nextRowId = targetRowID;
         nextSourceRowId = source.advance(targetRowID);
         return nextPosting();
+    }
+
+    @Override
+    public void close()
+    {
+        FileUtils.closeQuietly(source);
     }
 }

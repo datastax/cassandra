@@ -126,7 +126,10 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
             var negatedPostingList = searchInternal(expression.negated(), keyRange, queryContext, defer);
             var postingList = new ComplementPostingList(firstSegmentRowId, lastSegmentRowId, negatedPostingList);
             if (postingList.isEmpty())
+            {
+                postingList.close(); // Closing the posting list also closes the negated posting list.
                 return KeyRangeIterator.empty();
+            }
 
             // Use the appropriate min and max keys for the first and last segments.
             searcherContext = new IndexSearcherContext(isFirstSegment ? sstableContext.minSSTableKey() : metadata.minKey,
