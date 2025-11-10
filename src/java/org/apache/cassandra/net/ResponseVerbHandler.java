@@ -89,6 +89,8 @@ public class ResponseVerbHandler implements IVerbHandler
                 Context context = Context.from(pu.metadata());
                 if (pu.metadata().isIndex()) continue;
                 incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+                // Paxos commit responses also include READ_BYTES
+                incrementSensor(sensors, context, Type.READ_BYTES, message);
             }
         }
         else if (callbackInfo.callback instanceof ReadCallback)
@@ -97,11 +99,33 @@ public class ResponseVerbHandler implements IVerbHandler
             Context context = Context.from(readCallback.command());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
         }
-        // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo
+        // Covers Paxos V1 Prepare and Propose callbacks. Paxos V1 Commit callback is a regular WriteCallbackInfo
         else if (callbackInfo.callback instanceof AbstractPaxosCallback)
         {
             AbstractPaxosCallback<?> paxosCallback = (AbstractPaxosCallback<?>) callbackInfo.callback;
             Context context = Context.from(paxosCallback.getMetadata());
+            incrementSensor(sensors, context, Type.READ_BYTES, message);
+            incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+        }
+        // Covers Paxos V2 Prepare, Propose and Commit callbacks
+        else if (callbackInfo.callback instanceof org.apache.cassandra.service.paxos.PaxosPrepare)
+        {
+            org.apache.cassandra.service.paxos.PaxosPrepare paxosCallback = (org.apache.cassandra.service.paxos.PaxosPrepare) callbackInfo.callback;
+            Context context = Context.from(paxosCallback.getTableMetadata());
+            incrementSensor(sensors, context, Type.READ_BYTES, message);
+            incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+        }
+        else if (callbackInfo.callback instanceof org.apache.cassandra.service.paxos.PaxosPropose)
+        {
+            org.apache.cassandra.service.paxos.PaxosPropose<?> paxosCallback = (org.apache.cassandra.service.paxos.PaxosPropose<?>) callbackInfo.callback;
+            Context context = Context.from(paxosCallback.getTableMetadata());
+            incrementSensor(sensors, context, Type.READ_BYTES, message);
+            incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+        }
+        else if (callbackInfo.callback instanceof org.apache.cassandra.service.paxos.PaxosCommit)
+        {
+            org.apache.cassandra.service.paxos.PaxosCommit<?> paxosCallback = (org.apache.cassandra.service.paxos.PaxosCommit<?>) callbackInfo.callback;
+            Context context = Context.from(paxosCallback.getTableMetadata());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);
         }
