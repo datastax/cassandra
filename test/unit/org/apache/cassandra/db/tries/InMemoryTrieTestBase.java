@@ -58,7 +58,7 @@ public abstract class InMemoryTrieTestBase
 
     // Set this to true (in combination with smaller count) to dump the tries while debugging a problem.
     // Do not commit the code with VERBOSE = true.
-    private static final boolean VERBOSE = false;
+    static final boolean VERBOSE = false;
 
     private static final int COUNT = 100000;
 
@@ -497,7 +497,7 @@ public abstract class InMemoryTrieTestBase
         }
     }
 
-    private static String string(Object x)
+    static String string(Object x)
     {
         return x instanceof ByteBuffer
                ? ByteBufferUtil.bytesToHex((ByteBuffer) x)
@@ -506,7 +506,7 @@ public abstract class InMemoryTrieTestBase
                  : x.toString();
     }
 
-    static void checkGet(Trie<? super ByteBuffer> trie, Map<Preencoded, ByteBuffer> items)
+    static void checkGet(BaseTrie<? super ByteBuffer, ?, ?> trie, Map<Preencoded, ByteBuffer> items)
     {
         for (Map.Entry<Preencoded, ByteBuffer> en : items.entrySet())
         {

@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.util.function.Function;
+
 import org.agrona.DirectBuffer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -209,7 +211,7 @@ interface Cursor<T>
     default int skipToWhenAhead(int skipDepth, int skipTransition)
     {
         int depth = depth();
-        if (skipDepth < depth || skipDepth == depth && skipTransition > incomingTransition())
+        if (skipDepth < depth || skipDepth == depth && direction().gt(skipTransition, incomingTransition()))
             return skipTo(skipDepth, skipTransition);
         else
             return depth;
@@ -371,5 +373,20 @@ interface Cursor<T>
         {
             return -1;
         }
+    }
+
+    /// Dump the current branch. To be used for debugging only.
+    @SuppressWarnings("unused")
+    private String dumpBranch()
+    {
+        return dumpBranch(Object::toString);
+    }
+
+    /// Dump the current branch. To be used for debugging only.
+    private String dumpBranch(Function<T, String> toStringFunction)
+    {
+        TrieDumper<T> dumper = new TrieDumper.Plain<>(toStringFunction);
+        tailCursor(Direction.FORWARD).process(dumper);
+        return dumper.complete();
     }
 }

@@ -43,7 +43,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// of obtaining the full range deletion view of the trie and a combined data-with-deletions view.
 ///
 /// The structure of a deletion-aware trie presents the live data in its normal paths, and deleted ranges
-/// in additional "deletion branches". The objective of this split it to be able to separately and efficiently
+/// in additional "deletion branches". The objective of this split is to be able to separately and efficiently
 /// query the two: on one hand, to search for the closest live entry without having to walk paths leading to
 /// deleted data, and on the other, to be able to find the covering deletions affecting any position in the
 /// trie. With this design, both can be achieved in time proportional to the length of the key.
@@ -106,9 +106,7 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     DeletionAwareTrie<T, D> deletion(ByteComparable prefixInDataTrie, ByteComparable left, ByteComparable right, ByteComparable.Version byteComparableVersion, D deletion)
     {
         RangeTrie<D> rangeTrie = RangeTrie.range(left, right, byteComparableVersion, deletion);
-        return dir -> new SingletonCursor.DeletionBranch<>(dir,
-                                                           prefixInDataTrie.asComparableBytes(byteComparableVersion), byteComparableVersion,
-                                                           rangeTrie);
+        return deletionBranch(prefixInDataTrie, byteComparableVersion, rangeTrie);
     }
 
     /// Creates a deletion-aware trie from an existing range trie representing deletions.
@@ -490,7 +488,7 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
 
     /// Returns an entry set containing all tail tree constructed at the points that contain content of
     /// the given type.
-    default Iterable<Map.Entry<ByteComparable, DeletionAwareTrie<T, D>>> tailTries(Direction direction, Class<? extends T> clazz)
+    default Iterable<Map.Entry<ByteComparable.Preencoded, DeletionAwareTrie<T, D>>> tailTries(Direction direction, Class<? extends T> clazz)
     {
         return () -> new TrieTailsIterator.AsEntriesDeletionAware<>(cursor(direction), clazz);
     }

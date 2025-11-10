@@ -529,18 +529,15 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
             applyToAllSources(cursor ->
                              {
                                  if (equalCursor(head, cursor))
-                                     inputs.add(cursor);
+                                     inputs.add(cursor.tailCursor(direction));
                                  else if (cursor.precedingState() != null)
                                      inputs.add(cursor.precedingStateCursor(direction));
                              });
 
             if (inputs.size() == 1)
-            {
-                assert head == inputs.get(0);
-                return head.tailCursor(direction);
-            }
+                return inputs.get(0);
 
-            return new Range<>(resolver, direction, inputs, RangeCursor::tailCursor);
+            return new Range<>(resolver, direction, inputs, (x, dir) -> x);
         }
     }
 
@@ -769,6 +766,9 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
                 return null;
 
             deletionBranchDepth = depth;
+            if (deletions.size() == 1)
+                return deletions.get(0);
+
             return new Range<D>(deletionResolver, direction, deletions, (c, d) -> c);
         }
 
@@ -803,47 +803,52 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         @Override
         public DeletionAwareCursor<T, D> tailCursor(Direction dir)
         {
-            RangeCursor<D> deletions = null;
-            switch (relevantDeletionsState)
+            if (depth() > deletionBranchDepth)
             {
-                case NONE:
-                    break;
-                case MATCHING:
-                    deletions = relevantDeletions.tailCursor(direction);
-                    break;
-                case AHEAD:
-                    deletions = relevantDeletions.precedingStateCursor(direction);
-                    break;
-            }
-
-            if (deletions != null)
-            {
-                // Because deletions branch is already active (and no new one can be introduced now), we treat the
-                // sources as plain tries.
-                Cursor<T> source;
-
-                if (!branchHasMultipleSources())
-                    source = head.tailCursor(dir);
-                else
+                // We are already inside the coverage of a deletion branch. In this case we don't report that branch,
+                // but we make sure we apply its deletions to the data we report.
+                RangeCursor<D> deletions = null;
+                switch (relevantDeletionsState)
                 {
-                    List<DeletionAwareCursor<T, D>> inputs = new ArrayList<>(heap.length + 1);
-                    applyToSelectedSources(inputs::add);
-
-                    source = new Plain<>(resolver, dir, inputs, DeletionAwareCursor::tailCursor);
+                    case NONE:
+                        break;
+                    case MATCHING:
+                        deletions = relevantDeletions.tailCursor(direction);
+                        break;
+                    case AHEAD:
+                        deletions = relevantDeletions.precedingStateCursor(direction);
+                        break;
                 }
+                // TODO: What if one child introduces a nested deletion (in non-fixed-deletion-points mode)?
+                // deletions will not be adjusted to include it.
 
-                return new RangeApplyCursor.DeletionAwareDataBranch<>(deleter, deletions, source);
+                if (deletions != null)
+                {
+                    // Because deletions branch is already active (and no new one can be introduced now), we treat the
+                    // sources as plain tries.
+                    Cursor<T> source;
+
+                    if (!branchHasMultipleSources())
+                        source = head.tailCursor(dir);
+                    else
+                    {
+                        List<DeletionAwareCursor<T, D>> inputs = new ArrayList<>(heap.length + 1);
+                        applyToSelectedSources(inputs::add);
+
+                        source = new Plain<>(resolver, dir, inputs, DeletionAwareCursor::tailCursor);
+                    }
+
+                    return new RangeApplyCursor.DeletionAwareDataBranch<>(deleter, deletions, source);
+                }
             }
-            else
-            {
-                if (!branchHasMultipleSources())
-                    return head.tailCursor(dir);
 
-                List<DeletionAwareCursor<T, D>> inputs = new ArrayList<>(heap.length + 1);
-                applyToSelectedSources(inputs::add);
+            if (!branchHasMultipleSources())
+                return head.tailCursor(dir);
 
-                return new DeletionAware<>(resolver, deletionResolver, deleter, deletionsAtFixedPoints, dir, inputs, DeletionAwareCursor::tailCursor);
-            }
+            List<DeletionAwareCursor<T, D>> inputs = new ArrayList<>(heap.length + 1);
+            applyToSelectedSources(inputs::add);
+
+            return new DeletionAware<>(resolver, deletionResolver, deleter, deletionsAtFixedPoints, dir, inputs, DeletionAwareCursor::tailCursor);
         }
     }
 }

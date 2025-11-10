@@ -192,7 +192,8 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
     /// Iterator representing the selected content of the trie a sequence of `(path, tail)` pairs, where
     /// `tail` is the branch of the trie rooted at the selected content node (reachable by following
     /// `path`). The tail trie will have the selected content at its root.
-    static class AsEntriesRange<S extends RangeState<S>> extends Range<S, Map.Entry<ByteComparable, RangeTrie<S>>>
+    static class AsEntriesRange<S extends RangeState<S>>
+    extends Range<S, Map.Entry<ByteComparable.Preencoded, RangeTrie<S>>>
     {
         public AsEntriesRange(RangeCursor<S> cursor, Class<? extends S> clazz)
         {
@@ -200,9 +201,9 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
         }
 
         @Override
-        protected Map.Entry<ByteComparable, RangeTrie<S>> mapContent(S value, RangeTrie<S> tailTrie, byte[] bytes, int byteLength)
+        protected Map.Entry<ByteComparable.Preencoded, RangeTrie<S>> mapContent(S value, RangeTrie<S> tailTrie, byte[] bytes, int byteLength)
         {
-            ByteComparable key = toByteComparable(byteComparableVersion(), bytes, byteLength);
+            ByteComparable.Preencoded key = toByteComparable(byteComparableVersion(), bytes, byteLength);
             return new AbstractMap.SimpleImmutableEntry<>(key, tailTrie);
         }
     }
@@ -211,7 +212,8 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
     /// Iterator representing the selected content of the trie a sequence of `(path, tail)` pairs, where
     /// `tail` is the branch of the trie rooted at the selected content node (reachable by following
     /// `path`). The tail trie will have the selected content at its root.
-    static class AsEntriesDeletionAware<T, D extends RangeState<D>> extends DeletionAware<T, D, Map.Entry<ByteComparable, DeletionAwareTrie<T, D>>>
+    static class AsEntriesDeletionAware<T, D extends RangeState<D>>
+    extends DeletionAware<T, D, Map.Entry<ByteComparable.Preencoded, DeletionAwareTrie<T, D>>>
     {
         public AsEntriesDeletionAware(DeletionAwareCursor<T, D> cursor, Class<? extends T> clazz)
         {
@@ -219,9 +221,9 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
         }
 
         @Override
-        protected Map.Entry<ByteComparable, DeletionAwareTrie<T, D>> mapContent(T value, DeletionAwareTrie<T, D> tailTrie, byte[] bytes, int byteLength)
+        protected Map.Entry<ByteComparable.Preencoded, DeletionAwareTrie<T, D>> mapContent(T value, DeletionAwareTrie<T, D> tailTrie, byte[] bytes, int byteLength)
         {
-            ByteComparable key = toByteComparable(byteComparableVersion(), bytes, byteLength);
+            ByteComparable.Preencoded key = toByteComparable(byteComparableVersion(), bytes, byteLength);
             return new AbstractMap.SimpleImmutableEntry<>(key, tailTrie);
         }
     }

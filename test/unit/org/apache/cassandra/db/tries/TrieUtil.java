@@ -32,6 +32,7 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -618,5 +619,10 @@ public class TrieUtil
                                           .reduce("", (x, y) -> x + y));
             return stringBuilder.toString();
         }
+    }
+
+    public static <T, V> Trie<V> processContent(BaseTrie<T, ?, ?> trie, Function<T, V> processor)
+    {
+        return direction -> new ContentProcessingCursor<>(processor, trie.cursor(direction));
     }
 }

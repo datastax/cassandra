@@ -282,4 +282,8 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     /// ```tailTrie(prefix).prefixedBy(prefix) = subtrie(prefix, nextBranch(prefix))```
     /// where `nextBranch` stands for the key adjusted by adding one at the last position.
     Q tailTrie(ByteComparable prefix);
+
+    /// Returns an entry set containing all tail tree constructed at the points that contain content of
+    /// the given type.
+    Iterable<Map.Entry<ByteComparable.Preencoded, Q>> tailTries(Direction direction, Class<? extends T> clazz);
 }

@@ -166,7 +166,7 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
 
     /// Returns an entry set containing all tail tree constructed at the points that contain content of
     /// the given type.
-    default Iterable<Map.Entry<ByteComparable, RangeTrie<S>>> tailTries(Direction direction, Class<? extends S> clazz)
+    default Iterable<Map.Entry<ByteComparable.Preencoded, RangeTrie<S>>> tailTries(Direction direction, Class<? extends S> clazz)
     {
         return () -> new TrieTailsIterator.AsEntriesRange<>(cursor(direction), clazz);
     }

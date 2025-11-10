@@ -392,9 +392,8 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     /// value. Applied even if there's no pre-existing value in the memtable trie. The transformer can return null
     /// if the entry should not be added or preserved.
     /// @param deletionTransformer a function applied to combine overlapping deletions into a consistent view. Called
-    /// even if there is no pre-existing deletion to convert the marker type. For code simplicity this transformer is
-    /// not provided with the path to the modified markers. The transformer can return null if deletions cancel out
-    /// or should not be preserved.
+    /// even if there is no pre-existing deletion to convert the marker type. The transformer can return null if
+    /// deletions cancel out or should not be preserved.
     /// @param existingDeleter a function used to apply a deletion marker to potentially delete live data. This is
     /// only called if there is both content and deletion at a given covered point. It should return null if the entry
     /// is to be deleted.
