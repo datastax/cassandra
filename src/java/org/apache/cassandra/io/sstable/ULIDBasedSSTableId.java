@@ -52,6 +52,11 @@ public final class ULIDBasedSSTableId implements SSTableId<ULIDBasedSSTableId>
         this.approximateTimeUUID = TimeUUID.approximateFromULID(ulid);
     }
 
+    public TimeUUID getApproximateTimeUUID()
+    {
+        return approximateTimeUUID;
+    }
+
     @Override
     public ByteBuffer asBytes()
     {
