@@ -142,22 +142,16 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
 
 
     @Test
-    public void testUnsupportedOperator() throws Exception
+    public void testNeqOperator() throws Exception
     {
-        final IndexSearcher indexSearcher = KDTreeIndexBuilder.buildShortSearcher(newIndexDescriptor(), (short) 0, (short) 3);
-        try
+        try (IndexSearcher indexSearcher = KDTreeIndexBuilder.buildShortSearcher(newIndexDescriptor(), (short) 0, (short) 3);
+             var result = indexSearcher.search(new Expression(SAITester.createIndexContext("meh", ShortType.instance))
+             {{
+                 operation = Op.NOT_EQ;
+                 lower = upper = new Bound(ShortType.instance.decompose((short) 0), Int32Type.instance, true);
+             }}, null, new QueryContext(), false))
         {
-            indexSearcher.search(new Expression(SAITester.createIndexContext("meh", ShortType.instance))
-            {{
-                operation = Op.NOT_EQ;
-                lower = upper = new Bound(ShortType.instance.decompose((short) 0), Int32Type.instance, true);
-            }}, null, new QueryContext(), false);
-
-            fail("Expect IllegalArgumentException thrown, but didn't");
-        }
-        catch (IllegalArgumentException e)
-        {
-            // expected
+            assertFalse(result.hasNext());
         }
     }
 

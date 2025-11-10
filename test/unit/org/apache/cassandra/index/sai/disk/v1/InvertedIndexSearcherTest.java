@@ -158,21 +158,17 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     }
 
     @Test
-    public void testUnsupportedOperator() throws Exception
+    public void testNeqQueries() throws Exception
     {
         final int numTerms = randomIntBetween(5, 15), numPostings = randomIntBetween(5, 20);
         final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(version, numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, termsEnum))
         {
-            searcher.search(new Expression(indexContext)
-                            .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false);
+            var results = searcher.search(new Expression(indexContext)
+                                          .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false);
 
-            fail("Expect IllegalArgumentException thrown, but didn't");
-        }
-        catch (IllegalArgumentException e)
-        {
-            // expected
+            assertTrue(results.hasNext());
         }
     }
 
