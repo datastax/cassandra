@@ -53,6 +53,7 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -95,6 +96,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final QueryController controller;
     private final QueryContext queryContext;
     private final TableQueryMetrics tableQueryMetrics;
+    private Supplier<Monitorable.ExecutionInfo> executionInfoSupplier;
 
     private static final FastThreadLocal<List<PrimaryKey>> nextKeys = new FastThreadLocal<>()
     {
@@ -166,6 +168,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 maybeTriggerReferencedIndexesGuardrail(filterTree);
 
                 Plan plan = controller.buildPlan();
+                executionInfoSupplier = QueryMonitorableExecutionInfo.supplier(queryContext, plan);
+
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
                 // Can't check for `command.isTopK()` because the planner could optimize sorting out
@@ -233,6 +237,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             MessageParams.add(ParamType.TOO_MANY_REFERENCED_INDEXES_WARN, numReferencedIndexes);
         }
+    }
+
+    @Override
+    public Supplier<Monitorable.ExecutionInfo> monitorableExecutionInfo()
+    {
+        return executionInfoSupplier;
     }
 
     /**

@@ -270,4 +270,66 @@ public class QueryContext
         /** First get the candidates in ANN order from the vector index, then fetch the rows and filter them until we find K matching the predicates */
         SCAN_THEN_FILTER
     }
+
+    public Snapshot snapshot()
+    {
+        return new Snapshot(this);
+    }
+
+    /**
+     * A snapshot of all relevant metrics in a {@link QueryContext} at a specific point in time.
+     * This class memoizes the values of those metrics so that they can be reused by multiple metrics instances,
+     * without calculating the same values once and again.
+     * Also, this class should be more lightweight than the full {@link QueryContext}, in case of needing to retain it
+     * for long-ish periods of time, as in the case of the slow query logger, which tracks the metrics of the slowest
+     * queries over a fixed period of time.
+     */
+    public static class Snapshot
+    {
+        public final long totalQueryTimeNs;
+        public final long sstablesHit;
+        public final long segmentsHit;
+        public final long partitionsRead;
+        public final long rowsFiltered;
+        public final long rowsPreFiltered;
+        public final long trieSegmentsHit;
+        public final long bkdPostingListsHit;
+        public final long bkdSegmentsHit;
+        public final long bkdPostingsSkips;
+        public final long bkdPostingsDecodes;
+        public final long triePostingsSkips;
+        public final long triePostingsDecodes;
+        public final long queryTimeouts;
+        public final long annGraphSearchLatency;
+        public final long shadowedPrimaryKeyCount;
+        public final long postFilteringReadLatency;
+        public final FilterSortOrder filterSortOrder;
+
+        /**
+         * Creates a snapshot of all the metrics in the given {@link QueryContext}.
+         *
+         * @param context the query context to snapshot
+         */
+        private Snapshot(QueryContext context)
+        {
+            totalQueryTimeNs = context.totalQueryTimeNs();
+            sstablesHit = context.sstablesHit();
+            segmentsHit = context.segmentsHit();
+            partitionsRead = context.partitionsRead();
+            rowsFiltered = context.rowsFiltered();
+            rowsPreFiltered = context.rowsPreFiltered();
+            trieSegmentsHit = context.trieSegmentsHit();
+            bkdPostingListsHit = context.bkdPostingListsHit();
+            bkdSegmentsHit = context.bkdSegmentsHit();
+            bkdPostingsSkips = context.bkdPostingsSkips();
+            bkdPostingsDecodes = context.bkdPostingsDecodes();
+            triePostingsSkips = context.triePostingsSkips();
+            triePostingsDecodes = context.triePostingsDecodes();
+            queryTimeouts = context.queryTimeouts();
+            annGraphSearchLatency = context.annGraphSearchLatency();
+            shadowedPrimaryKeyCount = context.getShadowedPrimaryKeyCount();
+            postFilteringReadLatency = context.getPostFilteringReadLatency();
+            filterSortOrder = context.filterSortOrder();
+        }
+    }
 }
