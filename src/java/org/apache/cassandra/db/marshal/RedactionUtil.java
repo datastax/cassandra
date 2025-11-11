@@ -70,7 +70,7 @@ public final class RedactionUtil
     /**
      * Redacts a byte buffer value, optionally including size information.
      * <p>
-     * If the value is null, it's not greater than 1KiB, or has a fixed length (where size information would not be
+     * If the value is null, it's not greater than 100B, or has a fixed length (where size information would not be
      * useful), returns a simple "?" placeholder. Otherwise, returns a placeholder with a size hint indicating the
      * approximate size of the data, according to {@link #redact(int)}.
      *
