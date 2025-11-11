@@ -59,9 +59,7 @@ interface DataPoint
 
     static LivePoint deleteLive(LivePoint live, DeletionMarker deletion)
     {
-        if (deletion == null || live == null)
-            return live;
-        return deletion.applyTo(live);
+        return deleteLive(deletion, live);
     }
 
     DeletionMarker marker();
@@ -127,9 +125,7 @@ interface DataPoint
 
     DataPoint toContent();
 
-    /**
-     * Extract the values of the provided trie into a list.
-     */
+    /// Extract the values of the provided trie into a list.
     static List<DataPoint> toList(DeletionAwareTrie<LivePoint, DeletionMarker> trie)
     {
         return Streams.stream(trie.mergedTrie(DataPoint::resolve).entryIterator())
@@ -137,9 +133,7 @@ interface DataPoint
                       .collect(Collectors.toList());
     }
 
-    /**
-     * Extract the values of the provided trie into a list.
-     */
+    /// Extract the values of the provided trie into a list.
     static List<LivePoint> contentOnlyList(DeletionAwareTrie<LivePoint, DeletionMarker> trie)
     {
         return Streams.stream(trie.contentOnlyTrie().entryIterator())
@@ -147,9 +141,7 @@ interface DataPoint
                       .collect(Collectors.toList());
     }
 
-    /**
-     * Extract the values of the provided trie into a list.
-     */
+    /// Extract the values of the provided trie into a list.
     static List<DeletionMarker> deletionOnlyList(DeletionAwareTrie<LivePoint, DeletionMarker> trie)
     {
         return Streams.stream(trie.deletionOnlyTrie().entryIterator())
@@ -225,61 +217,6 @@ interface DataPoint
         catch (TrieSpaceExhaustedException e)
         {
             throw new AssertionError(e);
-        }
-        return trie;
-    }
-
-    static DeletionAwareTrie<LivePoint, DeletionMarker> fromListToMerge(List<DataPoint> list)
-    {
-        DeletionAwareTrie<LivePoint, DeletionMarker> trie = DeletionAwareTrie.empty(VERSION);
-        {
-            // If we put a deletion first, the deletion branch will start at the root which works but isn't interesting
-            // enough as a test. So put the live data first.
-            for (DataPoint i : list)
-            {
-                LivePoint live = i.live();
-                if (live != null)
-                {
-                    trie = trie.mergeWith(
-                            DeletionAwareTrie.singleton(live.position, VERSION, live),
-                            LivePoint::combine,
-                            DeletionMarker::combine,
-                            DeletionMarker::applyTo,
-                            false);
-                }
-            }
-            // If we simply put all deletions with putAlternativeRecursive, we won't get correct branches as they
-            // won't always close the intervals they open. Deletions need to be put as ranges instead.
-            int active = -1;
-            int activeStartedAt = -1;
-            for (int i = 0; i < list.size(); ++i)
-            {
-                DeletionMarker marker = list.get(i).marker();
-                if (marker == null || marker.leftSide == marker.rightSide)
-                    continue;
-                assert marker.leftSide == active;
-                if (active != -1)
-                {
-                    if (marker == null || marker.leftSide == marker.rightSide)
-                        continue;
-
-                    DeletionMarker startMarker = list.get(activeStartedAt).marker();
-                    assert startMarker != null;
-                    int prefixLength = ByteComparable.diffPoint(startMarker.position, marker.position, VERSION) - 1;
-                    trie = trie.mergeWith(
-                            DeletionAwareTrie.deletion(ByteComparable.cut(startMarker.position, prefixLength),
-                                    ByteComparable.skipFirst(startMarker.position, prefixLength),
-                                    ByteComparable.skipFirst(marker.position, prefixLength),
-                                    VERSION, marker.leftSideAsCovering),
-                            LivePoint::combine,
-                            DeletionMarker::combine,
-                            DeletionMarker::applyTo,
-                            false);
-                }
-
-                active = marker.rightSide;
-                activeStartedAt = i;
-            }
         }
         return trie;
     }

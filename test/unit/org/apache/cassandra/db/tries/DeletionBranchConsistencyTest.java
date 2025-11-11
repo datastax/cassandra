@@ -28,14 +28,11 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 
-/**
- * Consistency test for InMemoryDeletionAwareTrie that validates concurrent operations
- * with both live data and deletion markers under different atomicity guarantees.
- * 
- * This test extends ConsistencyTestBase to verify that InMemoryDeletionAwareTrie maintains
- * correctness and consistency under concurrent access patterns typical of Cassandra's
- * memtable operations with deletions.
- */
+/// Consistency test for [InMemoryDeletionAwareTrie] that validates concurrent operations
+/// with both live data and deletion markers under different atomicity guarantees.
+/// This test extends [ConsistencyTestBase] to verify that [InMemoryDeletionAwareTrie] maintains
+/// correctness and consistency under concurrent access patterns typical of Cassandra's
+/// memtable operations with deletions.
 public class DeletionBranchConsistencyTest
 extends ConsistencyTestBase<ConsistencyTestBase.TestStateMetadata,
                            DeletionAwareTrie<ConsistencyTestBase.TestStateMetadata, ConsistencyTestBase.TestRangeState>,

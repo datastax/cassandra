@@ -40,13 +40,7 @@ class DeletionAwareMergeSource<T, D extends RangeState<D>, E extends RangeState<
 
     DeletionAwareMergeSource(BiFunction<E, T, T> resolver, DeletionAwareCursor<T, D> data)
     {
-        this.direction = data.direction();
-        this.resolver = resolver;
-        this.deletions = null;
-        this.data = data;
-        this.deletionsDepthCorrection = 0;
-        assert data.depth() == 0;
-        atDeletions = false;
+        this(resolver, data, null);
     }
 
     DeletionAwareMergeSource(BiFunction<E, T, T> resolver, DeletionAwareCursor<T, D> data, RangeCursor<E> deletions)

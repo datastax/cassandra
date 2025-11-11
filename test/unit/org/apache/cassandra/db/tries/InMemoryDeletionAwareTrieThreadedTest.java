@@ -27,12 +27,10 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 
-/**
- * Multithreaded test for InMemoryDeletionAwareTrie that creates both data and deletion entries.
- *
- * This test extends ThreadedTestBase to verify that InMemoryDeletionAwareTrie works correctly
- * under concurrent access with both live data points and deletion markers being added.
- */
+/// Multithreaded test for [InMemoryDeletionAwareTrie] that creates both data and deletion entries.
+///
+/// This test extends [ThreadedTestBase] to verify that [InMemoryDeletionAwareTrie] works correctly
+/// under concurrent access with both live data points and deletion markers being added.
 public class InMemoryDeletionAwareTrieThreadedTest extends ThreadedTestBase<LivePoint, InMemoryDeletionAwareTrie<LivePoint, DeletionMarker>>
 {
     @BeforeClass

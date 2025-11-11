@@ -89,7 +89,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     static class DeletionAwareInMemoryCursor<T, D extends RangeState<D>>
     extends InMemoryCursor<T> implements DeletionAwareCursor<T, D>
     {
-        DeletionAwareInMemoryCursor(InMemoryReadTrie<T> trie, Direction direction, int root, int depth, int incomingTransition)
+        DeletionAwareInMemoryCursor(InMemoryDeletionAwareTrie<T, D> trie, Direction direction, int root, int depth, int incomingTransition)
         {
             super(trie, direction, root, depth, incomingTransition);
         }
@@ -111,7 +111,11 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         @Override
         public DeletionAwareCursor<T, D> tailCursor(Direction direction)
         {
-            return new DeletionAwareInMemoryCursor<>(trie, direction, currentFullNode, 0, -1);
+            return new DeletionAwareInMemoryCursor<>((InMemoryDeletionAwareTrie<T, D>) trie,
+                                                     direction,
+                                                     currentFullNode,
+                                                     0,
+                                                     -1);
         }
     }
 
@@ -450,6 +454,8 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         return new DumpCursor(makeCursor(Direction.FORWARD), contentToString).process(new TrieDumper.DeletionAware<>(Function.identity(), rangeToString));
     }
 
+    /// Dump the branch rooted at the given node. To be used for debugging only.
+    @SuppressWarnings("unused")
     private String dumpBranch(int branchRoot)
     {
         return new DumpCursor(new DeletionAwareInMemoryCursor<>(this, Direction.FORWARD, branchRoot, 0, -1), Object::toString)

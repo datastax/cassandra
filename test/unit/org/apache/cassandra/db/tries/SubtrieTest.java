@@ -262,19 +262,6 @@ public class SubtrieTest
         }
     }
 
-
-    static <T> NavigableMap<Preencoded, T> boundedMap(NavigableMap<Preencoded, T> sourceMap, Preencoded l, boolean includeLeft, Preencoded r, boolean includeRight)
-    {
-        NavigableMap<Preencoded, T> imap = l == null
-                                               ? r == null
-                                                 ? sourceMap
-                                                 : sourceMap.headMap(r, includeRight)
-                                               : r == null
-                                                 ? sourceMap.tailMap(l, includeLeft)
-                                                 : sourceMap.subMap(l, includeLeft, r, includeRight);
-        return imap;
-    }
-
     public void checkEqualRange(NavigableMap<Preencoded, ByteBuffer> content1,
                                 Trie<ByteBuffer> t1,
                                 Preencoded l,
@@ -283,7 +270,7 @@ public class SubtrieTest
                                 boolean includeRight)
     {
         System.out.println(String.format("Intersection with %s%s:%s%s", includeLeft ? "[" : "(", asString(l), asString(r), includeRight ? "]" : ")"));
-        SortedMap<Preencoded, ByteBuffer> imap = boundedMap(content1, l, includeLeft, r, includeRight);
+        SortedMap<Preencoded, ByteBuffer> imap = TrieUtil.boundedMap(content1, l, includeLeft, r, includeRight);
         Trie<ByteBuffer> intersection = t1.subtrie(toBound(l, !includeLeft), toBound(r, includeRight));
         try
         {

@@ -41,14 +41,12 @@ import static org.quicktheories.generators.SourceDSL.booleans;
 import static org.quicktheories.generators.SourceDSL.integers;
 import static org.quicktheories.generators.SourceDSL.lists;
 
-///
 /// Randomized property-based testing for deletion-aware tries using QuickTheories.
 ///
 /// This test class uses the existing deletion-aware trie test infrastructure to perform
 /// comprehensive randomized testing of trie operations, merging, and deletion handling.
-/// It complements the structured tests in `DeletionAwareMergeTest` with property-based
+/// It complements the structured tests in [DeletionAwareMergeTest] with property-based
 /// testing to catch edge cases and verify invariants across a wide range of inputs.
-///
 public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
 {
     @BeforeClass
@@ -61,10 +59,8 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     private static final int MAX_VALUE = 63; // Fits in 6 bits (bitsNeeded)
     private static final int MAX_TIMESTAMP = 100;
     
-    ///
     /// Generator for random live data points.
     /// Creates `LivePoint` instances with random positions and timestamps.
-    ///
     private Gen<LivePoint> livePointGen()
     {
         return integers().between(0, MAX_VALUE)
@@ -85,10 +81,8 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
                              (pos, left, at, right) -> new DeletionMarker(before(pos), left, at, right));
     }
     
-    ///
     /// Generator for random live point lists.
     /// Creates sorted lists of `LivePoint` instances for trie construction.
-    ///
     private Gen<List<DataPoint>> dataPointListGen()
     {
         return lists().of(livePointGen().map(lp -> (DataPoint) lp))
@@ -96,17 +90,13 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
                      .map(this::sortAndValidateDataPoints);
     }
     
-    /**
-     * Generator for pairs of data point lists for merge testing.
-     */
+    /// Generator for pairs of data point lists for merge testing.
     private Gen<List<List<DataPoint>>> dataPointPairGen()
     {
         return dataPointListGen().zip(dataPointListGen(), Arrays::asList);
     }
     
-    ///
     /// Sorts data points by position and ensures they form a valid deletion-aware sequence.
-    ///
     private List<DataPoint> sortAndValidateDataPoints(List<DataPoint> points)
     {
         if (points.isEmpty())
@@ -140,11 +130,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
         }
     }
     
-    ///
     /// Test that trie construction and iteration are consistent.
     ///
     /// **Property**: Converting a list to a trie and back should yield the same list.
-    ///
     @Test
     public void testTrieConstructionConsistency()
     {
@@ -161,11 +149,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
             });
     }
     
-    ///
     /// Test that merging tries is commutative for the same resolver.
     ///
     /// **Property**: `merge(A, B)` should equal `merge(B, A)` when using the same merge resolver.
-    ///
     @Test
     public void testMergeCommutativity()
     {
@@ -193,11 +179,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
             });
     }
     
-    ///
     /// Test that merging with an empty trie is an identity operation.
     ///
     /// **Property**: `merge(A, empty)` should equal `A`.
-    ///
     @Test
     public void testMergeIdentity()
     {
@@ -219,11 +203,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
             });
     }
     
-    ///
     /// Test that subtrie operations preserve ordering and boundaries.
     ///
     /// **Property**: A subtrie should contain only elements within the specified range.
-    ///
     @Test
     public void testSubtrieRangeInvariant()
     {
@@ -269,11 +251,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
             });
     }
     
-    ///
     /// Test that the optimized `MergeCursor` produces the same results as the safe version.
     ///
     /// **Property**: Optimized and safe merge cursors should produce identical results.
-    ///
     @Test
     public void testOptimizedMergeCursorEquivalence()
     {
@@ -308,11 +288,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
             });
     }
 
-    ///
     /// Test that deletion markers properly delete live data within their ranges.
     ///
     /// **Property**: Live data covered by deletion ranges should be removed or modified.
-    ///
     @Test
     public void testDeletionApplicationInvariant()
     {
@@ -346,11 +324,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
             });
     }
 
-    ///
     /// Test that trie operations maintain structural invariants.
     ///
     /// **Property**: All trie operations should preserve the trie's structural integrity.
-    ///
     @Test
     public void testTrieStructuralInvariants()
     {
@@ -382,11 +358,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
             });
     }
 
-    ///
     /// Test that range operations are consistent with full trie operations.
     ///
     /// **Property**: Operating on a range should be equivalent to filtering the full result.
-    ///
     @Test
     public void testRangeOperationConsistency()
     {
@@ -431,11 +405,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
             });
     }
 
-    ///
     /// Test that merge operations are associative.
     ///
     /// **Property**: `merge(merge(A, B), C)` should equal `merge(A, merge(B, C))`.
-    ///
     @Test
     public void testMergeAssociativity()
     {
@@ -474,11 +446,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     }
 
 
-    ///
     /// Test collection merge functionality using randomized property-based testing.
     /// This test verifies that merging multiple tries using collection merge produces
     /// the same result as sequential pairwise merges.
-    ///
     @Test
     public void testCollectionMerge()
     {
@@ -522,10 +492,8 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
             });
     }
 
-    ///
     /// Test that the optimized collection merge produces the same results as the safe version.
     /// This verifies that the deletionsAtFixedPoints optimization works correctly for collection merges.
-    ///
     @Test
     public void testOptimizedCollectionMerge()
     {

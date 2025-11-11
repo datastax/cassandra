@@ -352,7 +352,7 @@ abstract class MergeCursor<T, C extends Cursor<T>> implements Cursor<T>
             if (tgt.hasDeletions())
                 return;
             // Additionally, if `deletionsAtFixedPoints` is in force, we don't need to look for deletions below this
-            // point when we already have applied tdt's deletions to src.
+            // point when we already have applied tgt's deletions to src.
             if (deletionsAtFixedPoints && src.hasDeletions())
                 return;
 

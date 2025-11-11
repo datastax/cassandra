@@ -193,10 +193,11 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         {
             // Report the higher deletion, to avoid dropping the other side of boundaries that switch to any omitted
             // deletion time.
-            return leftDeletion == null ? rightDeletion
-                                        : rightDeletion == null ? leftDeletion
-                                                                : rightDeletion.supersedes(leftDeletion) ? rightDeletion
-                                                                                                         : leftDeletion;
+            if (leftDeletion == null)
+                return rightDeletion;
+            if (rightDeletion == null)
+                return leftDeletion;
+            return rightDeletion.supersedes(leftDeletion) ? rightDeletion : leftDeletion;
         }
 
         @Override
@@ -444,7 +445,7 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         @Override
         public String toString()
         {
-            return pointDeletion + (coveringDeletion != null ? "(under " + (coveringDeletion != null ? coveringDeletion : "LIVE") + ")" : "");
+            return pointDeletion + (coveringDeletion != null ? "(under " + coveringDeletion + ")" : "");
         }
 
         @Override

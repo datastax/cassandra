@@ -27,6 +27,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Random;
 import java.util.Set;
 import java.util.SortedMap;
@@ -467,6 +468,40 @@ public class TrieUtil
     static String asString(ByteComparable bc)
     {
         return bc != null ? bc.byteComparableAsString(VERSION) : "null";
+    }
+
+    static <T> NavigableMap<Preencoded, T> boundedMap(NavigableMap<Preencoded, T> sourceMap, Preencoded ll, boolean includeLeft, Preencoded rr, boolean includeRight)
+    {
+        // Our slice has somewhat different semantics:
+        // - prefixes are not supported, i.e. a range like (a, aaa) cannot be used
+        // - inclusivity extends to the branches of each bound
+        Preencoded l = !includeLeft ? nudge(ll) : ll;
+        Preencoded r = includeRight ? nudge(rr) : rr;
+
+        return l == null
+               ? r == null
+                 ? sourceMap
+                 : sourceMap.headMap(r, false)
+               : r == null
+                 ? sourceMap.tailMap(l, true)
+                 : sourceMap.subMap(l, true, r, false);
+    }
+
+    static Preencoded nudge(Preencoded v)
+    {
+        if (v == null)
+            return null;
+
+        byte[] data = v.getPreencodedBytes().remainingBytesToArray();
+        int len = data.length;
+        while (len > 0 && data[len-1] == -1)
+            --len;
+
+        if (len == 0)
+            return null;
+
+        ++data[len - 1];
+        return ByteComparable.preencoded(v.encodingVersion(), data, 0, len);
     }
 
     static class SpecStackEntry

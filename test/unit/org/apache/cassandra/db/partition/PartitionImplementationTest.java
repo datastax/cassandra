@@ -478,7 +478,7 @@ public class PartitionImplementationTest
     private static Iterator<Clusterable> maybeFilterInvalidCloseThenOpen(Iterator<Clusterable> result, boolean reversed)
     {
         // Older implementations concatenate the individual slices, which may create an invalid close+open sequence with the same clustering.
-        // Stage 3 tries fix this problem.
+        // Stage 3 tries to fix this problem.
         if (implementation != Implementation.TRIE || !result.hasNext())
             return result;
 

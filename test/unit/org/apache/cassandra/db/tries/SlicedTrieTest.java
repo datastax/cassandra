@@ -269,40 +269,6 @@ public class SlicedTrieTest
         }
     }
 
-    static Preencoded nudge(Preencoded v)
-    {
-        if (v == null)
-            return null;
-
-        byte[] data = v.getPreencodedBytes().remainingBytesToArray();
-        int len = data.length;
-        while (len > 0 && data[len-1] == -1)
-            --len;
-
-        if (len == 0)
-            return null;
-
-        ++data[len - 1];
-        return ByteComparable.preencoded(v.encodingVersion(), data, 0, len);
-    }
-
-    static <T> NavigableMap<Preencoded, T> boundedMap(NavigableMap<Preencoded, T> sourceMap, Preencoded ll, boolean includeLeft, Preencoded rr, boolean includeRight)
-    {
-        // Our slice has somewhat different semantics:
-        // - prefixes are not supported, i.e. a range like (a, aaa) cannot be used
-        // - inclusivity extends to the branches of each bound
-        Preencoded l = !includeLeft ? nudge(ll) : ll;
-        Preencoded r = includeRight ? nudge(rr) : rr;
-
-        return l == null
-               ? r == null
-                 ? sourceMap
-                 : sourceMap.headMap(r, false)
-               : r == null
-                 ? sourceMap.tailMap(l, true)
-                 : sourceMap.subMap(l, true, r, false);
-    }
-
     public void checkEqualRange(NavigableMap<Preencoded, ByteBuffer> content1,
                                 Trie<ByteBuffer> t1,
                                 Preencoded l,
@@ -314,7 +280,7 @@ public class SlicedTrieTest
             return; // prefixes not supported in key bounds
 
         System.out.println(String.format("Intersection with %s%s:%s%s", includeLeft ? "[" : "(", asString(l), asString(r), includeRight ? "]" : ")"));
-        SortedMap<Preencoded, ByteBuffer> imap = boundedMap(content1, l, includeLeft, r, includeRight);
+        SortedMap<Preencoded, ByteBuffer> imap = TrieUtil.boundedMap(content1, l, includeLeft, r, includeRight);
         Trie<ByteBuffer> intersection = t1.slice(l, includeLeft, r, includeRight);
         try
         {

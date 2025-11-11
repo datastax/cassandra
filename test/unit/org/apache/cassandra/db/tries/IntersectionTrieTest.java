@@ -126,7 +126,7 @@ public class IntersectionTrieTest
                                 RangeOp<ByteBuffer> op) throws Exception
     {
         System.out.format("Intersection with [%s:%s]\n", asString(l), asString(r));
-        NavigableMap<Preencoded, ByteBuffer> imap = SlicedTrieTest.boundedMap(content1, l, true, r, false);
+        NavigableMap<Preencoded, ByteBuffer> imap = TrieUtil.boundedMap(content1, l, true, r, false);
 
         Trie<ByteBuffer> intersection = op.apply(t1, l, r);
 

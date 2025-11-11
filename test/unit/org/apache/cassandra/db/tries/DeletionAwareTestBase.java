@@ -97,9 +97,7 @@ public class DeletionAwareTestBase
         list.add(value);
     }
 
-    /**
-     * Creates a {@link ByteComparable} for the provided value by splitting the integer in sequences of "bits" bits.
-     */
+    /// Creates a [ByteComparable] for the provided value by splitting the integer in sequences of "bits" bits.
     private ByteComparable of(int value, int terminator)
     {
         // TODO: Also in all other tests of this type
