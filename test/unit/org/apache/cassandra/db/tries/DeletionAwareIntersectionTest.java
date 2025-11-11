@@ -70,9 +70,6 @@ public class DeletionAwareIntersectionTest extends DeletionAwareTestBase
             testIntersection("inside with change",
                              array(before(27), before(29)));
 
-//            testIntersection("empty range inside",
-//                             array(before(27), before(27)));
-
             testIntersection("point covered",
                              array(before(16), before(18)));
             testIntersection("point at range start",

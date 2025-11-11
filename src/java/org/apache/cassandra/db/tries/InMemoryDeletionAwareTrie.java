@@ -94,7 +94,6 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
             super(trie, direction, root, depth, incomingTransition);
         }
 
-        @SuppressWarnings("unchecked")
         @Override
         public T content()
         {
@@ -119,7 +118,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         }
     }
 
-    @SuppressWarnings("rawtypes")
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private RangeCursor<D> makeRangeCursor(Direction direction, int alternateBranch) {
         return isNull(alternateBranch)
                 ? null
@@ -168,7 +167,6 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         @Override
         void apply() throws TrieSpaceExhaustedException
         {
-            // TODO: Consider walking both data and deletion branches in parallel.
             int depth = state.currentDepth;
             while (true)
             {
@@ -261,6 +259,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         private void applyDeletions(RangeCursor<E> incomingAlternateBranch) throws TrieSpaceExhaustedException
         {
             // Apply the deletion branch to our data.
+            @SuppressWarnings({"unchecked", "rawtypes"})
             InMemoryTrie.RangeMutation<T, E, RangeCursor<E>> deleteMutation = new InMemoryTrie.RangeMutation<>(
                     deleter,
                     (Predicate<NodeFeatures<E>>) (Predicate) needsForcedCopy,
@@ -278,6 +277,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
             // If forced copying is in force, apply it to the deletion branch too.
             int deletionForcedCopyDepth = forcedCopyDepth <= state.currentDepth ? 0 : Integer.MAX_VALUE;
 
+            @SuppressWarnings({"unchecked", "rawtypes"})
             InMemoryRangeTrie.Mutation<D, E> rangeMutation = new InMemoryRangeTrie.Mutation<>(
                     deletionTransformer,
                     (Predicate<NodeFeatures<E>>) (Predicate) needsForcedCopy,

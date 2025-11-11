@@ -57,9 +57,9 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         /// a start for the next). Branches before, after and below this point is covered.
         COVERED(true, true, true);
 
-        public static int APPLICABLE_BEFORE = 1 << 0;
-        public static int APPLICABLE_AFTER  = 1 << 1;
-        public static int IS_BOUNDARY       = 1 << 2;
+        public static final int APPLICABLE_BEFORE = 1 << 0;
+        public static final int APPLICABLE_AFTER  = 1 << 1;
+        public static final int IS_BOUNDARY       = 1 << 2;
 
         /// Whether the set applied to positions before the cursor's in forward order.
         final boolean applicableBefore;

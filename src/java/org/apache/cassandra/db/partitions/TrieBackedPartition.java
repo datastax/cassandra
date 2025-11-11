@@ -119,7 +119,6 @@ public class TrieBackedPartition implements Partition
         final Object[] columnsBTree;
         final LivenessInfo livenessInfo;
         final int minLocalDeletionTime;
-        // TODO track minTimestamp to avoid applying deletions that do not do anything
 
         RowData(Object[] columnsBTree, LivenessInfo livenessInfo)
         {
@@ -315,7 +314,7 @@ public class TrieBackedPartition implements Partition
 
     /// Conversion from [RowData] to [Row]. [WithEnsureOnHeap] overrides this to do the necessary copying
     /// (hence the non-static method).
-    Row toRow(RowData data, Clustering clustering)
+    Row toRow(RowData data, Clustering<?> clustering)
     {
         return data.toRow(clustering, DeletionTime.LIVE);
     }
@@ -329,7 +328,6 @@ public class TrieBackedPartition implements Partition
     throws TrieSpaceExhaustedException
     {
         // We do not look for atomicity here, so can do the two steps separately.
-        // TODO: Direct insertion methods (singleton known to not be deleted, deletion known to not delete anything)
         Clustering<?> clustering = row.clustering();
         DeletionTime deletionTime = row.deletion().time();
 
@@ -343,9 +341,9 @@ public class TrieBackedPartition implements Partition
         }
         if (!row.isEmptyAfterDeletion())
         {
-            trie.apply(DeletionAwareTrie.<Object, TrieTombstoneMarker>singleton(comparableClustering,
-                                                                                BYTE_COMPARABLE_VERSION,
-                                                                                rowToData(row)),
+            trie.apply(DeletionAwareTrie.singleton(comparableClustering,
+                                                   BYTE_COMPARABLE_VERSION,
+                                                   rowToData(row)),
                        noConflictInData(),
                        mergeTombstoneRanges(),
                        noIncomingSelfDeletion(),
@@ -360,7 +358,6 @@ public class TrieBackedPartition implements Partition
                                           RangeTombstoneMarker openMarker,
                                           RangeTombstoneMarker closeMarker)
     {
-        // TODO: Standalone partitions would not delete their own data, we could tell the trie not to go over the live path.
         DeletionTime deletionTime = openMarker.openDeletionTime(false);
         assert deletionTime.equals(closeMarker.closeDeletionTime(false));
         putDeletionInTrie(trie,
@@ -435,7 +432,7 @@ public class TrieBackedPartition implements Partition
         return rowCountIncludingStatic - (hasStaticRow() ? 1 : 0);
     }
 
-    public ByteComparable path(ClusteringPrefix clustering)
+    public ByteComparable path(ClusteringPrefix<?> clustering)
     {
         return metadata.comparator.asByteComparable(clustering);
     }
@@ -493,12 +490,12 @@ public class TrieBackedPartition implements Partition
         return reverseIterator.hasNext() ? reverseIterator.next() : null;
     }
 
-    public Row getRow(Clustering clustering)
+    public Row getRow(Clustering<?> clustering)
     {
         return getRow(clustering, path(clustering));
     }
 
-    public Row getRow(Clustering clustering, ByteComparable path)
+    public Row getRow(Clustering<?> clustering, ByteComparable path)
     {
         RowData data = (RowData) trie.get(path);
         TrieTombstoneMarker marker = trie.applicableDeletion(path);
@@ -538,10 +535,9 @@ public class TrieBackedPartition implements Partition
 
     /// Implementation of [UnfilteredRowIterator] for this partition.
     ///
-    /// Currently, this implementation is pretty involved because it has to revert the transformations done to row and
-    /// partition-level deletions. To do the former, we apply a [RecombiningUnfilteredRowIterator] on top of this. To
-    /// do the latter, we extract the partition-level deletion from its coverage of the static row and filter out
-    /// tombstone ranges that switch to it.
+    /// Currently, this implementation has to revert the transformation done to partition-level deletions. To do that,
+    /// we extract the partition-level deletion from its coverage of the static row and filter out tombstone ranges that
+    /// switch to it.
     class UnfilteredIterator
     extends TrieEntriesIterator.WithNullFiltering<Object, Unfiltered>
     implements UnfilteredRowIterator
@@ -719,7 +715,7 @@ public class TrieBackedPartition implements Partition
         }
 
         @Override
-        public Row toRow(RowData data, Clustering clustering)
+        public Row toRow(RowData data, Clustering<?> clustering)
         {
             return ensureOnHeap.applyToRow(super.toRow(data, clustering));
         }
@@ -736,7 +732,7 @@ public class TrieBackedPartition implements Partition
             };
 
     /// Resolver for data in trie-backed partitions. We don't permit any overwrites/merges.
-    @SuppressWarnings("rawtypes")
+    @SuppressWarnings("unchecked")
     public static InMemoryTrie.UpsertTransformer<Object, Object> noConflictInData()
     {
         return NO_CONFLICT_RESOLVER;
@@ -754,7 +750,7 @@ public class TrieBackedPartition implements Partition
         return MERGE_TOMBSTONE_RANGES;
     }
 
-    private static InMemoryBaseTrie.UpsertTransformer<Object, TrieTombstoneMarker> IGNORE_UPDATE = (left, right) -> left;
+    private static final InMemoryBaseTrie.UpsertTransformer<Object, TrieTombstoneMarker> IGNORE_UPDATE = (left, right) -> left;
 
     /// Resolver for applying incoming deletions to existing data in trie-backed partitions. We assume that the data is
     /// not affected by the deletion.
@@ -763,7 +759,7 @@ public class TrieBackedPartition implements Partition
         return IGNORE_UPDATE;
     }
 
-    private static BiFunction<TrieTombstoneMarker, Object, Object> IGNORE_EXISTING = (left, right) -> right;
+    private static final BiFunction<TrieTombstoneMarker, Object, Object> IGNORE_EXISTING = (left, right) -> right;
 
     /// Resolver for applying existing deletions to incoming data in trie-backed partitions. We assume that the data is
     /// not affected by the deletion.

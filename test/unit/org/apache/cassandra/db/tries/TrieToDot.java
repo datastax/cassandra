@@ -87,11 +87,11 @@ class TrieToDot<T> extends TriePathReconstructor implements Cursor.Walker<T, Str
 
     private String nodeString(int keyPos)
     {
-        StringBuilder b = new StringBuilder();
-        b.append("Node_");
+        StringBuilder r = new StringBuilder();
+        r.append("Node_");
         for (int i = 0; i < keyPos; ++i)
-            b.append(transitionToString.apply(keyBytes[i] & 0xFF));
-        return b.toString();
+            r.append(transitionToString.apply(keyBytes[i] & 0xFF));
+        return r.toString();
     }
 
     @Override

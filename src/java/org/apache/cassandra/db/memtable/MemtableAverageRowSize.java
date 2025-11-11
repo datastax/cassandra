@@ -18,14 +18,13 @@
 
 package org.apache.cassandra.db.memtable;
 
-import java.util.function.Consumer;
-
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.tries.BaseTrie;
 import org.apache.cassandra.db.tries.Trie;
 
 class MemtableAverageRowSize
@@ -42,7 +41,7 @@ class MemtableAverageRowSize
         //   (which e.g. excludes clustering keys)
         // - avoids the conversion to Row, which has non-trivial cost
 
-        class SizeCalculator implements Trie.ValueConsumer<Object>
+        class SizeCalculator implements BaseTrie.ValueConsumer<Object>
         {
             long totalSize = 0;
             long count = 0;
