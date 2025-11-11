@@ -274,7 +274,8 @@ public class ReadExecutionController implements AutoCloseable
 
     public void updateSstablesIteratedPerRow(int mergedSSTablesIterated)
     {
-        if (sstablesScannedPerRowRead != null) {
+        if (sstablesScannedPerRowRead != null)
+        {
             sstablesScannedPerRowRead.update(mergedSSTablesIterated);
         }
     }
