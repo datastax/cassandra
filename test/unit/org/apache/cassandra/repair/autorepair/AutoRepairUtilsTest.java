@@ -102,7 +102,7 @@ public class AutoRepairUtilsTest extends CQLTester
         requireNetwork();
         defaultSnitch = DatabaseDescriptor.getEndpointSnitch();
         localEndpoint = FBUtilities.getBroadcastAddressAndPort();
-        hostId = Gossiper.instance.getHostId(localEndpoint);
+        hostId = StorageService.instance.getTokenMetadata().getHostId(localEndpoint);
         AutoRepairUtils.setup();
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace("ks", KeyspaceParams.create(false,
@@ -279,7 +279,7 @@ public class AutoRepairUtilsTest extends CQLTester
     public void testHasMultipleLiveMajorVersionsWithMultipleNodesOfSameVersion() throws UnknownHostException
     {
         Gossiper.instance.start(0);
-        Gossiper.instance.expireUpgradeFromVersion();
+        Gossiper.instance.clusterVersionProvider.reset();
 
         VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(null);
         EndpointState es = new EndpointState((HeartBeatState) null);
@@ -308,7 +308,7 @@ public class AutoRepairUtilsTest extends CQLTester
     public void testHasMultipleLiveMajorVersionsWithMultipleNodesOfSameMajorVersionDifferentMinorVersions() throws UnknownHostException
     {
         Gossiper.instance.start(0);
-        Gossiper.instance.expireUpgradeFromVersion();
+        Gossiper.instance.clusterVersionProvider.reset();
 
         VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(null);
         EndpointState es = new EndpointState((HeartBeatState) null);
@@ -338,7 +338,7 @@ public class AutoRepairUtilsTest extends CQLTester
     public void testHasMultipleLiveMajorVersionsWithMultipleNodesOfDifferentMajorVersions() throws UnknownHostException
     {
         Gossiper.instance.start(0);
-        Gossiper.instance.expireUpgradeFromVersion();
+        Gossiper.instance.clusterVersionProvider.reset();
 
         VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(null);
         EndpointState es = new EndpointState((HeartBeatState) null);
@@ -618,7 +618,7 @@ public class AutoRepairUtilsTest extends CQLTester
     public void testHasNodesBelowMinimumVersionWithAllNodesAtMinVersion() throws UnknownHostException
     {
         Gossiper.instance.start(0);
-        Gossiper.instance.expireUpgradeFromVersion();
+        Gossiper.instance.clusterVersionProvider.reset();
 
         VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(null);
 
@@ -643,7 +643,7 @@ public class AutoRepairUtilsTest extends CQLTester
     public void testHasNodesBelowMinimumVersionWithAllNodesAboveMinVersion() throws UnknownHostException
     {
         Gossiper.instance.start(0);
-        Gossiper.instance.expireUpgradeFromVersion();
+        Gossiper.instance.clusterVersionProvider.reset();
 
         VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(null);
 
@@ -668,7 +668,7 @@ public class AutoRepairUtilsTest extends CQLTester
     public void testHasNodesBelowMinimumVersionWithOneNodeBelowMinVersion() throws UnknownHostException
     {
         Gossiper.instance.start(0);
-        Gossiper.instance.expireUpgradeFromVersion();
+        Gossiper.instance.clusterVersionProvider.reset();
 
         VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(null);
 
@@ -693,7 +693,7 @@ public class AutoRepairUtilsTest extends CQLTester
     public void testHasNodesBelowMinimumVersionWithNullVersion() throws UnknownHostException
     {
         Gossiper.instance.start(0);
-        Gossiper.instance.expireUpgradeFromVersion();
+        Gossiper.instance.clusterVersionProvider.reset();
 
         VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(null);
 

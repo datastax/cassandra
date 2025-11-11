@@ -51,10 +51,10 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.service.AutoRepairService;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.repair.autorepair.AutoRepairUtils.RepairTurn;
 import org.apache.cassandra.utils.concurrent.Condition;
@@ -193,7 +193,12 @@ public class AutoRepair
             repairState.setLongestUnrepairedNode(AutoRepairUtils.getHostWithLongestUnrepairTime(repairType));
 
             //consistency level to use for local query
-            UUID myId = Gossiper.instance.getHostId(FBUtilities.getBroadcastAddressAndPort());
+            UUID myId = StorageService.instance.getTokenMetadata().getHostId(FBUtilities.getBroadcastAddressAndPort());
+            if (myId == null)
+            {
+                logger.warn("Could not resolve local host ID, skipping repair cycle for repair type {}", repairType);
+                return;
+            }
 
             // If it's too soon to run repair, don't bother checking if it's our turn.
             if (tooSoonToRunRepair(repairType, repairState, config, myId))
@@ -303,7 +308,7 @@ public class AutoRepair
                 boolean repairOneTableAtATime = !config.getRepairByKeyspace(repairType);
                 if (previousAssignment != null && repairOneTableAtATime && !previousAssignment.tableNames.equals(curRepairAssignment.tableNames))
                 {
-                    // In the repair assignment, all the tables are appended sequnetially.
+                    // In the repair assignment, all the tables are appended sequentially.
                     // Check if we have a different table, and if so, we should reset the table start time.
                     tableStartTime = timeFunc.get();
                 }
@@ -414,7 +419,7 @@ public class AutoRepair
     {
         if (repairState.getLastRepairTime() == 0)
         {
-            // the node has either just boooted or has not run repair before,
+            // the node has either just booted or has not run repair before,
             // we should check for the node's repair history in the DB
             repairState.setLastRepairTime(AutoRepairUtils.getLastRepairTimeForNode(repairType, myId));
         }
@@ -489,7 +494,7 @@ public class AutoRepair
         long repairScheduleElapsedInMillis = timeFunc.get() - startTimeInMillis;
         if (repairScheduleElapsedInMillis < SLEEP_IF_REPAIR_FINISHES_QUICKLY.toMilliseconds())
         {
-            //If repair finished quickly, happens for Cassndra cluster with empty (or tiny) data, in such cases,
+            //If repair finished quickly, happens for Cassandra cluster with empty (or tiny) data, in such cases,
             //wait for some duration so that the JMX metrics can detect the repairInProgress
             logger.info("Wait for {}ms for repair type {}.", SLEEP_IF_REPAIR_FINISHES_QUICKLY.toMilliseconds() - repairScheduleElapsedInMillis, repairType);
             Thread.sleep(SLEEP_IF_REPAIR_FINISHES_QUICKLY.toMilliseconds() - repairScheduleElapsedInMillis);
@@ -534,7 +539,7 @@ public class AutoRepair
             sleepFunc.accept(timeToSoak, TimeUnit.MILLISECONDS);
         }
     }
-      
+
     static class CollectedRepairStats
     {
         int failedTokenRanges = 0;

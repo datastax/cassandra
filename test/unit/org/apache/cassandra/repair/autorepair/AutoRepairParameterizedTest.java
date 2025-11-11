@@ -61,7 +61,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.AutoRepairMetricsManager;
 import org.apache.cassandra.metrics.AutoRepairMetrics;
@@ -70,6 +69,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.AutoRepairService;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.progress.ProgressEvent;
@@ -273,7 +273,7 @@ public class AutoRepairParameterizedTest extends CQLTester
     @Test
     public void testRepairTurn()
     {
-        UUID myId = Gossiper.instance.getHostId(FBUtilities.getBroadcastAddressAndPort());
+        UUID myId = StorageService.instance.getTokenMetadata().getHostId(FBUtilities.getBroadcastAddressAndPort());
         Assert.assertNotEquals("Expected my turn for the repair", NOT_MY_TURN, AutoRepairUtils.myTurnToRunRepair(repairType, myId));
     }
 
@@ -325,7 +325,7 @@ public class AutoRepairParameterizedTest extends CQLTester
         long lastRepairTime1 = AutoRepair.instance.repairStates.get(repairType).getLastRepairTime();
         Assert.assertTrue(String.format("Expected lastRepairTime1 > 0, actual value lastRepairTime1 %d",
                                         lastRepairTime1), lastRepairTime1 > 0);
-        UUID myId = Gossiper.instance.getHostId(FBUtilities.getBroadcastAddressAndPort());
+        UUID myId = StorageService.instance.getTokenMetadata().getHostId(FBUtilities.getBroadcastAddressAndPort());
         Assert.assertNotEquals("Expected my turn for the repair",
                                NOT_MY_TURN, AutoRepairUtils.myTurnToRunRepair(repairType, myId));
         AutoRepair.instance.repair(repairType);
@@ -345,7 +345,7 @@ public class AutoRepairParameterizedTest extends CQLTester
         AutoRepairService.instance.getAutoRepairConfig().setRepairMinInterval(repairType, "0s");
         Assert.assertEquals(String.format("Priority host count is not same, actual value %d, expected value %d",
                                           AutoRepairUtils.getPriorityHosts(repairType).size(), 0), 0, AutoRepairUtils.getPriorityHosts(repairType).size());
-        UUID myId = Gossiper.instance.getHostId(FBUtilities.getBroadcastAddressAndPort());
+        UUID myId = StorageService.instance.getTokenMetadata().getHostId(FBUtilities.getBroadcastAddressAndPort());
         Assert.assertNotEquals("Expected my turn for the repair", NOT_MY_TURN, AutoRepairUtils.myTurnToRunRepair(repairType, myId));
         AutoRepair.instance.repair(repairType);
         AutoRepairUtils.addPriorityHosts(repairType, Sets.newHashSet(FBUtilities.getBroadcastAddressAndPort()));
@@ -844,7 +844,7 @@ public class AutoRepairParameterizedTest extends CQLTester
     {
         RepairOption options = new RepairOption(RepairParallelism.PARALLEL, true, repairType == AutoRepairConfig.RepairType.INCREMENTAL, false,
                                                 AutoRepairService.instance.getAutoRepairConfig().getRepairThreads(repairType), Collections.emptySet(),
-                                                false, false, false, PreviewKind.NONE, false, true, false, false);
+                                                false, false, false, false, PreviewKind.NONE, false, true, false, false, false);
         AutoRepairState repairState = AutoRepair.instance.repairStates.get(repairType);
         AutoRepairState spyState = spy(repairState);
         AtomicReference<AutoRepair.RepairProgressListener> failingListener = new AtomicReference<>();

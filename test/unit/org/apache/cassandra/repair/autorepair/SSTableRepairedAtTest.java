@@ -94,11 +94,13 @@ public class SSTableRepairedAtTest extends CQLTester
         try
         {
             StorageService.instance.getTablesForKeyspace(missingKeyspace);
-            fail("Expected an AssertionError to be thrown");
+            fail("Expected an exception to be thrown for unknown keyspace");
         }
-        catch (AssertionError e)
+        catch (RuntimeException e)
         {
-            assertEquals("Unknown keyspace " + missingKeyspace, e.getMessage());
+            // UnknownKeyspaceException is thrown in our codebase (vs AssertionError in Apache 5.0.9)
+            assertTrue("Expected message to contain keyspace name, but was: " + e.getMessage(),
+                       e.getMessage() != null && e.getMessage().contains(missingKeyspace));
         }
     }
 
@@ -161,7 +163,7 @@ public class SSTableRepairedAtTest extends CQLTester
         table1.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         SchemaLoader.insertData(TEST_KEYSPACE, table1.name, 0, 1);
         table1.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
-        table1.getCompactionStrategyManager().mutateRepaired(table1.getLiveSSTables(), 1, null, false);
+        table1.mutateRepaired(table1.getLiveSSTables(), 1, null, false);
         assertEquals(2, table1.getLiveSSTables().stream().filter(SSTableReader::isRepaired).count());
 
         List<String> result = StorageService.instance.mutateSSTableRepairedState(false, false, TEST_KEYSPACE, Arrays.asList(table1.name));
