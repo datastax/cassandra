@@ -39,6 +39,7 @@
     <bytebuddy.version>1.14.17</bytebuddy.version>
     <byteman.version>4.0.23</byteman.version>
     <ohc.version>0.5.1</ohc.version>
+    <netty.version>4.1.128.Final</netty.version>
 
     <!-- These are referenced in build.xml, so need to be propagated from there -->
     <asm.version>@asm.version@</asm.version>
@@ -750,7 +751,7 @@
       <dependency>
         <groupId>io.netty</groupId>
         <artifactId>netty-all</artifactId>
-        <version>4.1.119.Final</version>
+        <version>${netty.version}</version>
         <exclusions>
           <exclusion>
             <groupId>io.netty</groupId>
@@ -844,18 +845,18 @@
       <dependency>
         <groupId>io.netty</groupId>
         <artifactId>netty-transport-native-epoll</artifactId>
-        <version>4.1.119.Final</version>
+        <version>${netty.version}</version>
       </dependency>
       <dependency>
         <groupId>io.netty</groupId>
         <artifactId>netty-transport-native-epoll</artifactId>
-        <version>4.1.119.Final</version>
+        <version>${netty.version}</version>
         <classifier>linux-x86_64</classifier>
       </dependency>
       <dependency>
         <groupId>io.netty</groupId>
         <artifactId>netty-transport-native-epoll</artifactId>
-        <version>4.1.119.Final</version>
+        <version>${netty.version}</version>
         <classifier>linux-aarch_64</classifier>
       </dependency>
 
