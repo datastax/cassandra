@@ -97,7 +97,7 @@ public class BruteForceRowIdIteratorTest
         }
 
         @Override
-        public void processNeighbors(int i, int i1, ScoreFunction scoreFunction, Function<Integer, Boolean> function, ImmutableGraphIndex.NeighborProcessor neighborProcessor)
+        public void processNeighbors(int i, int i1, ScoreFunction scoreFunction, ImmutableGraphIndex.IntMarker intMarker, ImmutableGraphIndex.NeighborProcessor neighborProcessor)
         {
 
         }
