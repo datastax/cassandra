@@ -65,6 +65,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
@@ -119,58 +120,58 @@ public class AutoRepairUtils
     static final String COL_REPAIR_PRIORITY = "repair_priority";
     static final String COL_DELETE_HOSTS = "delete_hosts";  // this set stores the host ids which think the row should be deleted
     static final String COL_REPAIR_TURN = "repair_turn";  // this record the last repair turn. Normal turn or turn due to priority
-    static final String COL_DELETE_HOSTS_UPDATE_TIME = "delete_hosts_update_time"; // the time when delete hosts are upated
-    static final String COL_FORCE_REPAIR = "force_repair";  // if set to true, the node will do non-primary range rapair
+    static final String COL_DELETE_HOSTS_UPDATE_TIME = "delete_hosts_update_time"; // the time when delete hosts are updated
+    static final String COL_FORCE_REPAIR = "force_repair";  // if set to true, the node will do non-primary range repair
 
-    final static String SELECT_REPAIR_HISTORY = String.format(
+    static final String SELECT_REPAIR_HISTORY = String.format(
     "SELECT * FROM %s.%s WHERE %s = ?", SchemaConstants.DISTRIBUTED_KEYSPACE_NAME,
     SystemDistributedKeyspace.AUTO_REPAIR_HISTORY, COL_REPAIR_TYPE);
-    final static String SELECT_REPAIR_PRIORITY = String.format(
+    static final String SELECT_REPAIR_PRIORITY = String.format(
     "SELECT * FROM %s.%s WHERE %s = ?", SchemaConstants.DISTRIBUTED_KEYSPACE_NAME,
     SystemDistributedKeyspace.AUTO_REPAIR_PRIORITY, COL_REPAIR_TYPE);
-    final static String DEL_REPAIR_PRIORITY = String.format(
+    static final String DEL_REPAIR_PRIORITY = String.format(
     "DELETE %s[?] FROM %s.%s WHERE %s = ?", COL_REPAIR_PRIORITY, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME,
     SystemDistributedKeyspace.AUTO_REPAIR_PRIORITY, COL_REPAIR_TYPE);
-    final static String ADD_PRIORITY_HOST = String.format(
+    static final String ADD_PRIORITY_HOST = String.format(
     "UPDATE %s.%s SET %s = %s + ?  WHERE %s = ?", SchemaConstants.DISTRIBUTED_KEYSPACE_NAME,
     SystemDistributedKeyspace.AUTO_REPAIR_PRIORITY, COL_REPAIR_PRIORITY, COL_REPAIR_PRIORITY, COL_REPAIR_TYPE);
 
-    final static String INSERT_NEW_REPAIR_HISTORY = String.format(
+    static final String INSERT_NEW_REPAIR_HISTORY = String.format(
     "INSERT INTO %s.%s (%s, %s, %s, %s, %s, %s) values (?, ? ,?, ?, {}, ?) IF NOT EXISTS",
     SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, SystemDistributedKeyspace.AUTO_REPAIR_HISTORY, COL_REPAIR_TYPE,
     COL_HOST_ID, COL_REPAIR_START_TS, COL_REPAIR_FINISH_TS, COL_DELETE_HOSTS, COL_DELETE_HOSTS_UPDATE_TIME);
 
-    final static String ADD_HOST_ID_TO_DELETE_HOSTS = String.format(
+    static final String ADD_HOST_ID_TO_DELETE_HOSTS = String.format(
     "UPDATE %s.%s SET %s = %s + ?, %s = ? WHERE %s = ? AND %s = ? IF EXISTS"
     , SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, SystemDistributedKeyspace.AUTO_REPAIR_HISTORY, COL_DELETE_HOSTS,
     COL_DELETE_HOSTS, COL_DELETE_HOSTS_UPDATE_TIME, COL_REPAIR_TYPE, COL_HOST_ID);
 
-    final static String DEL_AUTO_REPAIR_HISTORY = String.format(
+    static final String DEL_AUTO_REPAIR_HISTORY = String.format(
     "DELETE FROM %s.%s WHERE %s = ? AND %s = ?"
     , SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, SystemDistributedKeyspace.AUTO_REPAIR_HISTORY, COL_REPAIR_TYPE,
     COL_HOST_ID);
 
-    final static String RECORD_START_REPAIR_HISTORY = String.format(
+    static final String RECORD_START_REPAIR_HISTORY = String.format(
     "UPDATE %s.%s SET %s= ?, repair_turn = ? WHERE %s = ? AND %s = ?"
     , SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, SystemDistributedKeyspace.AUTO_REPAIR_HISTORY, COL_REPAIR_START_TS,
     COL_REPAIR_TYPE, COL_HOST_ID);
 
-    final static String RECORD_FINISH_REPAIR_HISTORY = String.format(
+    static final String RECORD_FINISH_REPAIR_HISTORY = String.format(
     "UPDATE %s.%s SET %s= ?, %s=false WHERE %s = ? AND %s = ?"
     , SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, SystemDistributedKeyspace.AUTO_REPAIR_HISTORY, COL_REPAIR_FINISH_TS,
     COL_FORCE_REPAIR, COL_REPAIR_TYPE, COL_HOST_ID);
 
-    final static String CLEAR_DELETE_HOSTS = String.format(
+    static final String CLEAR_DELETE_HOSTS = String.format(
     "UPDATE %s.%s SET %s= {} WHERE %s = ? AND %s = ?"
     , SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, SystemDistributedKeyspace.AUTO_REPAIR_HISTORY, COL_DELETE_HOSTS,
     COL_REPAIR_TYPE, COL_HOST_ID);
 
-    final static String SET_FORCE_REPAIR = String.format(
+    static final String SET_FORCE_REPAIR = String.format(
     "UPDATE %s.%s SET %s=true  WHERE %s = ? AND %s = ?"
     , SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, SystemDistributedKeyspace.AUTO_REPAIR_HISTORY, COL_FORCE_REPAIR,
     COL_REPAIR_TYPE, COL_HOST_ID);
 
-    final static String SELECT_LAST_REPAIR_TIME_FOR_NODE = String.format(
+    static final String SELECT_LAST_REPAIR_TIME_FOR_NODE = String.format(
     "SELECT %s FROM %s.%s WHERE %s = ? AND %s = ?", COL_REPAIR_FINISH_TS, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME,
     SystemDistributedKeyspace.AUTO_REPAIR_HISTORY, COL_REPAIR_TYPE, COL_HOST_ID);
 
@@ -238,7 +239,7 @@ public class AutoRepairUtils
         boolean forceRepair;
 
         public AutoRepairHistory(UUID hostId, String repairTurn, long lastRepairStartTime, long lastRepairFinishTime,
-                                 Set<UUID> deleteHosts, long deleteHostsUpateTime, boolean forceRepair)
+                                 Set<UUID> deleteHosts, long deleteHostsUpdateTime, boolean forceRepair)
         {
             this.hostId = hostId;
             this.repairTurn = repairTurn;
@@ -249,7 +250,7 @@ public class AutoRepairUtils
             {
                 this.deleteHosts = new HashSet<>();
             }
-            this.deleteHostsUpdateTime = deleteHostsUpateTime;
+            this.deleteHostsUpdateTime = deleteHostsUpdateTime;
             this.forceRepair = forceRepair;
         }
 
@@ -266,7 +267,7 @@ public class AutoRepairUtils
 
         public boolean isRepairRunning()
         {
-            // if a repair history record has start time laster than finish time, it means the repair is running
+            // if a repair history record has start time later than finish time, it means the repair is running
             return lastRepairStartTime > lastRepairFinishTime;
         }
 
@@ -377,7 +378,12 @@ public class AutoRepairUtils
     public static void setForceRepairNewNode(RepairType repairType)
     {
         // this function will be called when a node bootstrap finished
-        UUID hostId = Gossiper.instance.getHostId(FBUtilities.getBroadcastAddressAndPort());
+        UUID hostId = StorageService.instance.getTokenMetadata().getHostId(FBUtilities.getBroadcastAddressAndPort());
+        if (hostId == null)
+        {
+            logger.warn("Could not resolve local host ID, skipping setForceRepairNewNode for repair type {}", repairType);
+            return;
+        }
         // insert the data first
         insertNewRepairHistory(repairType, currentTimeMillis(), currentTimeMillis());
         setForceRepair(repairType, hostId);
@@ -388,7 +394,12 @@ public class AutoRepairUtils
         // this function is used by nodetool
         for (InetAddressAndPort host : hosts)
         {
-            UUID hostId = Gossiper.instance.getHostId(host);
+            UUID hostId = StorageService.instance.getTokenMetadata().getHostId(host);
+            if (hostId == null)
+            {
+                logger.warn("Could not resolve host ID for {}, skipping setForceRepair for repair type {}", host, repairType);
+                continue;
+            }
             setForceRepair(repairType, hostId);
         }
     }
@@ -509,8 +520,15 @@ public class AutoRepairUtils
              */
             if (Gossiper.instance.isAlive(node))
             {
-                UUID hostId = Gossiper.instance.getHostId(node);
-                hostIdsInCurrentRing.add(hostId);
+                UUID hostId = StorageService.instance.getTokenMetadata().getHostId(node);
+                if (hostId == null)
+                {
+                    logger.warn("Could not resolve host ID for node {}, skipping", node);
+                }
+                else
+                {
+                    hostIdsInCurrentRing.add(hostId);
+                }
             }
             else
             {
@@ -1036,7 +1054,7 @@ public class AutoRepairUtils
             ByteBufferUtil.bytes(startTime),
             ByteBufferUtil.bytes(finishTime),
             ByteBufferUtil.bytes(currentTimeMillis())
-            ), false, -1, null, cl, ProtocolVersion.CURRENT, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME),
+            ), false, PageSize.NONE, null, cl, ProtocolVersion.CURRENT, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME),
             Dispatcher.RequestTime.forImmediateExecution());
             resultSet = UntypedResultSet.create(resultMessage.result);
             boolean applied = resultSet.one().getBoolean(ModificationStatement.CAS_RESULT_COLUMN.toString());
@@ -1057,7 +1075,7 @@ public class AutoRepairUtils
 
     public static void insertNewRepairHistory(RepairType repairType, long startTime, long finishTime)
     {
-        UUID hostId = Gossiper.instance.getHostId(FBUtilities.getBroadcastAddressAndPort());
+        UUID hostId = StorageService.instance.getTokenMetadata().getHostId(FBUtilities.getBroadcastAddressAndPort());
         insertNewRepairHistory(repairType, hostId, startTime, finishTime);
     }
 
@@ -1080,10 +1098,14 @@ public class AutoRepairUtils
         {
             //find hostId from IP address
             UUID hostId = StorageService.instance.getTokenMetadata().getHostId(host);
-            hostIds.add(hostId);
             if (hostId != null)
             {
+                hostIds.add(hostId);
                 logger.info("Add host {} to the priority list", hostId);
+            }
+            else
+            {
+                logger.warn("Could not resolve host ID for {}, skipping addPriorityHosts", host);
             }
         }
         if (!hostIds.isEmpty())

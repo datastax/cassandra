@@ -57,7 +57,6 @@ import org.apache.cassandra.repair.consistent.LocalSessions;
 import org.apache.cassandra.repair.messages.SyncResponse;
 import org.apache.cassandra.repair.messages.ValidationResponse;
 import org.apache.cassandra.repair.state.SessionState;
-import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.tracing.Tracing;
@@ -303,7 +302,6 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         Tracing.traceRepair("Syncing range {}", state.commonRange);
         if (!previewKind.isPreview() && !paxosOnly)
         {
-            SystemDistributedKeyspace.startRepairs(getId(), state.parentRepairSession, state.keyspace, state.cfnames, state.commonRange);
             RepairProgressReporter.instance.onRepairsStarted(getId(), state.parentRepairSession, state.keyspace, state.cfnames, state.commonRange);
         }
 
@@ -315,7 +313,6 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
             trySuccess(new RepairSessionResult(state.id, state.keyspace, state.commonRange.ranges, Lists.<RepairResult>newArrayList(), state.commonRange.hasSkippedReplicas));
             if (!previewKind.isPreview())
             {
-                SystemDistributedKeyspace.failRepairs(getId(), state.keyspace, state.cfnames, new RuntimeException(message));
                 RepairProgressReporter.instance.onRepairsFailed(getId(), state.keyspace, state.cfnames, new RuntimeException(message));
             }
             return;
@@ -333,7 +330,6 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
                 tryFailure(e);
                 if (!previewKind.isPreview())
                 {
-                    SystemDistributedKeyspace.failRepairs(getId(), state.keyspace, state.cfnames, e);
                     RepairProgressReporter.instance.onRepairsFailed(getId(), state.keyspace, state.cfnames, e);
                 }
                 return;
