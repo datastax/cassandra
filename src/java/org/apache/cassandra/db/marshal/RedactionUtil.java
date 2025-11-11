@@ -40,7 +40,7 @@ import javax.annotation.Nullable;
  *   <li>Over 1 GiB: "?[>1GiB]"</li>
  * </ul>
  */
-public class RedactionUtil
+public final class RedactionUtil
 {
     // Pre-computed redacted values for each size bucket
     private static final String REDACTED = "?";
@@ -62,6 +62,10 @@ public class RedactionUtil
     private static final int MIB_10 = 10 * MIB;
     private static final int MIB_100 = 100 * MIB;
     private static final int GIB = 1024 * MIB;
+
+    private RedactionUtil()
+    {
+    }
 
     /**
      * Redacts a byte buffer value, optionally including size information.
