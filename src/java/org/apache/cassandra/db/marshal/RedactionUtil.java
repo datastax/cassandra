@@ -109,6 +109,8 @@ public final class RedactionUtil
      */
     public static String redact(int size)
     {
+        assert size >= 0 : "Size must be non-negative";
+
         // Byte range, don't include size information for the values in the smallest bucket
         if (size <= B_100)
             return REDACTED;

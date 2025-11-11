@@ -48,6 +48,9 @@ public class RedactionUtilTest
     @Test
     public void testRedactSize()
     {
+        // invalid size
+        Assertions.assertThatThrownBy(() -> RedactionUtil.redact(-1)).isInstanceOf(AssertionError.class);
+
         // byte range
         assertRedactSize(0, "?");
         assertRedactSize(1, "?");
