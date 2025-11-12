@@ -504,6 +504,93 @@ public class TrieUtil
         return ByteComparable.preencoded(v.encodingVersion(), data, 0, len);
     }
 
+    /**
+     * Creates a simple trie with a root having the provided number of childs, where each child is a leaf whose content
+     * is simply the value of the transition leading to it.
+     *
+     * In other words, {@code singleLevelIntTrie(4)} creates the following trie:
+     *       Root
+     * t= 0  1  2  3
+     *    |  |  |  |
+     *    0  1  2  3
+     */
+    static Trie<Integer> singleLevelIntTrie(int childs)
+    {
+        return new Trie<Integer>()
+        {
+            @Override
+            public Cursor<Integer> makeCursor(Direction direction)
+            {
+                return new SingleLevelCursor(direction);
+            }
+
+            class SingleLevelCursor implements Cursor<Integer>
+            {
+                final Direction direction;
+                int current;
+
+                SingleLevelCursor(Direction direction)
+                {
+                    this.direction = direction;
+                    current = direction.select(-1, childs);
+                }
+
+                @Override
+                public long advance()
+                {
+                    current += direction.increase;
+                    return encodedPosition();
+                }
+
+                @Override
+                public long skipTo(long encodedSkipPosition)
+                {
+                    int depth = Cursor.depth(encodedSkipPosition);
+                    int transition = Cursor.incomingTransition(encodedSkipPosition);
+                    if (depth > 1)
+                        return advance();
+                    if (depth < 1)
+                        transition = direction.select(childs, -1);
+
+                    if (direction.isForward())
+                        current = Math.max(0, transition);
+                    else
+                        current = Math.min(childs - 1, transition);
+
+                    return encodedPosition();
+                }
+
+                @Override
+                public long encodedPosition()
+                {
+                    if (current == direction.select(-1, childs))
+                        return Cursor.rootPosition(direction);
+                    if (direction.inLoop(current, 0, childs - 1))
+                        return Cursor.encode(1, current, direction);
+                    return Cursor.exhaustedPosition(direction);
+                }
+
+                @Override
+                public Integer content()
+                {
+                    return current == direction.select(-1, childs) ? -1 : current;
+                }
+
+                @Override
+                public ByteComparable.Version byteComparableVersion()
+                {
+                    return VERSION;
+                }
+
+                @Override
+                public Cursor<Integer> tailCursor(Direction d)
+                {
+                    throw new UnsupportedOperationException("tailTrie on test cursor");
+                }
+            }
+        };
+    }
+
     static class SpecStackEntry
     {
         Object[] children;
@@ -523,31 +610,22 @@ public class TrieUtil
     public static class CursorFromSpec<T> implements Cursor<T>
     {
         SpecStackEntry stack;
-        int depth;
-        int leadingTransition;
         Direction direction;
+        long position;
 
         CursorFromSpec(Object[] spec, Direction direction)
         {
             this.direction = direction;
             stack = makeSpecStackEntry(direction, spec, null);
-            depth = 0;
-            leadingTransition = -1;
-        }
-
-        CursorFromSpec(SpecStackEntry stack, int depth, int leadingTransition, Direction direction)
-        {
-            this.direction = direction;
-            this.stack = stack;
-            this.depth = depth;
-            this.leadingTransition = leadingTransition;
+            position = Cursor.rootPosition(direction);
         }
 
         @Override
-        public int advance()
+        public long advance()
         {
             SpecStackEntry current = stack;
             Object child;
+            int depth = Cursor.depth(position);
             do
             {
                 while (current != null
@@ -560,8 +638,7 @@ public class TrieUtil
                 if (current == null)
                 {
                     stack = null;
-                    leadingTransition = -1;
-                    return depth = -1;
+                    return position = Cursor.exhaustedPosition(direction);
                 }
 
                 child = current.children[current.curChild];
@@ -569,12 +646,15 @@ public class TrieUtil
             while (child == null);
             stack = makeSpecStackEntry(direction, child, current);
 
-            return ++depth;
+            return position = encode(++depth);
         }
 
         @Override
-        public int skipTo(int skipDepth, int skipTransition)
+        public long skipTo(long encodedSkipPosition)
         {
+            int skipDepth = Cursor.depth(encodedSkipPosition);
+            int skipTransition = Cursor.incomingTransition(encodedSkipPosition);
+            int depth = Cursor.depth(position);
             assert skipDepth <= depth + 1 : "skipTo descends more than one level";
 
             while (stack != null && skipDepth <= depth)
@@ -584,8 +664,7 @@ public class TrieUtil
             }
             if (stack == null)
             {
-                leadingTransition = -1;
-                return depth = -1;
+                return position = Cursor.exhaustedPosition(direction);
             }
 
             int index = skipTransition - 0x30;
@@ -601,9 +680,9 @@ public class TrieUtil
         }
 
         @Override
-        public int depth()
+        public long encodedPosition()
         {
-            return depth;
+            return position;
         }
 
         @Override
@@ -612,17 +691,9 @@ public class TrieUtil
             return (T) stack.content;
         }
 
-        @Override
-        public int incomingTransition()
+        private long encode(int depth)
         {
-            SpecStackEntry parent = stack != null ? stack.parent : null;
-            return parent != null ? parent.curChild + 0x30 : leadingTransition;
-        }
-
-        @Override
-        public Direction direction()
-        {
-            return direction;
+            return Cursor.encode(depth, stack.parent.curChild + 0x30, direction);
         }
 
         @Override
@@ -641,9 +712,7 @@ public class TrieUtil
         public String toString()
         {
             StringBuilder stringBuilder = new StringBuilder();
-            stringBuilder.append(incomingTransition())
-                         .append("@")
-                         .append(depth);
+            stringBuilder.append(Cursor.toString(position));
             if (stack.content != null)
                 stringBuilder.append(" content ")
                              .append(stack.content);
