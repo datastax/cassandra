@@ -183,13 +183,20 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     }
 
     /**
-     * Generates a CQL literal representing the specified binary value.
+     * Returns a CQL literal representing the specified binary value, or "?" if redaction is requested.
      *
-     * @param bytes the value to convert to a CQL literal.
+     * @param bytes the value to convert to a CQL literal
+     * @param redact whether to mask the value with '?' (for redaction purposes)
      */
-    public String toCQLString(ByteBuffer bytes)
+    public String toCQLString(ByteBuffer bytes, boolean redact)
     {
-        return bytes == null ? "null" : asCQL3Type().toCQLLiteral(bytes, ProtocolVersion.CURRENT);
+        if (redact)
+            return RedactionUtil.redact(bytes, isValueLengthFixed());
+
+        if (bytes == null)
+            return "null";
+
+        return asCQL3Type().toCQLLiteral(bytes, ProtocolVersion.CURRENT);
     }
 
     /** get a string representation of the bytes used for various identifier (NOT just for log messages) */

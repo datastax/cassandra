@@ -24,7 +24,6 @@ import java.io.EOFException;
 import java.io.IOError;
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.math.BigInteger;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -423,7 +422,7 @@ public class Util
             {
                 try (UnfilteredRowIterator partition = iterator.next())
                 {
-                    throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
+                    throw new AssertionError("Expected no results for query " + command.toUnredactedCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
                 }
             }
         }
@@ -438,7 +437,7 @@ public class Util
             {
                 try (RowIterator partition = iterator.next())
                 {
-                    throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
+                    throw new AssertionError("Expected no results for query " + command.toUnredactedCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
                 }
             }
         }

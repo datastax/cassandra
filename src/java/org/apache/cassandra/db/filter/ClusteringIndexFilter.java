@@ -159,9 +159,10 @@ public interface ClusteringIndexFilter
      *
      * @param metadata the table metadata
      * @param rowFilter a row filter
+     * @param redact whether to redact the clustering column value
      * @return a CQL string representing this clustering index filter and the specified {@link RowFilter}
      */
-    String toCQLString(TableMetadata metadata, RowFilter rowFilter);
+    String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact);
 
     public interface Serializer
     {
