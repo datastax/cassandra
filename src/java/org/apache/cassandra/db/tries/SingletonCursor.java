@@ -24,12 +24,10 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// Trie cursor for a singleton trie, mapping a given key to a value.
 class SingletonCursor<T> implements Cursor<T>
 {
-    private final Direction direction;
     ByteSource src;
     final ByteComparable.Version byteComparableVersion;
     final T value;
-    private int currentDepth = 0;
-    private int currentTransition = -1;
+    private long currentPosition;
     protected int nextTransition;
 
 
@@ -41,20 +39,20 @@ class SingletonCursor<T> implements Cursor<T>
     public SingletonCursor(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, T value)
     {
         this.src = src;
-        this.direction = direction;
         this.byteComparableVersion = byteComparableVersion;
         this.value = value;
         this.nextTransition = firstByte;
+        this.currentPosition = Cursor.rootPosition(direction);
     }
 
     @Override
-    public int advance()
+    public long advance()
     {
-        currentTransition = nextTransition;
-        if (currentTransition != ByteSource.END_OF_STREAM)
+        if (nextTransition != ByteSource.END_OF_STREAM)
         {
+            currentPosition = Cursor.positionForDescentWithByte(currentPosition, nextTransition);
             nextTransition = src.next();
-            return ++currentDepth;
+            return currentPosition;
         }
         else
         {
@@ -63,12 +61,12 @@ class SingletonCursor<T> implements Cursor<T>
     }
 
     @Override
-    public int advanceMultiple(TransitionsReceiver receiver)
+    public long advanceMultiple(TransitionsReceiver receiver)
     {
         if (nextTransition == ByteSource.END_OF_STREAM)
             return done();
         int current = nextTransition;
-        int depth = currentDepth;
+        long pos = currentPosition;
         int next = src.next();
         while (next != ByteSource.END_OF_STREAM)
         {
@@ -76,43 +74,44 @@ class SingletonCursor<T> implements Cursor<T>
                 receiver.addPathByte(current);
             current = next;
             next = src.next();
-            ++depth;
+            pos += DEPTH_ADJUSTMENT_ONE;
         }
-        currentTransition = current;
+        currentPosition = Cursor.positionForDescentWithByte(pos, current);
         nextTransition = next;
-        currentDepth = ++depth;
-        return currentDepth;
+        return currentPosition;
     }
 
     @Override
-    public int skipTo(int skipDepth, int skipTransition)
+    public long skipTo(long encodedSkipPosition)
     {
-        if (skipDepth <= currentDepth)
+        if (nextTransition != ByteSource.END_OF_STREAM)
         {
-            assert skipDepth < currentDepth || direction.gt(skipTransition, currentTransition);
-            return done();  // no alternatives
+            long nextPosition = Cursor.positionForDescentWithByte(currentPosition, nextTransition);
+            if (Cursor.compare(encodedSkipPosition, nextPosition) > 0)
+                return done();
+
+            assert Cursor.depth(encodedSkipPosition) == Cursor.depth(nextPosition)
+                : "Invalid advance request to " + Cursor.toString(encodedSkipPosition) +
+                  " to cursor at " + Cursor.toString(currentPosition);
+
+            nextTransition = src.next();
+            currentPosition = nextPosition;
+            return currentPosition;
         }
-        if (direction.gt(skipTransition, nextTransition))
-            return done();   // request is skipping over our path
-
-        return advance();
+        else
+        {
+            return done();
+        }
     }
 
-    private int done()
+    private long done()
     {
-        currentTransition = -1;
-        return currentDepth = -1;
-    }
-
-    @Override
-    public int depth()
-    {
-        return currentDepth;
+        return currentPosition = Cursor.exhaustedPosition(currentPosition);
     }
 
     protected boolean atEnd()
     {
-        return nextTransition == ByteSource.END_OF_STREAM && currentDepth >= 0;
+        return nextTransition == ByteSource.END_OF_STREAM && !Cursor.isExhausted(currentPosition);
     }
 
     @Override
@@ -122,15 +121,9 @@ class SingletonCursor<T> implements Cursor<T>
     }
 
     @Override
-    public int incomingTransition()
+    public long encodedPosition()
     {
-        return currentTransition;
-    }
-
-    @Override
-    public Direction direction()
-    {
-        return direction;
+        return currentPosition;
     }
 
     @Override

@@ -66,7 +66,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
     public InMemoryRangeCursor<S> makeCursor(Direction direction)
     {
-        return new InMemoryRangeCursor<>(this, direction, root, 0, -1);
+        return new InMemoryRangeCursor<>(this, direction, root);
     }
 
     protected long emptySizeOnHeap()
@@ -80,33 +80,33 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         S activeRange;  // only non-null if activeIsSet
         S prevContent;  // can only be non-null if activeIsSet
 
-        InMemoryRangeCursor(InMemoryReadTrie<S> trie, Direction direction, int root, int depth, int incomingTransition)
+        InMemoryRangeCursor(InMemoryReadTrie<S> trie, Direction direction, int root)
         {
-            super(trie, direction, root, depth, incomingTransition);
+            super(trie, direction, root);
             activeIsSet = true;
             activeRange = null;
             prevContent = null;
         }
 
         @Override
-        public int advance()
+        public long advance()
         {
             return updateActiveAndReturn(super.advance());
         }
 
         @Override
-        public int advanceMultiple(TransitionsReceiver receiver)
+        public long advanceMultiple(TransitionsReceiver receiver)
         {
             return updateActiveAndReturn(super.advanceMultiple(receiver));
         }
 
         @Override
-        public int skipTo(int skipDepth, int skipTransition)
+        public long skipTo(long encodedSkipPosition)
         {
             activeIsSet = false;    // since we are skipping, we have no idea where we will end up
             activeRange = null;
             prevContent = null;
-            return updateActiveAndReturn(super.skipTo(skipDepth, skipTransition));
+            return updateActiveAndReturn(super.skipTo(encodedSkipPosition));
         }
 
         @Override
@@ -117,9 +117,9 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             return activeRange;
         }
 
-        private int updateActiveAndReturn(int depth)
+        private long updateActiveAndReturn(long position)
         {
-            if (depth >= 0)
+            if (!Cursor.isExhausted(position))
             {
                 // Always check if we are seeing new content; if we do, that's an easy state update.
                 S content = content();
@@ -145,7 +145,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                 activeRange = null;
                 prevContent = null;
             }
-            return depth;
+            return position;
         }
 
         private void setActiveState()
@@ -164,13 +164,13 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         {
             // Walk a copy of this cursor (non-range because we are only not doing anything smart with it) to find the
             // nearest child content in the direction of the cursor.
-            return new InMemoryCursor<>(trie, direction, currentNode, 0, -1).advanceToContent(null);
+            return new InMemoryCursor<>(trie, direction, currentNode).advanceToContent(null);
         }
 
         @Override
         public InMemoryRangeCursor<S> tailCursor(Direction direction)
         {
-            InMemoryRangeCursor<S> cursor = new InMemoryRangeCursor<>(trie, direction, currentFullNode, 0, -1);
+            InMemoryRangeCursor<S> cursor = new InMemoryRangeCursor<>(trie, direction, currentFullNode);
             cursor.activeIsSet = activeIsSet;
             if (activeIsSet)
             {
@@ -242,9 +242,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                         applyDeletionRange(rightSideAsCovering(existingCoveringState), mutationCoveringState);
                 }
 
-                depth = mutationCursor.advance();
+                long position = mutationCursor.advance();
+                depth = Cursor.depth(position);
                 // Descend but do not modify anything yet.
-                if (!state.advanceTo(depth, mutationCursor.incomingTransition(), forcedCopyDepth))
+                if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
                     break;
                 assert depth == state.currentDepth : "Unexpected change to applyState. Concurrent trie modification?";
             }
@@ -255,15 +256,17 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         throws TrieSpaceExhaustedException
         {
             boolean atMutation = true;
-            int depth = mutationCursor.depth();
-            int transition = mutationCursor.incomingTransition();
+            long position = mutationCursor.encodedPosition();
+            int depth = Cursor.depth(position);
+            int transition = Cursor.incomingTransition(position);
             // We are walking both tries in parallel.
             while (true)
             {
                 if (atMutation)
                 {
-                    depth = mutationCursor.advance();
-                    transition = mutationCursor.incomingTransition();
+                    position = mutationCursor.advance();
+                    depth = Cursor.depth(position);
+                    transition = Cursor.incomingTransition(position);
 
                     assert depth > 0 : "Unbounded range in mutation trie, state " + mutationCoveringState + " active when exhausted.";
                     if (depth < forcedCopyDepth)

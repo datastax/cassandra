@@ -401,19 +401,20 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     {
         DeletionAwareCursor<T, D> dac = cursor(Direction.FORWARD);
         final ByteSource bytes = key.asComparableBytes(dac.byteComparableVersion());
-        int next;
-        int depth = dac.depth();
+        long currentPosition = dac.encodedPosition();
         RangeCursor<D> rc;
         while (true)
         {
             rc = dac.deletionBranchCursor(Direction.FORWARD);
             if (rc != null)
                 break;
-            next = bytes.next();
+            int next = bytes.next();
             if (next == ByteSource.END_OF_STREAM)
                 return null; // no deletion branch found
-            if (dac.skipTo(++depth, next) != depth || dac.incomingTransition() != next)
+            long nextPosition = Cursor.positionForDescentWithByte(currentPosition, next);
+            if (Cursor.compare(dac.skipTo(nextPosition), nextPosition) != 0)
                 return null;
+            currentPosition = nextPosition;
         }
 
         if (rc.descendAlong(bytes))

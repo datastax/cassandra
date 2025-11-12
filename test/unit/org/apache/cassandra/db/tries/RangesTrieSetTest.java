@@ -59,39 +59,27 @@ public class RangesTrieSetTest
                 return cursor.state();
             }
 
-            public int depth()
+            public long encodedPosition()
             {
-                return cursor.depth();
+                return cursor.encodedPosition();
             }
 
             @Override
-            public int incomingTransition()
-            {
-                return cursor.incomingTransition();
-            }
-
-            @Override
-            public int advance()
+            public long advance()
             {
                 return cursor.advance();
             }
 
             @Override
-            public int skipTo(int skipDepth, int skipTransition)
+            public long skipTo(long encodedSkipPosition)
             {
-                return cursor.skipTo(skipDepth, skipTransition);
+                return cursor.skipTo(encodedSkipPosition);
             }
 
             @Override
             public Cursor<TrieSetCursor.RangeState> tailCursor(Direction dir)
             {
                 throw new AssertionError();
-            }
-
-            @Override
-            public Direction direction()
-            {
-                return dir;
             }
 
             @Override
@@ -214,11 +202,13 @@ public class RangesTrieSetTest
                     TrieSetCursor cursor = set.cursor(direction);
                     // skip to nearest position in cursor
                     int next = b.next();
-                    int depth = 0;
-                    while (next != ByteSource.END_OF_STREAM && cursor.skipTo(depth + 1, next) == depth + 1 && cursor.incomingTransition() == next)
+                    long skipPosition = Cursor.rootPosition(direction);
+                    while (next != ByteSource.END_OF_STREAM)
                     {
+                        skipPosition = Cursor.positionForDescentWithByte(skipPosition, next);
+                        if (Cursor.compare(cursor.skipTo(skipPosition), skipPosition) != 0)
+                            break;
                         next = b.next();
-                        ++depth;
                     }
                     // Check the resulting state.
                     int effectiveIndexFwd = terminator <= ByteSource.TERMINATOR ? bi : ei;

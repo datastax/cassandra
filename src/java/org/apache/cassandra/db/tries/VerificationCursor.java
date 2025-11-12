@@ -19,35 +19,42 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 import com.google.common.base.Preconditions;
 
-import java.util.Objects;
 import org.agrona.DirectBuffer;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 public interface VerificationCursor
 {
-    int EXHAUSTED_DEPTH = -1;
-    int EXHAUSTED_TRANSITION = -1;
-    int INITIAL_TRANSITION = -1;
-
     /// Verifies:
     /// - `advance` does advance, `depth <= prevDepth + 1` and transition is higher than previous at the same depth
     ///   (this requires path tracking)
     /// - `skipTo` is not called with earlier or equal position (including lower levels)
     /// - `maybeSkipTo` is not called with earlier position that can't be identified with depth/incomingTransition only
     ///   (i.e. seeks to lower depth with an incoming transition that lower than the previous at that depth)
-    /// - exhausted state is `depth = -1, incomingTransition = -1`
-    /// - start state is `depth = 0, incomingTransition = -1`
+    /// - exhausted state matches `Cursor.exhaustedPosition(direction)`
+    /// - start state matches `Cursor.rootPosition(direction)`
     class Plain<T, C extends Cursor<T>> implements Cursor<T>, Cursor.TransitionsReceiver
     {
+        static
+        {
+            try
+            {
+                assert false;
+                throw new IllegalStateException("Assertions need to be turned on for verification cursors.");
+            }
+            catch (AssertionError e)
+            {
+                // correct path
+            }
+        }
+
         final Direction direction;
         final C source;
-        final int minDepth;
-        int returnedDepth;
-        int returnedTransition;
+        long returnedPosition;
         byte[] path;
 
         Cursor.TransitionsReceiver chainedReceiver = null;
@@ -55,39 +62,33 @@ public interface VerificationCursor
 
         Plain(C cursor)
         {
-            this(cursor, 0, 0, INITIAL_TRANSITION);
-        }
-
-        Plain(C cursor, int minDepth, int expectedDepth, int expectedTransition)
-        {
             this.direction = cursor.direction();
             this.source = cursor;
-            this.minDepth = minDepth;
-            this.returnedDepth = expectedDepth;
-            this.returnedTransition = expectedTransition;
+            this.returnedPosition = Cursor.rootPosition(direction);
             this.path = new byte[16];
-            Preconditions.checkState(source.depth() == expectedDepth && source.incomingTransition() == expectedTransition,
-                                     "Invalid initial depth %s with incoming transition %s (must be %s, %s)\n%s",
-                                     source.depth(), source.incomingTransition(),
-                                     expectedDepth, expectedTransition, this);
+            long reportedPosition = source.encodedPosition();
+            assert Cursor.direction(reportedPosition) == direction :
+                String.format("Invalid direction bit %d in root position %s (%016x)\n%s",
+                              (reportedPosition >> DIRECTION_BIT) & 1,
+                              Cursor.toString(reportedPosition),
+                              reportedPosition,
+                              this);
+            assert Cursor.compare(reportedPosition, returnedPosition) == 0 :
+                String.format("Invalid initial position %s (must be %s)\n%s",
+                              Cursor.toString(reportedPosition),
+                              Cursor.toString(returnedPosition),
+                              this);
         }
 
         @Override
-        public int depth()
+        public long encodedPosition()
         {
-            Preconditions.checkState(returnedDepth == source.depth(),
-                                     "Depth changed without advance: %s -> %s\n%s",
-                                     returnedDepth, source.depth(), this);
-            return returnedDepth;
-        }
-
-        @Override
-        public int incomingTransition()
-        {
-            Preconditions.checkState(returnedTransition == source.incomingTransition(),
-                                     "Transition changed without advance: %s -> %s\n%s",
-                                     returnedTransition, source.incomingTransition(), this);
-            return source.incomingTransition();
+            assert Cursor.compare(source.encodedPosition(), returnedPosition) == 0 :
+                String.format("Position changed without advance: %s -> %s\n%s",
+                              Cursor.toString(returnedPosition),
+                              Cursor.toString(source.encodedPosition()),
+                              this);
+            return returnedPosition;
         }
 
         @Override
@@ -97,86 +98,106 @@ public interface VerificationCursor
         }
 
         @Override
-        public Direction direction()
-        {
-            return direction;
-        }
-
-        @Override
         public ByteComparable.Version byteComparableVersion()
         {
             return source.byteComparableVersion();
         }
 
         @Override
-        public int advance()
+        public long advance()
         {
             return verify(source.advance());
         }
 
         @Override
-        public int advanceMultiple(Cursor.TransitionsReceiver receiver)
+        public long advanceMultiple(Cursor.TransitionsReceiver receiver)
         {
             advanceMultipleCalledReceiver = false;
             chainedReceiver = receiver;
-            int depth = source.advanceMultiple(this);
+            // Note: if the code below calls the receiver (us), returnedPosition will be adjusted to reflect descent.
+            long position = source.advanceMultiple(this);
             chainedReceiver = null;
-            Preconditions.checkState(!advanceMultipleCalledReceiver || depth == returnedDepth + 1,
-                                     "advanceMultiple returned depth %s did not match depth %s after added characters\n%s",
-                                     depth, returnedDepth + 1, this);
-            return verify(depth);
+            int depth = Cursor.depth(position);
+            int prevDepth = Cursor.depth(returnedPosition);
+            assert !advanceMultipleCalledReceiver || depth == prevDepth + 1 :
+                String.format("advanceMultiple returned depth %s did not match depth %s after added characters\n%s",
+                              depth,
+                              prevDepth + 1,
+                              this);
+            return verify(position);
         }
 
         @Override
-        public int skipTo(int skipDepth, int skipTransition)
+        public long skipTo(long encodedSkipPosition)
         {
-            verifySkipRequest(skipDepth, skipTransition);
-            return verify(source.skipTo(skipDepth, skipTransition));
+            verifySkipRequest(encodedSkipPosition);
+            return verify(source.skipTo(encodedSkipPosition));
         }
 
-        private void verifySkipRequest(int skipDepth, int skipTransition)
+        private void verifySkipRequest(long encodedSkipPosition)
         {
-            Preconditions.checkState(skipDepth <= returnedDepth + 1,
-                                     "Skip descends more than one level: %s -> %s\n%s",
-                                     returnedDepth,
-                                     skipDepth,
-                                     this);
-            if (skipDepth <= returnedDepth && skipDepth > minDepth)
-                Preconditions.checkState(direction.lt(getByte(skipDepth), skipTransition),
-                                         "Skip goes backwards to %s at depth %s where it already visited %s\n%s",
-                                         skipTransition, skipDepth, getByte(skipDepth), this);
+            int skipDepth = Cursor.depth(encodedSkipPosition);
+            int currDepth = Cursor.depth(returnedPosition);
+            assert skipDepth <= currDepth + 1 :
+                String.format("Skip descends more than one level: %s -> %s\n%s",
+                              Cursor.toString(returnedPosition),
+                              Cursor.toString(encodedSkipPosition),
+                              this);
+            int skipTransition = Cursor.undecodedTransition(encodedSkipPosition);
+            if (skipDepth <= currDepth && skipDepth > 0)
+                assert (getByte(skipDepth) ^ direction.select(0x00, 0xFF)) < skipTransition :
+                    String.format("Skip goes backwards to %s where it already visited byte %s\n%s",
+                                  Cursor.toString(encodedSkipPosition),
+                                  getByte(skipDepth),
+                                  this);
 
         }
 
-        private int verify(int depth)
+        private long verify(long newPosition)
         {
-            Preconditions.checkState(depth <= returnedDepth + 1,
-                                     "Cursor advanced more than one level: %s -> %s\n%s",
-                                     returnedDepth,
-                                     depth,
-                                     this);
-            Preconditions.checkState(depth < 0 || depth > minDepth,
-                                     "Cursor ascended to depth %s beyond its minimum depth %s\n%s",
-                                     depth, minDepth, this);
-            final int transition = source.incomingTransition();
-            if (depth < 0)
+            int newDepth = Cursor.depth(newPosition);
+            int oldDepth = Cursor.depth(returnedPosition);
+            assert newDepth <= oldDepth + 1 :
+                String.format("Cursor advanced more than one level: %s -> %s\n%s",
+                              Cursor.toString(returnedPosition),
+                              Cursor.toString(newPosition),
+                              this);
+            assert Cursor.direction(newPosition) == direction :
+                String.format("Invalid direction bit %d in position %s (%016x)\n%s",
+                              (newPosition >> DIRECTION_BIT) & 1,
+                              Cursor.toString(newPosition),
+                              newPosition,
+                              this);
+
+            if (Cursor.isExhausted(newPosition))
             {
-                Preconditions.checkState(depth == EXHAUSTED_DEPTH && transition == EXHAUSTED_TRANSITION,
-                                         "Cursor exhausted state should be %s, %s but was %s, %s\n%s",
-                                         EXHAUSTED_DEPTH, EXHAUSTED_TRANSITION,
-                                         depth, transition, this);
+                assert Cursor.compare(newPosition, Cursor.exhaustedPosition(direction)) == 0 :
+                    String.format("Cursor exhausted state should be %s but was %s\n%s",
+                                  Cursor.toString(Cursor.exhaustedPosition(direction)),
+                                  Cursor.toString(newPosition),
+                                  this);
             }
-            else if (depth <= returnedDepth)
+            else
             {
-                Preconditions.checkState(direction.lt(getByte(depth), transition),
-                                         "Cursor went backwards to %s at depth %s where it already visited %s\n%s",
-                                         transition, depth, getByte(depth), this);
+                if (newDepth <= oldDepth)
+                {
+                    assert (getByte(newDepth) ^ direction.select(0x00, 0xFF))
+                           < Cursor.undecodedTransition(newPosition) :
+                        String.format("Cursor went backwards to %s where it already visited byte %s\n%s",
+                                      Cursor.toString(newPosition),
+                                      getByte(newDepth),
+                                      this);
+                }
+                int undecodedTransition = Cursor.undecodedTransition(newPosition);
+                assert undecodedTransition >= 0 && undecodedTransition <= 0xFF :
+                    String.format("Cursor returned invalid incoming transition with state %s (%016x)\n%s",
+                                  Cursor.toString(newPosition),
+                                  newPosition,
+                                  this);
+                addByte(newPosition);
             }
-            returnedDepth = depth;
-            returnedTransition = transition;
-            if (depth >= 0)
-                addByte(returnedTransition, depth);
-            return depth;
+            returnedPosition = newPosition;
+            return newPosition;
         }
 
         @Override
@@ -190,33 +211,42 @@ public interface VerificationCursor
         @Override
         public void addPathByte(int nextByte)
         {
-            addByte(nextByte, ++returnedDepth);
-            returnedTransition = nextByte;
+            advanceMultipleCalledReceiver = true;
+            returnedPosition = Cursor.positionForDescentWithByte(returnedPosition, nextByte);
+            addByte(returnedPosition);
+
             if (chainedReceiver != null)
                 chainedReceiver.addPathByte(nextByte);
         }
 
-        private void addByte(int nextByte, int depth)
+        private void addByte(long asPosition)
         {
-            advanceMultipleCalledReceiver = true;
-            int index = depth - minDepth - 1;
+            addByte(Cursor.incomingTransition(asPosition), Cursor.depth(asPosition));
+        }
+
+        private void addByte(int nextByteEncoded, int depth)
+        {
+            int index = depth - 1;
             if (index >= path.length)
                 path = Arrays.copyOf(path, path.length * 2);
-            path[index] = (byte) nextByte;
+            path[index] = (byte) nextByteEncoded;
         }
 
         private int getByte(int depth)
         {
-            return path[depth - minDepth - 1] & 0xFF;
+            return path[depth - 1] & 0xFF;
         }
 
         @Override
         public void addPathBytes(DirectBuffer buffer, int pos, int count)
         {
+            advanceMultipleCalledReceiver = true;
             for (int i = 0; i < count; ++i)
-                addByte(buffer.getByte(pos + i), returnedDepth + 1 + i);
-            returnedDepth += count;
-            returnedTransition = buffer.getByte(pos + count - 1) & 0xFF;
+            {
+                int nextByte = buffer.getByte(pos + i) & 0xFF;
+                returnedPosition = Cursor.positionForDescentWithByte(returnedPosition, nextByte);
+                addByte(returnedPosition);
+            }
             if (chainedReceiver != null)
                 chainedReceiver.addPathBytes(buffer, pos, count);
         }
@@ -227,14 +257,14 @@ public interface VerificationCursor
             StringBuilder builder = new StringBuilder();
             builder.append(source.getClass().getTypeName()
                                  .replace(source.getClass().getPackageName() + '.', ""));
-            if (returnedDepth < 0)
+            if (Cursor.isExhausted(returnedPosition))
             {
                 builder.append(" exhausted");
             }
             else
             {
                 builder.append(" at ");
-                builder.append(Hex.bytesToHex(path, 0, returnedDepth - minDepth));
+                builder.append(Hex.bytesToHex(path, 0, Cursor.depth(returnedPosition)));
             }
             return builder.toString();
         }
@@ -264,7 +294,7 @@ public interface VerificationCursor
         }
 
         @Override
-        public int advance()
+        public long advance()
         {
             currentPrecedingState = nextPrecedingState;
             checkIfDescentShouldBeForbidden();
@@ -272,7 +302,7 @@ public interface VerificationCursor
         }
 
         @Override
-        public int advanceMultiple(TransitionsReceiver receiver)
+        public long advanceMultiple(TransitionsReceiver receiver)
         {
             currentPrecedingState = nextPrecedingState;
             checkIfDescentShouldBeForbidden();
@@ -280,25 +310,25 @@ public interface VerificationCursor
         }
 
         @Override
-        public int skipTo(int skipDepth, int skipTransition)
+        public long skipTo(long encodedSkipPosition)
         {
             checkIfDescentShouldBeForbidden();
-            return verifySkipState(super.skipTo(skipDepth, skipTransition));
+            return verifySkipState(super.skipTo(encodedSkipPosition));
         }
 
         private void checkIfDescentShouldBeForbidden()
         {
-            maxNextDepth = source.content() != null ? source.depth() : Integer.MAX_VALUE;
+            maxNextDepth = source.content() != null ? Cursor.depth(returnedPosition) : Integer.MAX_VALUE;
         }
 
         @Override
         public S precedingState()
         {
-            Preconditions.checkState(currentPrecedingState == source.precedingState() ||
-                                     currentPrecedingState != null && currentPrecedingState.equals(source.precedingState()),
-                                     "Preceding state changed without advance: %s -> %s.\n%s",
-                                     currentPrecedingState, source.precedingState(),
-                                     this);
+            assert currentPrecedingState == source.precedingState() ||
+                   currentPrecedingState != null && currentPrecedingState.equals(source.precedingState()) :
+                String.format("Preceding state changed without advance: %s -> %s.\n%s",
+                              currentPrecedingState, source.precedingState(),
+                              this);
             return currentPrecedingState;
         }
 
@@ -313,34 +343,33 @@ public interface VerificationCursor
             return Objects.equals(left, right);
         }
 
-        private int verifyState(int depth)
+        private long verifyState(long position)
         {
             S precedingState = source.precedingState();
             boolean equal = agree(currentPrecedingState, precedingState);
-            Preconditions.checkState(equal,
-                                     "Unexpected change to covering state: %s -> %s\n%s",
-                                     currentPrecedingState, precedingState, this);
-            Preconditions.checkState(depth <= maxNextDepth,
-                                     "Cursor descended after reporting an included branch\n%s",
-                                     this);
+            assert equal : String.format("Unexpected change to covering state: %s -> %s\n%s",
+                                         currentPrecedingState, precedingState, this);
+            assert Cursor.depth(position) <= maxNextDepth :
+                String.format("Cursor descended after reporting an included branch\n%s",
+                              this);
             currentPrecedingState = precedingState;
 
             S content = source.content();
             if (content != null)
             {
-                Preconditions.checkState(agree(currentPrecedingState, content.precedingState(direction)),
-                                         "Range end %s does not close covering state %s\n%s",
-                                         content.precedingState(direction), currentPrecedingState, this);
+                assert agree(currentPrecedingState, content.precedingState(direction)) :
+                    String.format("Range end %s does not close covering state %s\n%s",
+                                  content.precedingState(direction), currentPrecedingState, this);
                 verifyBoundaryStateProperties(content);
                 nextPrecedingState = content.precedingState(direction.opposite());
             }
 
-            if (depth < 0)
+            if (Cursor.isExhausted(position))
                 verifyEndState();
-            return depth;
+            return position;
         }
 
-        private int verifySkipState(int depth)
+        private long verifySkipState(long depth)
         {
             // The covering state information is invalidated by a skip.
             currentPrecedingState = verifyCoveringStateProperties(source.precedingState());
@@ -352,18 +381,18 @@ public interface VerificationCursor
         {
             if (state == null)
                 return null;
-            Preconditions.checkState(!state.isBoundary(),
-                                     "Boundary state %s was returned where a covering state was expected\n%s",
-                                     state,
-                                     this);
+            assert !state.isBoundary() :
+                String.format("Boundary state %s was returned where a covering state was expected\n%s",
+                              state,
+                              this);
             final S precedingState = state.precedingState(Direction.FORWARD);
             final S succeedingState = state.precedingState(Direction.REVERSE);
-            Preconditions.checkState(precedingState == state && succeedingState == state,
-                                     "State %s must return itself its preceding and succeeding state (returned %s/%s)\n%s",
-                                     state,
-                                     precedingState,
-                                     succeedingState,
-                                     this);
+            assert precedingState == state && succeedingState == state :
+                String.format("State %s must return itself its preceding and succeeding state (returned %s/%s)\n%s",
+                              state,
+                              precedingState,
+                              succeedingState,
+                              this);
             return state;
         }
 
@@ -371,10 +400,10 @@ public interface VerificationCursor
         {
             if (state == null)
                 return null;
-            Preconditions.checkState(state.isBoundary(),
-                                     "Covering state %s was returned where a boundary state was expected\n%s",
-                                     state,
-                                     this);
+            assert state.isBoundary() :
+                String.format("Covering state %s was returned where a boundary state was expected\n%s",
+                              state,
+                              this);
             final S precedingState = state.precedingState(Direction.FORWARD);
             final S succeedingState = state.precedingState(Direction.REVERSE);
             verifyCoveringStateProperties(precedingState);
@@ -399,17 +428,17 @@ public interface VerificationCursor
         Range(RangeCursor<S> source)
         {
             super(source);
-            Preconditions.checkState(currentPrecedingState == null,
-                                     "Initial preceding state %s should be null for range cursor\n%s",
-                                     currentPrecedingState, this);
+            assert currentPrecedingState == null :
+                String.format("Initial preceding state %s should be null for range cursor\n%s",
+                              currentPrecedingState, this);
         }
 
         @Override
         void verifyEndState()
         {
-            Preconditions.checkState(currentPrecedingState == null,
-                                     "End state %s should be null for range cursor\n%s",
-                                     currentPrecedingState, this);
+            assert currentPrecedingState == null :
+                String.format("End state %s should be null for range cursor\n%s",
+                              currentPrecedingState, this);
         }
 
         @Override
@@ -454,27 +483,21 @@ public interface VerificationCursor
         }
 
         @Override
-        public int incomingTransition()
-        {
-            return source.incomingTransition();
-        }
-
-        @Override
-        public int advance()
+        public long advance()
         {
             return verifyDeletionBranch(super.advance());
         }
 
         @Override
-        public int advanceMultiple(TransitionsReceiver receiver)
+        public long advanceMultiple(TransitionsReceiver receiver)
         {
             return verifyDeletionBranch(super.advanceMultiple(receiver));
         }
 
         @Override
-        public int skipTo(int skipDepth, int skipTransition)
+        public long skipTo(long encodedSkipPosition)
         {
-            return verifyDeletionBranch(super.skipTo(skipDepth, skipTransition));
+            return verifyDeletionBranch(super.skipTo(encodedSkipPosition));
         }
 
         @Override
@@ -487,33 +510,36 @@ public interface VerificationCursor
             return new Range<>(deletionBranch);
         }
 
-        int verifyDeletionBranch(int depth)
+        long verifyDeletionBranch(long position)
         {
+            int depth = Cursor.depth(position);
             if (depth <= deletionBranchDepth)
                 deletionBranchDepth = -1;
 
             var deletionBranch = source.deletionBranchCursor(direction);
             if (deletionBranch != null)
             {
-                Preconditions.checkState(deletionBranchDepth == -1,
-                                         "Deletion branch at depth %s covered by another deletion branch at parent depth %s",
-                                         depth, deletionBranchDepth);
-                Preconditions.checkState(deletionBranch.depth() == 0,
-                                         "Invalid deletion branch initial depth %s",
-                                         deletionBranch.depth());
-                Preconditions.checkState(deletionBranch.incomingTransition() == INITIAL_TRANSITION,
-                                         "Invalid deletion branch initial transition %s",
-                                         deletionBranch.incomingTransition());
-                Preconditions.checkState(deletionBranch.precedingState() == null,
-                                         "Deletion branch starts with active deletion %s",
-                                         deletionBranch.precedingState());
-                deletionBranch.skipTo(EXHAUSTED_DEPTH, EXHAUSTED_TRANSITION);
-                Preconditions.checkState(deletionBranch.precedingState() == null,
-                                         "Deletion branch ends with active deletion %s",
-                                         deletionBranch.precedingState());
-                deletionBranchDepth = depth;
+                assert deletionBranchDepth == -1 :
+                    String.format("Deletion branch at position %s covered by another deletion branch at parent depth %s\n%s",
+                                  Cursor.toString(position),
+                                  deletionBranchDepth,
+                                  this);
+                assert Cursor.compare(deletionBranch.encodedPosition(), Cursor.rootPosition(direction)) == 0 :
+                    String.format("Invalid deletion branch initial position %s\n%s",
+                                  Cursor.toString(deletionBranch.encodedPosition()),
+                                  this);
+                assert deletionBranch.precedingState() == null :
+                    String.format("Deletion branch starts with active deletion %s\n%s",
+                                  deletionBranch.precedingState(),
+                                  this);
+                deletionBranch.skipTo(Cursor.exhaustedPosition(direction));
+                assert deletionBranch.precedingState() == null :
+                    String.format("Deletion branch ends with active deletion %s\n%s",
+                                  deletionBranch.precedingState(),
+                                  this);
+                deletionBranchDepth = Cursor.depth(position);
             }
-            return depth;
+            return position;
         }
 
         @Override
