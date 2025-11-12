@@ -35,7 +35,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.System.getProperty;
@@ -47,31 +47,21 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
  * We also log timed out operations, see CASSANDRA-7392.
  * Since CASSANDRA-12403 we also log queries that were slow.
  */
-class MonitoringTask
+@VisibleForTesting
+public class MonitoringTask
 {
     private static final String LINE_SEPARATOR = getProperty("line.separator");
     private static final Logger logger = LoggerFactory.getLogger(MonitoringTask.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 5L, TimeUnit.MINUTES);
 
-    /**
-     * Defines the interval for reporting any operations that have timed out.
-     */
-    private static final int REPORT_INTERVAL_MS = Math.max(0, Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "monitoring_report_interval_ms", "5000")));
-
-    /**
-     * Defines the maximum number of unique timed out queries that will be reported in the logs.
-     * Use a negative number to remove any limit.
-     */
-    private static final int MAX_OPERATIONS = Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "monitoring_max_operations", "50"));
-
     @VisibleForTesting
-    static MonitoringTask instance = make(REPORT_INTERVAL_MS, MAX_OPERATIONS);
+    public static MonitoringTask instance = make(Math.max(0, CassandraRelevantProperties.SLOW_QUERY_LOG_MONITORING_REPORT_INTERVAL_IN_MS.getInt()),
+                                                 CassandraRelevantProperties.SLOW_QUERY_LOG_MONITORING_MAX_OPERATIONS.getInt());
 
     private final ScheduledFuture<?> reportingTask;
     private final OperationsQueue failedOperationsQueue;
     private final OperationsQueue slowOperationsQueue;
     private long approxLastLogTimeNanos;
-
 
     @VisibleForTesting
     static MonitoringTask make(int reportIntervalMillis, int maxTimedoutOperations)
@@ -133,7 +123,7 @@ class MonitoringTask
     }
 
     @VisibleForTesting
-    private void logOperations(long approxCurrentTimeNanos)
+    public void logOperations(long approxCurrentTimeNanos)
     {
         logSlowOperations(approxCurrentTimeNanos);
         logFailedOperations(approxCurrentTimeNanos);
@@ -328,11 +318,11 @@ class MonitoringTask
          * this is set lazily as it takes time to build the query CQL */
         private String name;
 
-        Operation(Monitorable operation, long failedAtNanos)
+        Operation(Monitorable operation, long nowNanos)
         {
             this.operation = operation;
             numTimesReported = 1;
-            totalTimeNanos = failedAtNanos - operation.creationTimeNanos();
+            totalTimeNanos = nowNanos - operation.creationTimeNanos();
             minTime = totalTimeNanos;
             maxTime = totalTimeNanos;
         }
@@ -353,6 +343,8 @@ class MonitoringTask
         }
 
         public abstract String getLogMessage();
+
+        protected abstract Monitorable.ExecutionInfo executionInfo();
     }
 
     /**
@@ -383,35 +375,64 @@ class MonitoringTask
                                      NANOSECONDS.toMillis(operation.timeoutNanos()),
                                      operation.isCrossNode() ? "msec/cross-node" : "msec");
         }
+
+        @Override
+        protected Monitorable.ExecutionInfo executionInfo()
+        {
+            return Monitorable.ExecutionInfo.EMPTY;
+        }
     }
 
     /**
      * An operation (query) that was reported as slow.
      */
-    private final static class SlowOperation extends Operation
+    @VisibleForTesting
+    public final static class SlowOperation extends Operation
     {
-        SlowOperation(Monitorable operation, long failedAt)
+        /** Any specific execution info of the slowest operation among the aggregated operations. */
+        private Monitorable.ExecutionInfo slowestOperationExecutionInfo;
+
+        @VisibleForTesting
+        public SlowOperation(Monitorable operation, long slowAtNanos)
         {
-            super(operation, failedAt);
+            super(operation, slowAtNanos);
+            slowestOperationExecutionInfo = operation.executionInfo();
         }
 
         public String getLogMessage()
         {
             if (numTimesReported == 1)
-                return String.format("<%s>, time %d msec - slow timeout %d %s",
+                return String.format("<%s>, time %d msec - slow timeout %d %s%s",
                                      name(),
                                      NANOSECONDS.toMillis(totalTimeNanos),
                                      NANOSECONDS.toMillis(operation.slowTimeoutNanos()),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     operation.isCrossNode() ? "msec/cross-node" : "msec",
+                                     slowestOperationExecutionInfo.toLogString(true));
             else
-                return String.format("<%s>, was slow %d times: avg/min/max %d/%d/%d msec - slow timeout %d %s",
+                return String.format("<%s>, was slow %d times: avg/min/max %d/%d/%d msec - slow timeout %d %s%s",
                                      name(),
                                      numTimesReported,
                                      NANOSECONDS.toMillis(totalTimeNanos/ numTimesReported),
                                      NANOSECONDS.toMillis(minTime),
                                      NANOSECONDS.toMillis(maxTime),
                                      NANOSECONDS.toMillis(operation.slowTimeoutNanos()),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     operation.isCrossNode() ? "msec/cross-node" : "msec",
+                                     slowestOperationExecutionInfo.toLogString(false));
+        }
+
+        @Override
+        protected Monitorable.ExecutionInfo executionInfo()
+        {
+            return slowestOperationExecutionInfo;
+        }
+
+        @Override
+        void add(Operation operation)
+        {
+            if (operation.maxTime > maxTime)
+                slowestOperationExecutionInfo = operation.executionInfo();
+
+            super.add(operation);
         }
     }
 }

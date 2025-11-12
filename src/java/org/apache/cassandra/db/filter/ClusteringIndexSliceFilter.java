@@ -135,10 +135,10 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
     }
 
     @Override
-    public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
     {
         CqlBuilder builder = new CqlBuilder();
-        builder.append(slices.toCQLString(metadata, rowFilter));
+        builder.append(slices.toCQLString(metadata, rowFilter, redact));
         appendOrderByToCQLString(metadata, builder);
         return builder.toString();
     }
