@@ -134,77 +134,6 @@ interface RangeCursor<S extends RangeState<S>> extends Cursor<S>
         return new Empty<S>(null, version, direction);
     }
 
-    class Done<S extends RangeState<S>> implements RangeCursor<S>
-    {
-        final Direction direction;
-        final ByteComparable.Version version;
-
-        public Done(Direction direction, ByteComparable.Version version)
-        {
-            this.direction = direction;
-            this.version = version;
-        }
-
-        @Override
-        public S state()
-        {
-            return null;
-        }
-
-        @Override
-        public int depth()
-        {
-            return -1;
-        }
-
-        @Override
-        public int incomingTransition()
-        {
-            return -1;
-        }
-
-        @Override
-        public S content()
-        {
-            return null;
-        }
-
-        @Override
-        public Direction direction()
-        {
-            return direction;
-        }
-
-        @Override
-        public ByteComparable.Version byteComparableVersion()
-        {
-            return version;
-        }
-
-        @Override
-        public int advance()
-        {
-            return -1;
-        }
-
-        @Override
-        public int skipTo(int skipDepth, int skipTransition)
-        {
-            return -1;
-        }
-
-        @Override
-        public RangeCursor<S> tailCursor(Direction direction)
-        {
-            return this;
-        }
-    }
-
-    static <S extends RangeState<S>> RangeCursor<S> done(Direction direction, ByteComparable.Version version)
-    {
-        return new Done<>(direction, version);
-    }
-
     class FromSet<S extends RangeState<S>> implements RangeCursor<S>
     {
         final TrieSetCursor source;
@@ -223,21 +152,9 @@ interface RangeCursor<S extends RangeState<S>> extends Cursor<S>
         }
 
         @Override
-        public int depth()
+        public long encodedPosition()
         {
-            return source.depth();
-        }
-
-        @Override
-        public int incomingTransition()
-        {
-            return source.incomingTransition();
-        }
-
-        @Override
-        public Direction direction()
-        {
-            return source.direction();
+            return source.encodedPosition();
         }
 
         @Override
@@ -247,15 +164,15 @@ interface RangeCursor<S extends RangeState<S>> extends Cursor<S>
         }
 
         @Override
-        public int advance()
+        public long advance()
         {
             return source.advance();
         }
 
         @Override
-        public int skipTo(int skipDepth, int skipTransition)
+        public long skipTo(long encodedSkipPosition)
         {
-            return source.skipTo(skipDepth, skipTransition);
+            return source.skipTo(encodedSkipPosition);
         }
 
         @Override

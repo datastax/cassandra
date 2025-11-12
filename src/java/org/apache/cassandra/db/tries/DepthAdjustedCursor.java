@@ -24,36 +24,34 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 class DepthAdjustedCursor<T, C extends Cursor<T>> implements Cursor<T>
 {
     final C source;
-    final int depthAdjustment;
-    final int incomingTransitionAtRoot;
+    final long depthAdjustment;
+    final long matchingPositionAtRoot;
 
-    DepthAdjustedCursor(C source, int depthAdjustment, int incomingTransitionAtRoot)
+    DepthAdjustedCursor(C source, long matchingPositionAtRoot)
     {
         this.source = source;
-        this.depthAdjustment = depthAdjustment;
-        this.incomingTransitionAtRoot = incomingTransitionAtRoot;
+        this.matchingPositionAtRoot = matchingPositionAtRoot;
+        this.depthAdjustment = Cursor.depthCorrectionValue(matchingPositionAtRoot);
     }
 
-    int toAdjustedDepth(int depth)
+    long toAdjustedDepth(long position)
     {
-        return depth < 0 ? depth : depth + depthAdjustment;
+        return Cursor.isExhausted(position) ? position : position + depthAdjustment;
     }
 
-    int fromAdjustedDepth(int depth)
+    long fromAdjustedDepth(long position)
     {
-        return depth < 0 ? depth : depth - depthAdjustment;
-    }
-
-    @Override
-    public int depth()
-    {
-        return toAdjustedDepth(source.depth());
+        return Cursor.isExhausted(position) ? position : position - depthAdjustment;
     }
 
     @Override
-    public int incomingTransition()
+    public long encodedPosition()
     {
-        return source.depth() == 0 ? incomingTransitionAtRoot : source.incomingTransition();
+        long position = source.encodedPosition();
+        if (Cursor.depth(position) == 0)
+            return matchingPositionAtRoot;
+        else
+            return toAdjustedDepth(position);
     }
 
     @Override
@@ -63,43 +61,27 @@ class DepthAdjustedCursor<T, C extends Cursor<T>> implements Cursor<T>
     }
 
     @Override
-    public Direction direction()
-    {
-        return source.direction();
-    }
-
-    @Override
     public ByteComparable.Version byteComparableVersion()
     {
         return source.byteComparableVersion();
     }
 
     @Override
-    public int advance()
+    public long advance()
     {
         return toAdjustedDepth(source.advance());
     }
 
     @Override
-    public int advanceMultiple(TransitionsReceiver receiver)
+    public long advanceMultiple(TransitionsReceiver receiver)
     {
         return toAdjustedDepth(source.advanceMultiple(receiver));
     }
 
     @Override
-    public int skipTo(int skipDepth, int skipTransition)
+    public long skipTo(long encodedSkipPosition)
     {
-        return toAdjustedDepth(source.skipTo(fromAdjustedDepth(skipDepth), skipTransition));
-    }
-
-    @Override
-    public int skipToWhenAhead(int skipDepth, int skipTransition)
-    {
-        int requestedDepth = fromAdjustedDepth(skipDepth);
-        if (requestedDepth == 0)
-            return direction().lt(skipTransition, incomingTransitionAtRoot) ? depthAdjustment : toAdjustedDepth(source.skipTo(requestedDepth, skipTransition));
-        else
-            return toAdjustedDepth(source.skipToWhenAhead(fromAdjustedDepth(skipDepth), skipTransition));
+        return toAdjustedDepth(source.skipTo(fromAdjustedDepth(encodedSkipPosition)));
     }
 
     @Override
@@ -126,29 +108,29 @@ class DepthAdjustedCursor<T, C extends Cursor<T>> implements Cursor<T>
         throw new AssertionError("Depth-adjusted cursors cannot be walked directly.");
     }
 
-    static <T> Cursor<T> make(Cursor<T> source, int depthAdjustment, int incomingTransitionAtRoot)
+    static <T> Cursor<T> make(Cursor<T> source, long matchingPositionAtRoot)
     {
-        return depthAdjustment == 0 ? source : new Plain<>(source, depthAdjustment, incomingTransitionAtRoot);
+        return Cursor.depth(matchingPositionAtRoot) == 0 ? source : new Plain<>(source, matchingPositionAtRoot);
     }
 
-    static <S extends RangeState<S>> RangeCursor<S> make(RangeCursor<S> source, int depthAdjustment, int incomingTransitionAtRoot)
+    static <S extends RangeState<S>> RangeCursor<S> make(RangeCursor<S> source, long matchingPositionAtRoot)
     {
-        return depthAdjustment == 0 ? source : new Range<>(source, depthAdjustment, incomingTransitionAtRoot);
+        return Cursor.depth(matchingPositionAtRoot) == 0 ? source : new Range<>(source, matchingPositionAtRoot);
     }
 
     static class Plain<T> extends DepthAdjustedCursor<T, Cursor<T>>
     {
-        public Plain(Cursor<T> source, int depthAdjustment, int incomingTransitionAtRoot)
+        public Plain(Cursor<T> source, long matchingPositionAtRoot)
         {
-            super(source, depthAdjustment, incomingTransitionAtRoot);
+            super(source, matchingPositionAtRoot);
         }
     }
 
     static class Range<S extends RangeState<S>> extends DepthAdjustedCursor<S, RangeCursor<S>> implements RangeCursor<S>
     {
-        Range(RangeCursor<S> source, int depthAdjustment, int incomingTransitionAtRoot)
+        Range(RangeCursor<S> source, long matchingPositionAtRoot)
         {
-            super(source, depthAdjustment, incomingTransitionAtRoot);
+            super(source, matchingPositionAtRoot);
         }
 
         @Override

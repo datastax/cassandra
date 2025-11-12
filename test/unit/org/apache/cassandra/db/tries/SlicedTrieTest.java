@@ -44,6 +44,7 @@ import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.apache.cassandra.db.tries.TrieUtil.asString;
 import static org.apache.cassandra.db.tries.TrieUtil.assertSameContent;
 import static org.apache.cassandra.db.tries.TrieUtil.generateKeys;
+import static org.apache.cassandra.db.tries.TrieUtil.singleLevelIntTrie;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
 import static org.junit.Assert.assertEquals;
 
@@ -311,103 +312,6 @@ public class SlicedTrieTest
     private static <T> List<T> toList(Trie<T> trie, Direction direction)
     {
         return Iterables.toList(trie.values(direction));
-    }
-
-    /**
-     * Creates a simple trie with a root having the provided number of childs, where each child is a leaf whose content
-     * is simply the value of the transition leading to it.
-     *
-     * In other words, {@code singleLevelIntTrie(4)} creates the following trie:
-     *       Root
-     * t= 0  1  2  3
-     *    |  |  |  |
-     *    0  1  2  3
-     */
-    private static Trie<Integer> singleLevelIntTrie(int childs)
-    {
-        return new Trie<Integer>()
-        {
-            @Override
-            public Cursor<Integer> makeCursor(Direction direction)
-            {
-                return new SingleLevelCursor(direction);
-            }
-
-            class SingleLevelCursor implements Cursor<Integer>
-            {
-                final Direction direction;
-                int current;
-
-                SingleLevelCursor(Direction direction)
-                {
-                    this.direction = direction;
-                    current = direction.select(-1, childs);
-                }
-
-                @Override
-                public int advance()
-                {
-                    current += direction.increase;
-                    return depth();
-                }
-
-                @Override
-                public int skipTo(int depth, int transition)
-                {
-                    if (depth > 1)
-                        return advance();
-                    if (depth < 1)
-                        transition = direction.select(childs, -1);
-
-                    if (direction.isForward())
-                        current = Math.max(0, transition);
-                    else
-                        current = Math.min(childs - 1, transition);
-
-                    return depth();
-                }
-
-                @Override
-                public int depth()
-                {
-                    if (current == direction.select(-1, childs))
-                        return 0;
-                    if (direction.inLoop(current, 0, childs - 1))
-                        return 1;
-                    return -1;
-                }
-
-                @Override
-                public int incomingTransition()
-                {
-                    return current >= childs ? -1 : current;
-                }
-
-                @Override
-                public Integer content()
-                {
-                    return current == direction.select(-1, childs) ? -1 : current;
-                }
-
-                @Override
-                public Direction direction()
-                {
-                    return direction;
-                }
-
-                @Override
-                public ByteComparable.Version byteComparableVersion()
-                {
-                    return VERSION;
-                }
-
-                @Override
-                public Cursor<Integer> tailCursor(Direction d)
-                {
-                    throw new UnsupportedOperationException("tailTrie on test cursor");
-                }
-            }
-        };
     }
 
     /** Creates a single byte {@link ByteComparable} with the provide value */

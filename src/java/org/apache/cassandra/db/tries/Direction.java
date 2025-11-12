@@ -65,6 +65,11 @@ public enum Direction
             return forward;
         }
 
+        public long select(long forward, long reverse)
+        {
+            return forward;
+        }
+
         public boolean isForward()
         {
             return true;
@@ -108,6 +113,11 @@ public enum Direction
         }
 
         public int select(int forward, int reverse)
+        {
+            return reverse;
+        }
+
+        public long select(long forward, long reverse)
         {
             return reverse;
         }
@@ -159,6 +169,11 @@ public enum Direction
      * Use the first argument in forward direction and the second in reverse, i.e. isForward() ? forward : reverse.
      */
     public abstract int select(int forward, int reverse);
+
+    /**
+     * Use the first argument in forward direction and the second in reverse, i.e. isForward() ? forward : reverse.
+     */
+    public abstract long select(long forward, long reverse);
 
     /**
      * Helper to perform loops over possible values in the given direction. Returns whether the given index is still

@@ -37,22 +37,22 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
     {
         this.cursor = cursor;
         this.predicate = predicate;
-        assert cursor.depth() == 0;
+        cursor.assertFresh();
     }
 
     public boolean hasNext()
     {
         if (!gotNext)
         {
-            int depth = cursor.depth();
+            int depth = Cursor.depth(cursor.encodedPosition());
             if (depth > 0)
             {
                 // if we are not just starting, we have returned a branch and must skip over it
-                depth = cursor.skipTo(depth, cursor.incomingTransition() + cursor.direction().increase);
-                if (depth < 0)
+                long pos = cursor.skipTo(Cursor.positionForSkippingBranch(cursor.encodedPosition()));
+                if (Cursor.isExhausted(pos))
                     return false;
-                resetPathLength(depth - 1);
-                addPathByte(cursor.incomingTransition());
+                resetPathLength(Cursor.depth(pos) - 1);
+                addPathByte(Cursor.incomingTransition(pos));
             }
 
             next = cursor.content();

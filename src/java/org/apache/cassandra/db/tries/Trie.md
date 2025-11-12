@@ -139,16 +139,16 @@ and provides methods for advancing to the next position.  This is enough informa
 also to easily compare cursors over different tries that are advanced together. Advancing is always done in
 order; if one imagines the set of nodes in the trie with their associated paths, a cursor may only advance from a
 node with a lexicographically smaller path to one with bigger. The `advance` operation moves to the immediate
-next, it is also possible to skip over some items e.g. all children of the current node (`skipChildren`).
+next, it is also possible to skip over some items to a specific position ahead (`skipTo`).
 
 Moving to the immediate next position in the lexicographic order is accomplished by:
 - if the current node has children, moving to its first child;
 - otherwise, ascend the parent chain and return the next child of the closest parent that still has any.
 
 As long as the trie is not exhausted, advancing always takes one step down, from the current node, or from a node
-on the parent chain. By comparing the new depth (which `advance` also returns) with the one before the advance,
-one can tell if the former was the case (if `newDepth == oldDepth + 1`) and how many steps up we had to take
-(`oldDepth + 1 - newDepth`). When following a path down, the cursor will stop on all prefixes.
+on the parent chain. By comparing the new depth with the one before the advance, one can tell if the former was 
+the case (if `newDepth == oldDepth + 1`) or how many steps up we had to take (`oldDepth + 1 - newDepth`)  if it 
+wasn't. When following a path down, the cursor will stop on all prefixes.
 
 In addition to the single-step `advance` method, the cursor also provides an `advanceMultiple` method for descending
 multiple steps down when this is known to be efficient. If it is not feasible to descend (e.g. because there are no
@@ -203,6 +203,42 @@ have changed, and 3 is true because it has a false premise.
 
 The same argument holds when `b` is the smaller cursor to be advanced.
 
+### `encodedState` for efficient advance and position comparison
+
+The cursor definitions above were given with separate `depth` and `incomingTransition` methods, but in practice we
+combine the features of the current position into a single long integer that encodes the combination of the two. This
+saves some method calls which often tend to be megamorphic, and also makes some checks more efficient.
+
+The encoded state is prepared in such a way that it is trivially easy to compare the position of two cursors in parallel
+walks: if the encoded state of one cursor is smaller than the encoded state of another, then it is positioned before it.
+Recall that for a cursor to be positioned before another means either that its depth is higher than the other's, or that
+depth match, and the incoming character is smaller. We can ensure that we can trivially compare by composing a long that
+has the inverse of the depth as its most significant bits, and the incoming character in some of its less-significant
+ones.
+
+More precisely, in bits 32 to 63 of the `encodedState` long we store `-depth`, and in bits 20 to 27 &ndash;
+`incomingTransition`. Other bits are reserved for future use (e.g. we could set a bit to signify that the node at the
+current position may have content to drastically reduce the number of `content` calls a consumer needs to do).
+The `Cursor` class implements methods to compose and decompose encoded states, as well as to perform common checks
+(e.g. whether an advance descended into a child position) and to prepare certain positions for skipping (e.g. over 
+the current branch).
+
+### Reverse iteration
+
+Tries and trie cursors support reverse iteration. Reverse trie iteration presents data in lexicographic order
+using the inverted alphabet. This is not always the same as the reverse order of the data returned in the forward
+direction; the latter is only guaranteed if the entries in the trie can contain no prefixes (i.e. the representation
+is prefix-free like the byte-ordered type translations).
+
+This difference is imposed by the cursor interfaces which necessarily have to present parent nodes before their
+children and do not preserve or present any state on ascent.
+
+To make it easier to manipulate `encodedState` for reverse iteration, we use the 31st bit in the encoded state to
+distinguish between forward and reverse iteration, and flip the bits of `incomingTransition` to make it possible to use
+the same encoded state comparison for both iteration directions (because higher `incomingTransition` values should be
+ordered before lower ones in reverse walks).
+
+
 ## Merging two tries
 
 Two tries can be merged using `Trie.mergeWith`, which is implemented using the class `MergeCursor`. The implementation
@@ -228,17 +264,6 @@ descendants) at the expense of possibly adding one additional comparison in the 
 
 As above, when we know that the head element is not equal to the heap top (i.e. it's necessarily smaller) we can
 use its `advanceMultiple` safely.
-
-## Reverse iteration
-
-Tries and trie cursors support reverse iteration. Reverse trie iteration presents data in lexicographic order 
-using the inverted alphabet. This is not always the same as the reverse order of the data returned in the forward 
-direction; the latter is only guaranteed if the entries in the trie can contain no prefixes (i.e. the representation 
-is prefix-free like the byte-ordered type translations).
-
-This difference is imposed by the cursor interfaces which necessarily have to present parent nodes before their 
-children and do not preserve or present any state on ascent.
-
 
 # Trie sets
 

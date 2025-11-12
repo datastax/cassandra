@@ -280,7 +280,7 @@ public class InMemoryRangeTrieTest
             assertTrue(found);
 
         if (found)
-            while (c.advanceMultiple(null) != -1)
+            while (!Cursor.isExhausted(c.advanceMultiple(null)))
             {
             }    // let the verification cursor check the correctness of the iteration
     }
@@ -301,11 +301,12 @@ public class InMemoryRangeTrieTest
                 return true;
             if (cmp < 0)
                 return false;
-            if (c.advance() < 0)
+            if (Cursor.isExhausted(c.advance()))
                 return false; // exhausted
 
-            paths.resetPathLength(c.depth() - 1);
-            paths.addPathByte(c.incomingTransition());
+            long position = c.encodedPosition();
+            paths.resetPathLength(Cursor.depth(position) - 1);
+            paths.addPathByte(Cursor.incomingTransition(position));
         }
     }
 
@@ -321,8 +322,9 @@ public class InMemoryRangeTrieTest
             ++depth;
         }
         final int nextByte = sb.next();
-        int skippedDepth = cursor.skipTo(depth + 1, nextByte);
-        if (skippedDepth != depth + 1 || cursor.incomingTransition() != nextByte)
+        long skipPosition = Cursor.encode(depth + 1, nextByte, cursor.direction());
+        long skippedPosition = cursor.skipTo(skipPosition);
+        if (Cursor.compare(skippedPosition, skipPosition) != 0)
             return false;
         return cursor.descendAlong(sb);
     }

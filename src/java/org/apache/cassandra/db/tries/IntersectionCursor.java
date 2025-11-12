@@ -33,134 +33,117 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
 
     final C source;
     final TrieSetCursor set;
-    final Direction direction;
     State state;
 
     IntersectionCursor(C source, TrieSetCursor set)
     {
-        this.direction = source.direction();
         this.source = source;
         this.set = set;
         setInitialState();
     }
 
     @Override
-    public int depth()
+    public long encodedPosition()
     {
-        return source.depth();
+        return source.encodedPosition();
     }
 
     @Override
-    public int incomingTransition()
-    {
-        return source.incomingTransition();
-    }
-
-    @Override
-    public int advance()
+    public long advance()
     {
         if (state == State.SET_AHEAD)
-            return advanceInCoveredBranch(set.depth(), source.advance());
+            return advanceInCoveredBranch(set.encodedPosition(), source.advance());
 
         return advanceWhenMatching();
     }
 
     @Override
-    public int advanceMultiple(Cursor.TransitionsReceiver receiver)
+    public long advanceMultiple(Cursor.TransitionsReceiver receiver)
     {
         // We can only apply advanceMultiple if we are fully inside a covered branch.
         if (state == State.SET_AHEAD)
-            return advanceInCoveredBranch(set.depth(), source.advanceMultiple(receiver));
+            return advanceInCoveredBranch(set.encodedPosition(), source.advanceMultiple(receiver));
 
         return advanceWhenMatching();
     }
 
-    private int advanceWhenMatching()
+    private long advanceWhenMatching()
     {
         // The set is assumed sparser, so we advance that first.
-        int setDepth = set.advance();
+        long setPosition = set.advance();
         if (set.precedingIncluded())
-            return advanceInCoveredBranch(setDepth, source.advance());
+            return advanceInCoveredBranch(setPosition, source.advance());
         else
-            return advanceSourceToIntersection(setDepth, set.incomingTransition());
+            return advanceSourceToIntersection(setPosition);
     }
 
     @Override
-    public int skipTo(int skipDepth, int skipTransition)
+    public long skipTo(long encodedSkipPosition)
     {
         if (state == State.SET_AHEAD)
-            return advanceInCoveredBranch(set.depth(), source.skipTo(skipDepth, skipTransition));
+            return advanceInCoveredBranch(set.encodedPosition(), source.skipTo(encodedSkipPosition));
 
-        int setDepth = set.skipTo(skipDepth, skipTransition);
+        long setPosition = set.skipTo(encodedSkipPosition);
         if (set.precedingIncluded())
-            return advanceInCoveredBranch(setDepth, source.skipTo(skipDepth, skipTransition));
+            return advanceInCoveredBranch(setPosition, source.skipTo(encodedSkipPosition));
         else
-            return advanceSourceToIntersection(setDepth, set.incomingTransition());
+            return advanceSourceToIntersection(setPosition);
     }
 
-    private int advanceInCoveredBranch(int setDepth, int sourceDepth)
+    private long advanceInCoveredBranch(long setPosition, long sourcePosition)
     {
         // Check if the advanced source is still in the covered area.
-        if (sourceDepth > setDepth) // most common fast path
-            return coveredAreaWithSetAhead(sourceDepth);
-        if (sourceDepth < 0)
-            return exhausted();
+        long cmp = Cursor.compare(sourcePosition, setPosition);
+        if (cmp < 0)    // source is strictly before set position
+            return coveredAreaWithSetAhead(sourcePosition);
+        if (Cursor.isExhausted(sourcePosition))
+            return exhausted(sourcePosition);
 
-        int sourceTransition = source.incomingTransition();
-        if (sourceDepth == setDepth)
-        {
-            int setTransition = set.incomingTransition();
-            if (direction.lt(sourceTransition, setTransition))
-                return coveredAreaWithSetAhead(sourceDepth);
-            if (sourceTransition == setTransition)
-                return matchingPosition(sourceDepth);
-        }
+        if (cmp == 0)
+            return matchingPosition(sourcePosition);
 
         // Source moved beyond the set position. Advance the set too.
-        setDepth = set.skipTo(sourceDepth, sourceTransition);
-        int setTransition = set.incomingTransition();
-        if (setDepth == sourceDepth && setTransition == sourceTransition)
-            return matchingPosition(sourceDepth);
+        setPosition = set.skipTo(sourcePosition);
+        if (Cursor.compare(setPosition, sourcePosition) == 0)
+            return matchingPosition(sourcePosition);
 
         // At this point set is ahead. Check content to see if we are in a covered branch.
         // If not, we need to skip the source as well and repeat the process.
         if (set.precedingIncluded())
-            return coveredAreaWithSetAhead(sourceDepth);
+            return coveredAreaWithSetAhead(sourcePosition);
         else
-            return advanceSourceToIntersection(setDepth, setTransition);
+            return advanceSourceToIntersection(setPosition);
     }
 
-    private int advanceSourceToIntersection(int setDepth, int setTransition)
+    private long advanceSourceToIntersection(long setPosition)
     {
         while (true)
         {
             // Set is ahead of source, but outside the covered area. Skip source to the set's position.
-            int sourceDepth = source.skipTo(setDepth, setTransition);
-            int sourceTransition = source.incomingTransition();
-            if (sourceDepth < 0)
-                return exhausted();
-            if (sourceDepth == setDepth && sourceTransition == setTransition)
-                return matchingPosition(setDepth);
+            long sourcePosition = source.skipTo(setPosition);
+            if (Cursor.isExhausted(sourcePosition))
+                return exhausted(sourcePosition);
+            if (Cursor.compare(setPosition, sourcePosition) == 0)
+                return matchingPosition(sourcePosition);
 
             // Source is now ahead of the set.
-            setDepth = set.skipTo(sourceDepth, sourceTransition);
-            setTransition = set.incomingTransition();
-            if (setDepth == sourceDepth && setTransition == sourceTransition)
-                return matchingPosition(setDepth);
+            setPosition = set.skipTo(sourcePosition);
+            if (Cursor.compare(setPosition, sourcePosition) == 0)
+                return matchingPosition(sourcePosition);
 
             // At this point set is ahead. Check content to see if we are in a covered branch.
             if (set.precedingIncluded())
-                return coveredAreaWithSetAhead(sourceDepth);
+                return coveredAreaWithSetAhead(sourcePosition);
         }
     }
 
-    private int coveredAreaWithSetAhead(int depth)
+    private long coveredAreaWithSetAhead(long encodedPosition)
     {
         state = State.SET_AHEAD;
-        return depth;
+        return encodedPosition;
     }
 
-    int matchingPosition(int depth)
+    long matchingPosition(long encodedPosition)
     {
         // If we are matching a boundary of the set, include all its children by using a set-ahead state, ensuring that
         // the set will only be advanced once the source ascends to its depth again.
@@ -168,30 +151,24 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
             state = State.SET_AHEAD;
         else
             state = State.MATCHING;
-        return depth;
+        return encodedPosition;
     }
 
     void setInitialState()
     {
-        matchingPosition(depth());
+        matchingPosition(encodedPosition());
     }
 
-    private int exhausted()
+    private long exhausted(long position)
     {
         state = State.MATCHING;
-        return -1;
+        return position;
     }
 
     @Override
     public T content()
     {
         return source.content();
-    }
-
-    @Override
-    public Direction direction()
-    {
-        return source.direction();
     }
 
     @Override
@@ -230,14 +207,14 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
         }
 
         @Override
-        int matchingPosition(int depth)
+        long matchingPosition(long encodedPosition)
         {
             TrieSetCursor.RangeState setState = set.state();
             if (!setState.isBoundary)
             {
                 // This is a prefix, we still have set path bytes to follow.
                 state = State.MATCHING;
-                return depth;
+                return encodedPosition;
             }
 
             // If the boundary is a start (for the direction of iteration), and we include starts, we should include branch.
@@ -248,13 +225,13 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
                 // Report the content, and include all the branch's children by using a set-ahead state, ensuring that
                 // the set will only be advanced once the source ascends to this depth again.
                 state = State.SET_AHEAD;
-                return depth;
+                return encodedPosition;
             }
 
             // Otherwise we need to skip this node and its branch by jumping to the next position on the same depth.
             // Note that we can't mess up any `advanceMultiple` path reporting, as that cannot end up on a matching
             // position while it is reporting bytes for a descending chain.
-            return skipTo(depth, incomingTransition() + direction.increase);
+            return skipTo(Cursor.positionForSkippingBranch(encodedPosition));
         }
 
         @Override

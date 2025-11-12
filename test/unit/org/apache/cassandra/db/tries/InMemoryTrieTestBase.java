@@ -24,6 +24,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.google.common.base.Predicates;
 import com.google.common.base.Throwables;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
@@ -205,7 +206,7 @@ public abstract class InMemoryTrieTestBase
     }
 
     @Test
-    public void testEntriesNullChildBug()
+    public void testEntriesNullChildBug() throws TrieSpaceExhaustedException
     {
         Object[] trieDef = new Object[]
                            {
@@ -244,6 +245,11 @@ public abstract class InMemoryTrieTestBase
         Trie<ByteBuffer> trie = TrieUtil.specifiedTrie(trieDef);
         System.out.println(trie.dump());
         assertSameContent(trie, expected);
+
+        InMemoryTrie<ByteBuffer> inmem = strategy.create();
+        inmem.apply(trie, (x, y) -> y, Predicates.alwaysFalse());
+        System.out.println(inmem.dump());
+        assertSameContent(inmem, expected);
     }
 
     static Preencoded comparable(String s)

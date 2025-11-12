@@ -31,7 +31,6 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
 {
     final BiFunction<S, T, T> resolver;
-    final Direction direction;
     final RangeCursor<S> range;
     final Cursor<T> data;
 
@@ -39,31 +38,17 @@ class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
 
     RangeApplyCursor(BiFunction<S, T, T> resolver, RangeCursor<S> range, Cursor<T> data)
     {
-        this.direction = data.direction();
         this.resolver = resolver;
         this.range = range;
         this.data = data;
-        assert data.depth() == 0;
-        assert range.depth() == 0;
+        assert Cursor.compare(data.encodedPosition(), range.encodedPosition()) == 0;
         atRange = true;
     }
 
     @Override
-    public int depth()
+    public long encodedPosition()
     {
-        return data.depth();
-    }
-
-    @Override
-    public int incomingTransition()
-    {
-        return data.incomingTransition();
-    }
-
-    @Override
-    public Direction direction()
-    {
-        return direction;
+        return data.encodedPosition();
     }
 
     @Override
@@ -76,27 +61,27 @@ class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
     }
 
     @Override
-    public int advance()
+    public long advance()
     {
-        int dataDepth = data.advance();
+        long dataPosition = data.advance();
         if (atRange)
-            return skipRangeToDataPosition(dataDepth);
+            return skipRangeToDataPosition(dataPosition);
         else
-            return maybeSkipRange(dataDepth);
+            return maybeSkipRange(dataPosition);
     }
 
     @Override
-    public int skipTo(int skipDepth, int skipTransition)
+    public long skipTo(long encodedSkipPosition)
     {
-        int dataDepth = data.skipTo(skipDepth, skipTransition);
+        long dataPosition = data.skipTo(encodedSkipPosition);
         if (atRange) // if both cursors were at the same position, always advance the range cursor to catch up.
-            return skipRangeToDataPosition(dataDepth);
+            return skipRangeToDataPosition(dataPosition);
         else // otherwise skip range to the new data position only if it advances past the range's current position.
-            return maybeSkipRange(dataDepth);
+            return maybeSkipRange(dataPosition);
     }
 
     @Override
-    public int advanceMultiple(TransitionsReceiver receiver)
+    public long advanceMultiple(TransitionsReceiver receiver)
     {
         // While we are on a shared position, we must descend one byte at a time to maintain the cursor ordering.
         if (atRange)
@@ -105,34 +90,26 @@ class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
             return maybeSkipRange(data.advanceMultiple(receiver));
     }
 
-    int maybeSkipRange(int dataDepth)
+    long maybeSkipRange(long dataPosition)
     {
-        int rangeDepth = range.depth();
+        long rangePosition = range.encodedPosition();
+        long cmp = Cursor.compare(dataPosition, rangePosition);
         // If data position is at or before the range position, we are good.
-        if (rangeDepth < dataDepth)
-            return setAtRangeAndReturnDepth(false, dataDepth);
-
-        if (rangeDepth == dataDepth)
-        {
-            int dataTrans = data.incomingTransition();
-            int rangeTrans = range.incomingTransition();
-            if (direction.le(dataTrans, rangeTrans))
-                return setAtRangeAndReturnDepth(dataTrans == rangeTrans, dataDepth);
-        }
+        if (cmp <= 0)
+            return setAtRangeAndReturnPosition(cmp == 0, dataPosition);
 
         // Range cursor is before data cursor. Skip it ahead so that we are positioned on data.
-        return skipRangeToDataPosition(dataDepth);
+        return skipRangeToDataPosition(dataPosition);
     }
 
-    private int skipRangeToDataPosition(int dataDepth)
+    private long skipRangeToDataPosition(long dataPosition)
     {
-        int dataTrans = data.incomingTransition();
-        int rangeDepth = range.skipTo(dataDepth, dataTrans);
-        return setAtRangeAndReturnDepth(rangeDepth == dataDepth && range.incomingTransition() == dataTrans,
-                                        dataDepth);
+        long rangePosition = range.skipTo(dataPosition);
+        return setAtRangeAndReturnPosition(rangePosition == dataPosition,
+                                           dataPosition);
     }
 
-    private int setAtRangeAndReturnDepth(boolean atRange, int depth)
+    private long setAtRangeAndReturnPosition(boolean atRange, long depth)
     {
         this.atRange = atRange;
         return depth;
