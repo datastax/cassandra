@@ -17,13 +17,13 @@
  */
 package org.apache.cassandra.db.tries;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Predicate;
 import javax.annotation.Nonnull;
+
+import com.google.common.annotations.VisibleForTesting;
 
 import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -1596,7 +1596,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                  C mutationCursor,
                  InMemoryBaseTrie<T>.ApplyState state)
         {
-            assert mutationCursor.depth() == 0 : "Unexpected non-fresh cursor.";
+            mutationCursor.assertFresh();
             this.transformer = transformer;
             this.needsForcedCopy = needsForcedCopy;
             this.mutationCursor = mutationCursor;
@@ -1614,8 +1614,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
                 applyContent();
 
-                depth = mutationCursor.advance();
-                if (!state.advanceTo(depth, mutationCursor.incomingTransition(), forcedCopyDepth))
+                long position = mutationCursor.advance();
+                depth = Cursor.depth(position);
+                if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
                     break;
                 assert state.currentDepth == depth : "Unexpected change to applyState. Concurrent trie modification?";
             }
@@ -1647,9 +1648,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             // This is not very efficient, but we only currently use this option in tests.
             // If it's needed for production use, isBranching should be implemented in the cursor interface.
             Cursor<U> dupe = mutationCursor.tailCursor(Direction.FORWARD);
-            int childDepth = dupe.advance();
-            return childDepth > 0 &&
-                   dupe.skipTo(childDepth, dupe.incomingTransition() + 1) == childDepth;
+            long childPosition = dupe.advance();
+            return !Cursor.isExhausted(childPosition) &&
+                   !Cursor.isExhausted(dupe.skipTo(Cursor.positionForSkippingBranch(childPosition)));
         }
 
         @Override
