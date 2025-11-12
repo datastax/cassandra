@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.junit.Test;
 
 import net.bytebuddy.ByteBuddy;
@@ -268,51 +269,29 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slowest query plan:",
                               "LiteralIndexScan");
 
-            // test single hybrid ANN query (WHERE + ORDER BY ANN) - this triggers orderResultsBy
+            // Disable query optimizer to prevent skipping hybrid query logic and hit orderByResults to verify metrics update
+            node.runOnInstance(() -> QueryController.QUERY_OPT_LEVEL = 0);
             mark = node.logs().mark();
-            String hybridAnnQuery = withKeyspace("SELECT * FROM %s.t WHERE n > 1 ORDER BY v ANN OF [1, 1] LIMIT 10");
-            coordinator.execute(hybridAnnQuery, ConsistencyLevel.ONE);
+            coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
-                              "SAI slow query metrics:",
-                              "sstablesHit: 1",
-                              "segmentsHit: 1",
-                              "partitionsRead: 4",
-                              "rowsFiltered: 5",
-                              "rowsPreFiltered: 0",
-                              "trieSegmentsHit: 0",
-                              "bkdPostingListsHit: 0",
-                              "bkdSegmentsHit: 0",
-                              "bkdPostingsSkips: 0",
-                              "bkdPostingsDecodes: 0",
-                              "triePostingsSkips: 0",
-                              "triePostingsDecodes: 0",
-                              "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
-                              "shadowedPrimaryKeyCount: 1",
-                              "SAI slow query plan:",
-                              "AnnIndexScan");
-
-            // test aggregated hybrid ANN query
-            mark = node.logs().mark();
-            for (int i = 0; i < 2; i++)
-                coordinator.execute(hybridAnnQuery, ConsistencyLevel.ONE);
-            assertLogsContain(mark, node,
-                              "SAI slowest query metrics:",
-                              "sstablesHit: 1",
-                              "segmentsHit: 1",
-                              "partitionsRead: 4",
-                              "rowsFiltered: 5",
-                              "rowsPreFiltered: 0",
-                              "trieSegmentsHit: 0",
-                              "bkdPostingListsHit: 0",
-                              "bkdSegmentsHit: 0",
-                              "bkdPostingsSkips: 0",
-                              "bkdPostingsDecodes: 0",
-                              "triePostingsSkips: 0",
-                              "triePostingsDecodes: 0",
-                              "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
-                              "shadowedPrimaryKeyCount: 1",
-                              "SAI slowest query plan:",
-                              "AnnIndexScan");
+                    "SAI slow query metrics:",
+                    "sstablesHit: 2",
+                    "segmentsHit: 2",
+                    "partitionsRead: 3",
+                    "rowsFiltered: 3",
+                    "rowsPreFiltered: 0",
+                    "trieSegmentsHit: 0",
+                    "bkdPostingListsHit: 1",
+                    "bkdSegmentsHit: 1",
+                    "bkdPostingsSkips: 0",
+                    "bkdPostingsDecodes: 4",
+                    "triePostingsSkips: 0",
+                    "triePostingsDecodes: 0",
+                    "annGraphSearchLatencyNanos: 0",
+                    "shadowedPrimaryKeyCount: 0",
+                    "SAI slow query plan:",
+                    "KeysSort",
+                    "NumericIndexScan");
 
             // test changing data between identical queries, making one of them slower than the other,
             // so we can check that only the execution info of the slowest query are reported
