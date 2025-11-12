@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.distributed.test;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
@@ -66,15 +67,27 @@ public class SlowQueryLoggerTest extends TestBaseImpl
             ICoordinator coordinator = cluster.coordinator(1);
             IInvokableInstance node = cluster.get(2);
 
-            cluster.schemaChange(format("CREATE TABLE %s.%s (k text, c text, v text, PRIMARY KEY (k, c))"));
+            cluster.schemaChange(format("CREATE TABLE %s.%s (k text, c text, v text, b blob, PRIMARY KEY (k, c))"));
             coordinator.execute(format("INSERT INTO %s.%s (k, c, v) VALUES ('secret_k', 'secret_c', 'secret_v')"), ALL);
 
+            // verify that slow queries are logged with redacted values
             long mark = node.logs().mark();
             coordinator.execute(format("SELECT * FROM %s.%s WHERE k = 'secret_k' AND c = 'secret_c' AND v = 'secret_v' ALLOW FILTERING"), ALL);
             node.runOnInstance(() -> MonitoringTask.instance.logOperations(approxTime.now()));
-
             assertLogsContain(mark, node, "Some operations were slow", format("<SELECT \\* FROM %s\\.%s WHERE k = \\? AND c = \\? AND v = \\? ALLOW FILTERING>"));
             assertLogsNotContain(mark, node, "secret_k", "secret_c", "secret_v");
+
+            // verify that large values include size hints
+            mark = node.logs().mark();
+            String query = format("SELECT * FROM %s.%s WHERE b = ? ALLOW FILTERING");
+            coordinator.execute(query, ALL, ByteBuffer.allocate(100 + 1));
+            coordinator.execute(query, ALL, ByteBuffer.allocate(1024 + 1));
+            coordinator.execute(query, ALL, ByteBuffer.allocate(10 * 1024 + 1));
+            node.runOnInstance(() -> MonitoringTask.instance.logOperations(approxTime.now()));
+            assertLogsContain(mark, node,
+                              format("<SELECT \\* FROM %s\\.%s WHERE b = \\?\\[>100B\\] ALLOW FILTERING>"),
+                              format("<SELECT \\* FROM %s\\.%s WHERE b = \\?\\[>1KiB\\] ALLOW FILTERING>"),
+                              format("<SELECT \\* FROM %s\\.%s WHERE b = \\?\\[>10KiB\\] ALLOW FILTERING>"));
         }
     }
 
