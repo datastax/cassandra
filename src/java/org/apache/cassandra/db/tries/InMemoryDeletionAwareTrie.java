@@ -89,9 +89,9 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     static class DeletionAwareInMemoryCursor<T, D extends RangeState<D>>
     extends InMemoryCursor<T> implements DeletionAwareCursor<T, D>
     {
-        DeletionAwareInMemoryCursor(InMemoryDeletionAwareTrie<T, D> trie, Direction direction, int root, int depth, int incomingTransition)
+        DeletionAwareInMemoryCursor(InMemoryDeletionAwareTrie<T, D> trie, Direction direction, int root)
         {
-            super(trie, direction, root, depth, incomingTransition);
+            super(trie, direction, root);
         }
 
         @Override
@@ -112,9 +112,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         {
             return new DeletionAwareInMemoryCursor<>((InMemoryDeletionAwareTrie<T, D>) trie,
                                                      direction,
-                                                     currentFullNode,
-                                                     0,
-                                                     -1);
+                                                     currentFullNode);
         }
     }
 
@@ -122,14 +120,14 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     private RangeCursor<D> makeRangeCursor(Direction direction, int alternateBranch) {
         return isNull(alternateBranch)
                 ? null
-                : new InMemoryRangeTrie.InMemoryRangeCursor<>((InMemoryReadTrie) this, direction, alternateBranch, 0, -1);
+                : new InMemoryRangeTrie.InMemoryRangeCursor<>((InMemoryReadTrie) this, direction, alternateBranch);
     }
 
     //noinspection ClassEscapesDefinedScope
     @Override
     public DeletionAwareInMemoryCursor<T, D> makeCursor(Direction direction)
     {
-        return new DeletionAwareInMemoryCursor<>(this, direction, root, 0, -1);
+        return new DeletionAwareInMemoryCursor<>(this, direction, root);
     }
 
     protected long emptySizeOnHeap()
@@ -185,6 +183,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
 
                 int existingAlternateBranch = state.alternateBranch();
                 RangeCursor<E> incomingAlternateBranch = mutationCursor.deletionBranchCursor(Direction.FORWARD);
+                long position;
                 if (incomingAlternateBranch != null || existingAlternateBranch != NONE)
                 {
                     int updatedAlternateBranch = existingAlternateBranch;
@@ -227,12 +226,13 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
                     if (state.currentDepth == 0)
                         break; // to be attached to root by complete()
                     state.attachAndMoveToParentState(forcedCopyDepth);
-                    depth = mutationCursor.depth();
+                    position = mutationCursor.encodedPosition();
                 }
                 else
-                    depth = mutationCursor.advance();
+                    position = mutationCursor.advance();
 
-                if (!state.advanceTo(depth, mutationCursor.incomingTransition(), forcedCopyDepth))
+                depth = Cursor.depth(position);
+                if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
                     break;
                 assert state.currentDepth == depth : "Unexpected change to applyState. Concurrent trie modification?";
             }
@@ -246,10 +246,11 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
             int initialDepth = state.currentDepth;
 
             // The first forcedCopyDepth and applyContent are already called.
-            int depth = mutationCursor.advance();
+            long position = mutationCursor.advance();
+            int depth = Cursor.depth(position);
 
             // Below is the same as the main loop in `apply`, slightly rearranged and ignoring deletion branches.
-            while (state.advanceTo(depth, mutationCursor.incomingTransition(), forcedCopyDepth, initialDepth))
+            while (state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth, initialDepth))
             {
                 assert state.currentDepth == depth : "Unexpected change to applyState. Concurrent trie modification?";
 
@@ -257,7 +258,8 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
                     forcedCopyDepth = needsForcedCopy.test(this) ? depth : Integer.MAX_VALUE;
 
                 applyContent();
-                depth = mutationCursor.advance();
+                position = mutationCursor.advance();
+                depth = Cursor.depth(position);
             }
             assert state.currentDepth == initialDepth;
         }
@@ -468,7 +470,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     @SuppressWarnings("unused")
     private String dumpBranch(int branchRoot)
     {
-        return new DumpCursor(new DeletionAwareInMemoryCursor<>(this, Direction.FORWARD, branchRoot, 0, -1), Object::toString)
+        return new DumpCursor(new DeletionAwareInMemoryCursor<>(this, Direction.FORWARD, branchRoot), Object::toString)
                .process(new TrieDumper.DeletionAware<>(Function.identity(), Object::toString));
     }
 }
