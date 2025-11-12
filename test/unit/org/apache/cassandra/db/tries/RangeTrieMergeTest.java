@@ -549,7 +549,7 @@ public class RangeTrieMergeTest
         list.add(value);
     }
 
-    @Test(expected = IllegalStateException.class)
+    @Test(expected = AssertionError.class)
     public void testRangeUnderCoveredRange()
     {
         String[] ranges1 = {"ba", "bb"};

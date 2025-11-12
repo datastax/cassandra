@@ -97,7 +97,7 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
 
     public InMemoryCursor<T> makeCursor(Direction direction)
     {
-        return new InMemoryCursor<>(this, direction, root, 0, -1);
+        return new InMemoryCursor<>(this, direction, root);
     }
 
     protected long emptySizeOnHeap()
@@ -277,9 +277,10 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
                     }
                 }
 
-                depth = mutationCursor.advance() + initialDepth;
+                long position = mutationCursor.advance();
+                depth = Cursor.depth(position) + initialDepth;
                 // Descend but do not modify anything yet.
-                if (!state.advanceTo(depth, mutationCursor.incomingTransition(), forcedCopyDepth, initialDepth))
+                if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth, initialDepth))
                     break;
 
                 assert state.currentDepth == depth : "Unexpected change to applyState. Concurrent trie modification?";
@@ -295,15 +296,18 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
         boolean applyDeletionRange(S mutationCoveringState) throws TrieSpaceExhaustedException
         {
             boolean atMutation = true;
-            int depth = mutationCursor.depth() + initialDepth;
-            int transition = mutationCursor.incomingTransition();
+            long position = mutationCursor.encodedPosition();
+            int depth = Cursor.depth(position) + initialDepth;
+            int transition = Cursor.incomingTransition(position);
             // We are walking both tries in parallel.
             while (true)
             {
                 if (atMutation)
                 {
-                    depth = mutationCursor.advance() + initialDepth;
-                    transition = mutationCursor.incomingTransition();
+
+                    position = mutationCursor.advance();
+                    depth = Cursor.depth(position) + initialDepth;
+                    transition = Cursor.incomingTransition(position);
                     atMutation = false;
                 }
 
