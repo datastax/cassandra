@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
@@ -60,10 +59,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class PartitionAwarePrimaryKeyMapFactory implements Factory
     {
-        private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final LongArray.Factory offsetReaderFactory;
-        private final MetadataSource metadata;
         private final KeyFetcher keyFetcher;
         private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
@@ -77,18 +74,17 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         {
             try
             {
-                this.perSSTableComponents = perSSTableComponents;
-                this.metadata = MetadataSource.loadMetadata(perSSTableComponents);
+                MetadataSource metadata = MetadataSource.loadMetadata(perSSTableComponents);
 
                 IndexComponent.ForRead offsetsComponent = perSSTableComponents.get(IndexComponentType.OFFSETS_VALUES);
                 IndexComponent.ForRead tokensComponent = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES);
 
-                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(offsetsComponent));
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(tokensComponent));
+                NumericValuesMeta offsetsMeta = new NumericValuesMeta(metadata.get(offsetsComponent));
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadata.get(tokensComponent));
 
                 count = tokensMeta.valueCount;
-                token = tokensComponent.createFileHandle();
-                offset = offsetsComponent.createFileHandle();
+                token = tokensComponent.createFileHandle(this::close);
+                offset = offsetsComponent.createFileHandle(this::close);
 
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
                 this.offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta);
@@ -106,8 +102,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         @Override
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
         {
-            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
-            final LongArray rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
+            final LongArray rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
+            final LongArray rowIdToOffset = new LongArray.DeferredLongArray(offsetReaderFactory::open);
 
             return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId);
         }
@@ -163,27 +159,9 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
-    public long exactRowIdOrInvertedCeiling(PrimaryKey key)
+    public long rowIdFromPrimaryKey(PrimaryKey key)
     {
         return rowIdToToken.indexOf(key.token().getLongValue());
-    }
-
-    @Override
-    public long ceiling(PrimaryKey key)
-    {
-        var rowId = exactRowIdOrInvertedCeiling(key);
-        if (rowId >= 0)
-            return rowId;
-        if (rowId == Long.MIN_VALUE)
-            return -1;
-        else
-            return -rowId - 1;
-    }
-
-    @Override
-    public long floor(PrimaryKey key)
-    {
-        throw new UnsupportedOperationException();
     }
 
     @Override

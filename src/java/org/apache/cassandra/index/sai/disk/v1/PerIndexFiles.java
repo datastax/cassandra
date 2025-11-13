@@ -28,7 +28,6 @@ import org.slf4j.Logger;
 
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -52,7 +51,7 @@ public class PerIndexFiles implements Closeable
         {
             try
             {
-                files.put(component, perIndexComponents.get(component).createFileHandle());
+                files.put(component, perIndexComponents.get(component).createFileHandle(this::close));
                 componentsPresent.add(component);
             }
             catch (UncheckedIOException e)

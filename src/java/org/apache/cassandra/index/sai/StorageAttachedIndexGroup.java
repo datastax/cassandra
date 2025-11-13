@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.index.sai;
 
-import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -60,7 +59,6 @@ import org.apache.cassandra.index.sai.metrics.TableStateMetrics;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
@@ -284,7 +282,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     @Override
     public Set<Component> componentsForNewSSTable()
     {
-        return IndexDescriptor.componentsForNewlyFlushedSSTable(indices);
+        return IndexDescriptor.componentsForNewlyFlushedSSTable(indices, baseCfs.metadata().comparator.size() > 0);
     }
 
     @Override

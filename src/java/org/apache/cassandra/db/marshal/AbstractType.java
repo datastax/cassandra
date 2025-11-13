@@ -33,7 +33,6 @@ import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnSpecification;
@@ -176,6 +175,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public <V> T compose(V value, ValueAccessor<V> accessor)
     {
         return getSerializer().deserialize(value, accessor);
+    }
+
+    public ByteBuffer decomposeUntyped(Object value)
+    {
+        return decompose((T) value);
     }
 
     public ByteBuffer decompose(T value)

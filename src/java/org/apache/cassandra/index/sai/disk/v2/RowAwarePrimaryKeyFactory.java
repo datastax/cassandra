@@ -41,7 +41,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     private final ClusteringComparator clusteringComparator;
-    private final boolean hasEmptyClustering;
+    final boolean hasEmptyClustering;
 
 
     public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
@@ -92,6 +92,12 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         public RowAwarePrimaryKey forStaticRow()
         {
             return new RowAwarePrimaryKey(token, partitionKey, Clustering.STATIC_CLUSTERING, primaryKeySupplier);
+        }
+
+        @Override
+        public boolean isTokenOnly()
+        {
+            return partitionKey == null && clustering == null && primaryKeySupplier == null;
         }
 
         @Override

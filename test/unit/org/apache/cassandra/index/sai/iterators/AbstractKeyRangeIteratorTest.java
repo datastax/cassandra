@@ -182,8 +182,8 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
     }
 
 
-    private static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = Version.current().onDiskFormat()
-                                                                              .newPrimaryKeyFactory(new ClusteringComparator(LongType.instance));
+    protected static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = Version.current().onDiskFormat()
+                                                                                .newPrimaryKeyFactory(new ClusteringComparator(LongType.instance));
 
     /**
      * Generates a random list of primary keys with the given average number of partitions and rows per partition.
