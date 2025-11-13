@@ -117,8 +117,8 @@ public class TermsReaderTest extends SaiRandomizedTest
             indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter), docLengths);
         }
 
-        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
-        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle();
+        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
+        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle(null);
 
         long termsFooterPointer = Long.parseLong(indexMetas.get(IndexComponentType.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 
@@ -160,8 +160,8 @@ public class TermsReaderTest extends SaiRandomizedTest
             indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter), docLengths);
         }
 
-        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
-        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle();
+        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
+        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle(null);
 
         long termsFooterPointer = Long.parseLong(indexMetas.get(IndexComponentType.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 

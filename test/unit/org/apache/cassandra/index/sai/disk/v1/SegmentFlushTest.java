@@ -215,8 +215,8 @@ public class SegmentFlushTest
 
     private void verifyStringIndex(IndexComponents.ForRead components, SegmentMetadata segmentMetadata) throws IOException
     {
-        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
-        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle();
+        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
+        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle(null);
 
         long termsFooterPointer = Long.parseLong(segmentMetadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 

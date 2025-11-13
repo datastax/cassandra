@@ -61,6 +61,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import static org.apache.cassandra.index.sai.disk.v1.kdtree.BKDQueries.bkdQueryFrom;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Note: The sstables and SAI indexes used in this test were written with DSE 6.8
@@ -158,6 +159,7 @@ public class LegacyOnDiskFormatTest
         assertEquals(countFromFactory, countFromMap);
 
         PrimaryKey expected = pkFactory.createTokenOnly(Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(23)).getToken());
+        assertTrue(expected.isTokenOnly());
 
         PrimaryKey primaryKey = primaryKeyMap.primaryKeyFromRowId(0);
 
@@ -175,9 +177,9 @@ public class LegacyOnDiskFormatTest
         List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext, sstableContext);
 
         BKDReader bkdReader = new BKDReader(intContext,
-                                            components.get(IndexComponentType.KD_TREE).createFileHandle(),
+                                            components.get(IndexComponentType.KD_TREE).createFileHandle(null),
                                             metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE),
-                                            components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(),
+                                            components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(null),
                                             metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE_POSTING_LISTS));
 
         Expression expression = new Expression(intContext).add(Operator.LT, Int32Type.instance.decompose(10));
@@ -203,9 +205,9 @@ public class LegacyOnDiskFormatTest
 
         ByteComparable.Version byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
         TermsReader termsReader = new TermsReader(textContext,
-                                                  components.get(IndexComponentType.TERMS_DATA).createFileHandle(),
+                                                  components.get(IndexComponentType.TERMS_DATA).createFileHandle(null),
                                                   byteComparableVersion,
-                                                  components.get(IndexComponentType.POSTING_LISTS).createFileHandle(),
+                                                  components.get(IndexComponentType.POSTING_LISTS).createFileHandle(null),
                                                   root,
                                                   footerPointer,
                                                   Version.AA); // These tests are for AA, so no need to parameterize

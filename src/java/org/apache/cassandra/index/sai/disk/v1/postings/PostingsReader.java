@@ -209,6 +209,12 @@ public class PostingsReader implements OrdinalPostingList
             }
 
             @Override
+            public long floorRowId(long targetToken)
+            {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
             public long indexOf(long targetToken)
             {
                 throw new UnsupportedOperationException();

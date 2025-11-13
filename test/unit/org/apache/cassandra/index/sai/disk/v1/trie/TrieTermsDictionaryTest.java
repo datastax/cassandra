@@ -83,7 +83,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             assertEquals(NOT_FOUND, reader.exactMatch(asByteComparable.apply("a")));
@@ -170,7 +170,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             assertEquals(0, reader.ceiling(asByteComparable.apply("a")));
@@ -253,7 +253,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     // stateful across calls to ceiling, a new one must be opened for each call.
     private void readAndAssertCeiling(long root, long expected, ByteComparable key, IndexComponent.ForRead termsData)
     {
-        try (FileHandle input = termsData.createFileHandle();
+        try (FileHandle input = termsData.createFileHandle(null);
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), root, VERSION))
         {
             assertEquals(expected, reader.ceiling(key));
@@ -283,7 +283,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             assertEquals(NOT_FOUND, reader.floor(asByteComparable.apply("a")));
@@ -322,7 +322,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             // Validate token only searches
@@ -374,7 +374,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
              TrieTermsDictionaryReader iterator = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION);
              ReverseTrieTermsDictionaryReader reverseIterator = new ReverseTrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
         {
@@ -420,7 +420,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             final ByteComparable expectedMaxTerm = byteComparables.get(byteComparables.size() - 1);
