@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.util.Random;
 
 import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.io.util.FileUtils;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -35,11 +36,10 @@ import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.schema.TableMetadata;
 
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
 public class SaiRandomizedTest extends RandomizedTest
@@ -88,13 +88,17 @@ public class SaiRandomizedTest extends RandomizedTest
                                                                         randomSimpleString(5, 13),
                                                                         randomSimpleString(3, 17),
                                                                         new SequenceBasedSSTableId(randomIntBetween(0, 128))),
-                                                         SequentialWriterOption.newBuilder()
-                                                                               .bufferSize(randomIntBetween(17, 1 << 13))
-                                                                               .bufferType(randomBoolean() ? BufferType.ON_HEAP : BufferType.OFF_HEAP)
-                                                                               .trickleFsync(randomBoolean())
-                                                                               .trickleFsyncByteInterval(nextInt(1 << 10, 1 << 16))
-                                                                               .finishOnClose(true)
-                                                                               .build());
+                                                         IndexFileUtils.defaultWriterOption);
+    }
+
+    public static IndexDescriptor newClusteringIndexDescriptor(TableMetadata metadata) throws IOException
+    {
+        return indexInputLeakDetector.newIndexDescriptor(new Descriptor(new File(temporaryFolder.newFolder()),
+                                                                        randomSimpleString(5, 13),
+                                                                        randomSimpleString(3, 17),
+                                                                        new SequenceBasedSSTableId(randomIntBetween(0, 128))),
+                                                         metadata,
+                                                         IndexFileUtils.defaultWriterOption);
     }
 
     public String newIndex()

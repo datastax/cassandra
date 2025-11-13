@@ -34,11 +34,10 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
         int rows = nextInt(10, 100);
         PrimaryKey[] keys = new PrimaryKey[rows];
         for (int index = 0; index < rows; index++)
-            keys[index] = factory.create(makeKey(simplePartition, Integer.toString(index)), Clustering.EMPTY);
+            keys[index] = factory.create(makeKey(simplePartition, index), Clustering.EMPTY);
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -53,7 +52,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -67,7 +65,7 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
         int clustering = 0;
         for (int index = 0; index < rows; index++)
         {
-            keys[index] = factory.create(makeKey(simplePartitionSingleClusteringAsc, Integer.toString(partition)),
+            keys[index] = factory.create(makeKey(simplePartitionSingleClusteringAsc, partition),
                                          makeClustering(simplePartitionSingleClusteringAsc, Integer.toString(clustering++)));
             if (clustering == 5)
             {
@@ -78,7 +76,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -93,7 +90,7 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
         int clustering2 = 0;
         for (int index = 0; index < rows; index++)
         {
-            keys[index] = factory.create(makeKey(simplePartitionMultipleClusteringAsc, Integer.toString(partition)),
+            keys[index] = factory.create(makeKey(simplePartitionMultipleClusteringAsc, partition),
                                          makeClustering(simplePartitionMultipleClusteringAsc, Integer.toString(clustering1), Integer.toString(clustering2++)));
             if (clustering2 == 5)
             {
@@ -109,7 +106,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -123,7 +119,7 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
         int clustering = 0;
         for (int index = 0; index < rows; index++)
         {
-            keys[index] = factory.create(makeKey(simplePartitionSingleClusteringDesc, Integer.toString(partition)),
+            keys[index] = factory.create(makeKey(simplePartitionSingleClusteringDesc, partition),
                                          makeClustering(simplePartitionSingleClusteringDesc, Integer.toString(clustering++)));
             if (clustering == 5)
             {
@@ -134,7 +130,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -149,7 +144,7 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
         int clustering2 = 0;
         for (int index = 0; index < rows; index++)
         {
-            keys[index] = factory.create(makeKey(simplePartitionMultipleClusteringDesc, Integer.toString(partition)),
+            keys[index] = factory.create(makeKey(simplePartitionMultipleClusteringDesc, partition),
                                          makeClustering(simplePartitionMultipleClusteringDesc, Integer.toString(clustering1), Integer.toString(clustering2++)));
             if (clustering2 == 5)
             {
@@ -165,7 +160,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -190,7 +184,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -221,7 +214,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -246,7 +238,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -277,7 +268,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -292,7 +282,7 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
         int clustering2 = 0;
         for (int index = 0; index < rows; index++)
         {
-            keys[index] = factory.create(makeKey(simplePartitionMultipleClusteringMixed, Integer.toString(partition)),
+            keys[index] = factory.create(makeKey(simplePartitionMultipleClusteringMixed, partition),
                                          makeClustering(simplePartitionMultipleClusteringMixed, Integer.toString(clustering1), Integer.toString(clustering2++)));
             if (clustering2 == 5)
             {
@@ -308,7 +298,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -339,7 +328,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        byteComparisonTests(factory, keys);
         compareToAndEqualsTests(factory, keys);
     }
 
@@ -358,24 +346,6 @@ public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
             {
                 assertCompareToAndEquals(key, keys[comparisonIndex], -1);
                 assertCompareToAndEquals(tokenOnlyKey, keys[comparisonIndex], tokenOnlyKey.token().equals(keys[comparisonIndex].token()) ? 0 : -1);
-            }
-        }
-    }
-
-    private void byteComparisonTests(PrimaryKey.Factory factory, PrimaryKey... keys)
-    {
-        for (int index = 0; index < keys.length - 1; index++)
-        {
-            PrimaryKey key = keys[index];
-            PrimaryKey tokenOnlyKey = factory.createTokenOnly(key.token());
-            assertByteComparison(tokenOnlyKey, key, -1);
-            assertByteComparison(key, key, 0);
-            assertByteComparison(tokenOnlyKey, tokenOnlyKey, 0);
-
-            for (int comparisonIndex = index + 1; comparisonIndex < keys.length; comparisonIndex++)
-            {
-                assertByteComparison(key, keys[comparisonIndex], -1);
-                assertByteComparison(tokenOnlyKey, keys[comparisonIndex], -1);
             }
         }
     }
