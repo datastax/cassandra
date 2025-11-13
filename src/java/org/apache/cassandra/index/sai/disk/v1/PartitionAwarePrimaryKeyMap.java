@@ -25,9 +25,9 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
@@ -87,8 +87,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadata.get(tokensComponent));
                 this.count = tokensMeta.valueCount;
 
-                token = tokensComponent.createFileHandle();
-                offset = offsetsComponent.createFileHandle();
+                token = tokensComponent.createFileHandle(this::close);
+                offset = offsetsComponent.createFileHandle(this::close);
 
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
                 this.offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta);

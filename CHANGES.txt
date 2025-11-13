@@ -1,7 +1,7 @@
 Future version (tbd)
+ * Reduce size of per-SSTable index components for SAI (CASSANDRA-18673)
  * Support for add and replace in IntervalTree (CASSANDRA-20513)
  * Add SSTableIntervalTree latency metric (CASSANDRA-20502)
- * Improve IntervalTree build throughput (CASSANDRA-19596)
  * Clear BTree.FastBuilder saved overflow state on reset to prevent cross-table column contamination after schema disagreement (CASSANDRA-21216, CASSANDRA-21260)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 Merged from 5.1:
