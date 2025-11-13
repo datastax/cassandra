@@ -293,6 +293,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                     "KeysSort",
                     "NumericIndexScan");
 
+            node.runOnInstance(() -> QueryController.QUERY_OPT_LEVEL = CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_LEVEL.getInt());
+
             // test changing data between identical queries, making one of them slower than the other,
             // so we can check that only the execution info of the slowest query are reported
             mark = node.logs().mark();
