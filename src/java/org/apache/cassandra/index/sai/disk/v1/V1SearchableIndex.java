@@ -217,6 +217,7 @@ public class V1SearchableIndex implements SearchableIndex
             {
                 if (segment.intersects(keyRange))
                 {
+                    context.addSegmentsHit(1);
                     // Note that the proportionality is not used when the user supplies a rerank_k value in the
                     // ANN_OPTIONS map.
                     var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
@@ -241,6 +242,7 @@ public class V1SearchableIndex implements SearchableIndex
         {
             for (Segment segment : segments)
             {
+                context.addSegmentsHit(1);
                 // Only pass the primary keys in a segment's range to the segment index.
                 var segmentKeys = PrimaryKeyListUtil.getKeysInRange(keys, segment.metadata.minKey, segment.metadata.maxKey);
                 var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
