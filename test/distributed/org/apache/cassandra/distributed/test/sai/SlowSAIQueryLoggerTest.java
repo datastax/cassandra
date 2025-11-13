@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.junit.Test;
 
 import net.bytebuddy.ByteBuddy;
@@ -182,8 +183,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             coordinator.execute(annQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
                               "SAI slow query metrics:",
-                              "sstablesHit: 0", // TODO: should be fixed by CNDB-15620
-                              "segmentsHit: 0", // TODO: should be fixed by CNDB-15620
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
                               "partitionsRead: 4",
                               "rowsFiltered: 4",
                               "rowsPreFiltered: 0",
@@ -205,8 +206,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                 coordinator.execute(annQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
                               "SAI slowest query metrics:",
-                              "sstablesHit: 0", // TODO: should be fixed by CNDB-15620
-                              "segmentsHit: 0", // TODO: should be fixed by CNDB-15620
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
                               "partitionsRead: 4",
                               "rowsFiltered: 4",
                               "rowsPreFiltered: 0",
@@ -228,8 +229,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
                               "SAI slow query metrics:",
-                              "sstablesHit: 0", // TODO: should be fixed by CNDB-15620
-                              "segmentsHit: 0", // TODO: should be fixed by CNDB-15620
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
                               "partitionsRead: 4",
                               "rowsFiltered: 5",
                               "rowsPreFiltered: 0",
@@ -251,8 +252,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                 coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
                               "SAI slowest query metrics:",
-                              "sstablesHit: 0", // TODO: should be fixed by CNDB-15620
-                              "segmentsHit: 0", // TODO: should be fixed by CNDB-15620
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
                               "partitionsRead: 4",
                               "rowsFiltered: 5",
                               "rowsPreFiltered: 0",
@@ -267,6 +268,32 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "shadowedPrimaryKeyCount: 1",
                               "SAI slowest query plan:",
                               "LiteralIndexScan");
+
+            // Disable query optimizer to prevent skipping hybrid query logic and hit orderByResults to verify metrics update
+            node.runOnInstance(() -> QueryController.QUERY_OPT_LEVEL = 0);
+            mark = node.logs().mark();
+            coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
+            assertLogsContain(mark, node,
+                    "SAI slow query metrics:",
+                    "sstablesHit: 2",
+                    "segmentsHit: 2",
+                    "partitionsRead: 3",
+                    "rowsFiltered: 3",
+                    "rowsPreFiltered: 0",
+                    "trieSegmentsHit: 0",
+                    "bkdPostingListsHit: 1",
+                    "bkdSegmentsHit: 1",
+                    "bkdPostingsSkips: 0",
+                    "bkdPostingsDecodes: 4",
+                    "triePostingsSkips: 0",
+                    "triePostingsDecodes: 0",
+                    "annGraphSearchLatencyNanos: 0",
+                    "shadowedPrimaryKeyCount: 0",
+                    "SAI slow query plan:",
+                    "KeysSort",
+                    "NumericIndexScan");
+
+            node.runOnInstance(() -> QueryController.QUERY_OPT_LEVEL = CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt());
 
             // test changing data between identical queries, making one of them slower than the other,
             // so we can check that only the execution info of the slowest query are reported
