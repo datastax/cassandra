@@ -44,7 +44,7 @@ import static org.junit.Assert.assertEquals;
 
 /**
  * Wide-table tests (with clustering columns) for
- * {@link RowAwarePrimaryKeyMap} using the row-aware on-disk format.
+ * {@link WidePrimaryKeyMap} using the row-aware on-disk format.
  */
 public class RowAwareWidePrimaryKeyMapTest extends SAITester
 {
