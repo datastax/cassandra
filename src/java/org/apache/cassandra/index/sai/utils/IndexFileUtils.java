@@ -52,7 +52,7 @@ public class IndexFileUtils
     protected static final Logger logger = LoggerFactory.getLogger(IndexFileUtils.class);
 
     @VisibleForTesting
-    protected static final SequentialWriterOption defaultWriterOption = SequentialWriterOption.newBuilder()
+    public static final SequentialWriterOption defaultWriterOption = SequentialWriterOption.newBuilder()
                                                                                               .trickleFsync(DatabaseDescriptor.getTrickleFsync())
                                                                                               .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
                                                                                               .bufferType(BufferType.OFF_HEAP)

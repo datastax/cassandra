@@ -104,18 +104,6 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
             {
                 return blockOffsets.get(block);
             }
-
-            @Override
-            public long ceilingIndex(long targetValue)
-            {
-               throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public long indexOf(long targetValue)
-            {
-                throw new UnsupportedOperationException();
-            }
         };
     }
 

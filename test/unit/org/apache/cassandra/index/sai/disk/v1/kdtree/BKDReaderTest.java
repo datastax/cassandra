@@ -412,8 +412,8 @@ public class BKDReaderTest extends SaiRandomizedTest
         final long postingsPosition = metadata.get(IndexComponentType.KD_TREE_POSTING_LISTS).root;
         MatcherAssert.assertThat(postingsPosition, is(greaterThan(0L)));
 
-        FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
-        FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
+        FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle(null);
+        FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(null);
         return new BKDReader(indexContext,
                              kdtreeHandle,
                              bkdPosition,
