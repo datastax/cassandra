@@ -131,13 +131,13 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perSSTableComponentTypes()
+    public Set<IndexComponentType> perSSTableComponentTypes(boolean hasClustering)
     {
         return PER_SSTABLE_COMPONENTS;
     }
 
     @Override
-    public int openFilesPerSSTable()
+    public int openFilesPerSSTable(boolean hasClustering)
     {
         return 4;
     }

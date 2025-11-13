@@ -151,7 +151,7 @@ public class IndexBuildDeciderTest extends SAITester
     {
         IndexContext context = createIndexContext("v1", Int32Type.instance);
         return V2OnDiskFormat.instance.perIndexComponentTypes(context).size()
-               + V2OnDiskFormat.instance.perSSTableComponentTypes().size();
+               + V2OnDiskFormat.instance.perSSTableComponentTypes(false).size();
     }
 
     public static class IndexBuildDeciderWithoutInitialBuild implements IndexBuildDecider

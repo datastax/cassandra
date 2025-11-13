@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
 import javax.annotation.Nullable;
 import javax.management.AttributeNotFoundException;
 import javax.management.InstanceNotFoundException;
@@ -46,6 +47,7 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
+
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -60,7 +62,6 @@ import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.ReadFailureException;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -95,7 +96,6 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
@@ -699,7 +699,7 @@ public class SAITester extends CQLTester
     {
         Set<File> indexFiles = indexFiles();
 
-        for (IndexComponentType indexComponentType : Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType indexComponentType : Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes(false))
         {
             String name = Version.current(KEYSPACE).fileNameFormatter().format(indexComponentType, (String)null, 0);
             Component component = new Component(Component.Type.CUSTOM, name);

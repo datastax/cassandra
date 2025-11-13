@@ -26,6 +26,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.store.ChecksumIndexInput;
 
 public interface IndexComponent
@@ -50,10 +51,10 @@ public interface IndexComponent
         @Override
         IndexComponents.ForRead parent();
 
-        FileHandle createFileHandle();
+        FileHandle createFileHandle(Throwables.DiscreteAction<?> cleanup);
 
         /**
-         * Opens a file handle for the provided index component similarly to {@link #createFileHandle()},
+         * Opens a file handle for the provided index component similarly to {@link #createFileHandle(Throwables.DiscreteAction)},
          * but this method shoud be called instead of the aforemented one if the access is done during index building, that is
          * before the full index that this is a part of has been finalized.
          * <p>
