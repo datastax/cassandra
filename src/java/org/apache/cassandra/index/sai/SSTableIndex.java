@@ -285,6 +285,10 @@ public class SSTableIndex implements Comparable<SSTableIndex>
                                                                   int limit,
                                                                   long totalRows) throws IOException
     {
+        context.checkpoint();
+        context.addSstablesHit(1);
+        assert !isReleased();
+
         return searchableIndex.orderBy(orderer, predicate, keyRange, context, limit, totalRows);
     }
 
@@ -375,6 +379,10 @@ public class SSTableIndex implements Comparable<SSTableIndex>
 
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
     {
+        context.checkpoint();
+        context.addSstablesHit(1);
+        assert !isReleased();
+
         return searchableIndex.orderResultsBy(context, keys, orderer, limit, totalRows);
     }
 
