@@ -202,7 +202,7 @@ public class SegmentFlushTest
             minSegmentRowId = 0;
             maxSegmentRowId = 0;
             minKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());
-            maxKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());;
+            maxKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());
             minTerm = term2;
             maxTerm = term2;
             numRowsPerSegment = 1;
@@ -215,8 +215,8 @@ public class SegmentFlushTest
 
     private void verifyStringIndex(IndexComponents.ForRead components, SegmentMetadata segmentMetadata) throws IOException
     {
-        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
-        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle();
+        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle(null);
+        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle(null);
 
         long termsFooterPointer = Long.parseLong(segmentMetadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 

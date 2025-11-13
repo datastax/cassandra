@@ -392,6 +392,16 @@ public enum CassandraRelevantProperties
     /** Controls the maximum number of expressions that will be used in a SAI intersection operation. */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
 
+    /**
+     * Used to determine the block size and block mask for the clustering sorted terms.
+     */
+    SAI_SORTED_TERMS_CLUSTERING_BLOCK_SHIFT("cassandra.sai.sorted_terms_clustering_block_shift", "4"),
+
+    /**
+     * Used to determine the block size and block mask for the partition sorted terms.
+     */
+    SAI_SORTED_TERMS_PARTITION_BLOCK_SHIFT("cassandra.sai.sorted_terms_partition_block_shift", "4"),
+
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
     /** Enables use of vector type. True by default. **/

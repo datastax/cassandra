@@ -205,7 +205,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
 
             // it will return the next row id if given key is not found.
-            long minSSTableRowId = primaryKeyMap.ceiling(firstPrimaryKey);
+            long minSSTableRowId = primaryKeyMap.rowIdFromPrimaryKey(firstPrimaryKey);
             // If we didn't find the first key, we won't find the last primary key either
             if (minSSTableRowId < 0)
                 return CloseableIterator.emptyIterator();
@@ -370,7 +370,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             return metadata.maxSSTableRowId;
 
         PrimaryKey lastPrimaryKey = keyFactory.createTokenOnly(right.getToken());
-        long max = primaryKeyMap.floor(lastPrimaryKey);
+        long max = primaryKeyMap.rowIdFromPrimaryKey(lastPrimaryKey);
         if (max < 0)
             return metadata.maxSSTableRowId;
         return max;
@@ -533,7 +533,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             {
                 // turn the pk back into a row id, with a fast path for the case where the pk is from this sstable
                 var primaryKey = keysInRange.get(i);
-                long sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
+                long sstableRowId = primaryKeyMap.rowIdFromPrimaryKey(primaryKey);
 
                 if (sstableRowId < 0)
                 {

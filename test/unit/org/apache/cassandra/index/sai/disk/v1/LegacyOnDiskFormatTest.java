@@ -175,9 +175,9 @@ public class LegacyOnDiskFormatTest
         List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext, sstableContext);
 
         BKDReader bkdReader = new BKDReader(intContext,
-                                            components.get(IndexComponentType.KD_TREE).createFileHandle(),
+                                            components.get(IndexComponentType.KD_TREE).createFileHandle(null),
                                             metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE),
-                                            components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(),
+                                            components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(null),
                                             metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE_POSTING_LISTS));
 
         Expression expression = new Expression(intContext).add(Operator.LT, Int32Type.instance.decompose(10));
@@ -203,9 +203,9 @@ public class LegacyOnDiskFormatTest
 
         ByteComparable.Version byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
         TermsReader termsReader = new TermsReader(textContext,
-                                                  components.get(IndexComponentType.TERMS_DATA).createFileHandle(),
+                                                  components.get(IndexComponentType.TERMS_DATA).createFileHandle(null),
                                                   byteComparableVersion,
-                                                  components.get(IndexComponentType.POSTING_LISTS).createFileHandle(),
+                                                  components.get(IndexComponentType.POSTING_LISTS).createFileHandle(null),
                                                   root,
                                                   footerPointer,
                                                   Version.AA); // These tests are for AA, so no need to parameterize

@@ -76,13 +76,13 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
                                                                               .addClusteringColumn("ck1", UTF8Type.instance)
                                                                               .build();
 
-    static TableMetadata compositePartitionMultipleClusteringAsc = TableMetadata.builder("test", "test")
-                                                                                .partitioner(Murmur3Partitioner.instance)
-                                                                                .addPartitionKeyColumn("pk1", Int32Type.instance)
-                                                                                .addPartitionKeyColumn("pk2", Int32Type.instance)
-                                                                                .addClusteringColumn("ck1", UTF8Type.instance)
-                                                                                .addClusteringColumn("ck2", UTF8Type.instance)
-                                                                                .build();
+    protected static TableMetadata compositePartitionMultipleClusteringAsc = TableMetadata.builder("test", "test")
+                                                                                          .partitioner(Murmur3Partitioner.instance)
+                                                                                          .addPartitionKeyColumn("pk1", Int32Type.instance)
+                                                                                          .addPartitionKeyColumn("pk2", Int32Type.instance)
+                                                                                          .addClusteringColumn("ck1", UTF8Type.instance)
+                                                                                          .addClusteringColumn("ck2", UTF8Type.instance)
+                                                                                          .build();
 
     static TableMetadata compositePartitionSingleClusteringDesc = TableMetadata.builder("test", "test")
                                                                                .partitioner(Murmur3Partitioner.instance)
@@ -121,7 +121,7 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
                                                       TypeUtil.BYTE_COMPARABLE_VERSION));
     }
 
-    void assertCompareToAndEquals(PrimaryKey a, PrimaryKey b, int expected)
+    protected void assertCompareToAndEquals(PrimaryKey a, PrimaryKey b, int expected)
     {
         if (expected > 0)
         {
@@ -140,17 +140,17 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
         }
     }
 
-    DecoratedKey makeKey(TableMetadata table, Object...partitionKeys)
+    protected DecoratedKey makeKey(TableMetadata table, Object... partitionKeys)
     {
         ByteBuffer key;
         if (TypeUtil.isComposite(table.partitionKeyType))
             key = ((CompositeType)table.partitionKeyType).decompose(partitionKeys);
         else
-            key = table.partitionKeyType.fromString((String)partitionKeys[0]);
+            key = table.partitionKeyType.decomposeUntyped(partitionKeys[0]);
         return table.partitioner.decorateKey(key);
     }
 
-    Clustering makeClustering(TableMetadata table, String...clusteringKeys)
+    protected Clustering makeClustering(TableMetadata table, String... clusteringKeys)
     {
         Clustering clustering;
         if (table.comparator.size() == 0)
@@ -159,7 +159,7 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
         {
             ByteBuffer[] values = new ByteBuffer[clusteringKeys.length];
             for (int index = 0; index < table.comparator.size(); index++)
-                values[index] = table.comparator.subtype(index).fromString(clusteringKeys[index]);
+                values[index] = table.comparator.subtype(index).decomposeUntyped(clusteringKeys[index]);
             clustering = Clustering.make(values);
         }
         return clustering;

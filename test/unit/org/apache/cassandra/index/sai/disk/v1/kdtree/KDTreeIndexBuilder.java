@@ -92,22 +92,22 @@ public class KDTreeIndexBuilder
         }
 
         @Override
-        public long exactRowIdOrInvertedCeiling(PrimaryKey key)
+        public long rowIdFromPrimaryKey(PrimaryKey key)
         {
             return key.token().getLongValue();
         }
 
-        @Override
-        public long ceiling(PrimaryKey key)
-        {
-            return key.token().getLongValue();
-        }
-
-        @Override
-        public long floor(PrimaryKey key)
-        {
-            return key.token().getLongValue();
-        }
+//        @Override
+//        public long ceiling(PrimaryKey key)
+//        {
+//            return key.token().getLongValue();
+//        }
+//
+//        @Override
+//        public long floor(PrimaryKey key)
+//        {
+//            return key.token().getLongValue();
+//        }
 
         @Override
         public long count()

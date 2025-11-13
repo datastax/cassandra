@@ -87,6 +87,12 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
+        public boolean isTokenOnly()
+        {
+            return partitionKey == null && primaryKeySupplier == null;
+        }
+
+        @Override
         public Token token()
         {
             return this.token;

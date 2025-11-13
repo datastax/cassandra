@@ -33,7 +33,6 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.index.sasi.SASIIndex;
 import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Before;
@@ -1118,7 +1117,7 @@ public class NativeIndexDDLTest extends SAITester
         IndexContext numericIndexContext = getIndexContext(numericIndexName);
         IndexContext stringIndexContext = getIndexContext(stringIndexName);
 
-        for (IndexComponentType component : Version.current().onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType component : Version.current().onDiskFormat().perSSTableComponentTypes(false))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, null, corruptionType, true, true, rebuild);
 
         for (IndexComponentType component : Version.current().onDiskFormat().perIndexComponentTypes(numericIndexContext))
@@ -1137,12 +1136,14 @@ public class NativeIndexDDLTest extends SAITester
                                              boolean failedNumericIndex,
                                              boolean rebuild) throws Throwable
     {
-        // The completion markers are valid if they exist on the file system so we only need to test
+        // The completion markers are valid if they exist on the file system, so we only need to test
         // their removal. If we are testing with encryption then we don't want to test any components
         // that are encryptable unless they have been removed because encrypted components aren't
         // checksum validated.
 
-        if (component == IndexComponentType.PRIMARY_KEY_TRIE || component == IndexComponentType.PRIMARY_KEY_BLOCKS || component == IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)
+        if (component == IndexComponentType.PARTITION_SIZES || component == IndexComponentType.PARTITION_KEY_BLOCKS ||
+            component == IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS || component == IndexComponentType.CLUSTERING_KEY_BLOCKS ||
+            component == IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)
             return;
 
         if (((component == IndexComponentType.GROUP_COMPLETION_MARKER) ||

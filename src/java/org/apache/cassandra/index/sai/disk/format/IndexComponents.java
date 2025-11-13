@@ -182,8 +182,10 @@ public interface IndexComponents
     {
         return isPerIndexGroup()
                ? onDiskFormat().perIndexComponentTypes(context())
-               : onDiskFormat().perSSTableComponentTypes();
+               : onDiskFormat().perSSTableComponentTypes(hasClustering());
     }
+
+    boolean hasClustering();
 
     default ByteComparable.Version byteComparableVersionFor(IndexComponentType component)
     {

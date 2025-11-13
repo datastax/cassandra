@@ -65,7 +65,6 @@ public class SSTableContext extends SharedCloseableImpl
         this.primaryKeyMapFactory = copy.primaryKeyMapFactory;
     }
 
-    @SuppressWarnings("resource")
     public static SSTableContext create(SSTableReader sstable, IndexComponents.ForRead perSSTableComponents)
     {
         var onDiskFormat = perSSTableComponents.onDiskFormat();
@@ -146,7 +145,7 @@ public class SSTableContext extends SharedCloseableImpl
      */
     public int openFilesPerSSTable()
     {
-        return perSSTableComponents.onDiskFormat().openFilesPerSSTable();
+        return perSSTableComponents.onDiskFormat().openFilesPerSSTable(sstable.hasClustering);
     }
 
     @Override

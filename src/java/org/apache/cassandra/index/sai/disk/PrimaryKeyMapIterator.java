@@ -95,14 +95,14 @@ public final class PrimaryKeyMapIterator extends KeyRangeIterator
         PrimaryKey minKey = (minKeyBound.compareTo(sstableMinKey) > 0)
                             ? minKeyBound
                             : sstableMinKey;
-        long startRowId = minToken.isMinimum() ? 0 : keys.ceiling(minKey);
+        long startRowId = minToken.isMinimum() ? 0 : keys.rowIdFromPrimaryKey(minKey);
         return new PrimaryKeyMapIterator(keys, sstableMinKey, sstableMaxKey, startRowId, filter);
     }
 
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        this.currentRowId = keys.ceiling(nextKey);
+        this.currentRowId = keys.rowIdFromPrimaryKey(nextKey);
     }
 
     @Override

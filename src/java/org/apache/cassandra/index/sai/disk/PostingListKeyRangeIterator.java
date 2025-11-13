@@ -160,7 +160,7 @@ public class PostingListKeyRangeIterator extends KeyRangeIterator
         long segmentRowId;
         if (needsSkipping)
         {
-            long targetSstableRowId = primaryKeyMap.ceiling(skipToToken);
+            long targetSstableRowId = primaryKeyMap.rowIdFromPrimaryKey(skipToToken);
             // skipToToken is larger than max token in token file
             if (targetSstableRowId < 0)
             {

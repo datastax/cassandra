@@ -24,6 +24,7 @@ import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,12 +52,23 @@ public class V2OnDiskFormat extends V1OnDiskFormat
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static final Set<IndexComponentType> PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
-                                                                                     IndexComponentType.GROUP_META,
-                                                                                     IndexComponentType.TOKEN_VALUES,
-                                                                                     IndexComponentType.PRIMARY_KEY_TRIE,
-                                                                                     IndexComponentType.PRIMARY_KEY_BLOCKS,
-                                                                                     IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
+    @VisibleForTesting
+    public static final Set<IndexComponentType> SKINNY_PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
+                                                                                           IndexComponentType.GROUP_META,
+                                                                                           IndexComponentType.TOKEN_VALUES,
+                                                                                           IndexComponentType.PARTITION_SIZES,
+                                                                                           IndexComponentType.PARTITION_KEY_BLOCKS,
+                                                                                           IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS);
+
+    @VisibleForTesting
+    public static final Set<IndexComponentType> WIDE_PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
+                                                                                         IndexComponentType.GROUP_META,
+                                                                                         IndexComponentType.TOKEN_VALUES,
+                                                                                         IndexComponentType.PARTITION_SIZES,
+                                                                                         IndexComponentType.PARTITION_KEY_BLOCKS,
+                                                                                         IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS,
+                                                                                         IndexComponentType.CLUSTERING_KEY_BLOCKS,
+                                                                                         IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS);
 
     public static final Set<IndexComponentType> VECTOR_COMPONENTS_V2 = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
                                                                                   IndexComponentType.META,
@@ -100,7 +112,9 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
         assert primaryKeyFactory instanceof RowAwarePrimaryKeyFactory;
-        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, (RowAwarePrimaryKeyFactory) primaryKeyFactory, sstable);
+        RowAwarePrimaryKeyFactory rowAwareFactory = (RowAwarePrimaryKeyFactory) primaryKeyFactory;
+        return rowAwareFactory.hasEmptyClustering ? new SkinnyPrimaryKeyMap.Factory(perSSTableComponents, rowAwareFactory, sstable)
+                                                  : new WidePrimaryKeyMap.Factory(perSSTableComponents, rowAwareFactory, sstable);
     }
 
     @Override
@@ -131,15 +145,20 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perSSTableComponentTypes()
+    public Set<IndexComponentType> perSSTableComponentTypes(boolean hasClustering)
     {
-        return PER_SSTABLE_COMPONENTS;
+        return hasClustering ? WIDE_PER_SSTABLE_COMPONENTS : SKINNY_PER_SSTABLE_COMPONENTS;
     }
 
     @Override
-    public int openFilesPerSSTable()
+    public int openFilesPerSSTable(boolean hasClustering)
     {
-        return 4;
+        // For the V2 format the number of open files depends on whether the table has clustering. For wide tables
+        // the number of open files will be 6 per SSTable - token values, partition sizes index, partition key blocks,
+        // partition key block offsets, clustering key blocks & clustering key block offsets and for skinny tables
+        // the number of files will be 4 per SSTable - token values, partition key sizes, partition key blocks &
+        // partition key block offsets.
+        return hasClustering ? 6 : 4;
     }
 
     @Override
@@ -151,7 +170,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
             case META:
             case GROUP_META:
             case TOKEN_VALUES:
-            case PRIMARY_KEY_BLOCK_OFFSETS:
+            case PARTITION_KEY_BLOCK_OFFSETS:
             case KD_TREE:
             case KD_TREE_POSTING_LISTS:
                 return ByteOrder.LITTLE_ENDIAN;

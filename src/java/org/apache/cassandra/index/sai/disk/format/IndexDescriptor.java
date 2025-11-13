@@ -53,9 +53,11 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.util.IOUtils;
 
 /**
@@ -86,30 +88,43 @@ public class IndexDescriptor
     // are per-sstable (`isRowAware`) and some are per-column (`hasTermsHistogram`).
 
     public final Descriptor descriptor;
+    public final boolean hasClustering;
 
     // The per-sstable components for this descriptor. This is never `null` in practice, but 1) it's a bit easier to
     // initialize it outsides of the ctor, and 2) it can actually change upon calls to `reload`.
     private IndexComponentsImpl perSSTable;
     private final Map<IndexContext, IndexComponentsImpl> perIndexes = Maps.newHashMap();
 
-    private IndexDescriptor(Descriptor descriptor)
+    private IndexDescriptor(Descriptor descriptor, boolean hasClustering)
     {
         this.descriptor = descriptor;
+        this.hasClustering = hasClustering;
     }
 
     public static IndexDescriptor empty(Descriptor descriptor)
     {
-        IndexDescriptor created = new IndexDescriptor(descriptor);
+        IndexDescriptor created = new IndexDescriptor(descriptor, false);
         // Some code assumes that you can always at least call `perSSTableComponents()` and not get `null`, so we
         // set it to an empty group here.
         created.perSSTable = created.createEmptyGroup(null);
         return created;
     }
 
+    public static IndexDescriptor empty(Descriptor descriptor, TableMetadata metadata)
+    {
+        IndexDescriptor created = new IndexDescriptor(descriptor, metadata.comparator.size() > 0);
+        // Some code assumes that you can always at least call `perSSTableComponents()` and not get `null`, so we
+        // set it to an empty group here.
+        created.perSSTable = created.createEmptyGroup(null);
+        return created;
+    }
+
+
     public static IndexDescriptor load(SSTableReader sstable, Set<IndexContext> indices)
     {
         SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable);
-        IndexDescriptor descriptor = new IndexDescriptor(sstable.descriptor);
+        IndexDescriptor descriptor = new IndexDescriptor(sstable.descriptor,
+                                                         sstable.metadata().comparator.size() > 0);
         descriptor.initialize(indices, discovered);
         return descriptor;
     }
@@ -129,7 +144,7 @@ public class IndexDescriptor
     private Set<IndexComponentType> expectedComponentsForVersion(Version version, @Nullable IndexContext context)
     {
         return context == null
-               ? version.onDiskFormat().perSSTableComponentTypes()
+               ? version.onDiskFormat().perSSTableComponentTypes(hasClustering)
                : version.onDiskFormat().perIndexComponentTypes(context);
     }
 
@@ -177,11 +192,11 @@ public class IndexDescriptor
      * Please note that the final sstable may not contain all of these components, as some may be empty or not written
      * due to the specific of the flush, but this should be a superset of the components written.
      */
-    public static Set<Component> componentsForNewlyFlushedSSTable(Collection<StorageAttachedIndex> indices)
+    public static Set<Component> componentsForNewlyFlushedSSTable(Collection<StorageAttachedIndex> indices, boolean hasClustering)
     {
         ComponentsBuildId buildId = ComponentsBuildId.forNewSSTable();
         Set<Component> components = new HashSet<>();
-        for (IndexComponentType component : buildId.version().onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType component : buildId.version().onDiskFormat().perSSTableComponentTypes(hasClustering))
             components.add(customComponentFor(buildId, component, null));
 
         for (StorageAttachedIndex index : indices)
@@ -192,7 +207,7 @@ public class IndexDescriptor
     /**
      * The set of per-index components _expected_ to be written for a newly flushed sstable for the provided index.
      * <p>
-     * This is a subset of {@link #componentsForNewlyFlushedSSTable(Collection)} and has the same caveats.
+     * This is a subset of {@link #componentsForNewlyFlushedSSTable(Collection, boolean)} and has the same caveats.
      */
     public static Set<Component> perIndexComponentsForNewlyFlushedSSTable(IndexContext context)
     {
@@ -263,6 +278,62 @@ public class IndexDescriptor
     public IndexComponents.ForWrite newPerSSTableComponentsForWrite()
     {
         return newComponentsForWrite(null, perSSTable);
+    }
+
+//    public FileHandle createPerSSTableFileHandle(IndexComponent indexComponent, Throwables.DiscreteAction<?> cleanup)
+//    {
+//        try
+//        {
+//            final File file = fileFor(indexComponent);
+//
+//            if (logger.isTraceEnabled())
+//            {
+//                logger.trace(logMessage("Opening {} file handle for {} ({})"),
+//                             file, FBUtilities.prettyPrintMemory(file.length()));
+//            }
+//
+//            return new FileHandle.Builder(file).mmapped(true).complete();
+//        }
+//        catch (Throwable t)
+//        {
+//            throw handleFileHandleCleanup(t, cleanup);
+//        }
+//    }
+//
+//    public FileHandle createPerIndexFileHandle(IndexComponent indexComponent, IndexContext indexContext, Throwables.DiscreteAction<?> cleanup)
+//    {
+//        try
+//        {
+//            final File file = fileFor(indexComponent, indexContext);
+//
+//            if (logger.isTraceEnabled())
+//            {
+//                logger.trace(indexContext.logMessage("Opening file handle for {} ({})"),
+//                             file, FBUtilities.prettyPrintMemory(file.length()));
+//            }
+//
+//            return new FileHandle.Builder(file).mmapped(true).complete();
+//        }
+//        catch (Throwable t)
+//        {
+//            throw handleFileHandleCleanup(t, cleanup);
+//        }
+//    }
+
+    private static RuntimeException handleFileHandleCleanup(Throwable t, @Nullable Throwables.DiscreteAction<?> cleanup)
+    {
+        if (cleanup != null)
+        {
+            try
+            {
+                cleanup.perform();
+            }
+            catch (Exception e)
+            {
+                return Throwables.unchecked(Throwables.merge(t, e));
+            }
+        }
+        return Throwables.unchecked(t);
     }
 
     public IndexComponents.ForWrite newPerIndexComponentsForWrite(IndexContext context)
@@ -396,6 +467,12 @@ public class IndexDescriptor
         public boolean isEmpty()
         {
             return isComplete() && components.size() == 1;
+        }
+
+        @Override
+        public boolean hasClustering()
+        {
+            return IndexDescriptor.this.hasClustering;
         }
 
         @Override
@@ -607,12 +684,16 @@ public class IndexDescriptor
             }
 
             @Override
-            public FileHandle createFileHandle()
+            public FileHandle createFileHandle(Throwables.DiscreteAction<?> cleanup)
             {
                 try (var builder = StorageProvider.instance.fileHandleBuilderFor(this))
                 {
                     var b = builder.order(byteOrder());
                     return b.complete();
+                }
+                catch (Throwable t)
+                {
+                    throw handleFileHandleCleanup(t, cleanup);
                 }
             }
 
@@ -628,7 +709,7 @@ public class IndexDescriptor
             @Override
             public IndexInput openInput()
             {
-                return IndexFileUtils.instance.openBlockingInput(createFileHandle());
+                return IndexFileUtils.instance.openBlockingInput(createFileHandle(null));
             }
 
             @Override
