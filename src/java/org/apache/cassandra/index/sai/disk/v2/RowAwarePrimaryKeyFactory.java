@@ -23,7 +23,6 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
@@ -33,6 +32,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.lucene.util.RamUsageEstimator;
 
 /**
  * A row-aware {@link PrimaryKey.Factory}. This creates {@link PrimaryKey} instances that are
@@ -41,7 +41,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     private final ClusteringComparator clusteringComparator;
-    private final boolean hasClustering;
+    final boolean hasClustering;
 
 
     public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
