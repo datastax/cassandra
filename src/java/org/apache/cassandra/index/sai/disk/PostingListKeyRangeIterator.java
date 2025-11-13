@@ -140,11 +140,11 @@ public class PostingListKeyRangeIterator extends KeyRangeIterator
 
             FileUtils.closeQuietly(postingList, primaryKeyMap);
         }
-        else {
+        else
+        {
             logger.warn("PostingListKeyRangeIterator is already closed",
                         new IllegalStateException("PostingListKeyRangeIterator is already closed"));
         }
-
     }
 
     private boolean exhausted()

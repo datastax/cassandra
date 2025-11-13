@@ -97,8 +97,8 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
             indexMetas = writer.writeAll(pointValues);
         }
 
-        final FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
-        final FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
+        final FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle(null);
+        final FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(null);
 
         try (BKDReader reader = new BKDReader(indexContext,
                                               kdtreeHandle,
@@ -149,8 +149,8 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
             indexMetas = writer.writeAll(pointValues);
         }
 
-        final FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
-        final FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
+        final FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle(null);
+        final FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(null);
 
         try (BKDReader reader = new BKDReader(indexContext,
                                               kdtreeHandle,

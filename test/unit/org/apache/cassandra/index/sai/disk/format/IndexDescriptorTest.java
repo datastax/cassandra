@@ -308,7 +308,7 @@ public class IndexDescriptorTest
 
     static void createFakePerSSTableComponents(Descriptor descriptor, Version version, int generation, int sizeInBytes) throws IOException
     {
-        for (IndexComponentType type : version.onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType type : version.onDiskFormat().perSSTableComponentTypes(false))
             createileOnDisk(descriptor, version.fileNameFormatter().format(type, (String)null, generation), sizeInBytes);
     }
 

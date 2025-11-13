@@ -21,17 +21,19 @@ package org.apache.cassandra.index.sai.disk.v2;
 import java.io.IOException;
 
 import com.google.common.base.Stopwatch;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
-import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
+import org.apache.cassandra.index.sai.disk.v2.keystore.KeyStoreWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.util.IOUtils;
 
 public class SSTableComponentsWriter implements PerSSTableWriter
@@ -41,8 +43,11 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     private final IndexComponents.ForWrite perSSTableComponents;
     private final MetadataWriter metadataWriter;
     private final NumericValuesWriter tokenWriter;
-    private final NumericValuesWriter blockFPWriter;
-    private final SortedTermsWriter sortedTermsWriter;
+    private final NumericValuesWriter partitionSizeWriter;
+    private final KeyStoreWriter partitionKeysWriter;
+    private final KeyStoreWriter clusteringKeysWriter;
+
+    private long partitionId = -1;
 
     public SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
     {
@@ -51,25 +56,52 @@ public class SSTableComponentsWriter implements PerSSTableWriter
         this.tokenWriter = new NumericValuesWriter(perSSTableComponents.addOrGet(IndexComponentType.TOKEN_VALUES),
                                                    metadataWriter, false);
 
-        this.blockFPWriter = new NumericValuesWriter(perSSTableComponents.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS),
-                                                     metadataWriter, true);
-        this.sortedTermsWriter = new SortedTermsWriter(perSSTableComponents.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
-                                                       metadataWriter,
-                                                       blockFPWriter,
-                                                       perSSTableComponents.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE));
+        this.partitionSizeWriter = new NumericValuesWriter(perSSTableComponents.addOrGet(IndexComponentType.PARTITION_SIZES), metadataWriter, true);
+        NumericValuesWriter partitionKeyBlockOffsetWriter = new NumericValuesWriter(perSSTableComponents.addOrGet(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS), metadataWriter, true);
+        this.partitionKeysWriter = new KeyStoreWriter(perSSTableComponents.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
+                                                      metadataWriter,
+                                                      partitionKeyBlockOffsetWriter,
+                                                      CassandraRelevantProperties.SAI_SORTED_TERMS_PARTITION_BLOCK_SHIFT.getInt(),
+                                                      false);
+        if (perSSTableComponents.hasClustering())
+        {
+            NumericValuesWriter clusteringKeyBlockOffsetWriter = new NumericValuesWriter(perSSTableComponents.addOrGet(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS), metadataWriter, true);
+            this.clusteringKeysWriter = new KeyStoreWriter(perSSTableComponents.addOrGet(IndexComponentType.CLUSTERING_KEY_BLOCKS),
+                                                           metadataWriter,
+                                                           clusteringKeyBlockOffsetWriter,
+                                                           CassandraRelevantProperties.SAI_SORTED_TERMS_CLUSTERING_BLOCK_SHIFT.getInt(),
+                                                           true);
+        }
+        else
+        {
+            this.clusteringKeysWriter = null;
+        }
+    }
+
+    @Override
+    public void startPartition(DecoratedKey partitionKey) throws IOException
+    {
+        partitionId++;
+        partitionKeysWriter.add(v -> ByteSource.of(partitionKey.getKey(), v));
+        if (perSSTableComponents.hasClustering())
+            clusteringKeysWriter.startPartition();
     }
 
     @Override
     public void nextRow(PrimaryKey primaryKey) throws IOException
     {
+        assert partitionId >= 0;
+
         tokenWriter.add(primaryKey.token().getLongValue());
-        sortedTermsWriter.add(v -> primaryKey.asComparableBytes(v));
+        partitionSizeWriter.add(partitionId);
+        if (perSSTableComponents.hasClustering())
+            clusteringKeysWriter.add(perSSTableComponents.comparator().asByteComparable(primaryKey.clustering()));
     }
 
     @Override
     public void complete(Stopwatch stopwatch) throws IOException
     {
-        IOUtils.close(tokenWriter, sortedTermsWriter, metadataWriter);
+        IOUtils.close(tokenWriter, partitionSizeWriter, partitionKeysWriter, clusteringKeysWriter, metadataWriter);
         perSSTableComponents.markComplete();
     }
 

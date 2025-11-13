@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.format;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 

@@ -81,7 +81,7 @@ public class OneDimBKDPostingsWriterTest extends SaiRandomizedTest
         }
 
         IndexComponent.ForRead kdTreePostings = components.get(IndexComponentType.KD_TREE_POSTING_LISTS);
-        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(kdTreePostings.createFileHandle(), fp);
+        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(kdTreePostings.createFileHandle(null), fp);
         assertEquals(10, postingsIndex.size());
 
         // Internal postings...
@@ -128,7 +128,7 @@ public class OneDimBKDPostingsWriterTest extends SaiRandomizedTest
         }
 
         // There is only a single posting list...the leaf posting list.
-        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(), fp);
+        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(null), fp);
         assertEquals(1, postingsIndex.size());
     }
 
@@ -149,7 +149,7 @@ public class OneDimBKDPostingsWriterTest extends SaiRandomizedTest
         }
 
         // There is only a single posting list...the leaf posting list.
-        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(), fp);
+        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(null), fp);
         assertEquals(1, postingsIndex.size());
     }
 

@@ -38,7 +38,7 @@ public interface PrimaryKeyMap extends Closeable
      * A factory for creating {@link PrimaryKeyMap} instances. Implementations of this
      * interface are expected to be threadsafe.
      */
-    public interface Factory extends Closeable
+    interface Factory extends Closeable
     {
         /**
          * Creates a new {@link PrimaryKeyMap} instance
@@ -121,7 +121,7 @@ public interface PrimaryKeyMap extends Closeable
      * @param key the {@link PrimaryKey} to lookup
      * @return an sstable row id or a negative value if no row is found
      */
-    long ceiling(PrimaryKey key);
+   long ceiling(PrimaryKey key);
 
     /**
      * Returns the sstable row id associated with the greatest {@link PrimaryKey} less than or equal to the given
@@ -132,7 +132,7 @@ public interface PrimaryKeyMap extends Closeable
      * @param key the {@link PrimaryKey} to lookup
      * @return an sstable row id or a negative value if no row is found
      */
-    long floor(PrimaryKey key);
+   long floor(PrimaryKey key);
 
     /**
      * Returns the number of primary keys in the map
