@@ -54,7 +54,7 @@ public class ReadExecutionController implements AutoCloseable
     private final RepairedDataInfo repairedDataInfo;
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
 
-    public final Histogram sstablesScannedPerRowRead;
+    private final Histogram sstablesScannedPerRowRead;
 
     ReadExecutionController(ReadCommand command,
                             OpOrder.Group baseOp,
@@ -74,7 +74,10 @@ public class ReadExecutionController implements AutoCloseable
         this.command = command;
         this.createdAtNanos = createdAtNanos;
 
-        this.sstablesScannedPerRowRead = new Histogram(new DecayingEstimatedHistogramReservoir(true));
+        // This is expensive to create, and since this is on the query hot path, we must only make it when we need it.
+        this.sstablesScannedPerRowRead = Tracing.isTracing()
+                ? new Histogram(new DecayingEstimatedHistogramReservoir(true))
+                : null;
 
         if (trackRepairedStatus)
         {
@@ -227,7 +230,7 @@ public class ReadExecutionController implements AutoCloseable
         if (createdAtNanos != NO_SAMPLING)
             addSample();
 
-        if (Tracing.traceSinglePartitions())
+        if (sstablesScannedPerRowRead != null)
         {
             var sstablesHistogram = sstablesScannedPerRowRead.getSnapshot();
             Tracing.trace("Scanned {} rows; average {} sstables scanned per row with stdev {} and max {}",
@@ -271,6 +274,9 @@ public class ReadExecutionController implements AutoCloseable
 
     public void updateSstablesIteratedPerRow(int mergedSSTablesIterated)
     {
-        sstablesScannedPerRowRead.update(mergedSSTablesIterated);
+        if (sstablesScannedPerRowRead != null)
+        {
+            sstablesScannedPerRowRead.update(mergedSSTablesIterated);
+        }
     }
 }
