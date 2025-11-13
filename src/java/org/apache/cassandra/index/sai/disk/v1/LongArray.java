@@ -37,12 +37,20 @@ public interface LongArray extends Closeable
     long length();
 
     /**
-     * @param targetToken Token to look up.  Must not be smaller than previous value queried
+     * @param targetToken Token to look up.  Must not be smaller than the previous value queried
      *                    (the method is stateful)
      * @return The row ID of the first token equal to or greater than the target,
-     *         or negative value if target token is greater than all tokens
+     *         or negative value if the target token is greater than all tokens
      */
     long ceilingRowId(long targetToken);
+
+    /**
+     * @param targetToken Token to look up.  Must not be bigger than the next value queried
+     *                    (the method is stateful)
+     * @return The row ID of the first token equal to or smaller than the target,
+     * or negative value if the target token is smaller than all tokens
+     */
+    long floorRowId(long targetToken);
 
     /**
      * Using the given value returns the first index corresponding to the value.
@@ -85,6 +93,13 @@ public interface LongArray extends Closeable
         {
             open();
             return longArray.ceilingRowId(targetToken);
+        }
+
+        @Override
+        public long floorRowId(long targetToken)
+        {
+            open();
+            return longArray.floorRowId(targetToken);
         }
 
         @Override

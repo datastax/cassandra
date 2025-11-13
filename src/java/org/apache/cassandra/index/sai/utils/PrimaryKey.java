@@ -40,7 +40,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * For the V2 on-disk format the {@link DecoratedKey} and {@link Clustering} are supported.
  *
  */
-public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
+public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable, ByteComparable
 {
     /**
      * A factory for creating {@link PrimaryKey} instances
@@ -156,6 +156,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
      *
      * @return {@code true} if the clustering is empty, otherwise {@code false}
      */
+    @SuppressWarnings("ConstantConditions")
     default boolean hasEmptyClustering()
     {
         return clustering() == null || clustering().isEmpty();
