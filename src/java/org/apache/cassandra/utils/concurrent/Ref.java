@@ -130,6 +130,13 @@ public final class Ref<T> implements RefCounted<T>
     public void release()
     {
         state.release(false);
+        // We require a reachability fence here to prevent the JIT from clearing the Ref reference from the stack
+        // during the state.release() call. If that happens, the ref may become phantom reachable, and the GC may clear
+        // the state as a phantom reference to the ref and then enqueue the state on the phantom queue. This allows
+        // the Reference-Reaper to race with our state.release call above, and the reference-reaper may be able to
+        // update the released flag before the non-leak release path. In this case, we report a spurious leak and a
+        // spurious bad release.
+        Reference.reachabilityFence(this);
     }
 
     public Throwable ensureReleased(Throwable accumulate)
