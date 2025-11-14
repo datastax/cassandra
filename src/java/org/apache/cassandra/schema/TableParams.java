@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
@@ -36,6 +37,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toMap;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_BACKWARD_COMPATIBILITY_CC_4;
 import static org.apache.cassandra.schema.TableParams.Option.*;
 
 public final class TableParams
@@ -68,6 +70,9 @@ public final class TableParams
             return name().toLowerCase();
         }
     }
+
+    @VisibleForTesting
+    public static boolean backwardCompatibilityCC4 = SCHEMA_BACKWARD_COMPATIBILITY_CC_4.getBoolean();
 
     public final String comment;
     public final boolean allowAutoSnapshot;
@@ -287,10 +292,16 @@ public final class TableParams
     {
         // option names should be in alphabetical order
         builder.append("additional_write_policy = ").appendWithSingleQuotes(additionalWritePolicy.toString())
-               .newLine()
-               .append("AND allow_auto_snapshot = ").append(allowAutoSnapshot)
-               .newLine()
-               .append("AND bloom_filter_fp_chance = ").append(bloomFilterFpChance)
+               .newLine();
+
+        // Exclude allow_auto_snapshot in backward compatibility mode (new in 5.0)
+        if (!backwardCompatibilityCC4)
+        {
+            builder.append("AND allow_auto_snapshot = ").append(allowAutoSnapshot)
+                   .newLine();
+        }
+
+        builder.append("AND bloom_filter_fp_chance = ").append(bloomFilterFpChance)
                .newLine()
                .append("AND caching = ").append(caching.asMap())
                .newLine()
@@ -301,9 +312,15 @@ public final class TableParams
                .append("AND compaction = ").append(compaction.asMap())
                .newLine()
                .append("AND compression = ").append(compression.asMap())
-               .newLine()
-               .append("AND memtable = ").appendWithSingleQuotes(memtable.configurationKey())
-               .newLine()
+               .newLine();
+
+        // Use map format for CC 4.0 compatibility, string format for 5.0
+        if (backwardCompatibilityCC4)
+            builder.append("AND memtable = ").append(memtable.toMapForCC4());
+        else
+            builder.append("AND memtable = ").appendWithSingleQuotes(memtable.configurationKey());
+
+        builder.newLine()
                .append("AND crc_check_chance = ").append(crcCheckChance)
                .newLine();
 
@@ -320,10 +337,16 @@ public final class TableParams
                                                    false)
                .newLine()
                .append("AND gc_grace_seconds = ").append(gcGraceSeconds)
-               .newLine()
-               .append("AND incremental_backups = ").append(incrementalBackups)
-               .newLine()
-               .append("AND max_index_interval = ").append(maxIndexInterval)
+               .newLine();
+
+        // Exclude incremental_backups in backward compatibility mode (new in 5.0)
+        if (!backwardCompatibilityCC4)
+        {
+            builder.append("AND incremental_backups = ").append(incrementalBackups)
+                   .newLine();
+        }
+
+        builder.append("AND max_index_interval = ").append(maxIndexInterval)
                .newLine()
                .append("AND memtable_flush_period_in_ms = ").append(memtableFlushPeriodInMs)
                .newLine()

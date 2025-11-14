@@ -184,13 +184,19 @@ public final class TableAttributes extends PropertyDefinitions
                              .findFirst()
                              .orElse(null);
                 // Not exhaustive, but avoids raising an error upgrading from a CC 4.0 schema
-                if (memtableClass == null)
+                // Extract short class name if fully qualified (e.g., "org.apache.cassandra.db.memtable.TrieMemtable" -> "TrieMemtable")
+                String shortClassName = memtableClass != null && memtableClass.contains(".")
+                                        ? memtableClass.substring(memtableClass.lastIndexOf('.') + 1)
+                                        : memtableClass;
+
+                if (shortClassName == null)
                     builder.memtable(MemtableParams.get(null));
-                else if ("SkipListMemtable".equalsIgnoreCase(memtableClass))
+                else if ("SkipListMemtable".equalsIgnoreCase(shortClassName))
                     builder.memtable(MemtableParams.get("skiplist"));
-                else if ("PersistentMemoryMemtable".equalsIgnoreCase(memtableClass))
-                    builder.memtable(MemtableParams.get("persistent_memory"));
+                else if ("TrieMemtable".equalsIgnoreCase(shortClassName))
+                    builder.memtable(MemtableParams.get("trie"));
                 else
+                    // Default to trie for unknown memtable types
                     builder.memtable(MemtableParams.get("trie"));
             }
             else

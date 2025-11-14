@@ -69,6 +69,33 @@ public final class MemtableParams
         return factory;
     }
 
+    /**
+     * Returns a map representation of the memtable configuration for backward compatibility with CC 4.0.
+     * This is used when outputting schema in a format compatible with CC 4.0.
+     *
+     * CC 4.0 accepts both short class names (e.g., 'TrieMemtable') and fully qualified names
+     * (e.g., 'org.apache.cassandra.db.memtable.TrieMemtable'), but using short names is preferred
+     * for consistency and readability.
+     */
+    public Map<String, String> toMapForCC4()
+    {
+        ParameterizedClass definition = CONFIGURATION_DEFINITIONS.get(configurationKey);
+        if (definition != null && definition.class_name != null)
+        {
+            Map<String, String> map = new HashMap<>();
+            String className = definition.class_name;
+            String shortClassName = className.contains(".")
+                                    ? className.substring(className.lastIndexOf('.') + 1)
+                                    : className;
+            map.put("class", shortClassName);
+            if (definition.parameters != null)
+                map.putAll(definition.parameters);
+            return map;
+        }
+        // Fallback for unknown configurations
+        return ImmutableMap.of("class", configurationKey);
+    }
+
     @Override
     public String toString()
     {
