@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.stream.Collectors;
 
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -34,39 +35,34 @@ import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.vector.NVQUtil;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+@Ignore
 @RunWith(Parameterized.class)
-public class VectorCompactionTest extends VectorTester
+abstract public class VectorCompactionTest extends VectorTester
 {
+    // Subclasses must implement this to cover different dimensions
+    abstract public int dimension();
+
     @Parameterized.Parameter(0)
     public Version version;
 
     @Parameterized.Parameter(1)
-    public int dimension;
-
-    @Parameterized.Parameter(2)
     public boolean enableNVQ;
 
-    @Parameterized.Parameters(name = "{0} {1} {2}")
+    @Parameterized.Parameters(name = "{0} {1}")
     public static Collection<Object[]> data()
     {
-        // Run with relatively low and medium dimensions since they can test slightly different code paths
-        var dimensions = new int[]{ 2, 100 };
         // See Version file for explanation of changes associated with each version
         return Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
-                          .flatMap(v -> Arrays.stream(dimensions).mapToObj(d -> new Object[]{ v, d }))
                           .flatMap(vd -> {
-                              // NVQ is only relevant some of the time, so add it to the test matrix if relevant
-                              var enableNVQ = NVQUtil.shouldWriteNVQ((int) vd[1], (Version) vd[0])
-                                              ? new Boolean[]{ true, false }
-                                              : new Boolean[]{ false };
-                              return Arrays.stream(enableNVQ).map(b -> new Object[]{ vd[0], vd[1], b });
+                              // NVQ is only relevant some of the time, but we always pass it so that the test
+                              // could be broken up into multiple tests, and would finish before timeouts.
+                              return Arrays.stream(new Boolean[]{ true, false }).map(b -> new Object[]{ vd, b });
                           })
                           .collect(Collectors.toList());
     }
@@ -95,7 +91,7 @@ public class VectorCompactionTest extends VectorTester
             Vector<Float> vector;
             do
             {
-                vector = randomVectorBoxed(dimension); // confirm no duplicates
+                vector = randomVectorBoxed(dimension()); // confirm no duplicates
             } while (!vectors.add(vector));
             // make ascending counted vector
             execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, vector);
@@ -111,14 +107,14 @@ public class VectorCompactionTest extends VectorTester
         compact();
 
         // Confirm we can query the data
-        assertRowCount(execute("SELECT * FROM %s ORDER BY v ANN OF ? LIMIT 1", randomVectorBoxed(dimension)), 1);
+        assertRowCount(execute("SELECT * FROM %s ORDER BY v ANN OF ? LIMIT 1", randomVectorBoxed(dimension())), 1);
     }
 
     @Test
     public void testPQRefine()
     {
         // The test fails for dimensions > 2, not sure why, but likely due to the use of random vectors.
-        if (dimension > 2)
+        if (dimension() > 2)
             return;
 
         createTable();
@@ -246,7 +242,7 @@ public class VectorCompactionTest extends VectorTester
                 else
                 {
                     // insert a new random vector
-                    v = randomVectorBoxed(dimension);
+                    v = randomVectorBoxed(dimension());
                     vectorsInserted.add(v);
                 }
                 assert v != null;
@@ -293,7 +289,7 @@ public class VectorCompactionTest extends VectorTester
                 }
                 else
                 {
-                    v = randomVectorBoxed(dimension);
+                    v = randomVectorBoxed(dimension());
                     vectorsInserted.add(v);
                 }
                 assert v != null;
@@ -305,7 +301,7 @@ public class VectorCompactionTest extends VectorTester
 
     private void createTable()
     {
-        createTable("CREATE TABLE %s (pk int, v vector<float, " + dimension + ">, PRIMARY KEY(pk))");
+        createTable("CREATE TABLE %s (pk int, v vector<float, " + dimension() + ">, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
     }
 
@@ -313,7 +309,7 @@ public class VectorCompactionTest extends VectorTester
     {
         for (int i = 0; i < 10; i++)
         {
-            var q = randomVectorBoxed(dimension);
+            var q = randomVectorBoxed(dimension());
             var r = execute("SELECT pk, similarity_cosine(v, ?) as similarity FROM %s ORDER BY v ANN OF ? LIMIT 10", q, q);
             float lastSimilarity = Float.MAX_VALUE;
             assertEquals(10, r.size());
