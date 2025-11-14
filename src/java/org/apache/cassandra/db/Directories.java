@@ -1464,6 +1464,8 @@ public class Directories
      * Returns all data paths without checking if they are directories.
      * This is useful in contexts where the isDirectory() check could cause
      * deadlocks or unnecessary blocking I/O, such as with remote storage paths.
+     *
+     * This method is needed by CNDB, please do not remove.
      */
     public List<File> getCFDirectoriesUnchecked()
     {
