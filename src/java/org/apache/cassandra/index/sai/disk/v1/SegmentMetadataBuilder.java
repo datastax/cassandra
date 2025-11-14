@@ -75,8 +75,6 @@ public class SegmentMetadataBuilder
     private long numRows;
     private long totalTermCount;
 
-    private Boolean isLastSegmentInSSTable;
-
     private final TermsDistribution.Builder termsDistributionBuilder;
     private final Version version;
 
@@ -104,11 +102,6 @@ public class SegmentMetadataBuilder
         this.totalTermCount = totalTermCount;
     }
 
-    public void setIsLastSegmentInSSTable(boolean isLastSegmentInSSTable)
-    {
-        this.isLastSegmentInSSTable = isLastSegmentInSSTable;
-    }
-
     public void setKeyRange(@Nonnull PrimaryKey minKey, @Nonnull PrimaryKey maxKey)
     {
         Preconditions.checkNotNull(minKey, "minKey must not be null");
@@ -121,9 +114,6 @@ public class SegmentMetadataBuilder
     public void setRowIdRange(long minRowId, long maxRowId)
     {
         Preconditions.checkArgument(minRowId <= maxRowId, "minRowId (" + minRowId + ") must not be greater than (" + maxRowId + ')');
-        if (maxRowId - minRowId > (long) Integer.MAX_VALUE)
-            throw new IllegalArgumentException("Row id range too large: " + (maxRowId - minRowId));
-
         this.minRowId = minRowId;
         this.maxRowId = maxRowId;
     }
@@ -170,8 +160,6 @@ public class SegmentMetadataBuilder
             throw new IllegalStateException("Segment key range not set");
         if (minTerm == null || maxTerm == null)
             throw new IllegalStateException("Term range not set");
-        if (isLastSegmentInSSTable == null)
-            throw new IllegalStateException("isLastSegmentInSSTable not set");
 
         FileUtils.closeQuietly(interceptors);
         built = true; // must be flipped after closing the interceptors, because they may push some data to us when closing
@@ -187,8 +175,7 @@ public class SegmentMetadataBuilder
                                    termsDistributionBuilder.build(),
                                    metadataMap,
                                    totalTermCount,
-                                   version,
-                                   isLastSegmentInSSTable);
+                                   version);
     }
 
     /**

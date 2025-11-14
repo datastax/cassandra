@@ -158,17 +158,21 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     }
 
     @Test
-    public void testNeqQueries() throws Exception
+    public void testUnsupportedOperator() throws Exception
     {
         final int numTerms = randomIntBetween(5, 15), numPostings = randomIntBetween(5, 20);
         final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(version, numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, termsEnum))
         {
-            var results = searcher.search(new Expression(indexContext)
-                                          .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false);
+            searcher.search(new Expression(indexContext)
+                            .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false);
 
-            assertTrue(results.hasNext());
+            fail("Expect IllegalArgumentException thrown, but didn't");
+        }
+        catch (IllegalArgumentException e)
+        {
+            // expected
         }
     }
 
@@ -180,12 +184,11 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
         SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, components);
-        metadataBuilder.setRowIdRange(0, Integer.MAX_VALUE);
+        metadataBuilder.setRowIdRange(0, Long.MAX_VALUE);
         metadataBuilder.setKeyRange(SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()),
                                     SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()));
         metadataBuilder.setTermRange(termsEnum.get(0).originalTermBytes,
                                      termsEnum.get(terms - 1).originalTermBytes);
-        metadataBuilder.setIsLastSegmentInSSTable(false); // The primary key map has count Long.MAX_VALUE, so we don't have max.
 
         try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
@@ -204,8 +207,6 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
             SSTableContext sstableContext = mock(SSTableContext.class);
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
             when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
-            when(sstableContext.minSSTableKey()).thenReturn(SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()));
-            when(sstableContext.maxSSTableKey()).thenReturn(SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()));
             final IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext,
                                                                                    indexContext,
                                                                                    indexFiles,

@@ -39,7 +39,7 @@ public class V3VectorIndexSearcher extends V2VectorIndexSearcher
                                  SegmentMetadata segmentMetadata,
                                  IndexContext indexContext) throws IOException
     {
-        super(sstableContext,
+        super(sstableContext.primaryKeyMapFactory(),
               perIndexFiles,
               segmentMetadata,
               indexContext,

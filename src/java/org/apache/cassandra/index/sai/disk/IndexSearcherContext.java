@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 public class IndexSearcherContext
@@ -31,22 +30,15 @@ public class IndexSearcherContext
 
     final PrimaryKey minimumKey;
     final PrimaryKey maximumKey;
+    final long minSSTableRowId;
+    final long maxSSTableRowId;
     final long segmentRowIdOffset;
     final long maxPartitionOffset;
 
-    public IndexSearcherContext(SegmentMetadata metadata,
-                                QueryContext context,
-                                PostingList postingList) throws IOException
-    {
-        this(metadata.minKey,
-             metadata.maxKey,
-             metadata.segmentRowIdOffset,
-             context,
-             postingList);
-    }
-
     public IndexSearcherContext(PrimaryKey minimumKey,
                                 PrimaryKey maximumKey,
+                                long minSSTableRowId,
+                                long maxSSTableRowId,
                                 long segmentRowIdOffset,
                                 QueryContext context,
                                 PostingList postingList) throws IOException
@@ -61,6 +53,8 @@ public class IndexSearcherContext
         // use segment's metadata for the range iterator, may not be accurate, but should not matter to performance.
         this.maximumKey = maximumKey;
 
+        this.minSSTableRowId = minSSTableRowId;
+        this.maxSSTableRowId = maxSSTableRowId;
         this.maxPartitionOffset = Long.MAX_VALUE;
     }
 

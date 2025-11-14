@@ -48,6 +48,8 @@ public class PostingListKeyRangeIteratorTest
         var indexContext = new IndexSearcherContext(pkm.primaryKeyFromRowId(1),
                                                     pkm.primaryKeyFromRowId(3),
                                                     0,
+                                                    3,
+                                                    0,
                                                     new QueryContext(10000),
                                                     postingList);
         try (var iterator = new PostingListKeyRangeIterator(mockIndexContext, pkm, indexContext))
@@ -86,6 +88,8 @@ public class PostingListKeyRangeIteratorTest
     {
         return new IndexSearcherContext(pkm.primaryKeyFromRowId(minRowId),
                                         pkm.primaryKeyFromRowId(maxRowId),
+                                        minRowId,
+                                        maxRowId,
                                         0,
                                         new QueryContext(10000),
                                         list);

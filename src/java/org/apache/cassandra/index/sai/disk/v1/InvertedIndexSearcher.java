@@ -51,6 +51,7 @@ import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.postings.IntersectingPostingList;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -97,7 +98,7 @@ public class InvertedIndexSearcher extends IndexSearcher
                                     Version version,
                                     boolean filterRangeResults) throws IOException
     {
-        super(sstableContext, perIndexFiles, segmentMetadata, indexContext);
+        super(sstableContext.primaryKeyMapFactory(), perIndexFiles, segmentMetadata, indexContext);
         this.sstable = sstableContext.sstable;
 
         long root = metadata.getIndexRoot(IndexComponentType.TERMS_DATA);
@@ -133,7 +134,13 @@ public class InvertedIndexSearcher extends IndexSearcher
     }
 
     @SuppressWarnings("resource")
-    protected PostingList searchInternal(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
+    public KeyRangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
+    {
+        PostingList postingList = searchPosting(exp, context);
+        return toPrimaryKeyIterator(postingList, context);
+    }
+
+    private PostingList searchPosting(Expression exp, QueryContext context)
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);

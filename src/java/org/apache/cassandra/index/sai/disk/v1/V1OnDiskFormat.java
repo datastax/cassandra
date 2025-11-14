@@ -163,7 +163,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
         return perIndexComponents.isEmpty()
-               ? new EmptyIndex(sstableContext)
+               ? new EmptyIndex()
                : new V1SearchableIndex(sstableContext, perIndexComponents);
     }
 
@@ -176,7 +176,7 @@ public class V1OnDiskFormat implements OnDiskFormat
         if (indexContext.isLiteral())
             // We filter because the CA format wrote maps acording to a different order than their abstract type.
             return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, Version.AA, true);
-        return new KDTreeIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
+        return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
     }
 
     @Override

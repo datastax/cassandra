@@ -28,10 +28,11 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -56,12 +57,12 @@ public class KDTreeIndexSearcher extends IndexSearcher
     private final BKDReader bkdReader;
     private final QueryEventListener.BKDIndexEventListener perColumnEventListener;
 
-    KDTreeIndexSearcher(SSTableContext sstableContext,
+    KDTreeIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                         PerIndexFiles perIndexFiles,
                         SegmentMetadata segmentMetadata,
                         IndexContext indexContext) throws IOException
     {
-        super(sstableContext, perIndexFiles, segmentMetadata, indexContext);
+        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexContext);
 
         final long bkdPosition = metadata.getIndexRoot(IndexComponentType.KD_TREE);
         assert bkdPosition >= 0;
@@ -83,7 +84,13 @@ public class KDTreeIndexSearcher extends IndexSearcher
     }
 
     @Override
-    protected PostingList searchInternal(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
+    public KeyRangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
+    {
+        PostingList postingList = searchPosting(exp, context);
+        return toPrimaryKeyIterator(postingList, context);
+    }
+
+    private PostingList searchPosting(Expression exp, QueryContext context)
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);

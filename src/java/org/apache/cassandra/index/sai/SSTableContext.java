@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.index.sai;
 
-import java.io.IOException;
-
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -45,49 +43,17 @@ public class SSTableContext extends SharedCloseableImpl
     public final PrimaryKey.Factory primaryKeyFactory;
     public final PrimaryKeyMap.Factory primaryKeyMapFactory;
 
-    // The first and last key for the whole sstable
-    private final PrimaryKey minSSTableKey;
-    private final PrimaryKey maxSSTableKey;
-
     private SSTableContext(SSTableReader sstable,
                            IndexComponents.ForRead perSSTableComponents,
                            PrimaryKey.Factory primaryKeyFactory,
                            PrimaryKeyMap.Factory primaryKeyMapFactory,
-                           boolean skipLoadingMinMaxKeys,
-                           Cleanup cleanup) throws IOException
+                           Cleanup cleanup)
     {
         super(cleanup);
         this.sstable = sstable;
         this.perSSTableComponents = perSSTableComponents;
         this.primaryKeyFactory = primaryKeyFactory;
         this.primaryKeyMapFactory = primaryKeyMapFactory;
-
-        // If the min/max keys are null but then subsequently attempted to be accessed, we throw an exception
-        // as we do not expect this to happen.
-        if (skipLoadingMinMaxKeys)
-        {
-            minSSTableKey = null;
-            maxSSTableKey = null;
-        }
-        else
-        {
-            // If we throw, the caller releases the sstable ref and runs the cleanup.
-            try (var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
-            {
-                if (pkm.count() == 0)
-                {
-                    minSSTableKey = null;
-                    maxSSTableKey = null;
-                }
-                else
-                {
-                    PrimaryKey min = pkm.primaryKeyFromRowId(0);
-                    PrimaryKey max = pkm.primaryKeyFromRowId(pkm.count() - 1);
-                    minSSTableKey = pkm.primaryKeyFromRowId(0, min, max).loadDeferred();
-                    maxSSTableKey = pkm.primaryKeyFromRowId(pkm.count() - 1, min, max).loadDeferred();
-                }
-            }
-        }
     }
 
     private SSTableContext(SSTableContext copy)
@@ -97,8 +63,6 @@ public class SSTableContext extends SharedCloseableImpl
         this.perSSTableComponents = copy.perSSTableComponents;
         this.primaryKeyFactory = copy.primaryKeyFactory;
         this.primaryKeyMapFactory = copy.primaryKeyMapFactory;
-        this.minSSTableKey = copy.minSSTableKey;
-        this.maxSSTableKey = copy.maxSSTableKey;
     }
 
     @SuppressWarnings("resource")
@@ -121,14 +85,13 @@ public class SSTableContext extends SharedCloseableImpl
             }
 
             // avoid opening SAI metadata if reads are disabled
-            boolean readsDisabled = CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean();
-            primaryKeyMapFactory = readsDisabled
+            primaryKeyMapFactory = CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean()
                                    ? new PrimaryKeyMap.DummyThrowingFactory()
                                    : onDiskFormat.newPrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
 
             Cleanup cleanup = new Cleanup(primaryKeyMapFactory, sstableRef);
 
-            return new SSTableContext(sstable, perSSTableComponents, primaryKeyFactory, primaryKeyMapFactory, readsDisabled, cleanup);
+            return new SSTableContext(sstable, perSSTableComponents, primaryKeyFactory, primaryKeyMapFactory, cleanup);
         }
         catch (Throwable t)
         {
@@ -176,20 +139,6 @@ public class SSTableContext extends SharedCloseableImpl
     public PrimaryKeyMap.Factory primaryKeyMapFactory()
     {
         return primaryKeyMapFactory;
-    }
-
-    public PrimaryKey minSSTableKey()
-    {
-        if (minSSTableKey == null)
-            throw new IllegalStateException("minSSTableKey is null");
-        return minSSTableKey;
-    }
-
-    public PrimaryKey maxSSTableKey()
-    {
-        if (maxSSTableKey == null)
-            throw new IllegalStateException("maxSSTableKey is null");
-        return maxSSTableKey;
     }
 
     /**
