@@ -39,6 +39,7 @@ import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_DEBUG_REF_COUNT;
@@ -60,6 +61,12 @@ public class GlobalTidyConcurrencyTest
         System.setProperty("org.jboss.byteman.verbose", "true"); // checkstyle: suppress nearby 'blockSystemPropertyUsage'
     }
 
+    public static void maybeGc()
+    {
+        if (ThreadLocalRandom.current().nextDouble() < 0.001d)
+            System.gc();
+    }
+
     /**
      * This is a basic concurrency test for {@link SSTableReader.GlobalTidy}
      *
@@ -72,11 +79,17 @@ public class GlobalTidyConcurrencyTest
      * - GlobalTidy.lookup modification when the relevant Ref is alive
      */
     @Test
-    @BMRule(name = "Count leaks",
-    targetClass="Ref$State",
-    targetMethod="reportLeak",
-    targetLocation="AT EXIT",
-    action="org.apache.cassandra.io.sstable.format.GlobalTidyConcurrencyTest.leakHappened = true;")
+    @BMRules(rules = {
+        @BMRule(name = "Count leaks",
+        targetClass="Ref$State",
+        targetMethod="reportLeak",
+        targetLocation="AT EXIT",
+        action="org.apache.cassandra.io.sstable.format.GlobalTidyConcurrencyTest.leakHappened = true;"),
+        @BMRule(name = "Trigger occasional GCs to stress reference reaper",
+        targetClass="Ref$State",
+        targetMethod="release",
+        targetLocation="AT ENTRY",
+        action="org.apache.cassandra.io.sstable.format.GlobalTidyConcurrencyTest.maybeGc();")})
     public void tidyVsGetRaceTest() throws InterruptedException
     {
         int NUM_THREADS = 32;
