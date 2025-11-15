@@ -43,23 +43,85 @@ public class SAIUtil
 {
     /**
      * Waits until all indexes in the given keyspace become queryable.
+     * This checks from node1's perspective. If your test queries from multiple nodes,
+     * use {@link #waitForIndexQueryableOnAllNodes(Cluster, String)} instead.
+     *
+     * @deprecated Use {@link #waitForIndexQueryable(Cluster, String, int)} to explicitly specify the coordinator node,
+     *             or {@link #waitForIndexQueryableOnAllNodes(Cluster, String)} for tests that query from multiple nodes.
      */
+    @Deprecated
     public static void waitForIndexQueryable(Cluster cluster, String keyspace)
     {
-        assertGossipEnabled(cluster);
-        final List<String> indexes = getIndexes(cluster, keyspace);
-        await().atMost(60, TimeUnit.SECONDS)
-               .untilAsserted(() -> assertIndexesQueryable(cluster, keyspace, indexes));
+        waitForIndexQueryable(cluster, keyspace, 1);
     }
 
     /**
      * Waits until given index becomes queryable.
+     * This checks from node1's perspective. If your test queries from multiple nodes,
+     * use {@link #waitForIndexQueryable(Cluster, String, String, int)} instead.
+     *
+     * @deprecated Use {@link #waitForIndexQueryable(Cluster, String, String, int)} to explicitly specify the coordinator node.
      */
+    @Deprecated
     public static void waitForIndexQueryable(Cluster cluster, String keyspace, String index)
+    {
+        waitForIndexQueryable(cluster, keyspace, index, 1);
+    }
+
+    /**
+     * Waits until all indexes in the given keyspace become queryable, as verified by the specified coordinator node.
+     * This method checks index status from the coordinator's perspective, ensuring that when the coordinator
+     * executes queries, it will see the indexes as queryable.
+     * <p>
+     * Use this method when your test will query from a specific node, to ensure that the coordinator node
+     * has received gossip updates about index status.
+     *
+     * @param cluster the cluster
+     * @param keyspace the keyspace name
+     * @param coordinatorNode the node number (1-based) that will act as coordinator for queries
+     */
+    public static void waitForIndexQueryable(Cluster cluster, String keyspace, int coordinatorNode)
+    {
+        assertGossipEnabled(cluster);
+        final List<String> indexes = getIndexes(cluster, keyspace);
+        await().atMost(60, TimeUnit.SECONDS)
+               .untilAsserted(() -> assertIndexesQueryable(cluster, keyspace, indexes, coordinatorNode));
+    }
+
+    /**
+     * Waits until the given index becomes queryable, as verified by the specified coordinator node.
+     *
+     * @param cluster the cluster
+     * @param keyspace the keyspace name
+     * @param index the index name
+     * @param coordinatorNode the node number (1-based) that will act as coordinator for queries
+     */
+    public static void waitForIndexQueryable(Cluster cluster, String keyspace, String index, int coordinatorNode)
     {
         assertGossipEnabled(cluster);
         await().atMost(60, TimeUnit.SECONDS)
-               .untilAsserted(() -> assertIndexQueryable(cluster, keyspace, index));
+               .untilAsserted(() -> assertIndexQueryable(cluster, keyspace, index, coordinatorNode));
+    }
+
+    /**
+     * Waits until all indexes in the given keyspace become queryable on ALL cluster nodes.
+     * This is useful when tests query from multiple coordinators, ensuring that each node
+     * has received gossip updates about index status before queries are executed.
+     *
+     * @param cluster the cluster
+     * @param keyspace the keyspace name
+     */
+    public static void waitForIndexQueryableOnAllNodes(Cluster cluster, String keyspace)
+    {
+        assertGossipEnabled(cluster);
+        final List<String> indexes = getIndexes(cluster, keyspace);
+
+        for (int nodeNum = 1; nodeNum <= cluster.size(); nodeNum++)
+        {
+            final int node = nodeNum;
+            await().atMost(60, TimeUnit.SECONDS)
+                   .untilAsserted(() -> assertIndexesQueryable(cluster, keyspace, indexes, node));
+        }
     }
 
     private static void assertGossipEnabled(Cluster cluster)
@@ -71,21 +133,25 @@ public class SAIUtil
     }
 
     /**
-     * Checks if index is known to be queryable, by pulling index state from {@link SecondaryIndexManager}.
-     * Requires gossip.
+     * Checks if index is known to be queryable, by pulling index state from {@link SecondaryIndexManager}
+     * on the specified coordinator node. Requires gossip.
+     *
+     * @param coordinatorNode the node number (1-based) that checks index status
      */
-    public static void assertIndexQueryable(Cluster cluster, String keyspace, String index)
+    public static void assertIndexQueryable(Cluster cluster, String keyspace, String index, int coordinatorNode)
     {
-        assertIndexesQueryable(cluster, keyspace, Collections.singleton(index));
+        assertIndexesQueryable(cluster, keyspace, Collections.singleton(index), coordinatorNode);
     }
 
     /**
-     * Checks if all indexes are known to be queryable, by pulling index state from local {@link SecondaryIndexManager}.
-     * Requires gossip.
+     * Checks if all indexes are known to be queryable, by pulling index state from {@link SecondaryIndexManager}
+     * on the specified coordinator node. Requires gossip.
+     *
+     * @param coordinatorNode the node number (1-based) that checks index status from its perspective
      */
-    private static void assertIndexesQueryable(Cluster cluster, String keyspace, final Iterable<String> indexes)
+    private static void assertIndexesQueryable(Cluster cluster, String keyspace, final Iterable<String> indexes, int coordinatorNode)
     {
-        IInvokableInstance localNode = cluster.get(1);
+        IInvokableInstance localNode = cluster.get(coordinatorNode);
         final List<InetAddressAndPort> nodes =
             cluster.stream()
                    .map(node -> nodeAddress(node.broadcastAddress()))
