@@ -99,4 +99,19 @@ public abstract class AbstractMetricsTest extends SAITester
             }
         }, 160, TimeUnit.SECONDS);
     }
+
+    protected void waitForMetricValueBetween(ObjectName name, long min, long max)
+    {
+        waitForAssert(() -> {
+            try
+            {
+                double value = ((Number) getMetricValue(name)).longValue();
+                assertTrue("Metric value " + value + " is between " + min + " and " + max, value >= min && value <= max);
+            }
+            catch (Throwable ex)
+            {
+                throw Throwables.unchecked(ex);
+            }
+        }, 60, TimeUnit.SECONDS);
+    }
 }
