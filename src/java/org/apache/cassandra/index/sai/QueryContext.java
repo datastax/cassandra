@@ -19,11 +19,15 @@
 package org.apache.cassandra.index.sai;
 
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.utils.MonotonicClock;
 
@@ -88,9 +92,7 @@ public class QueryContext
 
     private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
-    // Determines the order of using indexes for filtering and sorting.
-    // Null means the query execution order hasn't been decided yet.
-    private FilterSortOrder filterSortOrder = null;
+    private PlanInfo queryPlanInfo;
 
     @VisibleForTesting
     public QueryContext()
@@ -219,12 +221,6 @@ public class QueryContext
         annGraphSearchLatency += val;
     }
 
-    public void setFilterSortOrder(FilterSortOrder filterSortOrder)
-    {
-        checkThreadOwnership();
-        this.filterSortOrder = filterSortOrder;
-    }
-
     public void checkpoint()
     {
         checkThreadOwnership();
@@ -250,17 +246,10 @@ public class QueryContext
             annRerankFloor = max(annRerankFloor, observedFloor);
     }
 
-    /**
-     * Determines the order of filtering and sorting operations.
-     * Currently used only by vector search.
-     */
-    public enum FilterSortOrder
+    public void recordQueryPlan(Plan.RowsIteration originalPlan, Plan.RowsIteration optimizedPlan)
     {
-        /** First get the matching keys from the non-vector indexes, then use vector index to return the top K by similarity order */
-        SEARCH_THEN_ORDER,
-
-        /** First get the candidates in ANN order from the vector index, then fetch the rows and filter them until we find K matching the predicates */
-        SCAN_THEN_FILTER
+        if (CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean())
+            this.queryPlanInfo = new PlanInfo(originalPlan, optimizedPlan);
     }
 
     public Snapshot snapshot()
@@ -311,7 +300,9 @@ public class QueryContext
         public final long triePostingsDecodes;
         public final long queryTimeouts;
         public final long annGraphSearchLatency;
-        public final FilterSortOrder filterSortOrder;
+
+        @Nullable
+        public final PlanInfo queryPlanInfo;
 
         /**
          * Creates a snapshot of all the metrics in the given {@link QueryContext}.
@@ -339,7 +330,38 @@ public class QueryContext
             triePostingsDecodes = context.triePostingsDecodes;
             queryTimeouts = context.queryTimeouts;
             annGraphSearchLatency = context.annGraphSearchLatency;
-            filterSortOrder = context.filterSortOrder;
+            queryPlanInfo = context.queryPlanInfo;
+        }
+    }
+
+    /**
+     * Captures relevant information about a query plan, both original and optimized.
+     */
+    public static class PlanInfo
+    {
+        public final boolean searchExecutedBeforeOrder;
+        public final boolean filterExecutedAfterOrderedScan;
+
+        public final long costEstimated;
+        public final long rowsToReturnEstimated;
+        public final long rowsToFetchEstimated;
+        public final long keysToIterateEstimated;
+        public final int logSelectivityEstimated;
+
+        public final int indexReferencesInQuery;
+        public final int indexReferencesInPlan;
+
+        public PlanInfo(@Nonnull Plan.RowsIteration originalPlan, @Nonnull Plan.RowsIteration optimizedPlan)
+        {
+            this.costEstimated = Math.round(optimizedPlan.fullCost());
+            this.rowsToReturnEstimated = Math.round(optimizedPlan.expectedRows());
+            this.rowsToFetchEstimated = Math.round(optimizedPlan.estimatedRowsToFetch());
+            this.keysToIterateEstimated = Math.round(optimizedPlan.estimatedKeysToIterate());
+            this.logSelectivityEstimated = Math.min(20, (int) Math.floor(-Math.log10(optimizedPlan.selectivity())));
+            this.indexReferencesInQuery = originalPlan.referencedIndexCount();
+            this.indexReferencesInPlan = optimizedPlan.referencedIndexCount();
+            this.searchExecutedBeforeOrder = optimizedPlan.isSearchThenOrderHybrid();
+            this.filterExecutedAfterOrderedScan = optimizedPlan.isOrderedScanThenFilterHybrid();
         }
     }
 }
