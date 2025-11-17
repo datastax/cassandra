@@ -39,7 +39,7 @@ public class RebuildWitImmutableComponentsOnAATest extends RebuildWithImmutableC
     @After
     public void restoreVersionSettings()
     {
-        SAIUtil.setCurrentVersion(Version.CURRENT);
+        SAIUtil.resetCurrentVersion();
         if (defaultImmutableMinVersionSetting != null)
             IMMUTABLE_SAI_COMPONENTS_MIN_VERSION.setString(defaultImmutableMinVersionSetting);
     }
