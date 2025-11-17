@@ -801,6 +801,14 @@ public enum CassandraRelevantProperties
     SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_table.enabled", "true"),
 
     SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
+
+    /**
+     * Whether to enable SAI query plan metrics such as the estimated cost, estimated number of rows,
+     * number of indexes used in the original and optimized query plan, etc.
+     * These metrics are counters and histograms.
+     */
+    SAI_QUERY_PLAN_METRICS_ENABLED("cassandra.sai.metrics.query_plan.enabled", "true"),
+
     SAI_REDUCE_TOPK_ACROSS_SSTABLES("cassandra.sai.reduce_topk_across_sstables", "true"),
 
     /**
