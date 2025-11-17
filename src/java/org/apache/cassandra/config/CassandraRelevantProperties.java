@@ -639,6 +639,13 @@ public enum CassandraRelevantProperties
     SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_query.enabled", "false"),
 
     /**
+     * Whether to enable SAI query plan metrics such as the estimated cost, estimated number of rows,
+     * number of indexes used in the original and optimized query plan, etc.
+     * These metrics are counters and histograms.
+     */
+    SAI_QUERY_PLAN_METRICS_ENABLED("cassandra.sai.metrics.query_plan.enabled", "true"),
+
+    /**
      * Whether to enable SAI index metrics such as memtable flush metrics, compaction metrics, and disk usage metrics.
      * These metrics include timers, histograms, counters, and gauges for index operations.
      */

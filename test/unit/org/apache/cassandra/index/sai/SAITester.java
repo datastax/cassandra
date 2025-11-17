@@ -519,6 +519,18 @@ public class SAITester extends CQLTester
         return metricValue;
     }
 
+    protected double getHistogramMean(ObjectName metricObjectName)
+    {
+        try
+        {
+            return ((Number) getMBeanAttribute(metricObjectName, "Mean")).doubleValue();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     protected void assertMetricExists(ObjectName name)
     {
         Assertions.assertThatNoException().isThrownBy(() -> getMetricValue(name));
