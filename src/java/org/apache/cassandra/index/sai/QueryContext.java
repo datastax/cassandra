@@ -20,11 +20,14 @@ package org.apache.cassandra.index.sai;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.utils.MonotonicClock;
 
@@ -66,9 +69,10 @@ public class QueryContext
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
-    // Determines the order of using indexes for filtering and sorting.
-    // Null means the query execution order hasn't been decided yet.
-    private FilterSortOrder filterSortOrder = null;
+    private Plan originalPlan = null;
+
+
+    private Plan optimizedPlan = null;
 
     @VisibleForTesting
     public QueryContext()
@@ -145,11 +149,6 @@ public class QueryContext
         annGraphSearchLatency.add(val);
     }
 
-    public void setFilterSortOrder(FilterSortOrder filterSortOrder)
-    {
-        this.filterSortOrder = filterSortOrder;
-    }
-
     // getters
 
     public long sstablesHit()
@@ -208,9 +207,18 @@ public class QueryContext
         return annGraphSearchLatency.longValue();
     }
 
-    public FilterSortOrder filterSortOrder()
+    /** Can return null when query plan hasn't been prepared and optimized yet */
+    @Nullable
+    public Plan optimizedPlan()
     {
-        return filterSortOrder;
+        return optimizedPlan;
+    }
+
+    /** Can return null when query plan hasn't been prepared yet */
+    @Nullable
+    public Plan originalPlan()
+    {
+        return originalPlan;
     }
 
     public void checkpoint()
@@ -246,17 +254,14 @@ public class QueryContext
             annRerankFloor = max(annRerankFloor, observedFloor);
     }
 
-    /**
-     * Determines the order of filtering and sorting operations.
-     * Currently used only by vector search.
-     */
-    public enum FilterSortOrder
+    public void setOriginalPlan(Plan originalPlan)
     {
-        /** First get the matching keys from the non-vector indexes, then use vector index to return the top K by similarity order */
-        SEARCH_THEN_ORDER,
+        this.originalPlan = originalPlan;
+    }
 
-        /** First get the candidates in ANN order from the vector index, then fetch the rows and filter them until we find K matching the predicates */
-        SCAN_THEN_FILTER
+    public void setOptimizedPlan(Plan optimizedPlan)
+    {
+        this.optimizedPlan = optimizedPlan;
     }
 
     public Snapshot snapshot()
@@ -290,7 +295,9 @@ public class QueryContext
         public final long queryTimeouts;
         public final long annGraphSearchLatency;
         public final long shadowedPrimaryKeyCount;
-        public final FilterSortOrder filterSortOrder;
+
+        @Nullable
+        public final QueryPlanInfo queryPlanInfo;
 
         /**
          * Creates a snapshot of all the metrics in the given {@link QueryContext}.
@@ -315,7 +322,40 @@ public class QueryContext
             queryTimeouts = context.queryTimeouts();
             annGraphSearchLatency = context.annGraphSearchLatency();
             shadowedPrimaryKeyCount = context.getShadowedPrimaryKeyCount();
-            filterSortOrder = context.filterSortOrder();
+
+            Plan originalPlan = context.originalPlan();
+            Plan optimizedPlan = context.optimizedPlan();
+            if (originalPlan != null && optimizedPlan != null) {
+                queryPlanInfo = new QueryPlanInfo(originalPlan, optimizedPlan);
+            } else {
+                queryPlanInfo = null;
+            }
         }
+
+        public static class QueryPlanInfo
+        {
+            public final boolean searchExecutedBeforeOrder;
+            public final boolean filterExecutedAfterOrderedScan;
+
+            public final double rowsEstimated;
+            public final double selectivityEstimated;
+            public final double costEstimated;
+
+            public final int indexReferencesInQuery;
+            public final int indexReferencesInPlan;
+
+            public QueryPlanInfo(@Nonnull Plan originalPlan, @Nonnull Plan optimizedPlan)
+            {
+                this.costEstimated = optimizedPlan.fullCost();
+                this.rowsEstimated = optimizedPlan.expectedRows();
+                this.selectivityEstimated = optimizedPlan.selectivity();
+                this.indexReferencesInQuery = originalPlan.referencedIndexCount();
+                this.indexReferencesInPlan = optimizedPlan.referencedIndexCount();
+                this.searchExecutedBeforeOrder = optimizedPlan.isSearchThenOrderHybrid();
+                this.filterExecutedAfterOrderedScan = optimizedPlan.isOrderedScanThenFilterHybrid();
+            }
+        }
+
     }
+
 }

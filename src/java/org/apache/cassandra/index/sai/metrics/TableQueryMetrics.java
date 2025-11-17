@@ -115,7 +115,7 @@ public class TableQueryMetrics
         {
             final long queryLatencyMicros = TimeUnit.NANOSECONDS.toMicros(snapshot.totalQueryTimeNs);
 
-            if (snapshot.filterSortOrder == QueryContext.FilterSortOrder.SEARCH_THEN_ORDER)
+            if (snapshot.queryPlanInfo != null && snapshot.queryPlanInfo.searchExecutedBeforeOrder)
             {
                 Tracing.trace("Index query accessed memtable indexes, {}, and {}, selected {} before ranking, " +
                               "post-filtered {} in {}, and took {} microseconds.",
@@ -194,6 +194,9 @@ public class TableQueryMetrics
         public final Counter totalRowsFiltered;
         public final Counter totalQueriesCompleted;
 
+        public final Counter totalRowsEstimated;
+        public final Counter totalCostEstimated;
+
         public final Counter sortThenFilterQueriesCompleted;
         public final Counter filterThenSortQueriesCompleted;
 
@@ -210,6 +213,8 @@ public class TableQueryMetrics
             totalRowsFiltered = Metrics.counter(createMetricName("TotalRowsFiltered"));
             totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
             totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
+            totalRowsEstimated = Metrics.counter(createMetricName("TotalRowsEstimated"));
+            totalCostEstimated = Metrics.counter(createMetricName("TotalCostEstimated"));
 
             sortThenFilterQueriesCompleted = Metrics.counter(createMetricName("SortThenFilterQueriesCompleted"));
             filterThenSortQueriesCompleted = Metrics.counter(createMetricName("FilterThenSortQueriesCompleted"));
@@ -228,10 +233,17 @@ public class TableQueryMetrics
             totalPartitionReads.inc(snapshot.partitionsRead);
             totalRowsFiltered.inc(snapshot.rowsFiltered);
 
-            if (snapshot.filterSortOrder == QueryContext.FilterSortOrder.SCAN_THEN_FILTER)
-                sortThenFilterQueriesCompleted.inc();
-            else if (snapshot.filterSortOrder == QueryContext.FilterSortOrder.SEARCH_THEN_ORDER)
-                filterThenSortQueriesCompleted.inc();
+            QueryContext.Snapshot.QueryPlanInfo queryPlanInfo = snapshot.queryPlanInfo;
+            if (queryPlanInfo != null)
+            {
+                totalCostEstimated.inc(Math.round(queryPlanInfo.costEstimated));
+                totalRowsEstimated.inc(Math.round(queryPlanInfo.rowsEstimated));
+
+                if (queryPlanInfo.filterExecutedAfterOrderedScan)
+                    sortThenFilterQueriesCompleted.inc();
+                if (queryPlanInfo.searchExecutedBeforeOrder)
+                    filterThenSortQueriesCompleted.inc();
+            }
         }
     }
 
@@ -276,6 +288,28 @@ public class TableQueryMetrics
          */
         public final Timer annGraphSearchLatency;
 
+        /** Query execution cost as estimated by the planner */
+        public final Histogram costEstimated;
+
+        /** Number of rows returned by the query estimated by the planner */
+        public final Histogram rowsEstimated;
+
+        /**
+         * Negative deceimal logarithm of selectivity of the query, before applying the LIMIT clause.
+         * We use logarithm because selectivity values can be very small (e.g. 10^-9).
+         */
+        public final Histogram logSelectivityEstimated;
+
+        /** 
+         * Number of indexes referenced by the optimized query plan.
+         * The same index referenced from unrelated query clauses, 
+         * leading to separate index searches, are counted separately.  
+         */
+        public final Histogram indexReferencesInPlan;
+
+        /** Number of indexes referenced by the original query plan before optimization (as stated in the query text) */
+        public final Histogram indexReferencesInQuery;
+        
         /**
          * @param table the table to measure metrics for
          * @param queryKind an identifier for the kind of query which metrics are being recorded for
@@ -304,6 +338,12 @@ public class TableQueryMetrics
 
             // Key vector metrics that translate to performance
             annGraphSearchLatency = Metrics.timer(createMetricName("ANNGraphSearchLatency"));
+
+            costEstimated = Metrics.histogram(createMetricName("CostEstimated"), false);
+            rowsEstimated = Metrics.histogram(createMetricName("RowsEstimated"), true);
+            logSelectivityEstimated = Metrics.histogram(createMetricName("LogSelectivityEstimated"), true);
+            indexReferencesInPlan = Metrics.histogram(createMetricName("IndexReferencesInPlan"), true);
+            indexReferencesInQuery = Metrics.histogram(createMetricName("IndexReferencesInQuery"), false);
         }
 
         @Override
@@ -340,6 +380,17 @@ public class TableQueryMetrics
             }
 
             shadowedKeysScannedHistogram.update(snapshot.shadowedPrimaryKeyCount);
+
+            QueryContext.Snapshot.QueryPlanInfo queryPlanInfo = snapshot.queryPlanInfo;
+            if (queryPlanInfo != null)
+            {
+                costEstimated.update(Math.round(queryPlanInfo.costEstimated));
+                rowsEstimated.update(Math.round(queryPlanInfo.rowsEstimated));
+                double logSelectivity = -Math.log10(queryPlanInfo.selectivityEstimated);
+                logSelectivityEstimated.update((int) (Math.min(20, Math.floor(logSelectivity))));
+                indexReferencesInQuery.update(queryPlanInfo.indexReferencesInQuery);
+                indexReferencesInPlan.update(queryPlanInfo.indexReferencesInPlan);
+            }
         }
     }
 }

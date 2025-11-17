@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
@@ -27,6 +28,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import org.apache.commons.lang3.mutable.MutableInt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +36,7 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -366,14 +369,23 @@ abstract public class Plan
     }
 
     /**
-     * Returns the index context if the plan node uses one.
-     * Need to be overridden by nodes that use an index.
-     * Non-recursive.
+     * Traverses the tree recursively and calls the consumer for each index used in the plan.
      */
-    protected @Nullable IndexContext getIndexContext()
+    public final void visitIndexesRecursive(Consumer<IndexContext> consumer)
+    {
+        forEach(node -> {
+            node.visitIndexes(consumer);
+            return Plan.ControlFlow.Continue;
+        });
+    }
+
+    /**
+     * Traverses the tree and calls the consumer for each index used in the plan.
+     * Non recursive.
+     */
+    protected void visitIndexes(Consumer<IndexContext> consumer)
     {
         // By default, a node does not contain an index.
-        return null;
     }
 
     /**
@@ -428,10 +440,33 @@ abstract public class Plan
     }
 
     /** Returns true if the plan contains a node matching the condition */
-    final boolean contains(Function<Plan, Boolean> condition)
+    public final boolean contains(Function<Plan, Boolean> condition)
     {
         ControlFlow res = forEach(node -> (condition.apply(node)) ? ControlFlow.Break : ControlFlow.Continue);
         return res == ControlFlow.Break;
+    }
+
+    /**
+     * Returns true if the plan represents a hybrid query that first selects the matching
+     * rows by index-based search and then orders the matching rows in memory. This order of execution
+     * is best when the query contains a predicate that matches only a very small number of rows.
+     * Returns false in other cases, including when the query is not a hybrid query.
+     */
+    public final boolean isSearchThenOrderHybrid()
+    {
+        return contains(node -> node instanceof KeysSort);
+    }
+
+    /**
+     * Returns true if the plan represents a hybrid query that first scans the index in
+     * the index term-order (sorted by the index terms) and then filters the matching rows in memory.
+     * This order of execution is best when the query contains a predicate with a poor selectivity.
+     * Returns false in other cases, including when the query is not a hybrid query.
+     */
+    public final boolean isOrderedScanThenFilterHybrid()
+    {
+        return (contains(node -> node instanceof Filter)
+                && contains(node -> node instanceof IndexScan && ((IndexScan) node).ordering != null));
     }
 
     /**
@@ -492,6 +527,29 @@ abstract public class Plan
             selectivity = estimateSelectivity();
         assert 0.0 <= selectivity && selectivity <= 1.0 : "Invalid selectivity: " + selectivity;
         return selectivity;
+    }
+
+    /**
+     * Returns the number of rows produced by this plan.
+     * This can be only called on plans producing rows.
+     */
+    public final double expectedRows()
+    {
+        Cost cost = cost();
+        if (!(cost instanceof RowsIterationCost))
+            throw new UnsupportedOperationException("Expected rows is only supported for plans returning rows (called on " + this.getClass() + ')');
+
+        return ((RowsIterationCost) cost).expectedRows;
+    }
+
+    /**
+     * Returns the number of indexes referenced by this plan.
+     */
+    public final int referencedIndexCount()
+    {
+        MutableInt count = new MutableInt(0);
+        visitIndexesRecursive(index -> count.increment());
+        return count.intValue();
     }
 
     protected interface Cost
@@ -961,10 +1019,10 @@ abstract public class Plan
         }
 
         @Override
-        final protected IndexContext getIndexContext()
+        final protected void visitIndexes(Consumer<IndexContext> consumer)
         {
             assert predicate != null || ordering != null;
-            return predicate != null ? predicate.context : ordering.context;
+            consumer.accept(predicate != null ? predicate.context : ordering.context);
         }
     }
     /**
@@ -1509,11 +1567,10 @@ abstract public class Plan
                    : new AnnIndexScan(factory, id, access, ordering);
         }
 
-        @Nullable
         @Override
-        protected IndexContext getIndexContext()
+        protected void visitIndexes(Consumer<IndexContext> consumer)
         {
-            return ordering.context;
+            consumer.accept(ordering.context);
         }
     }
 
@@ -1551,9 +1608,9 @@ abstract public class Plan
         }
 
         @Override
-        protected IndexContext getIndexContext()
+        protected void visitIndexes(Consumer<IndexContext> consumer)
         {
-            return ordering.context;
+            consumer.accept(ordering.context);
         }
     }
 
@@ -1581,11 +1638,6 @@ abstract public class Plan
         final double costPerRow()
         {
             return cost().costPerRow();
-        }
-
-        final double expectedRows()
-        {
-            return cost().expectedRows;
         }
     }
 
@@ -1660,7 +1712,7 @@ abstract public class Plan
      * In order to return one row in the result set it may need to retrieve many rows from the source node.
      * Hence, it will typically have higher cost-per-row than the source node, and will return fewer rows.
      */
-    static class Filter extends RowsIteration
+    public static class Filter extends RowsIteration
     {
         private final RowFilter filter;
         private final LazyTransform<RowsIteration> source;

@@ -372,12 +372,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private void updateIndexMetricsQueriesCount(Plan plan)
     {
         HashSet<IndexContext> queriedIndexesContexts = new HashSet<>();
-        plan.forEach(node -> {
-            IndexContext indexContext = node.getIndexContext();
-            if (indexContext != null)
-                queriedIndexesContexts.add(indexContext);
-            return Plan.ControlFlow.Continue;
-        });
+        plan.visitIndexesRecursive(queriedIndexesContexts::add);
         queriedIndexesContexts.forEach(indexContext -> indexContext.getIndexMetrics()
                 .ifPresent(m -> m.queriesCount.inc()));
     }
@@ -400,18 +395,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // here is even lower.
         int intersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
         Plan plan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
+        queryContext.setOriginalPlan(plan);
 
         if (QUERY_OPT_LEVEL > 0)
             plan = plan.optimize();
 
         plan = plan.limitIntersectedClauses(intersectionClauseLimit);
-
-        if (plan.contains(node -> node instanceof Plan.Filter)
-            && plan.contains(node -> node instanceof Plan.IndexScan && ((Plan.IndexScan) node).ordering != null))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
-        if (plan.contains(node -> node instanceof Plan.KeysSort))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
-
+        queryContext.setOptimizedPlan(plan);
         updateIndexMetricsQueriesCount(plan);
 
         if (logger.isTraceEnabled())

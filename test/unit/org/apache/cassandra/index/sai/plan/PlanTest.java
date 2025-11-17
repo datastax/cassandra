@@ -1051,6 +1051,28 @@ public class PlanTest
         Mockito.verify(indexScan1, Mockito.times(1)).estimateCost();
     }
 
+    @Test
+    public void testReferencedIndexes()
+    {
+        Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));  // numeric
+        Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.001 * factory.tableMetrics.rows));  // numeric
+        Plan.KeysIteration indexScan3 = factory.indexScan(saiPred4, (long) (0.5 * factory.tableMetrics.rows));    // literal
+        Plan.KeysIteration sort = factory.sort(indexScan1, ordering); // will generate ordered scan
+        Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(sort, indexScan2, indexScan3));
+        Plan.RowsIteration fetch = factory.fetch(intersection);
+        Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter123, fetch);
+        Plan.RowsIteration plan = factory.limit(postFilter, 3);
+
+        assertEquals(0, factory.everything.referencedIndexCount());
+        assertEquals(0, factory.nothing.referencedIndexCount());
+        assertEquals(1, indexScan1.referencedIndexCount());
+        assertEquals(1, indexScan2.referencedIndexCount());
+        assertEquals(1, indexScan3.referencedIndexCount());
+        assertEquals(1, sort.referencedIndexCount());
+        assertEquals(3, intersection.referencedIndexCount());
+        assertEquals(3, plan.referencedIndexCount());
+    }
+
     private List<Integer> ids(List<? extends Plan> subplans)
     {
         return subplans.stream().map(p -> p.id).collect(Collectors.toList());
