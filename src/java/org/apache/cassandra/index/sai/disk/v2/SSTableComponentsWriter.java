@@ -95,7 +95,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
         tokenWriter.add(primaryKey.token().getLongValue());
         partitionSizeWriter.add(partitionId);
         if (perSSTableComponents.hasClustering())
-            clusteringKeysWriter.add(perSSTableComponents.context().comparator().asByteComparable(primaryKey.clustering()));
+            clusteringKeysWriter.add(perSSTableComponents.comparator().asByteComparable(primaryKey.clustering()));
     }
 
     @Override

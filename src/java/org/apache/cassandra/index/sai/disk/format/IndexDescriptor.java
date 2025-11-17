@@ -33,12 +33,14 @@ import java.util.function.Consumer;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -89,21 +91,24 @@ public class IndexDescriptor
 
     public final Descriptor descriptor;
     public final boolean hasClustering;
+    private final ClusteringComparator comparator;
 
     // The per-sstable components for this descriptor. This is never `null` in practice, but 1) it's a bit easier to
     // initialize it outsides of the ctor, and 2) it can actually change upon calls to `reload`.
     private IndexComponentsImpl perSSTable;
     private final Map<IndexContext, IndexComponentsImpl> perIndexes = Maps.newHashMap();
 
-    private IndexDescriptor(Descriptor descriptor, boolean hasClustering)
+    private IndexDescriptor(Descriptor descriptor, ClusteringComparator comparator)
     {
         this.descriptor = descriptor;
-        this.hasClustering = hasClustering;
+        this.comparator = comparator;
+        this.hasClustering = comparator.size() > 0;
     }
 
+    @VisibleForTesting
     public static IndexDescriptor empty(Descriptor descriptor)
     {
-        IndexDescriptor created = new IndexDescriptor(descriptor, false);
+        IndexDescriptor created = new IndexDescriptor(descriptor, new ClusteringComparator());
         // Some code assumes that you can always at least call `perSSTableComponents()` and not get `null`, so we
         // set it to an empty group here.
         created.perSSTable = created.createEmptyGroup(null);
@@ -112,7 +117,7 @@ public class IndexDescriptor
 
     public static IndexDescriptor empty(Descriptor descriptor, TableMetadata metadata)
     {
-        IndexDescriptor created = new IndexDescriptor(descriptor, metadata.comparator.size() > 0);
+        IndexDescriptor created = new IndexDescriptor(descriptor, metadata.comparator);
         // Some code assumes that you can always at least call `perSSTableComponents()` and not get `null`, so we
         // set it to an empty group here.
         created.perSSTable = created.createEmptyGroup(null);
@@ -124,7 +129,7 @@ public class IndexDescriptor
     {
         SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable);
         IndexDescriptor descriptor = new IndexDescriptor(sstable.descriptor,
-                                                         sstable.metadata().comparator.size() > 0);
+                                                         sstable.metadata().comparator);
         descriptor.initialize(indices, discovered);
         return descriptor;
     }
@@ -473,6 +478,11 @@ public class IndexDescriptor
         public boolean hasClustering()
         {
             return IndexDescriptor.this.hasClustering;
+        }
+
+        public ClusteringComparator comparator()
+        {
+            return IndexDescriptor.this.comparator;
         }
 
         @Override
