@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
@@ -37,7 +38,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toMap;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_BACKWARD_COMPATIBILITY_CC_4;
 import static org.apache.cassandra.schema.TableParams.Option.*;
 
 public final class TableParams
@@ -72,7 +72,7 @@ public final class TableParams
     }
 
     @VisibleForTesting
-    public static boolean backwardCompatibilityCC4 = SCHEMA_BACKWARD_COMPATIBILITY_CC_4.getBoolean();
+    public static StorageCompatibilityMode storageCompatibilityModeOverride = null;
 
     public final String comment;
     public final boolean allowAutoSnapshot;
@@ -290,12 +290,17 @@ public final class TableParams
 
     public void appendCqlTo(CqlBuilder builder, boolean isView)
     {
+        StorageCompatibilityMode compatibilityMode = storageCompatibilityModeOverride != null
+                                                      ? storageCompatibilityModeOverride
+                                                      : StorageCompatibilityMode.current();
+        boolean usePre50Schema = compatibilityMode.isBefore(5);
+
         // option names should be in alphabetical order
         builder.append("additional_write_policy = ").appendWithSingleQuotes(additionalWritePolicy.toString())
                .newLine();
 
         // Exclude allow_auto_snapshot in backward compatibility mode (new in 5.0)
-        if (!backwardCompatibilityCC4)
+        if (!usePre50Schema)
         {
             builder.append("AND allow_auto_snapshot = ").append(allowAutoSnapshot)
                    .newLine();
@@ -314,8 +319,8 @@ public final class TableParams
                .append("AND compression = ").append(compression.asMap())
                .newLine();
 
-        // Use map format for CC 4.0 compatibility, string format for 5.0
-        if (backwardCompatibilityCC4)
+        // Use map format for pre-5.0 compatibility, string format for 5.0
+        if (usePre50Schema)
             builder.append("AND memtable = ").append(memtable.toMapForCC4());
         else
             builder.append("AND memtable = ").appendWithSingleQuotes(memtable.configurationKey());
@@ -340,7 +345,7 @@ public final class TableParams
                .newLine();
 
         // Exclude incremental_backups in backward compatibility mode (new in 5.0)
-        if (!backwardCompatibilityCC4)
+        if (!usePre50Schema)
         {
             builder.append("AND incremental_backups = ").append(incrementalBackups)
                    .newLine();

@@ -811,10 +811,6 @@ public enum CassandraRelevantProperties
 
     SAI_WRITE_JVECTOR3_FORMAT("cassandra.sai.write_jv3_format", "false"),
 
-    /**
-     * Enable schema backward compatibility mode for CC 4.0.
-     */
-    SCHEMA_BACKWARD_COMPATIBILITY_CC_4("cassandra.schema.backward_compatibility_cc_4", "false"),
     SCHEMA_PULL_INTERVAL_MS("cassandra.schema_pull_interval_ms", "60000"),
     SCHEMA_UPDATE_HANDLER_FACTORY_CLASS("cassandra.schema.update_handler_factory.class"),
     SEARCH_CONCURRENCY_FACTOR("cassandra.search_concurrency_factor", "1"),

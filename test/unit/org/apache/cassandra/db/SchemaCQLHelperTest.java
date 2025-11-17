@@ -67,6 +67,7 @@ import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
@@ -756,12 +757,12 @@ public class SchemaCQLHelperTest extends CQLTester
         String keyspace = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
 
         // Save original value
-        boolean originalValue = TableParams.backwardCompatibilityCC4;
+        StorageCompatibilityMode originalMode = TableParams.storageCompatibilityModeOverride;
 
         try
         {
             // Test filtering when CC 4.0 backward compatibility mode is enabled
-            TableParams.backwardCompatibilityCC4 = true;
+            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.CC_4;
 
             String tableName = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text)");
             ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(tableName);
@@ -778,7 +779,7 @@ public class SchemaCQLHelperTest extends CQLTester
             Assertions.assertThat(cql).doesNotContain("org.apache.cassandra.db.memtable");
 
             // Test filtering when disabled (default)
-            TableParams.backwardCompatibilityCC4 = false;
+            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.NONE;
 
             String tableName2 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text)");
             ColumnFamilyStore cfs2 = Keyspace.open(keyspace).getColumnFamilyStore(tableName2);
@@ -794,7 +795,7 @@ public class SchemaCQLHelperTest extends CQLTester
         finally
         {
             // Restore original value
-            TableParams.backwardCompatibilityCC4 = originalValue;
+            TableParams.storageCompatibilityModeOverride = originalMode;
         }
     }
 
