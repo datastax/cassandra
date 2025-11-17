@@ -257,7 +257,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     @Override
     public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
     {
-        IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
+        IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor, tableMetadata);
         try
         {
             return new StorageAttachedIndexWriter(indexDescriptor, tableMetadata, indices, tracker, keyCount, baseCfs.metric);
