@@ -28,6 +28,8 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import org.apache.commons.lang3.mutable.MutableDouble;
+import org.apache.commons.lang3.mutable.MutableInt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -216,7 +218,7 @@ abstract public class Plan
      * If node of given type is not found, returns null.
      */
     @SuppressWarnings("unchecked")
-    final <T extends Plan> @Nullable T firstNodeOfType(Class<T> nodeType)
+    public final <T extends Plan> @Nullable T firstNodeOfType(Class<T> nodeType)
     {
         Plan[] result = new Plan[] { null };
         forEach(node -> {
@@ -393,7 +395,7 @@ abstract public class Plan
      * and recomputes the nodes above it. Then it returns the best plan from candidates obtained that way.
      * The expected running time is proportional to the height of the plan tree multiplied by the number of the leaves.
      */
-    public final Plan optimize()
+    protected Plan optimize()
     {
         if (logger.isTraceEnabled())
             logger.trace("Optimizing plan:\n{}", toRedactedStringRecursive());
@@ -426,7 +428,7 @@ abstract public class Plan
      * Modifies all intersections to not intersect more clauses than the given limit.
      * Retains the most selective clauses.
      */
-    public final Plan limitIntersectedClauses(int clauseLimit)
+    protected Plan limitIntersectedClauses(int clauseLimit)
     {
         Plan result = this;
         if (result instanceof Intersection)
@@ -438,10 +440,34 @@ abstract public class Plan
     }
 
     /** Returns true if the plan contains a node matching the condition */
-    final boolean contains(Function<Plan, Boolean> condition)
+    public final boolean contains(Function<Plan, Boolean> condition)
     {
         ControlFlow res = forEach(node -> (condition.apply(node)) ? ControlFlow.Break : ControlFlow.Continue);
         return res == ControlFlow.Break;
+    }
+
+    /**
+     * Returns true if the plan represents a hybrid query that first selects the matching
+     * rows by index-based search and then orders the matching rows in memory. This order of execution
+     * is best when the query contains a predicate that matches only a very small number of rows.
+     * Returns false in other cases, including when the query is not a hybrid query.
+     */
+    public final boolean isSearchThenOrderHybrid()
+    {
+        return contains(node -> node instanceof KeysSort);
+    }
+
+    /**
+     * Returns true if the plan represents a hybrid query that first scans the index in
+     * the index term-order (sorted by the index terms) and then filters the matching rows in memory.
+     * This order of execution is best when the query contains a predicate with a poor selectivity.
+     * Returns false in other cases, including when the query is not a hybrid query.
+     */
+    public final boolean isOrderedScanThenFilterHybrid()
+    {
+        return (contains(node -> node instanceof Filter)
+                && contains(node -> node instanceof IndexScan && ((IndexScan) node).ordering != null
+                                      || node instanceof ScoredIndexScan));
     }
 
     /**
@@ -502,6 +528,44 @@ abstract public class Plan
             selectivity = estimateSelectivity();
         assert 0.0 <= selectivity && selectivity <= 1.0 : "Invalid selectivity: " + selectivity;
         return selectivity;
+    }
+
+    /**
+     * Returns the number of indexes referenced by this plan.
+     * The same index referenced from unrelated query clauses,
+     * leading to separate index searches, are counted separately.
+     */
+    public final int referencedIndexCount()
+    {
+        MutableInt count = new MutableInt(0);
+        visitIndexesRecursive(index -> count.increment());
+        return count.intValue();
+    }
+
+    /**
+     * Returns the estimated number of rows to be fetched from storage.
+     */
+    public final double estimatedRowsToFetch()
+    {
+        Fetch fetch = firstNodeOfType(Plan.Fetch.class);
+        return fetch != null ? fetch.expectedRows() : 0.0;
+    }
+
+    /**
+     * Returns the estimated number of primary keys to be iterated by all index iterators.
+     * This may be larger than the number of rows to fetch because of intersections.
+     */
+    public final double estimatedKeysToIterate()
+    {
+        MutableDouble total = new MutableDouble(0.0);
+        forEach(node -> {
+            if (node instanceof Leaf)
+            {
+                total.add(((Leaf) node).expectedKeys());
+            }
+            return ControlFlow.Continue;
+        });
+        return total.doubleValue();
     }
 
     protected interface Cost
@@ -679,6 +743,18 @@ abstract public class Plan
         final double costPerKey()
         {
             return cost().costPerKey();
+        }
+
+        @Override
+        public final KeysIteration optimize()
+        {
+            return (KeysIteration) super.optimize();
+        }
+
+        @Override
+        public final KeysIteration limitIntersectedClauses(int clauseLimit)
+        {
+            return (KeysIteration) super.limitIntersectedClauses(clauseLimit);
         }
 
         protected abstract boolean usesIncludedIndex();
@@ -1622,6 +1698,18 @@ abstract public class Plan
         public final double expectedRows()
         {
             return cost().expectedRows;
+        }
+
+        @Override
+        public final RowsIteration optimize()
+        {
+            return (RowsIteration) super.optimize();
+        }
+
+        @Override
+        public final RowsIteration limitIntersectedClauses(int clauseLimit)
+        {
+            return (RowsIteration) super.limitIntersectedClauses(clauseLimit);
         }
     }
 
