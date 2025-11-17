@@ -173,7 +173,7 @@ public final class TableAttributes extends PropertyDefinitions
 
         if (hasOption(MEMTABLE))
         {
-            // Handle deserialzation of Astra/CC 4.0 schema with memtable option as a map
+            // Handle deserialization of Astra/CC 4.0 schema with memtable option as a map
             if (properties.get(MEMTABLE.toString()) instanceof Map)
             {
                 String memtableClass = getMap(MEMTABLE)
@@ -183,7 +183,6 @@ public final class TableAttributes extends PropertyDefinitions
                              .map(Map.Entry::getValue)
                              .findFirst()
                              .orElse(null);
-                // Not exhaustive, but avoids raising an error upgrading from a CC 4.0 schema
                 // Extract short class name if fully qualified (e.g., "org.apache.cassandra.db.memtable.TrieMemtable" -> "TrieMemtable")
                 String shortClassName = memtableClass != null && memtableClass.contains(".")
                                         ? memtableClass.substring(memtableClass.lastIndexOf('.') + 1)
@@ -193,8 +192,14 @@ public final class TableAttributes extends PropertyDefinitions
                     builder.memtable(MemtableParams.get(null));
                 else if ("SkipListMemtable".equalsIgnoreCase(shortClassName))
                     builder.memtable(MemtableParams.get("skiplist"));
+                else if ("PersistentMemoryMemtable".equalsIgnoreCase(shortClassName))
+                    builder.memtable(MemtableParams.get("persistent_memory"));
                 else if ("TrieMemtable".equalsIgnoreCase(shortClassName))
                     builder.memtable(MemtableParams.get("trie"));
+                else if ("TrieMemtableStage1".equalsIgnoreCase(shortClassName))
+                    builder.memtable(MemtableParams.get("trie"));
+                else if ("ShardedSkipListMemtable".equalsIgnoreCase(shortClassName))
+                    builder.memtable(MemtableParams.get("skiplist_sharded"));
                 else
                     // Default to trie for unknown memtable types
                     builder.memtable(MemtableParams.get("trie"));
