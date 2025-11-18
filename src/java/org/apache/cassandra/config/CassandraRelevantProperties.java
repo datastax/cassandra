@@ -802,11 +802,17 @@ public enum CassandraRelevantProperties
 
     /** Whether to validate terms that will be SAI indexed at the coordinator */
     SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
-    
+
+    // Use nvq when building graphs in compaction. Disabled by default for now. Enabling will reduce recall slightly
+    // while also reducing the storage footprint.
+    SAI_VECTOR_ENABLE_NVQ("cassandra.sai.vector.enable_nvq", "false"),
     // Use non-positive value to disable it. Period in millis to trigger a flush for SAI vector memtable index.
     SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
     // Use non-positive value to disable it. When num of rows in SAI vector memtable index reaches the threshold, it triggers flush
     SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.vector_flush_threshold_max_rows", "-1"),
+    // NVQ number of subvectors. This isn't really expected to change much so we're only exposing
+    // it as a global variable in case it's needed.
+    SAI_VECTOR_NVQ_NUM_SUB_VECTORS("cassandra.sai.vector.nvq_num_sub_vectors", "2"),
     
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
