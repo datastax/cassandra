@@ -48,11 +48,10 @@ public class SAIUtil
      * This checks from node1's perspective. If your test queries from multiple nodes,
      * use {@link #waitForIndexQueryableOnAllNodes(Cluster, String)} instead.
      *
-     * @deprecated Use {@link #waitForIndexQueryable(Cluster, String, int)} to explicitly specify the coordinator node,
-     *             or {@link #waitForIndexQueryableOnAllNodes(Cluster, String)} for tests that query from multiple nodes.
+     * @param cluster the cluster
+     * @param keyspace the keyspace name
      */
-    @Deprecated
-    public static void waitForIndexQueryable(Cluster cluster, String keyspace)
+    public static void waitForIndexQueryableOnFirstNode(Cluster cluster, String keyspace)
     {
         waitForIndexQueryable(cluster, keyspace, 1);
     }
@@ -62,10 +61,11 @@ public class SAIUtil
      * This checks from node1's perspective. If your test queries from multiple nodes,
      * use {@link #waitForIndexQueryable(Cluster, String, String, int)} instead.
      *
-     * @deprecated Use {@link #waitForIndexQueryable(Cluster, String, String, int)} to explicitly specify the coordinator node.
+     * @param cluster the cluster
+     * @param keyspace the keyspace name
+     * @param index the index name
      */
-    @Deprecated
-    public static void waitForIndexQueryable(Cluster cluster, String keyspace, String index)
+    public static void waitForIndexQueryableOnFirstNode(Cluster cluster, String keyspace, String index)
     {
         waitForIndexQueryable(cluster, keyspace, index, 1);
     }
