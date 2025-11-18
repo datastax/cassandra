@@ -170,6 +170,17 @@ public class SSTableIdTest
     }
 
     @Test
+    public void testULIDApproximatedTimeUUID()
+    {
+        qt().forAll(longs().all(), longs().all()).checkAssert((msb, lsb) -> {
+            ULID.Value ulid = new ULID.Value(msb, lsb);
+            ULIDBasedSSTableId id = new ULIDBasedSSTableId(ulid);
+            long rawTimestamp = TimeUUID.unixMillisToRawTimestamp(ulid.timestamp(), (10_000L * (ulid.getMostSignificantBits() & 0xFFFF)) >> 16);
+            assertThat(id.getApproximateTimeUUID()).isNotNull().isEqualTo(new TimeUUID(rawTimestamp, ulid.getLeastSignificantBits()));
+        });
+    }
+
+    @Test
     public void testComparator()
     {
         ULID ulid = new ULID();
