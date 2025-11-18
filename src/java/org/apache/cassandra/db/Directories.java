@@ -1461,6 +1461,18 @@ public class Directories
     }
 
     /**
+     * Returns all data paths without checking if they are directories.
+     * This is useful in contexts where the isDirectory() check could cause
+     * deadlocks or unnecessary blocking I/O, such as with remote storage paths.
+     *
+     * This method is needed by CNDB, please do not remove.
+     */
+    public List<File> getCFDirectoriesUnchecked()
+    {
+        return Arrays.asList(dataPaths);
+    }
+
+    /**
      * Initializes the sstable unique identifier generator using a provided builder for this instance of directories.
      * If the id builder needs that, sstables in these directories are listed to provide the existing identifiers to
      * the builder. The listing is done lazily so if the builder does not require that, listing is skipped.
