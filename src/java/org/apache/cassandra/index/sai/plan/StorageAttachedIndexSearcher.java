@@ -49,6 +49,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -87,6 +88,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
+    private Supplier<Monitorable.ExecutionInfo> executionInfoSupplier;
 
     private static final FastThreadLocal<List<PrimaryKey>> nextKeys = new FastThreadLocal<>()
     {
@@ -155,6 +157,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 FilterTree filterTree = analyzeFilter();
                 Plan plan = controller.buildPlan();
+                executionInfoSupplier = QueryMonitorableExecutionInfo.supplier(queryContext, plan);
+
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
                 // Can't check for `command.isTopK()` because the planner could optimize sorting out
@@ -198,6 +202,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 throw t;
             }
         }
+    }
+
+    @Override
+    public Supplier<Monitorable.ExecutionInfo> monitorableExecutionInfo()
+    {
+        return executionInfoSupplier;
     }
 
     /**
@@ -727,7 +737,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     {
                         // If there are no regular rows, return the static row only
                         if (!clusters.hasNext())
-                            return new PrimaryKeyIterator(partition, staticRow, null, sourceKey, syntheticScoreColumn);
+                            return new PrimaryKeyIterator(partition, staticRow, null, sourceKey, syntheticScoreColumn, controller.getOrderer());
 
                         isStaticValid = true;
                         break;
@@ -750,7 +760,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                             // We can only count the pk as processed once we know it was valid for one of the
                             // scored keys.
                             processedKeys.add(pk);
-                            return new PrimaryKeyIterator(partition, staticRow, row, sourceKey, syntheticScoreColumn);
+                            return new PrimaryKeyIterator(partition, staticRow, row, sourceKey, syntheticScoreColumn, controller.getOrderer());
                         }
                     }
                 }
@@ -781,7 +791,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                       Row staticRow,
                                       @Nullable Unfiltered content,
                                       PrimaryKeyWithSortKey primaryKeyWithSortKey,
-                                      ColumnMetadata syntheticScoreColumn)
+                                      ColumnMetadata syntheticScoreColumn,
+                                      Orderer orderer)
             {
                 super(partition.metadata(),
                       partition.partitionKey(),
@@ -809,10 +820,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 columnData.addAll(originalRow.columnData());
 
                 // inject +score as a new column
-                var pkWithScore = (PrimaryKeyWithScore) primaryKeyWithSortKey;
+                float score = ((PrimaryKeyWithScore) primaryKeyWithSortKey).getExactScore(orderer, originalRow);
                 columnData.add(BufferCell.live(syntheticScoreColumn,
                                                FBUtilities.nowInSeconds(),
-                                               FloatType.instance.decompose(pkWithScore.indexScore)));
+                                               FloatType.instance.decompose(score)));
 
                 this.row = BTreeRow.create(originalRow.clustering(),
                                            originalRow.primaryKeyLivenessInfo(),

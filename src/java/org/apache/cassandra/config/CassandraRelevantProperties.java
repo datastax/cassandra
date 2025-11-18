@@ -383,6 +383,15 @@ public enum CassandraRelevantProperties
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
+    /** Defines the interval for reporting any operations that have timed out.  */
+    SLOW_QUERY_LOG_MONITORING_REPORT_INTERVAL_IN_MS("cassandra.monitoring_report_interval_ms", "5000"),
+
+    /**
+     * Defines the maximum number of unique timed out queries that will be reported in the logs.
+     * Use a negative number to remove any limit.
+     */
+    SLOW_QUERY_LOG_MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
+
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
 
@@ -407,6 +416,12 @@ public enum CassandraRelevantProperties
     /** Controls the maximum number of expressions that will be used in a SAI intersection operation. */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
 
+    /**
+     * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
+     * This execution info includes the query metrics and the query plan of the slow queries.
+     */
+    SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
+
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
     /** Enables use of vector type. True by default. **/
@@ -423,6 +438,12 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
     // Whether compaction should build vector indexes using fused adc
     SAI_VECTOR_ENABLE_FUSED("cassandra.sai.vector.enable_fused", "true"),
+    // Use nvq when building graphs in compaction. Disabled by default for now. Enabling will reduce recall slightly
+    // while also reducing the storage footprint.
+    SAI_VECTOR_ENABLE_NVQ("cassandra.sai.vector.enable_nvq", "false"),
+    // NVQ number of subvectors. This isn't really expected to change much so we're only exposing
+    // it as a global variable in case it's needed.
+    SAI_VECTOR_NVQ_NUM_SUB_VECTORS("cassandra.sai.vector.nvq_num_sub_vectors", "2"),
     /**
      * Whether to disable auto-compaction
      */

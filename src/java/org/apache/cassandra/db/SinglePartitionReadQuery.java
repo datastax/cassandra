@@ -26,6 +26,7 @@ import com.google.common.collect.Iterables;
 
 import org.apache.commons.lang3.tuple.Pair;
 
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -156,6 +157,19 @@ public interface SinglePartitionReadQuery extends ReadQuery
             return false;
 
         return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
+    }
+
+    default void appendCQLWhereClause(CqlBuilder builder, boolean redact)
+    {
+        builder.append(" WHERE ");
+
+        // Append the partition key restrictions.
+        TableMetadata metadata = metadata();
+        builder.append(partitionKey().toCQLString(metadata, redact));
+
+        // Append the clustering index filter and the row filter.
+        String filter = clusteringIndexFilter().toCQLString(metadata(), rowFilter(), redact);
+        builder.appendRestrictions(filter, true);
     }
 
     /**

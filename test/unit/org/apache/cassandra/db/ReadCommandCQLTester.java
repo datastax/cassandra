@@ -15,18 +15,41 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.regex.Pattern;
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.cql3.CQLTester;
 import org.assertj.core.api.Assertions;
 
 public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTester
 {
+    private static final Pattern PATTERN = Pattern.compile("%");
+
     protected abstract T parseCommand(String query);
 
-    protected void assertToCQLString(String query, String expected)
+    protected void assertToCQLString(String query, String expectedUnredactedCQL, String expectedRedactedCQL)
+    {
+        assertToCQLString(query, expectedUnredactedCQL, expectedRedactedCQL, null);
+    }
+
+    protected void assertToCQLString(String query,
+                                     String expectedUnredactedCQL,
+                                     String expectedRedactedCQL,
+                                     @Nullable String expectedErrorMessage)
     {
         T command = parseCommand(query);
-        Assertions.assertThat(command.toCQLString())
-                  .isEqualTo(formatQuery(expected));
+
+        String actualUnredactedCQL = command.toUnredactedCQLString();
+        Assertions.assertThat(actualUnredactedCQL)
+                  .isEqualTo(formatQuery(expectedUnredactedCQL));
+
+        String actualRedactedCQL = command.toRedactedCQLString();
+        Assertions.assertThat(actualRedactedCQL)
+                  .isEqualTo(formatQuery(expectedRedactedCQL));
+
+        if (expectedErrorMessage == null)
+            execute(PATTERN.matcher(actualUnredactedCQL).replaceAll("%%"));
+        else
+            Assertions.assertThatThrownBy(() -> execute(actualUnredactedCQL)).hasMessageContaining(expectedErrorMessage);
     }
 }
-

@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.LongPredicate;
+import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -37,7 +38,6 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -111,6 +111,8 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     @Nullable
     protected final Index.QueryPlan indexQueryPlan;
+
+    private volatile Supplier<ExecutionInfo> executionInfoSupplier = ExecutionInfo.EMPTY_SUPPLIER;
 
     protected static abstract class SelectionDeserializer
     {
@@ -261,10 +263,10 @@ public abstract class ReadCommand extends AbstractReadQuery
      */
     public abstract boolean isSinglePartition();
 
-    @VisibleForTesting
-    public Index.Searcher indexSearcher()
+    @Override
+    public ExecutionInfo executionInfo()
     {
-        return indexQueryPlan == null ? null : indexQueryPlan.searcherFor(this);
+        return executionInfoSupplier.get();
     }
 
     /**
@@ -419,7 +421,7 @@ public abstract class ReadCommand extends AbstractReadQuery
         if (indexQueryPlan != null)
         {
             cfs.indexManager.checkQueryability(indexQueryPlan);
-            searcher = indexSearcher();
+            searcher = indexQueryPlan.searcherFor(this);
 
             // trace the index(es) used for the query
             if (Tracing.isTracing())
@@ -442,6 +444,10 @@ public abstract class ReadCommand extends AbstractReadQuery
         Context context = Context.from(this);
         var storageTarget = (null == searcher) ? queryStorage(cfs, executionController)
                                                : searchStorage(searcher, executionController);
+
+        if (searcher != null)
+            executionInfoSupplier = searcher.monitorableExecutionInfo();
+
         UnfilteredPartitionIterator iterator = Transformation.apply(storageTarget, new TrackingRowIterator(context));
         iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 
@@ -608,7 +614,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 Threshold guardrail = shouldRespectTombstoneThresholds()
                                                 ? Guardrails.scannedTombstones
                                                 : DefaultGuardrail.DefaultThreshold.NEVER_TRIGGERED;
-                return guardrail.newCounter(ReadCommand.this::toCQLString, true, null);
+                return guardrail.newCounter(ReadCommand.this::toRedactedCQLString, false, null);
             }
 
             private MetricRecording()
@@ -672,7 +678,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 {
                     metric.tombstoneFailures.inc();
                     throw new TombstoneOverwhelmingException(tombstones.get(),
-                                                             ReadCommand.this.toCQLString(),
+                                                             ReadCommand.this.toRedactedCQLString(),
                                                              ReadCommand.this.metadata(),
                                                              currentKey,
                                                              clustering);
@@ -761,8 +767,6 @@ public abstract class ReadCommand extends AbstractReadQuery
     }
 
     public abstract Verb verb();
-
-    protected abstract void appendCQLWhereClause(CqlBuilder builder);
 
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which

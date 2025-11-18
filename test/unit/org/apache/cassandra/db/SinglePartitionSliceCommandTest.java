@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -485,7 +484,7 @@ public class SinglePartitionSliceCommandTest
                                                             DataLimits.NONE,
                                                             key,
                                                             sliceFilter);
-        String ret = cmd.toCQLString();
+        String ret = cmd.toRedactedCQLString();
         Assert.assertNotNull(ret);
         assertFalse(ret.isEmpty());
     }

@@ -52,11 +52,13 @@ import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
+import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.ImmutablePQVectors;
 import io.github.jbellis.jvector.quantization.PQVectors;
+import io.github.jbellis.jvector.quantization.NVQuantization;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
@@ -102,6 +104,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.StringHelper;
 
+import static org.apache.cassandra.index.sai.disk.vector.NVQUtil.NUM_SUB_VECTORS;
+
 public class CassandraOnHeapGraph<T> implements Accountable
 {
     // Cassandra's PQ features, independent of JVector's
@@ -139,6 +143,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
     // we don't need to explicitly close these since only on-heap resources are involved
     private final ThreadLocal<GraphSearcherAccessManager> searchers;
 
+    private final boolean writeNvq;
+
     /**
      * @param forSearching if true, vectorsByKey will be initialized and populated with vectors as they are added
      */
@@ -169,6 +175,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         // Assume true until we observe otherwise.
         allVectorsAreUnitLength = true;
+
+        // NVQ is only written during compaction to save on compute costs
+        writeNvq = NVQUtil.shouldWriteNVQ(dimension, context.version()) && !forSearching;
 
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         // This is only a warning since it's not a fatal error to write without hierarchy
@@ -487,7 +496,13 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
             long postingsLength = postingsPosition - postingsOffset;
 
-            try (var indexWriter = createIndexWriter(indexFile, termsOffset, perIndexComponents.context(), ordinalMapper, compressor);
+            // Write the NVQ feature. We could compute this at insert time, but because the graph allows for parallel
+            // insertions, it would be a bit more complicated. All vectors are in memory, so the computation to build the
+            // mean vector should be pretty fast, and this path is only used when we don't have an existing
+            // ProductQuantization or when we're using BQ.
+            NVQuantization nvq = writeNvq ? NVQuantization.compute(vectorValues, NUM_SUB_VECTORS) : null;
+
+            try (var indexWriter = createIndexWriter(indexFile, termsOffset, perIndexComponents.context(), ordinalMapper, compressor, nvq);
                  var view = builder.getGraph().getView())
             {
                 indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
@@ -496,7 +511,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
                 // write the graph
                 var start = System.nanoTime();
-                indexWriter.write(suppliers(perIndexComponents.context(), view, compressor));
+                indexWriter.write(suppliers(perIndexComponents.context(), view, compressor, nvq));
                 SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
                 logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
                 long termsLength = indexWriter.getOutput().position() - termsOffset;
@@ -511,13 +526,13 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
-    private OnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, VectorCompressor<?> compressor) throws IOException
+    private OnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, VectorCompressor<?> compressor, NVQuantization nvq) throws IOException
     {
         var indexWriterBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
             .withStartOffset(termsOffset)
             .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
             .withMapper(ordinalMapper)
-            .with(new InlineVectors(vectorValues.dimension()));
+            .with(nvq != null ? new NVQ(nvq) : new InlineVectors(vectorValues.dimension()));
 
         if (ENABLE_FUSED && compressor instanceof ProductQuantization && context.version().onDiskFormat().jvectorFileFormatVersion() >= 6)
             indexWriterBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
@@ -535,10 +550,16 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return metadataMap;
     }
 
-    private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(IndexContext context, ImmutableGraphIndex.View view, VectorCompressor<?> compressor)
+    private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(IndexContext context, ImmutableGraphIndex.View view, VectorCompressor<?> compressor, NVQuantization nvq)
     {
         var features = new EnumMap<FeatureId, IntFunction<Feature.State>>(FeatureId.class);
-        features.put(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
+
+        // We either write NVQ or inline (full precision) vectors in the graph. nvq is null when it is not enabled.
+        if (nvq != null)
+            features.put(FeatureId.NVQ_VECTORS, nodeId -> new NVQ.State(nvq.encode(vectorValues.getVector(nodeId))));
+        else
+            features.put(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
+
         if (ENABLE_FUSED && context.version().onDiskFormat().jvectorFileFormatVersion() >= 6)
         {
             if (compressor instanceof ProductQuantization)
@@ -548,6 +569,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 features.put(FeatureId.FUSED_PQ, nodeId -> new FusedPQ.State(view, func, nodeId));
             }
         }
+
         return features;
     }
 

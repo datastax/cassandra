@@ -88,6 +88,21 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
      */
     public abstract int compareInclusionOf(CellPath path);
 
+    @Override
+    public String toString()
+    {
+        return toString(false, false);
+    }
+
+    /**
+     * Returns a string representation of this subselection.
+     *
+     * @param cql if true, the string representation will be in CQL format
+     * @param redact if true, the string representation will redact sensitive data
+     * @return a string representation of this subselection
+     */
+    protected abstract String toString(boolean cql, boolean redact);
+
     private static class Slice extends ColumnSubselection
     {
         private final CellPath from;
@@ -122,11 +137,13 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
         }
 
         @Override
-        public String toString()
+        protected String toString(boolean cql, boolean redact)
         {
-            // This assert we're dealing with a collection since that's the only thing it's used for so far.
+            // This asserts we're dealing with a collection since that's the only thing it's used for so far.
             AbstractType<?> type = ((CollectionType<?>)column().type).nameComparator();
-            return String.format("[%s:%s]", from == CellPath.BOTTOM ? "" : type.getString(from.get(0)), to == CellPath.TOP ? "" : type.getString(to.get(0)));
+            return String.format("[%s:%s]",
+                                 from == CellPath.BOTTOM ? "" : (cql ? type.toCQLString(from.get(0), redact) : type.getString(from.get(0))),
+                                 to == CellPath.TOP ? "" : (cql ? type.toCQLString(to.get(0), redact) : type.getString(to.get(0))));
         }
     }
 
@@ -156,11 +173,11 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
         }
 
         @Override
-        public String toString()
+        protected String toString(boolean cql, boolean redact)
         {
-            // This assert we're dealing with a collection since that's the only thing it's used for so far.
+            // This asserts we're dealing with a collection since that's the only thing it's used for so far.
             AbstractType<?> type = ((CollectionType<?>)column().type).nameComparator();
-            return String.format("[%s]", type.getString(element.get(0)));
+            return String.format("[%s]", cql ? type.toCQLString(element.get(0), redact) : type.getString(element.get(0)));
         }
     }
 
