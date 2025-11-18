@@ -61,6 +61,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
     private final CloseableReranker reranker;
     private final int topK;
     private final int limit;
+    private final boolean isScoreApproximate;
     private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     private int rerankedCount;
 
@@ -70,6 +71,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
      * @param reranker A function that takes a graph ordinal and returns the exact similarity score
      * @param limit The query limit
      * @param topK The number of vectors to resolve and score before returning results
+     * @param isScoreApproximate Whether the scores are approximate or exact
      * @param columnQueryMetrics object to record metrics
      */
     public BruteForceRowIdIterator(NodeQueue approximateScoreQueue,
@@ -77,6 +79,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
                                    CloseableReranker reranker,
                                    int limit,
                                    int topK,
+                                   boolean isScoreApproximate,
                                    ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics)
     {
         this.approximateScoreQueue = approximateScoreQueue;
@@ -86,6 +89,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
         assert topK >= limit : "topK must be greater than or equal to limit. Found: " + topK + " < " + limit;
         this.limit = limit;
         this.topK = topK;
+        this.isScoreApproximate = isScoreApproximate;
         this.columnQueryMetrics = columnQueryMetrics;
         this.rerankedCount = topK; // placeholder to kick off computeNext
     }
@@ -112,7 +116,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
 
         float score = exactScoreQueue.topScore();
         int rowId = exactScoreQueue.pop();
-        return new RowIdWithScore(rowId, score);
+        return new RowIdWithScore(rowId, score, isScoreApproximate);
     }
 
     @Override

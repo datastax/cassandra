@@ -80,6 +80,8 @@ public class V5VectorPostingsWriter<T>
          * to total rows is smaller than {@link #GLOBAL_HOLES_ALLOWED}.  Only special cases (where the row id
          * cannot be mapped to the same vector ordinal) are written; since this is a small fraction of total
          * rows, these special cases are read into memory and reads can happen without consulting disk.
+         * When this format is used, level 0 of the graph contains a node for every row id, however, the only nodes
+         * that are actually reachable are the first node for each vector.
          */
         ONE_TO_MANY,
 
