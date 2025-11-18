@@ -167,7 +167,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + orderer));
 
         int rerankK = orderer.rerankKFor(limit, graph.getCompression());
-        var queryVector = vts.createFloatVector(orderer.getVectorTerm());
+        var queryVector = orderer.getVectorTerm();
 
         var result = searchInternal(keyRange, context, queryVector, limit, rerankK, 0, orderer.usePruning());
         return toMetaSortedIterator(result, context);
@@ -306,7 +306,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             // Rerankless search, so we go straight to the NodeQueueRowIdIterator.
             var iter = segmentOrdinalPairs.mapToSegmentRowIdScoreIterator(scoreFunction);
             approximateScores.pushMany(iter, segmentOrdinalPairs.size());
-            return new NodeQueueRowIdIterator(approximateScores);
+            return new NodeQueueRowIdIterator(approximateScores, graph.usesNVQ());
         }
 
         // Store the index of the (rowId, ordinal) pair from the segmentOrdinalPairs in the NodeQueue so that we can
@@ -315,7 +315,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
         var iter = segmentOrdinalPairs.mapToIndexScoreIterator(scoreFunction);
         approximateScores.pushMany(iter, segmentOrdinalPairs.size());
         var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getView());
-        return new BruteForceRowIdIterator(approximateScores, segmentOrdinalPairs, reranker, limit, rerankK, columnQueryMetrics);
+        return new BruteForceRowIdIterator(approximateScores, segmentOrdinalPairs, reranker, limit, rerankK, graph.usesNVQ(), columnQueryMetrics);
     }
 
     /**
@@ -334,7 +334,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             var iter = segmentOrdinalPairs.mapToSegmentRowIdScoreIterator(esf);
             scoredRowIds.pushMany(iter, segmentOrdinalPairs.size());
             columnQueryMetrics.onBruteForceNodesReranked(segmentOrdinalPairs.size());
-            return new NodeQueueRowIdIterator(scoredRowIds);
+            return new NodeQueueRowIdIterator(scoredRowIds, graph.usesNVQ());
         }
     }
 
@@ -352,10 +352,11 @@ public class V2VectorIndexSearcher extends IndexSearcher
         {
             var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
             var esf = vectorsView.rerankerFor(queryVector, similarityFunction);
+            final boolean isRerankerApproximate = graph.usesNVQ();
             segmentOrdinalPairs.forEachSegmentRowIdOrdinalPair((segmentRowId, ordinal) -> {
                 var score = esf.similarityTo(ordinal);
                 if (score >= threshold)
-                    results.add(new RowIdWithScore(segmentRowId, score));
+                    results.add(new RowIdWithScore(segmentRowId, score, isRerankerApproximate));
             });
             columnQueryMetrics.onBruteForceNodesReranked(segmentOrdinalPairs.size());
         }
@@ -497,14 +498,14 @@ public class V2VectorIndexSearcher extends IndexSearcher
         if (cost.shouldUseBruteForce())
         {
             // brute force using the in-memory compressed vectors to cut down the number of results returned
-            var queryVector = vts.createFloatVector(orderer.getVectorTerm());
+            var queryVector = orderer.getVectorTerm();
             return toMetaSortedIterator(this.orderByBruteForce(queryVector, segmentOrdinalPairs, limit, rerankK), context);
         }
         // Create bits from the mapping
         var bits = bitSetForSearch();
         segmentOrdinalPairs.forEachOrdinal(bits::set);
         // else ask the index to perform a search limited to the bits we created
-        var queryVector = vts.createFloatVector(orderer.getVectorTerm());
+        var queryVector = orderer.getVectorTerm();
         var results = graph.search(queryVector, limit, rerankK, 0, orderer.usePruning(), bits, context, cost::updateStatistics);
         return toMetaSortedIterator(results, context);
     }

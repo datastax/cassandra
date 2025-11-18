@@ -49,10 +49,10 @@ public class ReorderingPostingListTest
     public void ensureIteratorIsConsumedClosedAndReordered() throws Throwable
     {
         var source = new TestIterator(Arrays.stream(new RowIdWithScore[] {
-                new RowIdWithScore(3, 3),
-                new RowIdWithScore(2, 2),
-                new RowIdWithScore(1, 1),
-                new RowIdWithScore(4, 4),
+                new RowIdWithScore(3, 3, false),
+                new RowIdWithScore(2, 2, false),
+                new RowIdWithScore(1, 1, false),
+                new RowIdWithScore(4, 4, false),
         }).iterator());
 
         try (var postingList = new ReorderingPostingList(source, RowIdWithScore::getSegmentRowId))
@@ -75,9 +75,9 @@ public class ReorderingPostingListTest
     public void ensureAdvanceWorksCorrectly() throws Throwable
     {
         var source = new TestIterator(Arrays.stream(new RowIdWithScore[] {
-        new RowIdWithScore(3, 3),
-        new RowIdWithScore(1, 1),
-        new RowIdWithScore(2, 2),
+        new RowIdWithScore(3, 3, false),
+        new RowIdWithScore(1, 1, false),
+        new RowIdWithScore(2, 2, false),
         }).iterator());
 
         try (var postingList = new ReorderingPostingList(source, RowIdWithScore::getSegmentRowId))

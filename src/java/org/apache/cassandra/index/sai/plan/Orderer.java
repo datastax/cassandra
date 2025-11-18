@@ -29,6 +29,9 @@ import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -47,6 +50,8 @@ import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_USE_
  */
 public class Orderer
 {
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
     // The list of operators that are valid for order by clauses.
     static final EnumSet<Operator> ORDER_BY_OPERATORS = EnumSet.of(Operator.ANN,
                                                                    Operator.BM25,
@@ -58,7 +63,8 @@ public class Orderer
     public final ByteBuffer term;
 
     // Vector search parameters
-    private float[] vector;
+    private float[] rawVector;
+    private VectorFloat<?> vector;
     private final ANNOptions annOptions;
 
     // BM25 search parameter
@@ -168,17 +174,32 @@ public class Orderer
         String direction = isAscending() ? "ASC" : "DESC";
         String annOptionsString = annOptions != null ? annOptions.toCQLString() : "";
         if (isANN())
-            return context.getColumnName() + " ANN OF " + Arrays.toString(getVectorTerm()) + ' ' + direction + annOptionsString;
+            return context.getColumnName() + " ANN OF " + Arrays.toString(getRawVectorTerm()) + ' ' + direction + annOptionsString;
         if (isBM25())
             return context.getColumnName() + " BM25 OF " + TypeUtil.getString(term, context.getValidator()) + ' ' + direction;
         return context.getColumnName() + ' ' + direction;
     }
 
-    public float[] getVectorTerm()
+    public VectorFloat<?> getVectorTerm()
     {
         if (vector == null)
-            vector = TypeUtil.decomposeVector(context.getValidator(), term);
+            vector = vts.createFloatVector(getRawVectorTerm());
         return vector;
+    }
+
+    private float[] getRawVectorTerm()
+    {
+        if (rawVector == null)
+            rawVector = TypeUtil.decomposeVector(context.getValidator(), term);
+        return rawVector;
+    }
+
+    public float score(ByteBuffer otherVector)
+    {
+        if (!context.isVector())
+            throw new IllegalStateException("Cannot score non-vector index");
+        var floatVector = vts.createFloatVector(TypeUtil.decomposeVector(context.getValidator(), otherVector));
+        return context.getIndexWriterConfig().getSimilarityFunction().compare(getVectorTerm(), floatVector);
     }
 
     public List<ByteBuffer> getQueryTerms()
