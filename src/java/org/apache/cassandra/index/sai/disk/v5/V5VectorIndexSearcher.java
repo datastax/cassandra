@@ -41,6 +41,6 @@ public class V5VectorIndexSearcher extends V2VectorIndexSearcher
               perIndexFiles,
               segmentMetadata,
               indexContext,
-              new CassandraDiskAnn(sstableContext, segmentMetadata.componentMetadatas, perIndexFiles, indexContext, V5OnDiskOrdinalsMap::new));
+              new CassandraDiskAnn(sstableContext, segmentMetadata, perIndexFiles, indexContext, V5OnDiskOrdinalsMap::new));
     }
 }
