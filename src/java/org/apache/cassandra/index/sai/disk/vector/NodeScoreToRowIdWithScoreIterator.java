@@ -36,15 +36,18 @@ public class NodeScoreToRowIdWithScoreIterator extends AbstractIterator<RowIdWit
 {
     private final CloseableIterator<SearchResult.NodeScore> nodeScores;
     private final RowIdsView rowIdsView;
+    private final boolean isScoreApproximate;
 
     private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
     private float currentScore;
 
     public NodeScoreToRowIdWithScoreIterator(CloseableIterator<SearchResult.NodeScore> nodeScores,
-                                             RowIdsView rowIdsView)
+                                             RowIdsView rowIdsView,
+                                             boolean isScoreApproximate)
     {
         this.nodeScores = nodeScores;
         this.rowIdsView = rowIdsView;
+        this.isScoreApproximate = isScoreApproximate;
     }
 
     @Override
@@ -53,7 +56,7 @@ public class NodeScoreToRowIdWithScoreIterator extends AbstractIterator<RowIdWit
         try
         {
             if (segmentRowIdIterator.hasNext())
-                return new RowIdWithScore(segmentRowIdIterator.nextInt(), currentScore);
+                return new RowIdWithScore(segmentRowIdIterator.nextInt(), currentScore, isScoreApproximate);
 
             while (nodeScores.hasNext())
             {
@@ -62,7 +65,7 @@ public class NodeScoreToRowIdWithScoreIterator extends AbstractIterator<RowIdWit
                 var ordinal = result.node;
                 segmentRowIdIterator = rowIdsView.getSegmentRowIdsMatching(ordinal);
                 if (segmentRowIdIterator.hasNext())
-                    return new RowIdWithScore(segmentRowIdIterator.nextInt(), currentScore);
+                    return new RowIdWithScore(segmentRowIdIterator.nextInt(), currentScore, isScoreApproximate);
             }
             return endOfData();
         }
