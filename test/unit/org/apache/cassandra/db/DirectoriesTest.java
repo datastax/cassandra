@@ -329,6 +329,53 @@ public class DirectoriesTest
     }
 
     @Test
+    public void testGetCFDirectoriesUnchecked()
+    {
+        for (TableMetadata cfm : CFM)
+        {
+            Directories directories = new Directories(cfm, toDataDirectories(tempDataDir));
+
+            // getCFDirectoriesUnchecked should return all paths without checking if they're directories
+            List<File> uncheckedDirs = directories.getCFDirectoriesUnchecked();
+            assertFalse(uncheckedDirs.isEmpty());
+            assertEquals(1, uncheckedDirs.size());
+
+            // The unchecked method should include the directory
+            assertTrue(uncheckedDirs.contains(cfDir(cfm)));
+
+            // getCFDirectories should also return the same for valid directories
+            List<File> checkedDirs = directories.getCFDirectories();
+            assertEquals(uncheckedDirs.size(), checkedDirs.size());
+            assertEquals(uncheckedDirs, checkedDirs);
+        }
+    }
+
+    @Test
+    public void testGetCFDirectoriesUncheckedWithNonExistentPaths() throws IOException
+    {
+        // Create a temporary directory that doesn't exist
+        Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
+        File nonExistentDir = new File(tmpDir.resolve("nonexistent").resolve("ks").resolve("cf-123"));
+
+        TableMetadata cfm = CFM.iterator().next();
+
+        // Create DataDirectory pointing to non-existent location
+        DataDirectory[] dataDirs = new DataDirectory[] { new DataDirectory(nonExistentDir.parent().parent()) };
+        Directories directories = new Directories(cfm, dataDirs);
+
+        // getCFDirectoriesUnchecked should return the path even if it doesn't exist
+        List<File> uncheckedDirs = directories.getCFDirectoriesUnchecked();
+        assertFalse(uncheckedDirs.isEmpty());
+
+        // getCFDirectories should filter out non-directories (returns empty list)
+        List<File> checkedDirs = directories.getCFDirectories();
+
+        // The unchecked version should have at least as many (or more) entries than the checked version
+        // since it doesn't filter out non-existent paths
+        assertTrue(uncheckedDirs.size() >= checkedDirs.size());
+    }
+
+    @Test
     public void testListSnapshots() throws Exception {
         // Initial state
         TableMetadata fakeTable = createFakeTable(TABLE_NAME);
