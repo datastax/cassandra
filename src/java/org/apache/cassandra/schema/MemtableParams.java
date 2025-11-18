@@ -74,8 +74,9 @@ public final class MemtableParams
      * This is used when outputting schema in a format compatible with CC 4.0.
      *
      * CC 4.0 accepts both short class names (e.g., 'TrieMemtable') and fully qualified names
-     * (e.g., 'org.apache.cassandra.db.memtable.TrieMemtable'), but using short names is preferred
-     * for consistency and readability.
+     * (e.g., 'org.apache.cassandra.db.memtable.TrieMemtable'). For standard Cassandra memtables
+     * in the org.apache.cassandra.db.memtable package, we use short names and for custom memtables
+     * from other packages, we preserve the fully qualified class name.
      */
     public Map<String, String> toMapForCC4()
     {
@@ -84,10 +85,13 @@ public final class MemtableParams
         {
             Map<String, String> map = new HashMap<>();
             String className = definition.class_name;
-            String shortClassName = className.contains(".")
-                                    ? className.substring(className.lastIndexOf('.') + 1)
-                                    : className;
-            map.put("class", shortClassName);
+
+            if (className.startsWith("org.apache.cassandra.db.memtable."))
+            {
+                className = className.substring("org.apache.cassandra.db.memtable.".length());
+            }
+
+            map.put("class", className);
             if (definition.parameters != null)
                 map.putAll(definition.parameters);
             return map;
