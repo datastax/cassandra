@@ -75,6 +75,7 @@ public class CassandraDiskAnn
     private final OnDiskOrdinalsMap ordinalsMap;
     private final Set<FeatureId> features;
     private final ImmutableGraphIndex graph;
+    private final boolean usesNVQ;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -85,10 +86,10 @@ public class CassandraDiskAnn
 
     private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
-    public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
+    public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata segmentMetadata, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
     {
         this.source = sstableContext.sstable().getId();
-        this.componentMetadatas = componentMetadatas;
+        this.componentMetadatas = segmentMetadata.componentMetadatas;
         this.indexFiles = indexFiles;
         this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) context.getColumnQueryMetrics();
 
@@ -99,6 +100,11 @@ public class CassandraDiskAnn
         var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
         features = rawGraph.getFeatureSet();
         graph = rawGraph;
+        usesNVQ = features.contains(FeatureId.NVQ_VECTORS);
+
+        // This is helpful for understanding what features are enabled for a given index. Features is an EnumSet
+        // so the toString() method will print all the enabled features.
+        logger.debug("Opened graph for {} for sstable row id offset {} with {} features", source, segmentMetadata.segmentRowIdOffset, features);
 
         long pqSegmentOffset = this.componentMetadatas.get(IndexComponentType.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -126,7 +132,7 @@ public class CassandraDiskAnn
                 // don't load full PQVectors, all we need is the metadata from the PQ at the start
                 pq = ProductQuantization.load(reader);
                 compression = new VectorCompression(VectorCompression.CompressionType.PRODUCT_QUANTIZATION,
-                                                    rawGraph.getDimension() * Float.BYTES,
+                                                    graph.getDimension() * Float.BYTES,
                                                     pq.compressedVectorSize());
             }
             else
@@ -274,12 +280,12 @@ public class CassandraDiskAnn
                 graphAccessManager.release();
                 nodesVisitedConsumer.accept(result.getVisitedCount());
                 var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
-                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
+                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView(), usesNVQ);
             }
             else
             {
                 var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context, columnQueryMetrics, nodesVisitedConsumer, limit, rerankK, false, source.toString());
-                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
+                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView(), usesNVQ);
             }
         }
         catch (Throwable t)
@@ -316,6 +322,11 @@ public class CassandraDiskAnn
     public ImmutableGraphIndex.ScoringView getView()
     {
         return (ImmutableGraphIndex.ScoringView) graph.getView();
+    }
+
+    public boolean usesNVQ()
+    {
+        return usesNVQ;
     }
 
     public boolean containsUnitVectors()

@@ -26,10 +26,12 @@ import org.apache.cassandra.utils.AbstractIterator;
 public class NodeQueueRowIdIterator extends AbstractIterator<RowIdWithScore>
 {
     private final NodeQueue scoreQueue;
+    private final boolean isScoreApproximate;
 
-    public NodeQueueRowIdIterator(NodeQueue scoreQueue)
+    public NodeQueueRowIdIterator(NodeQueue scoreQueue, boolean isScoreApproximate)
     {
         this.scoreQueue = scoreQueue;
+        this.isScoreApproximate = isScoreApproximate;
     }
 
     @Override
@@ -39,6 +41,6 @@ public class NodeQueueRowIdIterator extends AbstractIterator<RowIdWithScore>
             return endOfData();
         float score = scoreQueue.topScore();
         int rowId = scoreQueue.pop();
-        return new RowIdWithScore(rowId, score);
+        return new RowIdWithScore(rowId, score, isScoreApproximate);
     }
 }

@@ -55,7 +55,7 @@ public class BruteForceRowIdIteratorTest
         var view = new TestView();
         CloseableReranker reranker = new CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
         var metrics = new ColumnQueryMetrics.VectorIndexMetrics("ks", "cf", "index");
-        var iter = new BruteForceRowIdIterator(heap, new SegmentRowIdOrdinalPairs(10), reranker, limit, topK, metrics);
+        var iter = new BruteForceRowIdIterator(heap, new SegmentRowIdOrdinalPairs(10), reranker, limit, topK, false, metrics);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
         assertFalse(view.isClosed);
