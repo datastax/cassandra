@@ -377,7 +377,8 @@ public class InvertedIndexSearcher extends IndexSearcher
         {
             // We can eagerly get the token now, even though it might not technically be required until we know
             // we have the best score. (Perhaps this should be lazy too?)
-            return new PrimaryKeyWithScore(context, source, pkm.primaryKeyFromRowId(sstableRowId), score);
+            // BM25 scores are exact.
+            return new PrimaryKeyWithScore(context, source, pkm.primaryKeyFromRowId(sstableRowId), score, false);
         }
     }
 }
