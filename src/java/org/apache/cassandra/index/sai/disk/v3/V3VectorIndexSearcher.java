@@ -41,6 +41,6 @@ public class V3VectorIndexSearcher extends V2VectorIndexSearcher
               perIndexFiles,
               segmentMetadata,
               indexContext,
-              new CassandraDiskAnn(sstableContext, segmentMetadata.componentMetadatas, perIndexFiles, indexContext, V2OnDiskOrdinalsMap::new));
+              new CassandraDiskAnn(sstableContext, segmentMetadata, perIndexFiles, indexContext, V2OnDiskOrdinalsMap::new));
     }
 }

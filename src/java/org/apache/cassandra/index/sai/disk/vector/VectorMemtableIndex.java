@@ -239,7 +239,7 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
         assert slice == null : "ANN does not support index slicing";
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
-        var qv = vts.createFloatVector(orderer.getVectorTerm());
+        var qv = orderer.getVectorTerm();
         var rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
 
         return List.of(searchInternal(context, qv, keyRange, limit, rerankK, 0, orderer.usePruning()));
@@ -341,7 +341,7 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
                             relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), rerankK);
 
         // convert the expression value to query vector
-        var qv = vts.createFloatVector(orderer.getVectorTerm());
+        var qv = orderer.getVectorTerm();
         // brute force path
         if (keysInGraph.size() <= maxBruteForceRows)
         {
