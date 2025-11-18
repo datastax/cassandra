@@ -41,6 +41,8 @@ import static org.awaitility.Awaitility.await;
 
 public class SAIUtil
 {
+    private static final long INDEX_BUILD_TIMEOUT_SECONDS = 60;
+
     /**
      * Waits until all indexes in the given keyspace become queryable.
      * This checks from node1's perspective. If your test queries from multiple nodes,
@@ -84,7 +86,7 @@ public class SAIUtil
     {
         assertGossipEnabled(cluster);
         final List<String> indexes = getIndexes(cluster, keyspace);
-        await().atMost(60, TimeUnit.SECONDS)
+        await().atMost(INDEX_BUILD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                .untilAsserted(() -> assertIndexesQueryable(cluster, keyspace, indexes, coordinatorNode));
     }
 
@@ -99,7 +101,7 @@ public class SAIUtil
     public static void waitForIndexQueryable(Cluster cluster, String keyspace, String index, int coordinatorNode)
     {
         assertGossipEnabled(cluster);
-        await().atMost(60, TimeUnit.SECONDS)
+        await().atMost(INDEX_BUILD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                .untilAsserted(() -> assertIndexQueryable(cluster, keyspace, index, coordinatorNode));
     }
 
@@ -119,7 +121,7 @@ public class SAIUtil
         for (int nodeNum = 1; nodeNum <= cluster.size(); nodeNum++)
         {
             final int node = nodeNum;
-            await().atMost(60, TimeUnit.SECONDS)
+            await().atMost(INDEX_BUILD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                    .untilAsserted(() -> assertIndexesQueryable(cluster, keyspace, indexes, node));
         }
     }
@@ -190,7 +192,7 @@ public class SAIUtil
 
     public static void waitForSchemaAgreement(Cluster cluster)
     {
-        await().atMost(60, TimeUnit.SECONDS)
+        await().atMost(INDEX_BUILD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                .until(() -> schemaAgrees(cluster));
     }
 
