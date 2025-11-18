@@ -58,6 +58,14 @@ public final class ULIDBasedSSTableId implements SSTableId<ULIDBasedSSTableId>
         return new TimeUUID(rawTimestamp, ulid.getLeastSignificantBits());
     }
 
+    /**
+     * @return approvimated {@link TimeUUID} based on ulid
+     */
+    public TimeUUID getApproximateTimeUUID()
+    {
+        return approximateTimeUUID;
+    }
+
     @Override
     public ByteBuffer asBytes()
     {
