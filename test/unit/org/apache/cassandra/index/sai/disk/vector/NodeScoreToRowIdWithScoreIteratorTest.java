@@ -38,7 +38,7 @@ public class NodeScoreToRowIdWithScoreIteratorTest
     public void testEmptyIterator()
     {
         var rowIdsView = new CustomRowIdsView();
-        var iter = new NodeScoreToRowIdWithScoreIterator(CloseableIterator.emptyIterator(), rowIdsView);
+        var iter = new NodeScoreToRowIdWithScoreIterator(CloseableIterator.emptyIterator(), rowIdsView, false);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
         assertFalse(rowIdsView.isClosed);
@@ -52,7 +52,7 @@ public class NodeScoreToRowIdWithScoreIteratorTest
         var rowIdsView = new CustomRowIdsView();
         // Note that the score is ignored at this stage because NodeScores are assumed to be in order
         var nodeScores = IntStream.range(0, 3).mapToObj(i -> new SearchResult.NodeScore(i, 1f)).iterator();
-        var iter = new NodeScoreToRowIdWithScoreIterator(CloseableIterator.wrap(nodeScores), rowIdsView);
+        var iter = new NodeScoreToRowIdWithScoreIterator(CloseableIterator.wrap(nodeScores), rowIdsView, false);
 
         assertTrue(iter.hasNext());
         // See CustomRowIdsView for the mapping
