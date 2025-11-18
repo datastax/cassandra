@@ -183,26 +183,38 @@ public final class TableAttributes extends PropertyDefinitions
                              .map(Map.Entry::getValue)
                              .findFirst()
                              .orElse(null);
-                // Extract short class name if fully qualified (e.g., "org.apache.cassandra.db.memtable.TrieMemtable" -> "TrieMemtable")
-                String shortClassName = memtableClass != null && memtableClass.contains(".")
-                                        ? memtableClass.substring(memtableClass.lastIndexOf('.') + 1)
-                                        : memtableClass;
 
-                if (shortClassName == null)
+                if (memtableClass == null)
+                {
                     builder.memtable(MemtableParams.get(null));
-                else if ("SkipListMemtable".equalsIgnoreCase(shortClassName))
-                    builder.memtable(MemtableParams.get("skiplist"));
-                else if ("PersistentMemoryMemtable".equalsIgnoreCase(shortClassName))
-                    builder.memtable(MemtableParams.get("persistent_memory"));
-                else if ("TrieMemtable".equalsIgnoreCase(shortClassName))
-                    builder.memtable(MemtableParams.get("trie"));
-                else if ("TrieMemtableStage1".equalsIgnoreCase(shortClassName))
-                    builder.memtable(MemtableParams.get("trie"));
-                else if ("ShardedSkipListMemtable".equalsIgnoreCase(shortClassName))
-                    builder.memtable(MemtableParams.get("skiplist_sharded"));
+                }
+                // Only process as a known memtable if it's in the standard package or is a short name (no package qualifier)
+                else if (memtableClass.startsWith("org.apache.cassandra.db.memtable.") || !memtableClass.contains("."))
+                {
+                    // Extract short class name for comparison against known types
+                    String shortClassName = memtableClass.contains(".")
+                                            ? memtableClass.substring(memtableClass.lastIndexOf('.') + 1)
+                                            : memtableClass;
+
+                    if ("SkipListMemtable".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("skiplist"));
+                    else if ("PersistentMemoryMemtable".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("persistent_memory"));
+                    else if ("TrieMemtable".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("trie"));
+                    else if ("TrieMemtableStage1".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("trie"));
+                    else if ("ShardedSkipListMemtable".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("skiplist_sharded"));
+                    else
+                        // Unknown short name or unknown class in standard package - use as configuration key
+                        builder.memtable(MemtableParams.get(shortClassName));
+                }
                 else
-                    // Default to trie for unknown memtable types
-                    builder.memtable(MemtableParams.get("trie"));
+                {
+                    // Custom fully qualified class name from a different package.
+                    builder.memtable(MemtableParams.get(memtableClass));
+                }
             }
             else
                 builder.memtable(MemtableParams.get(getString(MEMTABLE)));

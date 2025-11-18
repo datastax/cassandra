@@ -824,10 +824,62 @@ public class SchemaCQLHelperTest extends CQLTester
         ColumnFamilyStore cfs4 = Keyspace.open(keyspace).getColumnFamilyStore(tableName4);
         Assertions.assertThat(cfs4.metadata().params.memtable.configurationKey()).isEqualTo("skiplist");
 
-        // Test parsing CC 4.0 format with empty map (default)
-        String tableName5 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {}");
+        // Test parsing CC 4.0 format with PersistentMemoryMemtable (short name)
+        String tableName5 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'PersistentMemoryMemtable'}");
         ColumnFamilyStore cfs5 = Keyspace.open(keyspace).getColumnFamilyStore(tableName5);
+        Assertions.assertThat(cfs5.metadata().params.memtable.configurationKey()).isEqualTo("persistent_memory");
+
+        // Test parsing CC 4.0 format with PersistentMemoryMemtable (fully qualified)
+        String tableName6 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.PersistentMemoryMemtable'}");
+        ColumnFamilyStore cfs6 = Keyspace.open(keyspace).getColumnFamilyStore(tableName6);
+        Assertions.assertThat(cfs6.metadata().params.memtable.configurationKey()).isEqualTo("persistent_memory");
+
+        // Test parsing CC 4.0 format with TrieMemtableStage1 (legacy class)
+        String tableName7 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'TrieMemtableStage1'}");
+        ColumnFamilyStore cfs7 = Keyspace.open(keyspace).getColumnFamilyStore(tableName7);
+        Assertions.assertThat(cfs7.metadata().params.memtable.configurationKey()).isEqualTo("trie");
+
+        // Test parsing CC 4.0 format with ShardedSkipListMemtable (short name)
+        String tableName8 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'ShardedSkipListMemtable'}");
+        ColumnFamilyStore cfs8 = Keyspace.open(keyspace).getColumnFamilyStore(tableName8);
+        Assertions.assertThat(cfs8.metadata().params.memtable.configurationKey()).isEqualTo("skiplist_sharded");
+
+        // Test parsing CC 4.0 format with empty map (default)
+        String tableName9 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {}");
+        ColumnFamilyStore cfs9 = Keyspace.open(keyspace).getColumnFamilyStore(tableName9);
         // Empty map should use default memtable
-        Assertions.assertThat(cfs5.metadata().params.memtable).isNotNull();
+        Assertions.assertThat(cfs9.metadata().params.memtable).isNotNull();
+    }
+
+    @Test
+    public void testParseCc40MemtableFormatWithUnknownClass()
+    {
+        String keyspace = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+
+        // Test parsing CC 4.0 format with unknown short class name (not in cassandra.yaml)
+        // This should throw ConfigurationException because the configuration key doesn't exist
+        try
+        {
+            createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'UnknownMemtable'}");
+            fail("Expected ConfigurationException for unknown memtable class");
+        }
+        catch (RuntimeException e)
+        {
+            assertThat(e.getCause(), instanceOf(ConfigurationException.class));
+            assertThat(e.getCause().getMessage(), containsString("Memtable configuration \"UnknownMemtable\" not found"));
+        }
+
+        // Test parsing CC 4.0 format with custom fully qualified class name from different package
+        // This should also throw ConfigurationException because it's not configured in cassandra.yaml
+        try
+        {
+            createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'com.example.CustomMemtable'}");
+            fail("Expected ConfigurationException for unconfigured custom memtable class");
+        }
+        catch (RuntimeException e)
+        {
+            assertThat(e.getCause(), instanceOf(ConfigurationException.class));
+            assertThat(e.getCause().getMessage(), containsString("Memtable configuration \"com.example.CustomMemtable\" not found"));
+        }
     }
 }
