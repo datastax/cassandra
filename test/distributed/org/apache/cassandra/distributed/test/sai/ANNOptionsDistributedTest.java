@@ -96,7 +96,7 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
     {
         cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (k int PRIMARY KEY, n int, v vector<float, 2>)"));
         cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t(v) USING 'StorageAttachedIndex'"));
-        // Wait for index to be queryable on all nodes since test queries from all coordinators (lines 104-119)
+        // Wait for index to be queryable on all nodes since test queries from all coordinators
         SAIUtil.waitForIndexQueryableOnAllNodes(cluster, KEYSPACE);
 
         String selectRerankk = withKeyspace("SELECT * FROM %s.t ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 10}");
