@@ -278,9 +278,6 @@ public class TableQueryMetrics
         public final Histogram kdTreePostingsSkips;
         public final Histogram kdTreePostingsDecodes;
 
-        /** Shadowed keys scan metrics **/
-        public final Histogram shadowedKeysScannedHistogram;
-
         /**
          * Trie index posting lists metrics.
          */
@@ -318,8 +315,6 @@ public class TableQueryMetrics
 
             postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
             postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
-
-            shadowedKeysScannedHistogram = Metrics.histogram(createMetricName("ShadowedKeysScannedHistogram"), false);
 
             // Key vector metrics that translate to performance
             annGraphSearchLatency = Metrics.timer(createMetricName("ANNGraphSearchLatency"));
@@ -361,8 +356,6 @@ public class TableQueryMetrics
             {
                 annGraphSearchLatency.update(snapshot.annGraphSearchLatency, TimeUnit.NANOSECONDS);
             }
-
-            shadowedKeysScannedHistogram.update(snapshot.shadowedPrimaryKeyCount);
         }
     }
 }

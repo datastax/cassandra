@@ -83,8 +83,6 @@ public class QueryContext
 
     private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
-    private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
-
     // Determines the order of using indexes for filtering and sorting.
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
@@ -296,19 +294,6 @@ public class QueryContext
         }
     }
 
-    public void addShadowed(long count)
-    {
-        shadowedPrimaryKeyCount.add(count);
-    }
-
-    /**
-     * @return shadowed primary keys, in ascending order
-     */
-    public long getShadowedPrimaryKeyCount()
-    {
-        return shadowedPrimaryKeyCount.longValue();
-    }
-
     public float getAnnRerankFloor()
     {
         return annRerankFloor;
@@ -366,7 +351,6 @@ public class QueryContext
         public final long triePostingsDecodes;
         public final long queryTimeouts;
         public final long annGraphSearchLatency;
-        public final long shadowedPrimaryKeyCount;
         public final FilterSortOrder filterSortOrder;
 
         /**
@@ -394,7 +378,6 @@ public class QueryContext
             triePostingsDecodes = context.triePostingsDecodes();
             queryTimeouts = context.queryTimeouts();
             annGraphSearchLatency = context.annGraphSearchLatency();
-            shadowedPrimaryKeyCount = context.getShadowedPrimaryKeyCount();
             filterSortOrder = context.filterSortOrder();
         }
     }

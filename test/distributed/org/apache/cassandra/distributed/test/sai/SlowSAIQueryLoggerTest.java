@@ -107,7 +107,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount",
                               "SAI slow query plan:",
                               "NumericIndexScan");
 
@@ -133,7 +132,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount",
                               "SAI slowest query plan:",
                               "NumericIndexScan");
 
@@ -159,7 +157,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 2",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount: 0",
                               "SAI slow query plan:",
                               "LiteralIndexScan");
 
@@ -185,7 +182,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 2",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount: 0",
                               "SAI slowest query plan:",
                               "LiteralIndexScan");
 
@@ -211,7 +207,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
-                              "shadowedPrimaryKeyCount: 0",
                               "SAI slow query plan:",
                               "AnnIndexScan");
 
@@ -237,7 +232,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
-                              "shadowedPrimaryKeyCount: 0",
                               "SAI slowest query plan:",
                               "AnnIndexScan");
 
@@ -263,7 +257,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount: 1",
                               "SAI slow query plan:",
                               "LiteralIndexScan");
 
@@ -289,7 +282,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount: 1",
                               "SAI slowest query plan:",
                               "LiteralIndexScan");
 
@@ -315,7 +307,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                     "triePostingsSkips: 0",
                     "triePostingsDecodes: 0",
                     "annGraphSearchLatencyNanos: 0",
-                    "shadowedPrimaryKeyCount: 0",
                     "SAI slow query plan:",
                     "KeysSort",
                     "NumericIndexScan");

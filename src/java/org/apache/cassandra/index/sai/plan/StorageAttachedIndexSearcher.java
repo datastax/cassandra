@@ -526,7 +526,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             UnfilteredRowIterator counted = fetchedRowsCounter.apply(partition);
             queryContext.addKeysFetched(keys.size());
             queryContext.checkpoint();
-            return applyIndexFilter(counted, filterTree, queryContext);
+            return applyIndexFilter(counted, filterTree);
         }
 
         @Override
@@ -740,7 +740,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 queryContext.checkpoint();
 
                 UnfilteredRowIterator counted = fetchedRowsCounter.apply(partition);
-                UnfilteredRowIterator clusters = applyIndexFilter(counted, filterTree, queryContext);
+                UnfilteredRowIterator clusters = applyIndexFilter(counted, filterTree);
 
                 if (clusters == null)
                     return null;
@@ -864,13 +864,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
     }
 
-    private static UnfilteredRowIterator applyIndexFilter(UnfilteredRowIterator partition, FilterTree tree, QueryContext queryContext)
+    private static UnfilteredRowIterator applyIndexFilter(UnfilteredRowIterator partition, FilterTree tree)
     {
         FilteringPartitionIterator filtered = new FilteringPartitionIterator(partition, tree);
         if (!filtered.hasNext() && !filtered.matchesStaticRow())
         {
             // shadowed by expired TTL or row tombstone or range tombstone
-            queryContext.addShadowed(1);
             filtered.close();
             return null;
         }

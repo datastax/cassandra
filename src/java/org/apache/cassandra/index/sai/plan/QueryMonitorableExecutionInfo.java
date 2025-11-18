@@ -86,7 +86,6 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
         appendMetric(sb, "triePostingsSkips", metrics.triePostingsSkips);
         appendMetric(sb, "triePostingsDecodes", metrics.triePostingsDecodes);
         appendMetric(sb, "annGraphSearchLatencyNanos", metrics.annGraphSearchLatency);
-        appendMetric(sb, "shadowedPrimaryKeyCount", metrics.shadowedPrimaryKeyCount);
 
         // append the plan
         sb.append(sectionNamePrefix).append("plan:\n").append(plan);
