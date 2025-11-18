@@ -121,9 +121,9 @@ public class TableQueryMetrics
                               "post-filtered {} in {}, and took {} microseconds.",
                               pluralize(snapshot.sstablesHit, "SSTable index", "es"),
                               pluralize(snapshot.segmentsHit, "segment", "s"),
-                              pluralize(snapshot.rowsPreFiltered, "row", "s"),
-                              pluralize(snapshot.rowsFiltered, "row", "s"),
-                              pluralize(snapshot.partitionsRead, "partition", "s"),
+                              pluralize(snapshot.rowsFetched, "row", "s"),
+                              pluralize(snapshot.rowsReturned, "row", "s"),
+                              pluralize(snapshot.partitionsReturned, "partition", "s"),
                               queryLatencyMicros);
             }
             else
@@ -132,8 +132,8 @@ public class TableQueryMetrics
                               "and took {} microseconds.",
                               pluralize(snapshot.sstablesHit, "SSTable index", "es"),
                               pluralize(snapshot.segmentsHit, "segment", "s"),
-                              pluralize(snapshot.rowsFiltered, "row", "s"),
-                              pluralize(snapshot.partitionsRead, "partition", "s"),
+                              pluralize(snapshot.rowsReturned, "row", "s"),
+                              pluralize(snapshot.partitionsReturned, "partition", "s"),
                               queryLatencyMicros);
             }
         }
@@ -190,8 +190,12 @@ public class TableQueryMetrics
         public static final String METRIC_TYPE = "TableQueryMetrics";
 
         public final Counter totalQueryTimeouts;
-        public final Counter totalPartitionReads;
-        public final Counter totalRowsFiltered;
+        public final Counter totalKeysFetched;
+        public final Counter totalPartitionsFetched;
+        public final Counter totalPartitionsReturned;
+        public final Counter totalRowsFetched;
+        public final Counter totalRowsReturned;
+        public final Counter totalTombstonesFetched;
         public final Counter totalQueriesCompleted;
 
         public final Counter sortThenFilterQueriesCompleted;
@@ -206,8 +210,12 @@ public class TableQueryMetrics
         {
             super(table.keyspace, table.name, METRIC_TYPE, queryKind, filter);
 
-            totalPartitionReads = Metrics.counter(createMetricName("TotalPartitionReads"));
-            totalRowsFiltered = Metrics.counter(createMetricName("TotalRowsFiltered"));
+            totalKeysFetched = Metrics.counter(createMetricName("TotalKeysFetched"));
+            totalPartitionsFetched = Metrics.counter(createMetricName("TotalPartitionsFetched"));
+            totalPartitionsReturned = Metrics.counter(createMetricName("TotalPartitionsReturned"));
+            totalRowsFetched = Metrics.counter(createMetricName("TotalRowsFetched"));
+            totalRowsReturned = Metrics.counter(createMetricName("TotalRowsReturned"));
+            totalTombstonesFetched = Metrics.counter(createMetricName("TotalTombstonesFetched"));
             totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
             totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
 
@@ -225,8 +233,12 @@ public class TableQueryMetrics
             }
 
             totalQueriesCompleted.inc();
-            totalPartitionReads.inc(snapshot.partitionsRead);
-            totalRowsFiltered.inc(snapshot.rowsFiltered);
+            totalKeysFetched.inc(snapshot.keysFetched);
+            totalPartitionsFetched.inc(snapshot.partitionsFetched);
+            totalPartitionsReturned.inc(snapshot.partitionsReturned);
+            totalRowsFetched.inc(snapshot.rowsFetched);
+            totalRowsReturned.inc(snapshot.rowsReturned);
+            totalTombstonesFetched.inc(snapshot.tombstonesFetched);
 
             if (snapshot.filterSortOrder == QueryContext.FilterSortOrder.SCAN_THEN_FILTER)
                 sortThenFilterQueriesCompleted.inc();
@@ -249,8 +261,12 @@ public class TableQueryMetrics
          */
         public final Histogram sstablesHit;
         public final Histogram segmentsHit;
-        public final Histogram partitionReads;
-        public final Histogram rowsFiltered;
+        public final Histogram keysFetched;
+        public final Histogram partitionsFetched;
+        public final Histogram partitionsReturned;
+        public final Histogram rowsFetched;
+        public final Histogram rowsReturned;
+        public final Histogram tombstonesFetched;
 
         /**
          * BKD index metrics.
@@ -289,6 +305,12 @@ public class TableQueryMetrics
 
             sstablesHit = Metrics.histogram(createMetricName("SSTableIndexesHit"), false);
             segmentsHit = Metrics.histogram(createMetricName("IndexSegmentsHit"), false);
+            keysFetched = Metrics.histogram(createMetricName("KeysFetched"), false);
+            partitionsFetched = Metrics.histogram(createMetricName("PartitionsFetched"), false);
+            partitionsReturned = Metrics.histogram(createMetricName("PartitionsReturned"), false);
+            rowsFetched = Metrics.histogram(createMetricName("RowsFetched"), false);
+            rowsReturned = Metrics.histogram(createMetricName("RowsReturned"), false);
+            tombstonesFetched = Metrics.histogram(createMetricName("TombstonesFetched"), false);
 
             kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), true);
             kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
@@ -296,9 +318,6 @@ public class TableQueryMetrics
 
             postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
             postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
-
-            partitionReads = Metrics.histogram(createMetricName("PartitionReads"), false);
-            rowsFiltered = Metrics.histogram(createMetricName("RowsFiltered"), false);
 
             shadowedKeysScannedHistogram = Metrics.histogram(createMetricName("ShadowedKeysScannedHistogram"), false);
 
@@ -312,8 +331,12 @@ public class TableQueryMetrics
             queryLatency.update(snapshot.totalQueryTimeNs, TimeUnit.NANOSECONDS);
             sstablesHit.update(snapshot.sstablesHit);
             segmentsHit.update(snapshot.segmentsHit);
-            partitionReads.update(snapshot.partitionsRead);
-            rowsFiltered.update(snapshot.rowsFiltered);
+            keysFetched.update(snapshot.keysFetched);
+            partitionsFetched.update(snapshot.partitionsFetched);
+            partitionsReturned.update(snapshot.partitionsReturned);
+            rowsFetched.update(snapshot.rowsFetched);
+            rowsReturned.update(snapshot.rowsReturned);
+            tombstonesFetched.update(snapshot.tombstonesFetched);
 
             // Record string index cache metrics.
             if (snapshot.trieSegmentsHit > 0)

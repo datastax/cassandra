@@ -72,9 +72,12 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
         sb.append(sectionNamePrefix).append("metrics:\n");
         appendMetric(sb, "sstablesHit", metrics.sstablesHit);
         appendMetric(sb, "segmentsHit", metrics.segmentsHit);
-        appendMetric(sb, "partitionsRead", metrics.partitionsRead);
-        appendMetric(sb, "rowsFiltered", metrics.rowsFiltered);
-        appendMetric(sb, "rowsPreFiltered", metrics.rowsPreFiltered);
+        appendMetric(sb, "keysFetched", metrics.keysFetched);
+        appendMetric(sb, "partitionsFetched", metrics.partitionsFetched);
+        appendMetric(sb, "partitionsReturned", metrics.partitionsReturned);
+        appendMetric(sb, "rowsFetched", metrics.rowsFetched);
+        appendMetric(sb, "rowsReturned", metrics.rowsReturned);
+        appendMetric(sb, "tombstonesFetched", metrics.tombstonesFetched);
         appendMetric(sb, "trieSegmentsHit", metrics.trieSegmentsHit);
         appendMetric(sb, "bkdPostingListsHit", metrics.bkdPostingListsHit);
         appendMetric(sb, "bkdSegmentsHit", metrics.bkdSegmentsHit);
