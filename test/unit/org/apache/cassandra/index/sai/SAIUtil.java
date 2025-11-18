@@ -19,14 +19,17 @@
 package org.apache.cassandra.index.sai;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.Map;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.vector.NVQUtil;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.ReflectionUtils;
 
@@ -95,6 +98,25 @@ public class SAIUtil
         {
             throw new RuntimeException(e);
         }
+    }
+
+    public static void setEnableNVQ(boolean enableNVQ)
+    {
+        try
+        {
+            CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.setBoolean(enableNVQ);
+            Field field = NVQUtil.class.getDeclaredField("ENABLE_NVQ");
+            field.setAccessible(true);
+            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
+            modifiersField.setAccessible(true);
+            modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+            field.set(null, enableNVQ);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+
     }
 
     public static class CustomVersionSelector implements Version.Selector

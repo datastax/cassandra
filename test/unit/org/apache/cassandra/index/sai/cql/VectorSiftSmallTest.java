@@ -38,12 +38,13 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.vector.NVQUtil;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-public class VectorSiftSmallTest extends VectorTester
+public class VectorSiftSmallTest extends VectorTester.Versioned
 {
     private static final String DATASET = "siftsmall"; // change to "sift" for larger dataset. requires manual download
 
@@ -156,11 +157,23 @@ public class VectorSiftSmallTest extends VectorTester
             assertTrue("Pre-compaction recall is " + recall, recall > 0.975);
         }
 
+        // When NVQ is enabled, we expect worse recall
+        float postCompactionRecall = NVQUtil.ENABLE_NVQ ? 0.9499f : 0.975f;
+
+        // Take the CassandraOnHeapGraph code path.
         compact();
         for (int topK : List.of(1, 100))
         {
             var recall = testRecall(topK, queryVectors, groundTruth);
-            assertTrue("Post-compaction recall is " + recall, recall > 0.975);
+            assertTrue("Post-compaction recall is " + recall, recall > postCompactionRecall);
+        }
+
+        // Compact again to take the CompactionGraph code path.
+        compact();
+        for (int topK : List.of(1, 100))
+        {
+            var recall = testRecall(topK, queryVectors, groundTruth);
+            assertTrue("Post-compaction recall is " + recall, recall > postCompactionRecall);
         }
     }
 

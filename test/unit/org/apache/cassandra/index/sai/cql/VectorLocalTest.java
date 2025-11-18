@@ -30,6 +30,7 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import org.junit.After;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -125,7 +126,11 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
         randomizedTest(word2vec.dimension());
     }
 
-    @Test
+    // We do not test BQ because it is no longer implemented as of https://github.com/datastax/cassandra/pull/1580.
+    // Technically, the test was covering the case where we have large vectors, but it was taking a significant
+    // amount of time, so until we re-implement BQ, we can ignore this test. See for details
+    // https://github.com/riptano/cndb/issues/15985.
+    @Ignore
     public void randomizedBqCompressedTest()
     {
         randomizedTest(2048);
