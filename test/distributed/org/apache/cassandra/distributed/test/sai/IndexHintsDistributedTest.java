@@ -103,7 +103,8 @@ public class IndexHintsDistributedTest extends TestBaseImpl
         cluster.schemaChange(withKeyspace("CREATE INDEX legacy_idx ON %s.t(v)"));
         cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX non_analyzed_sai_idx ON %s.t(v) USING 'StorageAttachedIndex'"));
         cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX analyzed_sai_idx ON %s.t(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }"));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        // Wait for index to be queryable on all nodes since test queries from all coordinators
+        SAIUtil.waitForIndexQueryableOnAllNodes(cluster, KEYSPACE);
 
         // insert some data
         cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.t (k, v) VALUES (0, 'apple banana')"), ConsistencyLevel.ALL);

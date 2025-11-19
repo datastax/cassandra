@@ -85,7 +85,7 @@ public class AnalyzerDistributedTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (pk int PRIMARY KEY, not_analyzed int, val text)"));
         cluster.schemaChange(formatQuery("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer': 'standard'}"));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         var iterations = 15000;
         for (int i = 0; i < iterations; i++)
@@ -137,7 +137,7 @@ public class AnalyzerDistributedTest extends TestBaseImpl
                                          "'query_analyzer': '{" +
                                          "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
                                          "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}"));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         execute("INSERT INTO %s(c1,c2) VALUES (1, 'astra quick fox')");
         execute("INSERT INTO %s(c1,c2) VALUES (2, 'astra quick foxes')");
@@ -159,7 +159,7 @@ public class AnalyzerDistributedTest extends TestBaseImpl
                                          "{\"name\":\"edgengram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"30\"}}],\n" +
                                          "\t\"charFilters\":[]" +
                                          "}'};"));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'MAL0133AU')");
         execute("INSERT INTO %s (id, val) VALUES ('2', 'WFS2684AU')");
@@ -206,7 +206,7 @@ public class AnalyzerDistributedTest extends TestBaseImpl
                     "{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"30\"}}],\n" +
                     "\t\"charFilters\":[]" +
                     "}'};"));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'MAL0133AU')");
         execute("INSERT INTO %s (id, val) VALUES ('2', 'WFS2684AU')");

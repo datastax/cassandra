@@ -90,7 +90,7 @@ public class ImportIndexedSSTablesTest extends TestBaseImpl
 
         String indexName = table + "_v_index";
         cluster.schemaChange(String.format("CREATE INDEX %s ON %s.%s(v) USING 'sai'", indexName, KEYSPACE, table));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE, indexName);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE, indexName);
 
         rs = first.executeInternal(String.format("SELECT pk FROM %s.%s WHERE pk = ?", KEYSPACE, table), 1);
         assertThat(rs.length).isEqualTo(0);
@@ -137,7 +137,7 @@ public class ImportIndexedSSTablesTest extends TestBaseImpl
 
         String indexName = table + "_v_index";
         cluster.schemaChange(String.format("CREATE INDEX %s ON %s.%s(v) USING 'sai'", indexName, KEYSPACE, table));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE, indexName);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE, indexName);
 
         rs = first.executeInternal(String.format("SELECT pk FROM %s.%s WHERE pk = ?", KEYSPACE, table), 1);
         assertThat(rs.length).isEqualTo(0);
@@ -173,7 +173,7 @@ public class ImportIndexedSSTablesTest extends TestBaseImpl
 
         String indexName = table + "_v_index";
         cluster.schemaChange(String.format("CREATE INDEX %s ON %s.%s(v) USING 'sai'", indexName, KEYSPACE, table));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE, indexName);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE, indexName);
 
         rs = first.executeInternal(String.format("SELECT pk FROM %s.%s WHERE v = ?", KEYSPACE, table), "v1");
         assertThat(rs.length).isEqualTo(1);
@@ -214,7 +214,7 @@ public class ImportIndexedSSTablesTest extends TestBaseImpl
 
         String indexName = table + "_v_index";
         cluster.schemaChange(String.format("CREATE INDEX %s ON %s.%s(v) USING 'sai'", indexName, KEYSPACE, table));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE, indexName);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE, indexName);
 
         rs = first.executeInternal(String.format("SELECT pk FROM %s.%s WHERE v = ?", KEYSPACE, table), "v1");
         assertThat(rs.length).isEqualTo(1);
