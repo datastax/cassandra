@@ -127,7 +127,7 @@ public class VectorDistributedTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
         List<float[]> vectors = generateVectors(vectorCount);
@@ -179,7 +179,7 @@ public class VectorDistributedTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         // disable compaction
         String tableName = table;
         cluster.forEach(n -> n.runOnInstance(() -> {
@@ -220,7 +220,7 @@ public class VectorDistributedTest extends TestBaseImpl
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         // geo requries euclidean similarity function
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val") + " WITH OPTIONS = {'similarity_function' : 'euclidean'}"));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         // disable compaction
         String tableName = table;
         cluster.forEach(n -> n.runOnInstance(() -> {
@@ -265,7 +265,7 @@ public class VectorDistributedTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
         List<float[]> vectors = generateVectors(vectorCount);
@@ -298,7 +298,7 @@ public class VectorDistributedTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
         List<float[]> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVector()).collect(Collectors.toList());
@@ -358,7 +358,7 @@ public class VectorDistributedTest extends TestBaseImpl
         dimensionCount = 2;
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val") + " WITH OPTIONS = {'similarity_function' : 'cosine'}"));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         assertInvalidCosineOperations();
     }
@@ -381,7 +381,7 @@ public class VectorDistributedTest extends TestBaseImpl
         dimensionCount = 2;
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         assertInvalidCosineOperations();
     }

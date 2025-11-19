@@ -118,7 +118,7 @@ public class QueryInfoTrackerDistributedTest extends TestBaseImpl
         String table = rfOneKs + ".saiTbl";
         cluster.schemaChange("CREATE TABLE " + table + " (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT)");
         cluster.schemaChange("CREATE CUSTOM INDEX IF NOT EXISTS test_idx ON " + table + " (v1) USING 'StorageAttachedIndex'");
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         int rowsCount = 1000;
 
@@ -151,7 +151,7 @@ public class QueryInfoTrackerDistributedTest extends TestBaseImpl
         cluster.schemaChange("CREATE TABLE " + table + " (p int PRIMARY KEY, v int, ni int, vec VECTOR<FLOAT, 2>)");
         cluster.schemaChange("CREATE CUSTOM INDEX ON " + table + "(vec) USING 'StorageAttachedIndex'");
         cluster.schemaChange("CREATE CUSTOM INDEX ON " + table + "(v) USING 'StorageAttachedIndex'");
-        SAIUtil.waitForIndexQueryable(cluster, rfOneKs);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, rfOneKs);
 
         for (int rowIdx = 0; rowIdx < 100; rowIdx++)
         {

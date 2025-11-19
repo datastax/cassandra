@@ -97,7 +97,7 @@ public class MapEntryRangeQueryTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "inventory")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         int entryCount = getRandom().nextIntBetween(500, 1000);
         List<Pair<Integer, Integer>> values = IntStream.range(0, entryCount)
