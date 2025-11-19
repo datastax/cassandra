@@ -103,7 +103,7 @@ public class PartialUpdateHandlingTest extends TestBaseImpl
         CLUSTER.schemaChange(String.format("CREATE INDEX a_idx ON %s.%s(a) USING 'sai'", KEYSPACE, TEST_TABLE_NAME));
         CLUSTER.schemaChange(String.format("CREATE INDEX b_idx ON %s.%s(b) USING 'sai'", KEYSPACE, TEST_TABLE_NAME));
 
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
     }
 
     static class Specification
