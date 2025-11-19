@@ -87,7 +87,7 @@ public class IndexStreamingFailureTest extends TestBaseImpl
         String indexName = table + "_v_index";
         cluster.schemaChange(String.format("CREATE TABLE %s.%s (pk int PRIMARY KEY, v text)", KEYSPACE, table));
         cluster.schemaChange(String.format("CREATE INDEX %s ON %s.%s(v) USING 'sai'", indexName, KEYSPACE, table));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE, indexName);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE, indexName);
 
         IInvokableInstance first = cluster.get(1);
         IInvokableInstance second = cluster.get(2);
