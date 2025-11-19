@@ -147,7 +147,8 @@ public class SaiDiskSizeTest extends SAITester
         logger.info("SAI Version: {}, Index Disk Size: {} bytes", version, diskSize);
         assertThat(diskSize)
         .as("Disk size for SAI version %s", version)
-        .isLessThanOrEqualTo(size);
+        .isLessThanOrEqualTo(size)
+        .isGreaterThan((long) (size * 0.8));
 
         compact();
 
@@ -155,7 +156,8 @@ public class SaiDiskSizeTest extends SAITester
         logger.info("SAI Version: {}, Index Disk Size: {} bytes", version, diskSize);
         assertThat(diskSize)
         .as("Disk size for SAI version %s", version)
-        .isLessThanOrEqualTo(size);
+        .isLessThanOrEqualTo(size)
+        .isGreaterThan((long) (size * 0.8));
     }
 
     private void insertRows(int size, int start) throws UnknownHostException
