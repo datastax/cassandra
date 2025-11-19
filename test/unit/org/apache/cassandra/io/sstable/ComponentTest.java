@@ -134,18 +134,25 @@ public class ComponentTest
     }
 
     @Test
-    public void testFromRepresentationExactMatches()
+    public void testFromRepresentationSame()
     {
         // Test exact string matches for standard components
-        assertEquals(BtiFormat.Components.Types.DATA, Component.Type.fromRepresentation("Data.db", BtiFormat.getInstance()));
-        assertEquals(BtiFormat.Components.Types.PARTITION_INDEX, Component.Type.fromRepresentation("Partitions.db", BtiFormat.getInstance()));
-        assertEquals(BtiFormat.Components.Types.ROW_INDEX, Component.Type.fromRepresentation("Rows.db", BtiFormat.getInstance()));
-        assertEquals(BtiFormat.Components.Types.FILTER, Component.Type.fromRepresentation("Filter.db", BtiFormat.getInstance()));
-        assertEquals(BtiFormat.Components.Types.COMPRESSION_INFO, Component.Type.fromRepresentation("CompressionInfo.db", BtiFormat.getInstance()));
-        assertEquals(BtiFormat.Components.Types.STATS, Component.Type.fromRepresentation("Statistics.db", BtiFormat.getInstance()));
-        assertEquals(BtiFormat.Components.Types.DIGEST, Component.Type.fromRepresentation("Digest.crc32", BtiFormat.getInstance()));
-        assertEquals(BtiFormat.Components.Types.CRC, Component.Type.fromRepresentation("CRC.db", BtiFormat.getInstance()));
-        assertEquals(BtiFormat.Components.Types.TOC, Component.Type.fromRepresentation("TOC.txt", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.DATA, Component.Type.fromRepresentation("Data.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.DATA, Component.Type.fromRepresentation("Data.db", null));
+        assertSame(BtiFormat.Components.Types.PARTITION_INDEX, Component.Type.fromRepresentation("Partitions.db", BtiFormat.getInstance()));
+        assertSame(BtiFormat.Components.Types.ROW_INDEX, Component.Type.fromRepresentation("Rows.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.FILTER, Component.Type.fromRepresentation("Filter.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.FILTER, Component.Type.fromRepresentation("Filter.db", null));
+        assertSame(SSTableFormat.Components.Types.COMPRESSION_INFO, Component.Type.fromRepresentation("CompressionInfo.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.COMPRESSION_INFO, Component.Type.fromRepresentation("CompressionInfo.db", null));
+        assertSame(SSTableFormat.Components.Types.STATS, Component.Type.fromRepresentation("Statistics.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.STATS, Component.Type.fromRepresentation("Statistics.db", null));
+        assertSame(SSTableFormat.Components.Types.DIGEST, Component.Type.fromRepresentation("Digest.crc32", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.DIGEST, Component.Type.fromRepresentation("Digest.crc32", null));
+        assertSame(SSTableFormat.Components.Types.CRC, Component.Type.fromRepresentation("CRC.db", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.CRC, Component.Type.fromRepresentation("CRC.db", null));
+        assertSame(SSTableFormat.Components.Types.TOC, Component.Type.fromRepresentation("TOC.txt", BtiFormat.getInstance()));
+        assertSame(SSTableFormat.Components.Types.TOC, Component.Type.fromRepresentation("TOC.txt", null));
     }
 
     @Test
