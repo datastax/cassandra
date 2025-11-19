@@ -173,7 +173,7 @@ public final class TableAttributes extends PropertyDefinitions
 
         if (hasOption(MEMTABLE))
         {
-            // Handle deserialzation of Astra/CC 4.0 schema with memtable option as a map
+            // Handle deserialization of Astra/CC 4.0 schema with memtable option as a map
             if (properties.get(MEMTABLE.toString()) instanceof Map)
             {
                 String memtableClass = getMap(MEMTABLE)
@@ -183,15 +183,38 @@ public final class TableAttributes extends PropertyDefinitions
                              .map(Map.Entry::getValue)
                              .findFirst()
                              .orElse(null);
-                // Not exhaustive, but avoids raising an error upgrading from a CC 4.0 schema
+
                 if (memtableClass == null)
+                {
                     builder.memtable(MemtableParams.get(null));
-                else if ("SkipListMemtable".equalsIgnoreCase(memtableClass))
-                    builder.memtable(MemtableParams.get("skiplist"));
-                else if ("PersistentMemoryMemtable".equalsIgnoreCase(memtableClass))
-                    builder.memtable(MemtableParams.get("persistent_memory"));
+                }
+                // Only process as a known memtable if it's in the standard package or is a short name (no package qualifier)
+                else if (memtableClass.startsWith("org.apache.cassandra.db.memtable.") || !memtableClass.contains("."))
+                {
+                    // Extract short class name for comparison against known types
+                    String shortClassName = memtableClass.contains(".")
+                                            ? memtableClass.substring(memtableClass.lastIndexOf('.') + 1)
+                                            : memtableClass;
+
+                    if ("SkipListMemtable".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("skiplist"));
+                    else if ("PersistentMemoryMemtable".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("persistent_memory"));
+                    else if ("TrieMemtable".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("trie"));
+                    else if ("TrieMemtableStage1".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("trie"));
+                    else if ("ShardedSkipListMemtable".equalsIgnoreCase(shortClassName))
+                        builder.memtable(MemtableParams.get("skiplist_sharded"));
+                    else
+                        // Unknown short name or unknown class in standard package - use as configuration key
+                        builder.memtable(MemtableParams.get(shortClassName));
+                }
                 else
-                    builder.memtable(MemtableParams.get("trie"));
+                {
+                    // Custom fully qualified class name from a different package.
+                    builder.memtable(MemtableParams.get(memtableClass));
+                }
             }
             else
                 builder.memtable(MemtableParams.get(getString(MEMTABLE)));
