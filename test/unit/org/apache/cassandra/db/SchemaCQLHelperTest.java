@@ -61,11 +61,13 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
@@ -746,6 +748,198 @@ public class SchemaCQLHelperTest extends CQLTester
             assertThat(e, instanceOf(org.apache.cassandra.exceptions.InvalidRequestException.class));
             assertThat(e.getMessage(),
                        containsString("Cannot have multiple dropped column record for column"));
+        }
+    }
+
+    @Test
+    public void testSchemaBackwardCompatibilityCc40()
+    {
+        String keyspace = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+
+        // Save original value
+        StorageCompatibilityMode originalMode = TableParams.storageCompatibilityModeOverride;
+
+        try
+        {
+            // Test filtering when CC 4.0 backward compatibility mode is enabled
+            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.CC_4;
+
+            String tableName = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text)");
+            ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(tableName);
+            String cql = SchemaCQLHelper.getTableMetadataAsCQL(cfs.metadata(), cfs.keyspace.getMetadata());
+
+            // Should not contain new 5.0 properties
+            Assertions.assertThat(cql).doesNotContain("allow_auto_snapshot");
+            Assertions.assertThat(cql).doesNotContain("incremental_backups");
+            // Should contain other properties
+            Assertions.assertThat(cql).contains("bloom_filter_fp_chance");
+            // Should use map format for memtable (CC 4.0 compatible) with short class name
+            Assertions.assertThat(cql).contains("memtable = {'class': 'TrieMemtable'}");
+            // Should NOT contain fully qualified class name
+            Assertions.assertThat(cql).doesNotContain("org.apache.cassandra.db.memtable");
+
+            // Test filtering when disabled (default)
+            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.NONE;
+
+            String tableName2 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text)");
+            ColumnFamilyStore cfs2 = Keyspace.open(keyspace).getColumnFamilyStore(tableName2);
+            String cql2 = SchemaCQLHelper.getTableMetadataAsCQL(cfs2.metadata(), cfs2.keyspace.getMetadata());
+
+            // Should contain new 5.0 properties when filtering is disabled
+            Assertions.assertThat(cql2).contains("allow_auto_snapshot");
+            Assertions.assertThat(cql2).contains("incremental_backups");
+            // Should use string format for memtable (5.0 format)
+            Assertions.assertThat(cql2).contains("memtable = '");
+            Assertions.assertThat(cql2).doesNotContain("memtable = {'class'");
+        }
+        finally
+        {
+            // Restore original value
+            TableParams.storageCompatibilityModeOverride = originalMode;
+        }
+    }
+
+    @Test
+    public void testParseCc40MemtableFormat()
+    {
+        String keyspace = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+
+        // Test parsing CC 4.0 format with short class name
+        String tableName1 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'TrieMemtable'}");
+        ColumnFamilyStore cfs1 = Keyspace.open(keyspace).getColumnFamilyStore(tableName1);
+        Assertions.assertThat(cfs1.metadata().params.memtable.configurationKey()).isEqualTo("trie");
+
+        // Test parsing CC 4.0 format with fully qualified class name
+        String tableName2 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.TrieMemtable'}");
+        ColumnFamilyStore cfs2 = Keyspace.open(keyspace).getColumnFamilyStore(tableName2);
+        Assertions.assertThat(cfs2.metadata().params.memtable.configurationKey()).isEqualTo("trie");
+
+        // Test parsing CC 4.0 format with SkipListMemtable (short name)
+        String tableName3 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'SkipListMemtable'}");
+        ColumnFamilyStore cfs3 = Keyspace.open(keyspace).getColumnFamilyStore(tableName3);
+        Assertions.assertThat(cfs3.metadata().params.memtable.configurationKey()).isEqualTo("skiplist");
+
+        // Test parsing CC 4.0 format with SkipListMemtable (fully qualified)
+        String tableName4 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.SkipListMemtable'}");
+        ColumnFamilyStore cfs4 = Keyspace.open(keyspace).getColumnFamilyStore(tableName4);
+        Assertions.assertThat(cfs4.metadata().params.memtable.configurationKey()).isEqualTo("skiplist");
+
+        // Test parsing CC 4.0 format with PersistentMemoryMemtable (short name)
+        String tableName5 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'PersistentMemoryMemtable'}");
+        ColumnFamilyStore cfs5 = Keyspace.open(keyspace).getColumnFamilyStore(tableName5);
+        Assertions.assertThat(cfs5.metadata().params.memtable.configurationKey()).isEqualTo("persistent_memory");
+
+        // Test parsing CC 4.0 format with PersistentMemoryMemtable (fully qualified)
+        String tableName6 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.PersistentMemoryMemtable'}");
+        ColumnFamilyStore cfs6 = Keyspace.open(keyspace).getColumnFamilyStore(tableName6);
+        Assertions.assertThat(cfs6.metadata().params.memtable.configurationKey()).isEqualTo("persistent_memory");
+
+        // Test parsing CC 4.0 format with TrieMemtableStage1 (legacy class)
+        String tableName7 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'TrieMemtableStage1'}");
+        ColumnFamilyStore cfs7 = Keyspace.open(keyspace).getColumnFamilyStore(tableName7);
+        Assertions.assertThat(cfs7.metadata().params.memtable.configurationKey()).isEqualTo("trie");
+
+        // Test parsing CC 4.0 format with ShardedSkipListMemtable (short name)
+        String tableName8 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'ShardedSkipListMemtable'}");
+        ColumnFamilyStore cfs8 = Keyspace.open(keyspace).getColumnFamilyStore(tableName8);
+        Assertions.assertThat(cfs8.metadata().params.memtable.configurationKey()).isEqualTo("skiplist_sharded");
+
+        // Test parsing CC 4.0 format with empty map (default)
+        String tableName9 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {}");
+        ColumnFamilyStore cfs9 = Keyspace.open(keyspace).getColumnFamilyStore(tableName9);
+        // Empty map should use default memtable
+        Assertions.assertThat(cfs9.metadata().params.memtable).isNotNull();
+    }
+
+    @Test
+    public void testParseCc40MemtableFormatWithUnknownClass()
+    {
+        String keyspace = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+
+        // Test parsing CC 4.0 format with unknown short class name (not in cassandra.yaml)
+        // This should throw ConfigurationException because the configuration key doesn't exist
+        try
+        {
+            createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'UnknownMemtable'}");
+            fail("Expected ConfigurationException for unknown memtable class");
+        }
+        catch (RuntimeException e)
+        {
+            assertThat(e.getCause(), instanceOf(ConfigurationException.class));
+            assertThat(e.getCause().getMessage(), containsString("Memtable configuration \"UnknownMemtable\" not found"));
+        }
+
+        // Test parsing CC 4.0 format with custom fully qualified class name from different package
+        // This should also throw ConfigurationException because it's not configured in cassandra.yaml
+        try
+        {
+            createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'com.example.CustomMemtable'}");
+            fail("Expected ConfigurationException for unconfigured custom memtable class");
+        }
+        catch (RuntimeException e)
+        {
+            assertThat(e.getCause(), instanceOf(ConfigurationException.class));
+            assertThat(e.getCause().getMessage(), containsString("Memtable configuration \"com.example.CustomMemtable\" not found"));
+        }
+    }
+
+    @Test
+    public void testToMapForCC4OutputFormat()
+    {
+        String keyspace = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+        StorageCompatibilityMode originalMode = TableParams.storageCompatibilityModeOverride;
+
+        try
+        {
+            // Enable CC 4.0 backward compatibility mode to test toMapForCC4() output
+            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.CC_4;
+
+            // Test that standard Cassandra memtables output short class names
+            String tableName1 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'trie'");
+            ColumnFamilyStore cfs1 = Keyspace.open(keyspace).getColumnFamilyStore(tableName1);
+            String cql1 = SchemaCQLHelper.getTableMetadataAsCQL(cfs1.metadata(), cfs1.keyspace.getMetadata());
+            // Should output short class name for standard Cassandra memtable
+            Assertions.assertThat(cql1).contains("memtable = {'class': 'TrieMemtable'");
+            Assertions.assertThat(cql1).doesNotContain("org.apache.cassandra.db.memtable.TrieMemtable");
+
+            String tableName2 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'skiplist'");
+            ColumnFamilyStore cfs2 = Keyspace.open(keyspace).getColumnFamilyStore(tableName2);
+            String cql2 = SchemaCQLHelper.getTableMetadataAsCQL(cfs2.metadata(), cfs2.keyspace.getMetadata());
+            // Should output short class name for standard Cassandra memtable
+            Assertions.assertThat(cql2).contains("memtable = {'class': 'SkipListMemtable'");
+            Assertions.assertThat(cql2).doesNotContain("org.apache.cassandra.db.memtable.SkipListMemtable");
+
+            String tableName3 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'skiplist_sharded'");
+            ColumnFamilyStore cfs3 = Keyspace.open(keyspace).getColumnFamilyStore(tableName3);
+            String cql3 = SchemaCQLHelper.getTableMetadataAsCQL(cfs3.metadata(), cfs3.keyspace.getMetadata());
+            // Should output short class name for standard Cassandra memtable
+            Assertions.assertThat(cql3).contains("memtable = {'class': 'ShardedSkipListMemtable'");
+            Assertions.assertThat(cql3).doesNotContain("org.apache.cassandra.db.memtable.ShardedSkipListMemtable");
+
+            // Test that tables created with fully qualified class names also output short class names
+            String tableName4 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.TrieMemtable'}");
+            ColumnFamilyStore cfs4 = Keyspace.open(keyspace).getColumnFamilyStore(tableName4);
+            String cql4 = SchemaCQLHelper.getTableMetadataAsCQL(cfs4.metadata(), cfs4.keyspace.getMetadata());
+            // Should output short class name even though input was fully qualified
+            Assertions.assertThat(cql4).contains("memtable = {'class': 'TrieMemtable'");
+            Assertions.assertThat(cql4).doesNotContain("org.apache.cassandra.db.memtable.TrieMemtable");
+
+            String tableName5 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.SkipListMemtable'}");
+            ColumnFamilyStore cfs5 = Keyspace.open(keyspace).getColumnFamilyStore(tableName5);
+            String cql5 = SchemaCQLHelper.getTableMetadataAsCQL(cfs5.metadata(), cfs5.keyspace.getMetadata());
+            // Should output short class name even though input was fully qualified
+            Assertions.assertThat(cql5).contains("memtable = {'class': 'SkipListMemtable'");
+            Assertions.assertThat(cql5).doesNotContain("org.apache.cassandra.db.memtable.SkipListMemtable");
+
+            // Test that custom memtables from other packages preserve fully qualified class names
+            // Note: We can't easily test this without adding a custom memtable configuration to cassandra.yaml,
+            // but the logic in toMapForCC4() ensures that only classes starting with
+            // "org.apache.cassandra.db.memtable." get their short names extracted.
+        }
+        finally
+        {
+            // Restore original value
+            TableParams.storageCompatibilityModeOverride = originalMode;
         }
     }
 }
