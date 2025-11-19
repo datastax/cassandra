@@ -122,7 +122,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int PRIMARY KEY, v text)"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k, v) VALUES (0, 'old')");
 
         executeIsolated(1, "UPDATE %s SET v = 'new' WHERE k = 0");
@@ -136,7 +136,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v text, s int STATIC, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k, s) VALUES (0, 9)",
                 "INSERT INTO %s(k, c, v) VALUES (0, -1, 'old')",
                 "INSERT INTO %s(k, c, v) VALUES (0, 0, 'old')",
@@ -153,7 +153,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k1 int, k2 int, v text, v1 text, primary key(k1, k2)) with read_repair='NONE'"));
         cluster.schemaChange(formatQuery(createIndexQuery("v", false, false)));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k1, k2, v, v1) VALUES (0, 0, 'Old', '0')");
 
         executeIsolated(1, "UPDATE %s SET v = 'New' WHERE k1=0 and k2=0");
@@ -171,7 +171,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k1 int, k2 int, v text, v1 text, primary key(k1, k2)) with read_repair='NONE'"));
         cluster.schemaChange(formatQuery(createIndexQuery("v", true, true)));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k1, k2, v, v1) VALUES (0, 0, '\u00E1bc', '0')"); //
 
         executeIsolated(1, "UPDATE %s SET v = '\u0061\u0301bc' WHERE k1=0 and k2=0");
@@ -188,7 +188,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k1 int, k2 int, v text, v1 text, primary key(k1, k2)) with read_repair='NONE'"));
         cluster.schemaChange(formatQuery(createIndexQuery("v", false, true)));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k1, k2, v, v1) VALUES (0, 0, '\u00E1Bc', '0')");
 
         executeIsolated(1, "UPDATE %s SET v = '\u0061\u0301bC' WHERE k1=0 and k2=0");
@@ -205,7 +205,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v int, s text STATIC, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("s")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k, s) VALUES (0, 'old')",
                 "INSERT INTO %s(k, s) VALUES (1, 'old')");
 
@@ -220,7 +220,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v int, s text STATIC, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("s")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k, s) VALUES (0, 'old')",
                 "INSERT INTO %s(k, s) VALUES (1, 'old')",
                 "INSERT INTO %s(k, c, v) VALUES (0, 10, 100)",
@@ -239,7 +239,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k1 int, k2 int, c int, s int STATIC, PRIMARY KEY((k1, k2), c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("k1")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k1, k2, s) VALUES (0, 1, 10)",
                 "INSERT INTO %s (k1, k2, s) VALUES (0, 2, 20)");
 
@@ -254,7 +254,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k1 int, k2 int, c int, s int STATIC, PRIMARY KEY((k1, k2), c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("k1")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k1, k2, c, s) VALUES (0, 1, 10, 100)",
                 "INSERT INTO %s (k1, k2, c, s) VALUES (0, 2, 20, 200)");
 
@@ -269,7 +269,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("c")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, c) VALUES (1, 0)",
                 "INSERT INTO %s (k, c) VALUES (2, 0)");
 
@@ -284,7 +284,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, s int STATIC, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("s")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, s) VALUES (1, 0)",
                 "INSERT INTO %s (k, s) VALUES (2, 0)");
 
@@ -299,7 +299,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, s int STATIC, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("s")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, s) VALUES (1, 0)",
                 "INSERT INTO %s (k, s) VALUES (2, 0)",
                 "INSERT INTO %s (k, s) VALUES (3, 0)",
@@ -319,7 +319,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, s int STATIC, v int, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("s")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, c, v, s) VALUES (1, 10, 100, 0)",
                 "INSERT INTO %s (k, c, v, s) VALUES (2, 20, 200, 0)");
 
@@ -334,7 +334,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, s int STATIC, v int, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("s")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, c, v, s) VALUES (1, 10, 100, 0)",
                 "INSERT INTO %s (k, c, v, s) VALUES (2, 20, 200, 0)",
                 "INSERT INTO %s (k, s) VALUES (3, 0)",
@@ -354,7 +354,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY(k, c)) WITH speculative_retry = 'NONE'"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 0)",
                 "INSERT INTO %s (k, c, v) VALUES (0, 2, 0)");
 
@@ -369,7 +369,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 0)",
                 "INSERT INTO %s (k, c, v) VALUES (0, 2, 0)",
                 "INSERT INTO %s (k, c, v) VALUES (0, 3, 0)");
@@ -392,7 +392,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 0)",
                 "INSERT INTO %s (k, c, v) VALUES (0, 4, 0)");
 
@@ -413,7 +413,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, s text STATIC, v int, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("s")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, s) VALUES (1, 'old')",
                 "INSERT INTO %s (k, s) VALUES (2, 'old')");
 
@@ -430,7 +430,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, s text STATIC, v int, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("s")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, c, v, s) VALUES (1, 10, 100, 'old')",
                 "INSERT INTO %s (k, c, v, s) VALUES (2, 20, 200, 'old')");
 
@@ -448,7 +448,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 'old')",
                 "INSERT INTO %s (k, c, v) VALUES (0, 2, 'old')");
 
@@ -465,7 +465,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 'old')",
                 "INSERT INTO %s (k, c, v) VALUES (0, 4, 'old')");
 
@@ -488,7 +488,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int PRIMARY KEY, v text)"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         executeIsolated(1, "INSERT INTO %s (k, v) VALUES (0, 'old') USING TIMESTAMP 1");
         executeIsolated(2, "DELETE FROM %s WHERE k = 0");
@@ -502,7 +502,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         executeIsolated(1, "INSERT INTO %s (k, c, v) VALUES (0, 1, 'old') USING TIMESTAMP 1");
         executeIsolated(2, "DELETE FROM %s WHERE k = 0");
@@ -516,7 +516,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         executeIsolated(1, "INSERT INTO %s (k, c, v) VALUES (0, 1, 'old') USING TIMESTAMP 1");
         executeIsolated(2, "DELETE FROM %s WHERE k = 0 AND c = 1");
@@ -530,7 +530,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         executeIsolated(1,
                         "INSERT INTO %s (k, c, v) VALUES (0, 1, 'old') USING TIMESTAMP 1",
@@ -548,7 +548,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int PRIMARY KEY, v text)"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         executeIsolated(1, "INSERT INTO %s (k, v) VALUES (0, 'old') USING TIMESTAMP 1");
         executeIsolated(2, "INSERT INTO %s (k, v) VALUES (0, 'new') USING TIMESTAMP 2");
@@ -563,7 +563,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY(k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         executeIsolated(1, "INSERT INTO %s (k, c, v) VALUES (0, 1, 'old') USING TIMESTAMP 1");
         executeIsolated(2, "INSERT INTO %s (k, c, v) VALUES (0, 1, 'new') USING TIMESTAMP 2");
@@ -578,7 +578,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int PRIMARY KEY, v text)"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k, v) VALUES (1, 'old')", // updated to 'new'
                 "INSERT INTO %s(k, v) VALUES (2, 'old')",
                 "INSERT INTO %s(k, v) VALUES (3, 'old')", // updated to 'new'
@@ -599,7 +599,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY (k, c))"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k, c, v) VALUES (0, 1, 'old')", // updated to 'new'
                 "INSERT INTO %s(k, c, v) VALUES (0, 2, 'old')",
                 "INSERT INTO %s(k, c, v) VALUES (0, 3, 'old')", // updated to 'new'
@@ -623,7 +623,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k int PRIMARY KEY, v text)"));
         cluster.schemaChange(formatQuery(createIndexQuery("v")));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
         execute("INSERT INTO %s(k, v) VALUES (1, 'old')",
                 "INSERT INTO %s(k, v) VALUES (2, 'old')",
                 "INSERT INTO %s(k, v) VALUES (3, 'old')",
