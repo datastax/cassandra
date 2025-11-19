@@ -47,7 +47,8 @@ public class GenericOrderByTest extends TestBaseImpl
         {
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.t(k int, c int, v int, PRIMARY KEY(k, c))"));
             cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t(v) USING 'StorageAttachedIndex'"));
-            SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+            // Wait for index to be queryable on all nodes since test queries from all coordinators
+            SAIUtil.waitForIndexQueryableOnAllNodes(cluster, KEYSPACE);
 
             ICoordinator coordinator = cluster.coordinator(1);
 
@@ -111,7 +112,8 @@ public class GenericOrderByTest extends TestBaseImpl
 
             // with indexed column filter
             cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t(c) USING 'StorageAttachedIndex'"));
-            SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+            // Wait for index to be queryable on all nodes since test queries from all coordinators
+            SAIUtil.waitForIndexQueryableOnAllNodes(cluster, KEYSPACE);
             assertRowsWithLimit(cluster, "SELECT * FROM %s.t WHERE c=1 ORDER BY v ASC",
                                 row(1, 1, 1),
                                 row(2, 1, 6),
