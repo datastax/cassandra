@@ -110,7 +110,7 @@ public final class PrimaryKeyMapIterator extends KeyRangeIterator
     {
         while (currentRowId >= 0 && currentRowId < keys.count())
         {
-            PrimaryKey key = keys.primaryKeyFromRowId(currentRowId++);
+            PrimaryKey key = keys.primaryKeyFromRowId(currentRowId++, getMinimum(), getMaximum());
             if (filter == KeyFilter.KEYS_WITH_CLUSTERING && key.hasEmptyClustering())
                 continue;
             return key;
