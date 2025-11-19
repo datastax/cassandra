@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
@@ -60,10 +59,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class PartitionAwarePrimaryKeyMapFactory implements Factory
     {
-        private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final LongArray.Factory offsetReaderFactory;
-        private final MetadataSource metadata;
         private final KeyFetcher keyFetcher;
         private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
@@ -77,14 +74,13 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         {
             try
             {
-                this.perSSTableComponents = perSSTableComponents;
-                this.metadata = MetadataSource.loadMetadata(perSSTableComponents);
+                MetadataSource metadata = MetadataSource.loadMetadata(perSSTableComponents);
 
                 IndexComponent.ForRead offsetsComponent = perSSTableComponents.get(IndexComponentType.OFFSETS_VALUES);
                 IndexComponent.ForRead tokensComponent = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES);
 
-                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(offsetsComponent));
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(tokensComponent));
+                NumericValuesMeta offsetsMeta = new NumericValuesMeta(metadata.get(offsetsComponent));
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadata.get(tokensComponent));
 
                 count = tokensMeta.valueCount;
                 token = tokensComponent.createFileHandle();
@@ -106,8 +102,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         @Override
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
         {
-            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
-            final LongArray rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
+            final LongArray rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
+            final LongArray rowIdToOffset = new LongArray.DeferredLongArray(offsetReaderFactory::open);
 
             return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId);
         }

@@ -56,7 +56,7 @@ public abstract class AbstractTrieMemoryIndexBenchmark
     private static final String INTEGER_INDEX = "integer_index";
     private static final int RANDOM_STRING_SIZE = 64 * 1024 * 1024;
 
-    private char[] randomChars = new char[RANDOM_STRING_SIZE];
+    private final char[] randomChars = new char[RANDOM_STRING_SIZE];
 
     protected int randomSeed;
 

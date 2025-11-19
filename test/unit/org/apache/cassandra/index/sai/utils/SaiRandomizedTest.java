@@ -74,7 +74,7 @@ public class SaiRandomizedTest extends RandomizedTest
         Thread.setDefaultUncaughtExceptionHandler(handler);
     }
 
-    private static IndexInputLeakDetector indexInputLeakDetector;
+    private static final IndexInputLeakDetector indexInputLeakDetector;
 
     protected static TemporaryFolder temporaryFolder;
 
@@ -152,7 +152,7 @@ public class SaiRandomizedTest extends RandomizedTest
     {
         if (min < 0) throw new IllegalArgumentException("min must be >= 0: " + min);
         if (min > max) throw new IllegalArgumentException("max must be >= min: " + min + ", " + max);
-        return min == max ? min : (int) randomDoubleBetween((double) min, (double) max);
+        return min == max ? min : (int) randomDoubleBetween(min, max);
     }
 
     public static long randomLongBetween(long min, long max)
