@@ -99,8 +99,18 @@ public final class PathUtils
     private static final Logger logger = LoggerFactory.getLogger(PathUtils.class);
     private static final NoSpamLogger nospam1m = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    private static Consumer<Path> onDeletion = path -> {};
     private static final boolean USE_NIX_RECURSIVE_DELETE = CassandraRelevantProperties.USE_NIX_RECURSIVE_DELETE.getBoolean();
+
+    private static final CopyOption[] ATOMIC_MOVE_OPTIONS = {
+        StandardCopyOption.REPLACE_EXISTING,
+        StandardCopyOption.ATOMIC_MOVE
+    };
+
+    private static final CopyOption[] REPLACE_EXISTING_OPTIONS = {
+        StandardCopyOption.REPLACE_EXISTING
+    };
+
+    private static Consumer<Path> onDeletion = path -> {};
 
     public static FileChannel newReadChannel(Path path) throws NoSuchFileException
     {
@@ -556,12 +566,12 @@ public final class PathUtils
     {
         try
         {
-            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            Files.move(from, to, ATOMIC_MOVE_OPTIONS);
         }
         catch (AtomicMoveNotSupportedException e)
         {
             logger.trace("Could not do an atomic move", e);
-            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(from, to, REPLACE_EXISTING_OPTIONS);
         }
     }
 
