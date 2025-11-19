@@ -36,6 +36,11 @@ public enum StorageCompatibilityMode
     CASSANDRA_4(4),
 
     /**
+     * Same as {@link #CASSANDRA_4}, but allows the use of BTI format in {@link #validateSstableFormat}.
+     */
+    CC_4(4),
+
+    /**
      * Use the storage formats of the current version, but disabling features that are not compatible with any
      * not-upgraded nodes in the cluster. Use this during rolling upgrades to a new major Cassandra version. Once all
      * nodes have been upgraded, you can set the compatibility to {@link #NONE}.
