@@ -64,7 +64,7 @@ public class StrictFilteringTest extends TestBaseImpl
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.reject_in (k int PRIMARY KEY, a int, b int) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.reject_in(a) USING 'sai'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.reject_in(b) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         // insert an unrepaired row
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.reject_in(k, a) VALUES (0, 1)"));
@@ -88,7 +88,7 @@ public class StrictFilteringTest extends TestBaseImpl
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.partial_updates (k int PRIMARY KEY, a int, b int) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates(a) USING 'sai'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates(b) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         // insert a split row
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.partial_updates(k, a) VALUES (0, 1) USING TIMESTAMP 1"));
@@ -104,7 +104,7 @@ public class StrictFilteringTest extends TestBaseImpl
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.partial_updates_non_indexed_column (k int PRIMARY KEY, a int, b int) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates_non_indexed_column(a) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         CLUSTER.coordinator(1).execute(withKeyspace("INSERT INTO %s.partial_updates_non_indexed_column(k, a) VALUES (0, 1) USING TIMESTAMP 1"), ConsistencyLevel.ALL);
         CLUSTER.get(1).nodetoolResult("repair", KEYSPACE).asserts().success();
@@ -123,7 +123,7 @@ public class StrictFilteringTest extends TestBaseImpl
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.partial_updates_delete_between (k int, c int, a int, b int, x int, y int, PRIMARY KEY (k, c)) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates_delete_between(a) USING 'sai'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates_delete_between(b) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         // insert a split row w/ a range tombstone sandwiched in the middle 
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.partial_updates_delete_between(k, c, a, x) VALUES (0, 1, 1, 100) USING TIMESTAMP 1"));
@@ -141,7 +141,7 @@ public class StrictFilteringTest extends TestBaseImpl
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.dangling_unfiltered_delete_between (k int, c int, a int, b int, x int, PRIMARY KEY (k, c)) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.dangling_unfiltered_delete_between(a) USING 'sai'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.dangling_unfiltered_delete_between(b) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         // insert a split row w/ a range tombstone sandwiched in the middle 
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.dangling_unfiltered_delete_between(k, c, a, b, x) VALUES (0, 1, 1, 2, 100) USING TIMESTAMP 1"));
@@ -158,7 +158,7 @@ public class StrictFilteringTest extends TestBaseImpl
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.partial_updates_statics (k int, c int, s int static, b int, PRIMARY KEY (k, c)) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates_statics(s) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         // insert a split row
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.partial_updates_statics(k, s) VALUES (0, 2) USING TIMESTAMP 100"));
@@ -176,7 +176,7 @@ public class StrictFilteringTest extends TestBaseImpl
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.partial_updates_short_read (k int PRIMARY KEY, a int, b int) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates_short_read(a) USING 'sai'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates_short_read(b) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         // insert a split row
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.partial_updates_short_read(k, a) VALUES (0, 1) USING TIMESTAMP 1"));
@@ -195,7 +195,7 @@ public class StrictFilteringTest extends TestBaseImpl
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.no_srp_at_limit (k int, c int, a int, PRIMARY KEY (k, c)) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.no_srp_at_limit(a) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.no_srp_at_limit(k, c, a) VALUES (0, 2, 1) USING TIMESTAMP 5"));
         CLUSTER.get(2).executeInternal(withKeyspace("INSERT INTO %s.no_srp_at_limit(k, c, a) VALUES (0, 3, 1) USING TIMESTAMP 6"));
@@ -215,7 +215,7 @@ public class StrictFilteringTest extends TestBaseImpl
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.necessary_short_read (k int, c int, a int, PRIMARY KEY (k, c)) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.necessary_short_read(a) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.necessary_short_read(k, c, a) VALUES (0, 2, 1) USING TIMESTAMP 5"));
         CLUSTER.get(2).executeInternal(withKeyspace("INSERT INTO %s.necessary_short_read(k, c, a) VALUES (0, 2, 2) USING TIMESTAMP 6"));
@@ -242,7 +242,7 @@ public class StrictFilteringTest extends TestBaseImpl
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.partial_updates_short_read_static (k int, c int, a int, b int static, PRIMARY KEY(k, c)) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates_short_read_static(a) USING 'sai'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.partial_updates_short_read_static(b) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         // insert a split row
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.partial_updates_short_read_static(k, c, a) VALUES (0, 0, 1) USING TIMESTAMP 1"));
@@ -263,7 +263,7 @@ public class StrictFilteringTest extends TestBaseImpl
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.timestamp_collision (k int PRIMARY KEY, a int, b int) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.timestamp_collision(a) USING 'sai'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.timestamp_collision(b) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         // insert a split row
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.timestamp_collision(k, a, b) VALUES (0, 1, 2) USING TIMESTAMP 1"));
@@ -279,7 +279,7 @@ public class StrictFilteringTest extends TestBaseImpl
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.one_column (k int PRIMARY KEY, a int) WITH read_repair = 'NONE'"));
         CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s.one_column(a) USING 'sai'"));
-        SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
 
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s.one_column(k, a) VALUES (0, 1) USING TIMESTAMP 1"));
         CLUSTER.get(2).executeInternal(withKeyspace("INSERT INTO %s.one_column(k, a) VALUES (0, 100) USING TIMESTAMP 1"));
