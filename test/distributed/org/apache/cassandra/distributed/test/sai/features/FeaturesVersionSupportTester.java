@@ -155,7 +155,7 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
         if (version.onOrAfter(Version.JVECTOR_EARLIEST))
         {
             cluster.schemaChange(createIndexQuery);
-            SAIUtil.waitForIndexQueryable(cluster, keyspace, "ann_idx");
+            SAIUtil.waitForIndexQueryableOnFirstNode(cluster, keyspace, "ann_idx");
             Assertions.assertThat(coordinator.execute(annSelectQuery, ONE)).hasNumberOfRows(3);
             Assertions.assertThat(coordinator.execute(geoSelectQuery, ONE)).hasNumberOfRows(2);
         }
@@ -194,7 +194,7 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
                              "'index_analyzer': '{" +
                              "\"tokenizer\" : {\"name\" : \"standard\"}, " +
                              "\"filters\" : [{\"name\" : \"porterstem\"}]}'}");
-        SAIUtil.waitForIndexQueryable(cluster, keyspace, "bm25_idx");
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, keyspace, "bm25_idx");
 
         String query = "SELECT k FROM " + keyspace + ".bm25 ORDER BY v BM25 OF 'apple' LIMIT 3";
 
@@ -230,7 +230,7 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
         cluster.schemaChange("CREATE CUSTOM INDEX analyzer_idx ON " + keyspace + ".analyzer(v)" +
                              " USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'" +
                              "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        SAIUtil.waitForIndexQueryable(cluster, keyspace, "analyzer_idx");
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, keyspace, "analyzer_idx");
 
         Assertions.assertThat(coordinator.execute("SELECT * FROM " + keyspace + ".analyzer WHERE v = 'dogs'", ONE))
                   .hasNumberOfRows(1);
@@ -265,7 +265,7 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
                              "'query_analyzer': '{" +
                              "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
                              "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
-        SAIUtil.waitForIndexQueryable(cluster, keyspace, "q_analyzer_idx");
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, keyspace, "q_analyzer_idx");
 
         String query = "SELECT k FROM " + keyspace + ".q_analyzer WHERE v : ";
         Assertions.assertThat(coordinator.execute(query + "'ast'", ONE)).hasNumberOfRows(3);
