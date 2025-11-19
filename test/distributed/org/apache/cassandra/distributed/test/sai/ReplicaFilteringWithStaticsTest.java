@@ -65,7 +65,7 @@ public class ReplicaFilteringWithStaticsTest extends TestBaseImpl
         if (sai)
         {
             CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s." + table + "(s1) USING 'sai'"));
-            SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+            SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
         }
 
         CLUSTER.get(3).executeInternal(withKeyspace("UPDATE %s." + table + " USING TIMESTAMP 1 SET v0 = false WHERE pk0 = true AND ck0 = 'D'"));
@@ -107,7 +107,7 @@ public class ReplicaFilteringWithStaticsTest extends TestBaseImpl
         if (sai)
         {
             CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s." + table + "(ck1) USING 'sai'"));
-            SAIUtil.waitForIndexQueryable(CLUSTER, KEYSPACE);
+            SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
         }
 
         CLUSTER.get(1).executeInternal(withKeyspace("INSERT INTO %s." + table + " (pk0, ck0, ck1, s0, s1, v0) " +
