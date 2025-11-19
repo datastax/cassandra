@@ -882,4 +882,64 @@ public class SchemaCQLHelperTest extends CQLTester
             assertThat(e.getCause().getMessage(), containsString("Memtable configuration \"com.example.CustomMemtable\" not found"));
         }
     }
+
+    @Test
+    public void testToMapForCC4OutputFormat()
+    {
+        String keyspace = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+        StorageCompatibilityMode originalMode = TableParams.storageCompatibilityModeOverride;
+
+        try
+        {
+            // Enable CC 4.0 backward compatibility mode to test toMapForCC4() output
+            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.CC_4;
+
+            // Test that standard Cassandra memtables output short class names
+            String tableName1 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'trie'");
+            ColumnFamilyStore cfs1 = Keyspace.open(keyspace).getColumnFamilyStore(tableName1);
+            String cql1 = SchemaCQLHelper.getTableMetadataAsCQL(cfs1.metadata(), cfs1.keyspace.getMetadata());
+            // Should output short class name for standard Cassandra memtable
+            Assertions.assertThat(cql1).contains("memtable = {'class': 'TrieMemtable'");
+            Assertions.assertThat(cql1).doesNotContain("org.apache.cassandra.db.memtable.TrieMemtable");
+
+            String tableName2 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'skiplist'");
+            ColumnFamilyStore cfs2 = Keyspace.open(keyspace).getColumnFamilyStore(tableName2);
+            String cql2 = SchemaCQLHelper.getTableMetadataAsCQL(cfs2.metadata(), cfs2.keyspace.getMetadata());
+            // Should output short class name for standard Cassandra memtable
+            Assertions.assertThat(cql2).contains("memtable = {'class': 'SkipListMemtable'");
+            Assertions.assertThat(cql2).doesNotContain("org.apache.cassandra.db.memtable.SkipListMemtable");
+
+            String tableName3 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'skiplist_sharded'");
+            ColumnFamilyStore cfs3 = Keyspace.open(keyspace).getColumnFamilyStore(tableName3);
+            String cql3 = SchemaCQLHelper.getTableMetadataAsCQL(cfs3.metadata(), cfs3.keyspace.getMetadata());
+            // Should output short class name for standard Cassandra memtable
+            Assertions.assertThat(cql3).contains("memtable = {'class': 'ShardedSkipListMemtable'");
+            Assertions.assertThat(cql3).doesNotContain("org.apache.cassandra.db.memtable.ShardedSkipListMemtable");
+
+            // Test that tables created with fully qualified class names also output short class names
+            String tableName4 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.TrieMemtable'}");
+            ColumnFamilyStore cfs4 = Keyspace.open(keyspace).getColumnFamilyStore(tableName4);
+            String cql4 = SchemaCQLHelper.getTableMetadataAsCQL(cfs4.metadata(), cfs4.keyspace.getMetadata());
+            // Should output short class name even though input was fully qualified
+            Assertions.assertThat(cql4).contains("memtable = {'class': 'TrieMemtable'");
+            Assertions.assertThat(cql4).doesNotContain("org.apache.cassandra.db.memtable.TrieMemtable");
+
+            String tableName5 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.SkipListMemtable'}");
+            ColumnFamilyStore cfs5 = Keyspace.open(keyspace).getColumnFamilyStore(tableName5);
+            String cql5 = SchemaCQLHelper.getTableMetadataAsCQL(cfs5.metadata(), cfs5.keyspace.getMetadata());
+            // Should output short class name even though input was fully qualified
+            Assertions.assertThat(cql5).contains("memtable = {'class': 'SkipListMemtable'");
+            Assertions.assertThat(cql5).doesNotContain("org.apache.cassandra.db.memtable.SkipListMemtable");
+
+            // Test that custom memtables from other packages preserve fully qualified class names
+            // Note: We can't easily test this without adding a custom memtable configuration to cassandra.yaml,
+            // but the logic in toMapForCC4() ensures that only classes starting with
+            // "org.apache.cassandra.db.memtable." get their short names extracted.
+        }
+        finally
+        {
+            // Restore original value
+            TableParams.storageCompatibilityModeOverride = originalMode;
+        }
+    }
 }
