@@ -996,7 +996,7 @@ public class ImportTest extends CQLTester
     private void createIndexAndWait(String query, String indexName)
     {
         schemaChange(query);
-        waitForIndexQueryable(KEYSPACE, indexName);
+        waitForIndexQueryableOnFirstNode(KEYSPACE, indexName);
     }
 
 }
