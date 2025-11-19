@@ -522,7 +522,7 @@ public class IndexDescriptor
         {
             addOrGet(completionMarkerComponent()).createEmpty();
             sealed = true;
-            // Until this call, the group is not attached to the parent. This create the link.
+            // Until this call, the group is not attached to the parent. This creates the link.
             updateParentLink(this);
         }
 
