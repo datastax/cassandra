@@ -38,6 +38,7 @@ public class StorageCompatibilityModeTest
         {
             switch (mode)
             {
+                case CC_4:
                 case UPGRADING:
                 case NONE:
                     mode.validateSstableFormat(big);
