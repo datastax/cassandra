@@ -116,7 +116,7 @@ public class IntersectFilteringQueryTest extends GuardrailTester
         schemaChange("CREATE TABLE %s (k bigint, c bigint, v1 bigint, v2 bigint, PRIMARY KEY (k, c))");
         schemaChange("CREATE INDEX ON %s(v1) USING 'sai'");
         schemaChange("CREATE INDEX ON %s(v2) USING 'sai'");
-        SAIUtil.waitForIndexQueryable(getCluster(), KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(getCluster(), KEYSPACE);
 
         List<String> globalWarnings = executeViaDriver(format("SELECT * FROM %s WHERE v1 = 0 AND v2 = 0"));
         assertThat(globalWarnings).isEmpty();

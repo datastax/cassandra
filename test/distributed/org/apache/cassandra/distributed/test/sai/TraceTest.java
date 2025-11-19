@@ -66,7 +66,7 @@ public class TraceTest extends TestBaseImpl
 
             cluster.forEach(c -> c.flush(KEYSPACE));
 
-            SAIUtil.waitForIndexQueryable(cluster, "trace_ks");
+            SAIUtil.waitForIndexQueryableOnFirstNode(cluster, "trace_ks");
 
             UUID sessionId = nextTimeUUID().asUUID();
             cluster.coordinator(1).executeWithTracingWithResult(sessionId, "SELECT * from trace_ks.tbl WHERE v1 < " + MATCHED_ROWS, ConsistencyLevel.ONE);

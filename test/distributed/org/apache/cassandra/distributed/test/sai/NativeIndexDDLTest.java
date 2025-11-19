@@ -103,7 +103,7 @@ public class NativeIndexDDLTest extends TestBaseImpl
         cluster.schemaChange(String.format(CREATE_TABLE_TEMPLATE, KEYSPACE, table));
         cluster.schemaChange(String.format(CREATE_INDEX_TEMPLATE, KEYSPACE, table, "v1"));
         cluster.schemaChange(String.format(CREATE_INDEX_TEMPLATE, KEYSPACE, table, "v2"));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
         // create 100 rows in 1 sstable
         int num = 100;

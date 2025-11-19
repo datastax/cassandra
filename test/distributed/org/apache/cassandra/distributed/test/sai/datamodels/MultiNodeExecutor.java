@@ -65,7 +65,7 @@ public class MultiNodeExecutor implements DataModel.Executor
     @Override
     public void waitForTableIndexesQueryable(String keyspace, String table)
     {
-        SAIUtil.waitForIndexQueryable(cluster, keyspace);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, keyspace);
     }
 
     @Override
