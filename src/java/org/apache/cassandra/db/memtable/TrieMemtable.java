@@ -441,7 +441,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         private int rowCountIncludingStatic;
         private int tombstoneCount;
 
-        public static final long HEAP_SIZE = ObjectSizes.measure(new PartitionData((MemtableShard) null));
+        public static final long HEAP_SIZE = ObjectSizes.measure(new PartitionData(null));
 
         public PartitionData(MemtableShard owner)
         {
@@ -490,6 +490,12 @@ public class TrieMemtable extends AbstractShardedMemtable
         {
             return HEAP_SIZE;
         }
+
+        public void clearStats()
+        {
+            rowCountIncludingStatic = 0;
+            tombstoneCount = 0;
+        }
     }
 
     class KeySizeAndCountCollector extends TrieEntriesWalker<Object, Void>
@@ -526,7 +532,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         int partitionCount = counter.keyCount;
         long partitionKeySize = counter.keySize;
 
-        return new AbstractFlushablePartitionSet<TrieBackedPartition>()
+        return new AbstractFlushablePartitionSet<>()
         {
             public Memtable memtable()
             {
@@ -699,12 +705,12 @@ public class TrieMemtable extends AbstractShardedMemtable
 
         void updateLiveDataSize(long size)
         {
-            liveDataSize = liveDataSize + size;
+            liveDataSize += size;
         }
 
         private void updateCurrentOperations(long op)
         {
-            currentOperations = currentOperations + op;
+            currentOperations += op;
         }
 
         public int partitionCount()
@@ -863,7 +869,7 @@ public class TrieMemtable extends AbstractShardedMemtable
             {
                 try
                 {
-                    SHARD_COUNT = Integer.valueOf(shardCount);
+                    SHARD_COUNT = Integer.parseInt(shardCount);
                     CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
                 }
                 catch (NumberFormatException ex)

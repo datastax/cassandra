@@ -124,7 +124,7 @@ public class TrieMemoryIndex extends MemoryIndex
         this.primaryKeysAccumulator = new PrimaryKeysAccumulator(primaryKeysHeapAllocations);
         this.primaryKeysRemover = new PrimaryKeysRemover(primaryKeysHeapAllocations);
         this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
-        this.data = InMemoryTrie.longLived(TypeUtil.byteComparableVersionForTermsData(indexContext.version()), TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
+        this.data = InMemoryTrie.longLivedOrdered(TypeUtil.byteComparableVersionForTermsData(indexContext.version()), TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.memtable = memtable;
     }
 
