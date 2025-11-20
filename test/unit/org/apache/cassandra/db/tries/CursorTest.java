@@ -116,22 +116,22 @@ public class CursorTest
     {
         // Test forward direction
         long pos = Cursor.encode(1, 0x12, Direction.FORWARD);
-        assertEquals(0x12, Cursor.undecodedTransition(pos));
+        assertEquals(0x12 << 1, VerificationCursor.undecodedTransition(pos));
 
         // Test reverse direction (should have bit 0x100 set)
         pos = Cursor.encode(1, 0x12, Direction.REVERSE);
-        assertEquals(0x12 ^ 0xFF, Cursor.undecodedTransition(pos));
+        assertEquals((0x12 ^ 0xFF) << 1, VerificationCursor.undecodedTransition(pos));
 
         // Test with different transitions
         for (int i = 0; i < 0x100; i++)
         {
             // Forward direction
             pos = Cursor.encode(1, i, Direction.FORWARD);
-            assertEquals(i, Cursor.undecodedTransition(pos));
+            assertEquals(i << 1, VerificationCursor.undecodedTransition(pos));
 
             // Reverse direction
             pos = Cursor.encode(1, i, Direction.REVERSE);
-            assertEquals(i ^ 0xFF, Cursor.undecodedTransition(pos));
+            assertEquals((i ^ 0xFF) << 1, VerificationCursor.undecodedTransition(pos));
         }
     }
 
@@ -292,7 +292,7 @@ public class CursorTest
                 if (transition.intValue() != direction.select(0xFF, 0x00))
                     assertEquals(transition + direction.increase, Cursor.incomingTransition(newPos));
                 else
-                    assertEquals(0x100, Cursor.undecodedTransition(newPos));
+                    assertEquals(0x200, VerificationCursor.undecodedTransition(newPos));
                 assertEquals(direction, Cursor.direction(newPos));
             });
     }

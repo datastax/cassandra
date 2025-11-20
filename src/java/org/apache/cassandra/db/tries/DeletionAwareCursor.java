@@ -175,11 +175,24 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
     extends LiveAndDeletionsMergeCursor<T, D, Z>
     implements DeletionAwareTrie.DeletionsStopControl
     {
-        boolean stopIssuingDeletions = false;
+        boolean stopIssuingDeletions;
 
         SwitchableLiveAndDeletionsMergeCursor(BiFunction<T, D, Z> resolver, DeletionAwareCursor<T, D> c1)
         {
             super(resolver, c1);
+            this.stopIssuingDeletions = false;
+        }
+
+        SwitchableLiveAndDeletionsMergeCursor(BiFunction<T, D, Z> resolver, DeletionAwareCursor<T, D> c1, boolean stopIssuingDeletions)
+        {
+            super(resolver, c1);
+            this.stopIssuingDeletions = stopIssuingDeletions;
+        }
+
+        SwitchableLiveAndDeletionsMergeCursor(BiFunction<T, D, Z> resolver, DeletionAwareCursor<T, D> c1, RangeCursor<D> c2)
+        {
+            super(resolver, c1, c2);
+            this.stopIssuingDeletions = false;
         }
 
         public void stopIssuingDeletions(ResettingTransitionsReceiver receiver)
@@ -193,7 +206,8 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
                     c2 = RangeCursor.empty(direction(), byteComparableVersion());
                     break;
                 default:
-                    state = state.C1_ONLY;
+                    state = State.C1_ONLY;
+                    c2 = null;
                     break;
             }
         }
@@ -204,6 +218,25 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
             if (stopIssuingDeletions)
                 return encodedPosition;
             return super.postAdvance(encodedPosition);
+        }
+
+        @Override
+        public SwitchableLiveAndDeletionsMergeCursor<T, D, Z> tailCursor(Direction direction)
+        {
+            switch (state)
+            {
+                case C1_ONLY:
+                    return new SwitchableLiveAndDeletionsMergeCursor<>(resolver, c1.tailCursor(direction), stopIssuingDeletions);
+                    // we can't reach any of the other states if stopIssuingDeletions is true
+                case AT_C2:
+                    return new SwitchableLiveAndDeletionsMergeCursor<>(resolver, new DeletionAwareCursor.Empty<>(direction, byteComparableVersion()), c2.tailCursor(direction));
+                case AT_C1:
+                    return new SwitchableLiveAndDeletionsMergeCursor<>(resolver, c1.tailCursor(direction), c2.precedingStateCursor(direction));
+                case AT_BOTH:
+                    return new SwitchableLiveAndDeletionsMergeCursor<>(resolver, c1.tailCursor(direction), c2.tailCursor(direction));
+                default:
+                    throw new AssertionError();
+            }
         }
     }
 
@@ -297,6 +330,64 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
         public DeletionAwareCursor<T, D> tailCursor(Direction direction)
         {
             return new DeletionAwareCursor.Empty<>(direction, byteComparableVersion());
+        }
+    }
+
+    class Wrapping<T, D extends RangeState<D>> implements DeletionAwareCursor<T, D>
+    {
+        final Cursor<T> source;
+
+        public Wrapping(Cursor<T> source)
+        {
+            this.source = source;
+        }
+
+        @Override
+        public RangeCursor<D> deletionBranchCursor(Direction direction)
+        {
+            return null;
+        }
+
+        @Override
+        public long encodedPosition()
+        {
+            return source.encodedPosition();
+        }
+
+        @Override
+        public T content()
+        {
+            return source.content();
+        }
+
+        @Override
+        public ByteComparable.Version byteComparableVersion()
+        {
+            return source.byteComparableVersion();
+        }
+
+        @Override
+        public long advance()
+        {
+            return source.advance();
+        }
+
+        @Override
+        public long advanceMultiple(TransitionsReceiver receiver)
+        {
+            return source.advanceMultiple(receiver);
+        }
+
+        @Override
+        public long skipTo(long encodedSkipPosition)
+        {
+            return source.skipTo(encodedSkipPosition);
+        }
+
+        @Override
+        public DeletionAwareCursor<T, D> tailCursor(Direction direction)
+        {
+            return new Wrapping<>(source.tailCursor(direction));
         }
     }
 }
