@@ -109,7 +109,9 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
         @Override
         protected V getContent(T v)
         {
-            return mapContent(v, dir -> cursor.tailCursor(dir), keyBytes, keyPos);
+            // Fix the location of the tail trie source.
+            Cursor<T> tailCursor = cursor.tailCursor(cursor.direction());
+            return mapContent(v, tailCursor::tailCursor, keyBytes, keyPos);
         }
 
         protected abstract V mapContent(T value, Trie<T> tailTrie, byte[] bytes, int byteLength);
@@ -137,7 +139,9 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
         @Override
         protected V getContent(S v)
         {
-            return mapContent(v, dir -> cursor.tailCursor(dir), keyBytes, keyPos);
+            // Fix the location of the tail trie source.
+            RangeCursor<S> tailCursor = cursor.tailCursor(cursor.direction());
+            return mapContent(v, tailCursor::tailCursor, keyBytes, keyPos);
         }
 
         protected abstract V mapContent(S value, RangeTrie<S> tailTrie, byte[] bytes, int byteLength);
@@ -165,7 +169,9 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
         @Override
         protected V getContent(T v)
         {
-            return mapContent(v, dir -> cursor.tailCursor(dir), keyBytes, keyPos);
+            // Fix the location of the tail trie source.
+            DeletionAwareCursor<T, D> tailCursor = cursor.tailCursor(cursor.direction());
+            return mapContent(v, tailCursor::tailCursor, keyBytes, keyPos);
         }
 
         protected abstract V mapContent(T value, DeletionAwareTrie<T, D> tailTrie, byte[] bytes, int byteLength);

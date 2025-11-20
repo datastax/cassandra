@@ -24,34 +24,50 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 class DepthAdjustedCursor<T, C extends Cursor<T>> implements Cursor<T>
 {
     final C source;
-    final long depthAdjustment;
-    final long matchingPositionAtRoot;
+    private long depthAdjustment;
+    private long matchingPositionAtRoot;
 
     DepthAdjustedCursor(C source, long matchingPositionAtRoot)
     {
         this.source = source;
+        setAttachmentPoint(matchingPositionAtRoot);
+    }
+
+    void setAttachmentPoint(long matchingPositionAtRoot)
+    {
         this.matchingPositionAtRoot = matchingPositionAtRoot;
         this.depthAdjustment = Cursor.depthCorrectionValue(matchingPositionAtRoot);
     }
 
     long toAdjustedDepth(long position)
     {
-        return Cursor.isExhausted(position) ? position : position + depthAdjustment;
+        if (Cursor.depth(position) > 0)
+            return position + depthAdjustment;
+        else if (Cursor.isExhausted(position))
+            return position;
+        else
+            return matchingPositionAtRoot | (position & Cursor.ON_RETURN_PATH_BIT);
     }
 
     long fromAdjustedDepth(long position)
     {
-        return Cursor.isExhausted(position) ? position : position - depthAdjustment;
+        // matchingPositionAtRoot | ON_RETURN_PATH_BIT should map to rootPosition | ON_RETURN_PATH_BIT
+        long adjusted = position - depthAdjustment;
+        if (Cursor.depth(adjusted) > 0)
+            return adjusted;
+
+        // The only non-exhausted position that can be requested with this depth is the return path stop for the root.
+        if (position == (matchingPositionAtRoot | Cursor.ON_RETURN_PATH_BIT))
+            return Cursor.rootReturnPosition(adjusted);
+        else
+            return Cursor.exhaustedPosition(adjusted);
+
     }
 
     @Override
     public long encodedPosition()
     {
-        long position = source.encodedPosition();
-        if (Cursor.depth(position) == 0)
-            return matchingPositionAtRoot;
-        else
-            return toAdjustedDepth(position);
+        return toAdjustedDepth(source.encodedPosition());
     }
 
     @Override

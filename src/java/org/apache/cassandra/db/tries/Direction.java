@@ -45,16 +45,6 @@ public enum Direction
             return a <= b;
         }
 
-        public int min(int a, int b)
-        {
-            return Math.min(a, b);
-        }
-
-        public int max(int a, int b)
-        {
-            return Math.max(a, b);
-        }
-
         public <T> T select(T forward, T reverse)
         {
             return forward;
@@ -95,16 +85,6 @@ public enum Direction
         public boolean le(int a, int b)
         {
             return a >= b;
-        }
-
-        public int min(int a, int b)
-        {
-            return Math.max(a, b);
-        }
-
-        public int max(int a, int b)
-        {
-            return Math.min(a, b);
         }
 
         public <T> T select(T forward, T reverse)
@@ -155,10 +135,6 @@ public enum Direction
     {
         return le(b, a);
     }
-    /** Returns the result of the operation corresponding to min(a, b) for the forward direction */
-    public abstract int min(int a, int b);
-    /** Returns the result of the operation corresponding to max(a, b) for the forward direction */
-    public abstract int max(int a, int b);
 
     /**
      * Use the first argument in forward direction and the second in reverse, i.e. isForward() ? forward : reverse.

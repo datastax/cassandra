@@ -125,26 +125,31 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// Also see [Trie.md](./Trie.md) for further documentation.
 interface Cursor<T>
 {
-    static final int DEPTH_SHIFT = 32;
-    static final int TRANSITION_SHIFT = 20;
+    int DEPTH_SHIFT = 32;
+    int TRANSITION_SHIFT = 20;
 
     /// 1 for reverse direction, 0 for forward. Used to xor transition bits for incomingTransition.
     /// This takes part in comparisons but this does not matter positions are always compared with same direction.
     /// This _must_ be 31, the code below takes advantage of this bit being the sign bit of (int) encodedPosition.
-    static final int DIRECTION_BIT = 31;
+    int DIRECTION_BIT = 31;
+
+    /// An additional transition bit used to revisit positions on the way back after iterating the branch.
+    /// Used for sets and ranges to correctly define the range states for branch-inclusive ranges.
+    long ON_RETURN_PATH_BIT = 1L << 19;
 
     /// Mask of the transition bits including the direction. We apply xor with this value to form a position in the
     /// reverse direction.
-    static final long TRANSITION_MASK = 0x8FFL << TRANSITION_SHIFT;
+    long TRANSITION_MASK = 0x8FFL << TRANSITION_SHIFT;
 
-    static final long ROOT_POSITION_FORWARD = encode(0, 0, Direction.FORWARD);
-    static final long ROOT_POSITION_REVERSE = encode(0, 0, Direction.REVERSE);
+    long ROOT_POSITION_FORWARD = encode(0, 0, Direction.FORWARD);
+    long ROOT_POSITION_REVERSE = encode(0, 0, Direction.REVERSE);
+    long ROOT_POSITION_DEPTH = ROOT_POSITION_FORWARD & 0xFFFFFFFF00000000L;
 
-    static final long EXHAUSTED_POSITION_FORWARD = encode(-1, 0, Direction.FORWARD);
-    static final long EXHAUSTED_POSITION_REVERSE = encode(-1, 0, Direction.REVERSE);
-    static final long EXHAUSTED_POSITION_DEPTH = EXHAUSTED_POSITION_FORWARD & 0xFFFFFFFF00000000L;
+    long EXHAUSTED_POSITION_FORWARD = encode(-1, 0, Direction.FORWARD);
+    long EXHAUSTED_POSITION_REVERSE = encode(-1, 0, Direction.REVERSE);
+    long EXHAUSTED_POSITION_DEPTH = EXHAUSTED_POSITION_FORWARD & 0xFFFFFFFF00000000L;
 
-    static final long DEPTH_ADJUSTMENT_ONE = -1L << DEPTH_SHIFT;
+    long DEPTH_ADJUSTMENT_ONE = -1L << DEPTH_SHIFT;
 
     static int depth(long encodedPosition)
     {
@@ -182,6 +187,13 @@ interface Cursor<T>
         return Direction.values()[((int) encodedPosition >>> DIRECTION_BIT) & 1];
     }
 
+    /// Returns true if this position is on the return/ascent path. Positions on the ascent path are used to present
+    /// content or boundaries after the children of a node have been seen, e.g. to correctly order prefix content after
+    /// children in reverse order, or to close a range covering a branch.
+    static boolean isOnReturnPath(long encodedPosition)
+    {
+        return (encodedPosition & ON_RETURN_PATH_BIT) != 0;
+    }
 
     static long compare(long encoded1, long encoded2)
     {
@@ -194,6 +206,13 @@ interface Cursor<T>
         return direction.select(ROOT_POSITION_FORWARD, ROOT_POSITION_REVERSE);
     }
 
+    /// Returns the ascent path position for the root, i.e. the last point before going exhausted, as used by open-ended
+    /// ranges and sets.
+    static long rootReturnPosition(long prevPosition)
+    {
+        return ROOT_POSITION_DEPTH | ((((long) ((int) prevPosition) >> DIRECTION_BIT)) & TRANSITION_MASK) | ON_RETURN_PATH_BIT;
+    }
+
     static long exhaustedPosition(Direction direction)
     {
         return direction.select(EXHAUSTED_POSITION_FORWARD, EXHAUSTED_POSITION_REVERSE);
@@ -202,6 +221,11 @@ interface Cursor<T>
     static long exhaustedPosition(long prevPosition)
     {
         return EXHAUSTED_POSITION_DEPTH | ((((long) ((int) prevPosition) >> DIRECTION_BIT)) & TRANSITION_MASK);
+    }
+
+    static boolean isRootPosition(long encodedPosition)
+    {
+        return encodedPosition == ROOT_POSITION_FORWARD || encodedPosition == ROOT_POSITION_REVERSE;
     }
 
     static long encode(int depth, int transition, Direction direction)
@@ -218,6 +242,7 @@ interface Cursor<T>
     ///        encode(depth(encodedPosition) + 1, incomingByte, direction(encodedPosition))`
     static long positionForDescentWithByte(long encodedPosition, int incomingByte)
     {
+        assert !isOnReturnPath(encodedPosition) : "Can't descend from a return path position " + toString(encodedPosition);
         long depthPart = (encodedPosition + DEPTH_ADJUSTMENT_ONE) & 0xFFFFFFFF00000000L;
         long transitionXored = incomingByte ^ (((int) encodedPosition) >> DIRECTION_BIT);
         return depthPart | ((transitionXored << TRANSITION_SHIFT) & TRANSITION_MASK);
@@ -227,12 +252,7 @@ interface Cursor<T>
     /// returned encoded position is a valid `skipTo` position for the current state.
     static long positionForSkippingBranch(long encodedBranchPosition)
     {
-        return encodedBranchPosition + (1 << TRANSITION_SHIFT);
-    }
-
-    static long positionWithOppositeDirection(long encodedPosition)
-    {
-        return encodedPosition ^ TRANSITION_MASK;
+        return encodedBranchPosition + (1L << TRANSITION_SHIFT);
     }
 
     /// Returns true if the given `currPosition` as returned by `advance`, `advanceMultiple` or `skipTo` is the result
@@ -245,16 +265,13 @@ interface Cursor<T>
         return compare(currPosition, prevPosition) > 0;
     }
 
-    /// Returns a directed version of the incoming transition, including an overflow bit so that a 0x100 position
-    /// (which can be result of applying [#positionForSkippingBranch]) can be correctly returned.
-    static int undecodedTransition(long encodedPosition)
-    {
-        return (int) (encodedPosition >> TRANSITION_SHIFT) & 0x1FF;
-    }
-
     static String toString(long encodedPosition)
     {
-        return String.format("depth %d incomingTransition %02x %s", depth(encodedPosition), incomingTransition(encodedPosition), direction(encodedPosition));
+        return String.format("depth %d incomingTransition %02x%s %s",
+                             depth(encodedPosition),
+                             incomingTransition(encodedPosition),
+                             isOnReturnPath(encodedPosition) ? "↑" : " ",
+                             direction(encodedPosition));
     }
 
     /// Returns the cursor's current position encoded as a long. This combines the depth and incoming transition as well
@@ -326,8 +343,23 @@ interface Cursor<T>
             if (receiver != null)
             {
                 if (ascended(currPosition, prevPosition))
-                    receiver.resetPathLength(depth(currPosition) - 1);
-                receiver.addPathByte(incomingTransition(currPosition));
+                {
+                    int depth = depth(currPosition);
+                    if (depth > 0)
+                    {
+                        receiver.resetPathLength(depth - 1);
+                        receiver.addPathByte(incomingTransition(currPosition));
+                    }
+                    else
+                    {
+                        receiver.resetPathLength(0);
+                    }
+                }
+                else
+                    receiver.addPathByte(incomingTransition(currPosition));
+
+                if (isOnReturnPath(currPosition))
+                    receiver.onReturnPath();
             }
             T content = content();
             if (content != null)
@@ -397,6 +429,13 @@ interface Cursor<T>
         void addPathByte(int nextByte);
         /// Add the count bytes from position pos in the given buffer.
         void addPathBytes(DirectBuffer buffer, int pos, int count);
+
+        /// Called when the current position is on the return path. Sets and ranges use these positions to return
+        /// end-inclusive ranges.
+        default void onReturnPath()
+        {
+            // nothing by default
+        }
     }
 
     /// Used by [#advanceToContent] to track the transitions and backtracking taken.
@@ -523,14 +562,21 @@ interface Cursor<T>
     @SuppressWarnings("unused")
     private String dumpBranch()
     {
-        return dumpBranch(Object::toString);
+        return dumpBranch(Direction.FORWARD);
     }
 
     /// Dump the current branch. To be used for debugging only.
-    private String dumpBranch(Function<T, String> toStringFunction)
+    @SuppressWarnings("unused")
+    private String dumpBranch(Direction direction)
+    {
+        return dumpBranch(direction, Object::toString);
+    }
+
+    /// Dump the current branch. To be used for debugging only.
+    private String dumpBranch(Direction direction, Function<T, String> toStringFunction)
     {
         TrieDumper<T> dumper = new TrieDumper.Plain<>(toStringFunction);
-        tailCursor(Direction.FORWARD).process(dumper);
+        tailCursor(direction).process(dumper);
         return dumper.complete();
     }
 
