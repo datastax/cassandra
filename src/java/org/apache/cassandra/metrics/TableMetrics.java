@@ -334,8 +334,13 @@ public class TableMetrics
     public final Gauge<Double> mutatedAnticompactionGauge;
 
     public final TableTimer<SnapshottingTimer> coordinatorReadLatency;
+    public final TableTimer coordinatorCasReadLatency;
     public final TableTimer coordinatorScanLatency;
+    public final TableTimer coordinatorCasWriteLatency;
     public final TableTimer<SnapshottingTimer> coordinatorWriteLatency;
+
+    /** Time spent waiting for free memtable space, either on- or off-heap */
+    public final TableHistogram waitingOnFreeMemtableSpace;
 
     private final MetricNameFactory factory;
     private final MetricNameFactory aliasFactory;
@@ -1030,8 +1035,11 @@ public class TableMetrics
         liveScannedHistogram = createTableHistogram("LiveScannedHistogram", cfs.getKeyspaceMetrics().liveScannedHistogram, false);
         colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", cfs.getKeyspaceMetrics().colUpdateTimeDeltaHistogram, false);
         coordinatorReadLatency = createTableTimer("CoordinatorReadLatency", cfs.getKeyspaceMetrics().coordinatorReadLatency);
+        coordinatorCasReadLatency = createTableTimer("CoordinatorCasReadLatency", cfs.getKeyspaceMetrics().coordinatorCasReadLatency);
         coordinatorScanLatency = createTableTimer("CoordinatorScanLatency", cfs.getKeyspaceMetrics().coordinatorScanLatency);
         coordinatorWriteLatency = createTableTimer("CoordinatorWriteLatency", cfs.getKeyspaceMetrics().coordinatorWriteLatency);
+        coordinatorCasWriteLatency = createTableTimer("CoordinatorCasWriteLatency", cfs.getKeyspaceMetrics().coordinatorCasWriteLatency);
+        waitingOnFreeMemtableSpace = createTableHistogram("WaitingOnFreeMemtableSpace", cfs.getKeyspaceMetrics().waitingOnFreeMemtableSpace, false);
 
         // We do not want to capture view mutation specific metrics for a view
         // They only makes sense to capture on the base table
