@@ -154,10 +154,14 @@ public class KeyspaceMetrics
     public final Counter outOfRangeTokenPaxosRequests;
     /** Coordinator read metrics */
     public final Timer coordinatorReadLatency;
+    /** Coordinator CAS read metrics */
+    public final Timer coordinatorCasReadLatency;
     /** Coordinator range metrics */
     public final Timer coordinatorScanLatency;
     /** Coordinator write metrics */
     public final Timer coordinatorWriteLatency;
+    /** Coordinator CAS write metrics */
+    public final Timer coordinatorCasWriteLatency;
     /** Time spent waiting for free memtable space, either on- or off-heap */
     public final Histogram waitingOnFreeMemtableSpace;
 
@@ -297,8 +301,10 @@ public class KeyspaceMetrics
         bytesValidated = createKeyspaceHistogram("BytesValidated", false);
 
         coordinatorReadLatency = createKeyspaceTimer("CoordinatorReadLatency");
+        coordinatorCasReadLatency = createKeyspaceTimer("CoordinatorCasReadLatency");
         coordinatorScanLatency = createKeyspaceTimer("CoordinatorScanLatency");
         coordinatorWriteLatency = createKeyspaceTimer("CoordinatorWriteLatency");
+        coordinatorCasWriteLatency = createKeyspaceTimer("CoordinatorCasWriteLatency");
         waitingOnFreeMemtableSpace = createKeyspaceHistogram("WaitingOnFreeMemtableSpace", false);
 
         confirmedRepairedInconsistencies = createKeyspaceMeter("RepairedDataInconsistenciesConfirmed");
