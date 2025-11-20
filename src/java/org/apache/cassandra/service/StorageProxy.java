@@ -671,6 +671,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.casWriteMetrics.serviceTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(latency);
+            Keyspace.openAndGetStore(metadata).metric.coordinatorCasWriteLatency.update(latency, NANOSECONDS);
         }
     }
 
