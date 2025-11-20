@@ -27,44 +27,72 @@ class SingletonCursor<T> implements Cursor<T>
     ByteSource src;
     final ByteComparable.Version byteComparableVersion;
     final T value;
-    private long currentPosition;
-    protected int nextTransition;
+    protected long currentPosition;
+    protected long nextPosition;
 
 
-    public SingletonCursor(Direction direction, ByteSource src, ByteComparable.Version byteComparableVersion, T value)
-    {
-        this(direction, src.next(), src, byteComparableVersion, value);
-    }
-
-    public SingletonCursor(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, T value)
+    public SingletonCursor(Direction direction,
+                           ByteSource src,
+                           ByteComparable.Version byteComparableVersion,
+                           T value)
     {
         this.src = src;
         this.byteComparableVersion = byteComparableVersion;
         this.value = value;
-        this.nextTransition = firstByte;
         this.currentPosition = Cursor.rootPosition(direction);
+        prepareNextPosition(currentPosition);
+    }
+
+    /// Constructor for tail tries.
+    ///
+    /// Note: the positions given may have different direction from the direction of the constructed tail.
+    SingletonCursor(Direction direction,
+                    long currentPosition,
+                    long nextPosition,
+                    ByteSource src,
+                    ByteComparable.Version byteComparableVersion,
+                    T value)
+    {
+        assert !Cursor.isOnReturnPath(currentPosition) : "tailCursor cannot be called on return path positions";
+        this.src = src;
+        this.byteComparableVersion = byteComparableVersion;
+        this.value = value;
+        this.currentPosition = Cursor.rootPosition(direction);
+        if (!Cursor.isExhausted(nextPosition))
+            this.nextPosition = nextPosition - Cursor.depthCorrectionValue(currentPosition);
+        else
+            this.nextPosition = nextPosition;
+
+        if (direction != Cursor.direction(currentPosition))
+            this.nextPosition ^= Cursor.TRANSITION_MASK;
+    }
+
+    void prepareNextPosition(long currentPosition)
+    {
+        int nextTransition = src.next();
+
+        if (nextTransition != ByteSource.END_OF_STREAM)
+            nextPosition = Cursor.positionForDescentWithByte(currentPosition, nextTransition);
+        else
+            nextPosition = Cursor.exhaustedPosition(currentPosition);
     }
 
     @Override
     public long advance()
     {
-        if (nextTransition != ByteSource.END_OF_STREAM)
-        {
-            currentPosition = Cursor.positionForDescentWithByte(currentPosition, nextTransition);
-            nextTransition = src.next();
-            return currentPosition;
-        }
-        else
-        {
-            return done();
-        }
+        currentPosition = nextPosition;
+        if (!Cursor.isExhausted(nextPosition))
+            prepareNextPosition(currentPosition);
+        return currentPosition;
     }
 
     @Override
     public long advanceMultiple(TransitionsReceiver receiver)
     {
-        if (nextTransition == ByteSource.END_OF_STREAM)
-            return done();
+        if (Cursor.isExhausted(nextPosition))
+            return currentPosition = nextPosition;
+
+        int nextTransition = Cursor.incomingTransition(nextPosition);
         int current = nextTransition;
         long pos = currentPosition;
         int next = src.next();
@@ -77,41 +105,22 @@ class SingletonCursor<T> implements Cursor<T>
             pos += DEPTH_ADJUSTMENT_ONE;
         }
         currentPosition = Cursor.positionForDescentWithByte(pos, current);
-        nextTransition = next;
+        nextPosition = Cursor.exhaustedPosition(currentPosition);
         return currentPosition;
     }
 
     @Override
     public long skipTo(long encodedSkipPosition)
     {
-        if (nextTransition != ByteSource.END_OF_STREAM)
-        {
-            long nextPosition = Cursor.positionForDescentWithByte(currentPosition, nextTransition);
-            if (Cursor.compare(encodedSkipPosition, nextPosition) > 0)
-                return done();
-
-            assert Cursor.depth(encodedSkipPosition) == Cursor.depth(nextPosition)
-                : "Invalid advance request to " + Cursor.toString(encodedSkipPosition) +
-                  " to cursor at " + Cursor.toString(currentPosition);
-
-            nextTransition = src.next();
-            currentPosition = nextPosition;
-            return currentPosition;
-        }
+        if (Cursor.compare(encodedSkipPosition, nextPosition) <= 0)
+            return advance();
         else
-        {
-            return done();
-        }
-    }
-
-    private long done()
-    {
-        return currentPosition = Cursor.exhaustedPosition(currentPosition);
+            return currentPosition = Cursor.exhaustedPosition(currentPosition);
     }
 
     protected boolean atEnd()
     {
-        return nextTransition == ByteSource.END_OF_STREAM && !Cursor.isExhausted(currentPosition);
+        return Cursor.isExhausted(nextPosition) && !Cursor.isExhausted(currentPosition);
     }
 
     @Override
@@ -135,7 +144,11 @@ class SingletonCursor<T> implements Cursor<T>
     @Override
     public SingletonCursor<T> tailCursor(Direction dir)
     {
-        return new SingletonCursor<>(dir, nextTransition, duplicateSource(), byteComparableVersion, value);
+        return new SingletonCursor<>(dir,
+                                     currentPosition, nextPosition,
+                                     duplicateSource(),
+                                     byteComparableVersion,
+                                     value);
     }
 
     ByteSource.Duplicatable duplicateSource()
@@ -146,48 +159,25 @@ class SingletonCursor<T> implements Cursor<T>
         return duplicatableSource.duplicate();
     }
 
-    static class Range<S extends RangeState<S>> extends SingletonCursor<S> implements RangeCursor<S>
-    {
-        public Range(Direction direction, ByteSource src, ByteComparable.Version byteComparableVersion, S value)
-        {
-            super(direction, src, byteComparableVersion, value);
-        }
-
-        public Range(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, S value)
-        {
-            super(direction, firstByte, src, byteComparableVersion, value);
-        }
-
-        @Override
-        public S precedingState()
-        {
-            return null;
-        }
-
-        @Override
-        public S state()
-        {
-            return content();
-        }
-
-        @Override
-        public Range<S> tailCursor(Direction dir)
-        {
-            return new Range<>(dir, nextTransition, duplicateSource(), byteComparableVersion, value);
-        }
-    }
-
     static class DeletionAware<T, D extends RangeState<D>>
     extends SingletonCursor<T> implements DeletionAwareCursor<T, D>
     {
-        DeletionAware(Direction direction, ByteSource src, ByteComparable.Version byteComparableVersion, T value)
+        DeletionAware(Direction direction,
+                      ByteSource src,
+                      ByteComparable.Version byteComparableVersion,
+                      T value)
         {
             super(direction, src, byteComparableVersion, value);
         }
 
-        DeletionAware(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, T value)
+        DeletionAware(Direction direction,
+                      long currentPosition,
+                      long nextPosition,
+                      ByteSource src,
+                      ByteComparable.Version byteComparableVersion,
+                      T value)
         {
-            super(direction, firstByte, src, byteComparableVersion, value);
+            super(direction, currentPosition, nextPosition, src, byteComparableVersion, value);
         }
 
         @Override
@@ -199,7 +189,7 @@ class SingletonCursor<T> implements Cursor<T>
         @Override
         public DeletionAware<T, D> tailCursor(Direction dir)
         {
-            return new DeletionAware<>(dir, nextTransition, duplicateSource(), byteComparableVersion, value);
+            return new DeletionAware<>(dir, currentPosition, nextPosition, duplicateSource(), byteComparableVersion, value);
         }
     }
 
@@ -214,9 +204,14 @@ class SingletonCursor<T> implements Cursor<T>
             this.deletionBranch = deletionBranch;
         }
 
-        DeletionBranch(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, RangeTrie<D> deletionBranch)
+        DeletionBranch(Direction direction,
+                       long currentPosition,
+                       long nextPosition,
+                       ByteSource src,
+                       ByteComparable.Version byteComparableVersion,
+                       RangeTrie<D> deletionBranch)
         {
-            super(direction, firstByte, src, byteComparableVersion, null);
+            super(direction, currentPosition, nextPosition, src, byteComparableVersion, null);
             this.deletionBranch = deletionBranch;
         }
 
@@ -229,7 +224,7 @@ class SingletonCursor<T> implements Cursor<T>
         @Override
         public DeletionBranch<T, D> tailCursor(Direction dir)
         {
-            return new DeletionBranch<>(dir, nextTransition, duplicateSource(), byteComparableVersion, deletionBranch);
+            return new DeletionBranch<>(dir, currentPosition, nextPosition, duplicateSource(), byteComparableVersion, deletionBranch);
         }
     }
 }

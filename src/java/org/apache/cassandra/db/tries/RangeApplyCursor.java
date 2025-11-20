@@ -109,10 +109,10 @@ class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
                                            dataPosition);
     }
 
-    private long setAtRangeAndReturnPosition(boolean atRange, long depth)
+    private long setAtRangeAndReturnPosition(boolean atRange, long dataPosition)
     {
         this.atRange = atRange;
-        return depth;
+        return dataPosition;
     }
 
     @Override
@@ -123,8 +123,12 @@ class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
             return null;
 
         S applicableRange = atRange ? range.content() : null;
+
         if (applicableRange == null)
         {
+            if (Cursor.isExhausted(range.encodedPosition()))
+                return content;
+
             applicableRange = range.precedingState();
             if (applicableRange == null)
                 return content;
@@ -139,7 +143,10 @@ class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
         if (atRange)
             return new RangeApplyCursor<>(resolver, range.tailCursor(direction), data.tailCursor(direction));
         else
-            return data.tailCursor(direction);
+        {
+            RangeCursor<S> r = range.precedingStateCursor(direction);
+            return r == null ? data.tailCursor(direction) : new RangeApplyCursor<>(resolver, r, data.tailCursor(direction));
+        }
     }
 
     static class DeletionAwareDataBranch<T, D extends RangeState<D>> extends RangeApplyCursor<T, D> implements DeletionAwareCursor<T, D>
@@ -158,10 +165,18 @@ class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
         @Override
         public DeletionAwareCursor<T, D> tailCursor(Direction direction)
         {
-            return new DeletionAwareDataBranch<>(resolver,
-                                                 atRange ? range.tailCursor(direction)
-                                                         : RangeCursor.empty(direction, byteComparableVersion()),
-                                                 data.tailCursor(direction));
+            if (atRange)
+            {
+                return new DeletionAwareDataBranch<>(resolver, range.tailCursor(direction), data.tailCursor(direction));
+            }
+            else
+            {
+                RangeCursor<D> r = range.precedingStateCursor(direction);
+                if (r == null)
+                    r = RangeCursor.empty(direction, byteComparableVersion());
+                return new DeletionAwareDataBranch<>(resolver, r, data.tailCursor(direction));
+
+            }
         }
     }
 }

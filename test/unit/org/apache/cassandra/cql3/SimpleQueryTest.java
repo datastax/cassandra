@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.util.BitSet;
+
 import org.junit.Test;
 
 public class SimpleQueryTest extends CQLTester
@@ -322,6 +324,63 @@ public class SimpleQueryTest extends CQLTester
 
         assertRows(execute("SELECT * FROM %s"), expected);
     }
+
+
+    @Test
+    public void testDeletionHeirarchy() throws Throwable
+    {
+        int N = 3 * 5;
+
+        createTable("CREATE TABLE %s (k text, t int, v1 text, v2 int, PRIMARY KEY (k, t));");
+        int offset = 0;
+        BitSet present = new BitSet();
+
+        for (int t = 0; t < N; t++)
+        {
+            execute("INSERT INTO %s (k, t, v1, v2) values (?, ?, ?, ?)", "key", t, "v" + t, t + 10);
+            present.set(t);
+        }
+
+        // Partition tombstone
+        execute("DELETE FROM %s WHERE k=?", "key");
+        present.clear();
+
+        offset += N / 3;
+        for (int t = offset; t < N + offset; t++)
+        {
+            execute("INSERT INTO %s (k, t, v1, v2) values (?, ?, ?, ?)", "key", t, "v" + t, t + 10);
+            present.set(t);
+        }
+
+        // Range tombstone
+        execute("DELETE FROM %s WHERE k=? AND t>=? AND t<?", "key", offset, offset + N * 2 / 3);
+        present.clear(offset, offset + N * 2 / 3);
+
+        offset += N / 3;
+        for (int t = offset; t < N + offset; t++)
+        {
+            execute("INSERT INTO %s (k, t, v1, v2) values (?, ?, ?, ?)", "key", t, "v" + t, t + 10);
+            present.set(t);
+        }
+
+        // Row tombstones
+        for (int i = offset; i < offset + N; i+=3)
+        {
+            execute("DELETE FROM %s WHERE k=? AND t=?", "key", i);
+            present.clear(i);
+        }
+
+        Object[][] expected = new Object[present.cardinality()][];
+        int t = -1;
+        for (int i = 0; i < expected.length; i++)
+        {
+            t = present.nextSetBit(t + 1);
+            expected[i] = row("key", t, "v" + t, t + 10);
+        }
+
+        assertRows(execute("SELECT * FROM %s"), expected);
+    }
+
 
     @Test
     public void test2ndaryIndexes() throws Throwable

@@ -297,14 +297,6 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     }
 
     @Override
-    public long getEstimatedAverageRowSize()
-    {
-        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
-            estimatedAverageRowSize = new MemtableAverageRowSize(this, mergedTrie);
-        return estimatedAverageRowSize.rowSize;
-    }
-
-    @Override
     public UnfilteredRowIterator rowIterator(DecoratedKey key, Slices slices, ColumnFilter columnFilter, boolean reversed, SSTableReadsListener listener)
     {
         Partition p = getPartition(key);

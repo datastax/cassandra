@@ -82,6 +82,11 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
         return cursor.byteComparableVersion();
     }
 
+    Direction direction()
+    {
+        return cursor.direction();
+    }
+
     /// To be implemented by descendants to map the content value and path to the required entry. If callers need to
     /// save the path, they must copy the `bytes` array, which will be overwritten when the iteration continues.
     /// If this method returns null, the null will be passed on as an entry in the iteration.
@@ -136,7 +141,7 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
         V next;
         boolean gotNext;
 
-        protected WithNullFiltering(Trie<T> trie, Direction direction)
+        protected WithNullFiltering(BaseTrie<T, ?, ?> trie, Direction direction)
         {
             this(trie.cursor(direction));
         }

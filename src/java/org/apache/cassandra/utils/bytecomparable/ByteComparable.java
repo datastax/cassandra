@@ -36,6 +36,12 @@ public interface ByteComparable
      */
     ByteSource asComparableBytes(Version version);
 
+    /// Returns a peekable version of the byte-source. This may require additional wrapping.
+    default ByteSource.Peekable asPeekableBytes(Version version)
+    {
+        return ByteSource.peekable(asComparableBytes(version));
+    }
+
     enum Version
     {
         LEGACY,
