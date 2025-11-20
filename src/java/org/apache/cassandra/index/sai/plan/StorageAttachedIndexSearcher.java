@@ -118,6 +118,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     }
 
     @VisibleForTesting
+    public QueryContext queryContext()
+    {
+        return queryContext;
+    }
+
+    @VisibleForTesting
     public final Set<String> plannedIndexes()
     {
         try
