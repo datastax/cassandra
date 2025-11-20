@@ -109,6 +109,13 @@ public abstract class InMemoryTrieTestBase
             {
                 return InMemoryTrie.longLived(VERSION, BufferType.OFF_HEAP, null);
             }
+        },
+        SHORT_LIVED_ORDERED
+        {
+            <T> InMemoryTrie<T> create()
+            {
+                return InMemoryTrie.shortLivedOrdered(VERSION);
+            }
         };
 
         abstract <T> InMemoryTrie<T> create();
@@ -124,7 +131,7 @@ public abstract class InMemoryTrieTestBase
     }
 
     @Parameterized.Parameter(0)
-    public static ReuseStrategy strategy = ReuseStrategy.LONG_LIVED;
+    public static ReuseStrategy strategy = ReuseStrategy.SHORT_LIVED;
 
     public static Comparator<Preencoded> forwardComparator =
         (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, VERSION);

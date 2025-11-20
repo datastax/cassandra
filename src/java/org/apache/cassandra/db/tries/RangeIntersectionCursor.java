@@ -224,22 +224,22 @@ class RangeIntersectionCursor<S extends RangeState<S>> implements RangeCursor<S>
 
     private long coveredAreaWithSourceAhead(long position)
     {
-        return setState(State.SOURCE_AHEAD, position, restrict(src.precedingState(), set.state(), position));
+        return setState(State.SOURCE_AHEAD, position, restrict(src.precedingState(), set.state()));
     }
 
     private long matchingPosition(long position)
     {
-        return setState(State.MATCHING, position, restrict(src.state(), set.state(), position));
+        return setState(State.MATCHING, position, restrict(src.state(), set.state()));
     }
 
-    private S restrict(S srcState, TrieSetCursor.RangeState setState, long position)
+    private S restrict(S srcState, TrieSetCursor.RangeState setState)
     {
         if (srcState == null)
             return null;
         if (srcState.isBoundary())
             return srcState.restrict(setState.applicableBefore, setState.applicableAfter);
 
-        return setState.applyToCoveringState(srcState, Cursor.direction(position));
+        return setState.applyToCoveringState(srcState);
     }
 
     private long setState(State state, long position, S cursorState)
@@ -277,7 +277,7 @@ class RangeIntersectionCursor<S extends RangeState<S>> implements RangeCursor<S>
         public RangeState state()
         {
             RangeState s = super.state();
-            return s != null ? s : RangeState.START_END_PREFIX;
+            return s != null ? s : RangeState.NOT_CONTAINED;
         }
 
         @Override

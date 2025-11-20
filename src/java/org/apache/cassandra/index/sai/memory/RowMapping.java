@@ -66,7 +66,7 @@ public class RowMapping
         }
     };
 
-    private final InMemoryTrie<Integer> rowMapping = InMemoryTrie.shortLived(TypeUtil.BYTE_COMPARABLE_VERSION);
+    private final InMemoryTrie<Integer> rowMapping = InMemoryTrie.shortLivedOrdered(TypeUtil.BYTE_COMPARABLE_VERSION);
 
     private volatile boolean complete = false;
 
