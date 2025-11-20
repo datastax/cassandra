@@ -59,8 +59,10 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class PartitionAwarePrimaryKeyMapFactory implements Factory
     {
+        private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final LongArray.Factory offsetReaderFactory;
+        private final MetadataSource metadata;
         private final KeyFetcher keyFetcher;
         private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
@@ -74,13 +76,14 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         {
             try
             {
-                MetadataSource metadata = MetadataSource.loadMetadata(perSSTableComponents);
+                this.perSSTableComponents = perSSTableComponents;
+                this.metadata = MetadataSource.loadMetadata(perSSTableComponents);
 
                 IndexComponent.ForRead offsetsComponent = perSSTableComponents.get(IndexComponentType.OFFSETS_VALUES);
                 IndexComponent.ForRead tokensComponent = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES);
 
-                NumericValuesMeta offsetsMeta = new NumericValuesMeta(metadata.get(offsetsComponent));
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadata.get(tokensComponent));
+                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(offsetsComponent));
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(tokensComponent));
 
                 count = tokensMeta.valueCount;
                 token = tokensComponent.createFileHandle();
