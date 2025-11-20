@@ -195,11 +195,20 @@ abstract class MergeCursor<T, C extends Cursor<T>> implements Cursor<T>
             if (atC1 && atC2)
                 return new Range<>(resolver, c1.tailCursor(direction), c2.tailCursor(direction));
             else if (atC1)
-                return new Range<>(resolver, c1.tailCursor(direction), c2.precedingStateCursor(direction));
+                return makeMerge(resolver, c1.tailCursor(direction), c2.precedingStateCursor(direction));
             else if (atC2)
-                return new Range<>(resolver, c1.precedingStateCursor(direction), c2.tailCursor(direction));
+                return makeMerge(resolver, c1.precedingStateCursor(direction), c2.tailCursor(direction));
             else
                 throw new AssertionError();
+        }
+
+        private static <S extends RangeState<S>> RangeCursor<S> makeMerge(Trie.MergeResolver<S> resolver, RangeCursor<S> c1, RangeCursor<S> c2)
+        {
+            if (c1 == null)
+                return c2;
+            if (c2 == null)
+                return c1;
+            return new Range<>(resolver, c1, c2);
         }
     }
 
@@ -294,11 +303,12 @@ abstract class MergeCursor<T, C extends Cursor<T>> implements Cursor<T>
                 assert !c2.hasDeletions();
             }
 
-            if (atC1 && atC2)
+            if (atC1 && atC2 && // otherwise even if there is deletion, the other cursor is ahead of it and can't be affected
+                (!deletionsAtFixedPoints || deletionBranchDepth == -1)) // if we already found one, don't check the other source for branches below it
             {
                 maybeAddDeletionsBranch(c1, c2);
                 maybeAddDeletionsBranch(c2, c1);
-            }   // otherwise even if there is deletion, the other cursor is ahead of it and can't be affected
+            }
             return encodedPosition;
         }
 
@@ -315,10 +325,6 @@ abstract class MergeCursor<T, C extends Cursor<T>> implements Cursor<T>
             // If tgt already has deletions applied, no need to add more (we cannot have a deletion branch covering
             // another deletion branch).
             if (tgt.hasDeletions())
-                return;
-            // Additionally, if `deletionsAtFixedPoints` is in force, we don't need to look for deletions below this
-            // point when we already have applied tgt's deletions to src.
-            if (deletionsAtFixedPoints && src.hasDeletions())
                 return;
 
             RangeCursor<D> deletionsBranch = src.deletionBranchCursor(src.direction());
@@ -376,9 +382,9 @@ abstract class MergeCursor<T, C extends Cursor<T>> implements Cursor<T>
                 // in the trie structure, but is expensive for large tries because we have
                 // to list the whole data trie (minus content).
                 if (b1 == null)
-                    b1 = new DeletionAwareCursor.DeletionsTrieCursor(c1.data.tailCursor(direction));
+                    b1 = new DeletionAwareCursor.DeletionsTrieCursor<>(c1.data.tailCursor(direction));
                 if (b2 == null)
-                    b2 = new DeletionAwareCursor.DeletionsTrieCursor(c2.data.tailCursor(direction));
+                    b2 = new DeletionAwareCursor.DeletionsTrieCursor<>(c2.data.tailCursor(direction));
 
                 return new Range<>(deletionResolver, b1, b2);
             }

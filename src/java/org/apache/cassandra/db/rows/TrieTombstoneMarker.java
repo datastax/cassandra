@@ -70,5 +70,10 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
         return TrieTombstoneMarkerImpl.covering(deletionTime);
     }
 
+    static TrieTombstoneMarker point(DeletionTime deletionTime)
+    {
+        return TrieTombstoneMarkerImpl.point(deletionTime);
+    }
+
     TrieTombstoneMarker withUpdatedTimestamp(long newTimestamp);
 }

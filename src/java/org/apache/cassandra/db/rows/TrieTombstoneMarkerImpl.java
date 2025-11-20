@@ -37,9 +37,21 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
     Covering leftDeletion();
     Covering rightDeletion();
 
+    @Override
+    default TrieTombstoneMarker succedingState(Direction direction)
+    {
+        return precedingState(direction.opposite());
+    }
+
+
     static Covering covering(DeletionTime deletionTime)
     {
         return new Covering(deletionTime);
+    }
+
+    static Point point(DeletionTime deletionTime)
+    {
+        return new Point(covering(deletionTime), null);
     }
 
     static Covering combine(Covering left, Covering right)
@@ -65,7 +77,7 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         return new Boundary(left, right);
     }
 
-    static class Covering extends DeletionTime implements TrieTombstoneMarkerImpl
+    class Covering extends DeletionTime implements TrieTombstoneMarkerImpl
     {
         static final long HEAP_SIZE = ObjectSizes.measure(new Covering(DeletionTime.LIVE));
 
@@ -148,12 +160,6 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         }
 
         @Override
-        public TrieTombstoneMarker asPoint()
-        {
-            return new Point(this, null);
-        }
-
-        @Override
         public DeletionTime deletionTime()
         {
             return this;
@@ -167,7 +173,7 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         }
     }
 
-    static class Boundary implements TrieTombstoneMarkerImpl
+    class Boundary implements TrieTombstoneMarkerImpl
     {
         // Every boundary contains one side of a deletion, and for simplicity we assume that any covering deletion we
         // interrupt is already accounted for by its end boundaries, so with every new Boundary we add this object's
@@ -327,7 +333,7 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
     /// applies only to the exact position of the marker (i.e. if there is substructure, this deletion will not be
     /// covering for the branch). `isBoundary` returns true even though the applicable covering deletion does not
     /// change, because the point must be reported as content.
-    static class Point implements TrieTombstoneMarkerImpl
+    class Point implements TrieTombstoneMarkerImpl
     {
         // Every point deletion introduces a new deletion time. If it interrupts an existing deletion, it will reuse
         // the Covering object provided by its end bounds. Thus, the unshared size is this object + the size of
@@ -454,7 +460,7 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         @Override
         public String toString()
         {
-            return pointDeletion + (coveringDeletion != null ? "(under " + coveringDeletion + ")" : "");
+            return pointDeletion + (coveringDeletion != null ? "(under " + coveringDeletion + ')' : "");
         }
 
         @Override
