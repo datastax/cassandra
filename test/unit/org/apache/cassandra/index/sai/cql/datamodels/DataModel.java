@@ -31,6 +31,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.utils.Pair;
 
 public interface DataModel
@@ -155,6 +156,10 @@ public interface DataModel
 
     void insertRows(Executor tester) throws Throwable;
 
+    void insertRowsPartA(Executor tester) throws Throwable;
+
+    void insertRowsPartB(Executor tester) throws Throwable;
+
     void insertRowsWithTTL(Executor tester) throws Throwable;
 
     void updateCells(Executor tester) throws Throwable;
@@ -267,6 +272,26 @@ public interface DataModel
             String template = "INSERT INTO %%s (%s, %s) VALUES (%s, %s)";
 
             for (int i = 0; i < keys.size(); i++)
+            {
+                executeLocal(tester, String.format(template, primaryKey, columnNames, keys.get(i), rows.get(i)));
+            }
+        }
+
+        @Override
+        public void insertRowsPartA(Executor tester) throws Throwable
+        {
+            String template = "INSERT INTO %%s (%s, %s) VALUES (%s, %s)";
+            for (int i = 0; i < keys.size() / 2; i++)
+            {
+                executeLocal(tester, String.format(template, primaryKey, columnNames, keys.get(i), rows.get(i)));
+            }
+        }
+
+        @Override
+        public void insertRowsPartB(Executor tester) throws Throwable
+        {
+            String template = "INSERT INTO %%s (%s, %s) VALUES (%s, %s)";
+            for (int i = keys.size() / 2; i < keys.size(); i++)
             {
                 executeLocal(tester, String.format(template, primaryKey, columnNames, keys.get(i), rows.get(i)));
             }
@@ -613,6 +638,8 @@ public interface DataModel
         void flush(String keyspace, String table);
 
         void compact(String keyspace, String table);
+
+        void setCurrentVersion(Version version);
 
         void disableCompaction(String keyspace, String table);
 
