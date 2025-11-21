@@ -40,6 +40,7 @@ class CountReturnedRowsTransformation extends Transformation<UnfilteredRowIterat
             @Override
             protected Row applyToRow(Row row)
             {
+                queryContext.checkpoint();
                 queryContext.addRowsReturned(1);
                 return row;
             }
@@ -63,6 +64,7 @@ class CountReturnedRowsTransformation extends Transformation<UnfilteredRowIterat
     @Override
     protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
     {
+        queryContext.checkpoint();
         queryContext.addPartitionsReturned(1);
         return Transformation.apply(partition, rowCounter);
     }

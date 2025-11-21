@@ -524,8 +524,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             UnfilteredRowIterator partition = controller.getPartition(keys, executionController);
             UnfilteredRowIterator counted = fetchedRowsCounter.apply(partition);
-            queryContext.addKeysFetched(keys.size());
             queryContext.checkpoint();
+            queryContext.addKeysFetched(keys.size());
             return applyIndexFilter(counted, filterTree);
         }
 
@@ -736,8 +736,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
             try (UnfilteredRowIterator partition = controller.getPartition(pk, view, executionController))
             {
-                queryContext.addKeysFetched(sourceKeys.size());
                 queryContext.checkpoint();
+                queryContext.addKeysFetched(sourceKeys.size());
 
                 UnfilteredRowIterator counted = fetchedRowsCounter.apply(partition);
                 UnfilteredRowIterator clusters = applyIndexFilter(counted, filterTree);

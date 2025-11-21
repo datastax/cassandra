@@ -52,6 +52,7 @@ class CountFetchedRowsTransformation extends Transformation<UnfilteredRowIterato
     @Override
     protected DeletionTime applyToDeletion(DeletionTime deletionTime)
     {
+        queryContext.checkpoint();
         if (deletionTime.deletes(nowInSec))
             queryContext.addTombstonesFetched(1);
         else
@@ -62,6 +63,7 @@ class CountFetchedRowsTransformation extends Transformation<UnfilteredRowIterato
     @Override
     protected Row applyToRow(Row row)
     {
+        queryContext.checkpoint();
         if (row.hasLiveData(nowInSec, false))
             queryContext.addRowsFetched(1);
         else
