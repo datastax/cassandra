@@ -73,13 +73,19 @@ public final class MemtableParams
      * Returns a map representation of the memtable configuration for backward compatibility with CC 4.0.
      * This is used when outputting schema in a format compatible with CC 4.0.
      *
-     * CC 4.0 accepts both short class names (e.g., 'TrieMemtable') and fully qualified names
-     * (e.g., 'org.apache.cassandra.db.memtable.TrieMemtable'). For standard Cassandra memtables
-     * in the org.apache.cassandra.db.memtable package, we use short names and for custom memtables
-     * from other packages, we preserve the fully qualified class name.
+     * For the "default" configuration key, we output {'class': 'default'} to ensure round-trip
+     * consistency.
+     *
+     * For other configurations, CC 4.0 accepts both short class names (e.g., 'TrieMemtable') and
+     * fully qualified names (e.g., 'org.apache.cassandra.db.memtable.TrieMemtable'). For standard
+     * Cassandra memtables in the org.apache.cassandra.db.memtable package, we use short names and
+     * for custom memtables from other packages, we preserve the fully qualified class name.
      */
     public Map<String, String> toMapForCC4()
     {
+        if ("default".equals(configurationKey))
+            return ImmutableMap.of("class", "default");
+
         ParameterizedClass definition = CONFIGURATION_DEFINITIONS.get(configurationKey);
         if (definition != null && definition.class_name != null)
         {
