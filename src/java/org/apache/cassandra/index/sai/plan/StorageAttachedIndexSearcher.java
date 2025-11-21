@@ -869,7 +869,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         FilteringPartitionIterator filtered = new FilteringPartitionIterator(partition, tree);
         if (!filtered.hasNext() && !filtered.matchesStaticRow())
         {
-            // shadowed by expired TTL or row tombstone or range tombstone
             filtered.close();
             return null;
         }
