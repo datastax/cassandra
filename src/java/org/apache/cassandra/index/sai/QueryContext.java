@@ -57,14 +57,17 @@ public class QueryContext
     /** The number of live partitions returned to the coordinator, after post-filtering. */
     private final LongAdder partitionsReturned = new LongAdder();
 
+    /** The number of deleted partitions that are fetched. */
+    private final LongAdder partitionTombstonesFetched = new LongAdder();
+
     /** The number of live rows fetched from the storage engine, before post-filtering. */
     private final LongAdder rowsFetched = new LongAdder();
 
     /** The number of live rows returned to the coordinator, after post-filtering. */
     private final LongAdder rowsReturned = new LongAdder();
 
-    /** The number of deleted partitions, rows or ranges of rows that are fetched. */
-    private final LongAdder tombstonesFetched = new LongAdder();
+    /** The number of deleted individual rows or ranges of rows that are fetched. */
+    private final LongAdder rowTombstonesFetched = new LongAdder();
 
     private final LongAdder trieSegmentsHit = new LongAdder();
 
@@ -129,6 +132,11 @@ public class QueryContext
         partitionsReturned.add(val);
     }
 
+    public void addPartitionTombstonesFetched(long val)
+    {
+        partitionTombstonesFetched.add(val);
+    }
+
     public void addRowsFetched(long val)
     {
         rowsFetched.add(val);
@@ -139,9 +147,9 @@ public class QueryContext
         rowsReturned.add(val);
     }
 
-    public void addTombstonesFetched(long val)
+    public void addRowTombstonesFetched(long val)
     {
-        tombstonesFetched.add(val);
+        rowTombstonesFetched.add(val);
     }
 
     public void addTrieSegmentsHit(long val)
@@ -220,6 +228,11 @@ public class QueryContext
         return partitionsReturned.longValue();
     }
 
+    public long partitionTombstonesFetched()
+    {
+        return partitionTombstonesFetched.longValue();
+    }
+
     public long rowsFetched()
     {
         return rowsFetched.longValue();
@@ -230,9 +243,9 @@ public class QueryContext
         return rowsReturned.longValue();
     }
 
-    public long tombstonesFetched()
+    public long rowTombstonesFetched()
     {
-        return tombstonesFetched.longValue();
+        return rowTombstonesFetched.longValue();
     }
 
     public long trieSegmentsHit()
@@ -339,9 +352,10 @@ public class QueryContext
         public final long keysFetched;
         public final long partitionsFetched;
         public final long partitionsReturned;
+        public final long partitionTombstonesFetched;
         public final long rowsFetched;
         public final long rowsReturned;
-        public final long tombstonesFetched;
+        public final long rowTombstonesFetched;
         public final long trieSegmentsHit;
         public final long bkdPostingListsHit;
         public final long bkdSegmentsHit;
@@ -366,9 +380,10 @@ public class QueryContext
             keysFetched = context.keysFetched();
             partitionsFetched = context.partitionsFetched();
             partitionsReturned = context.partitionsReturned();
+            partitionTombstonesFetched = context.partitionTombstonesFetched();
             rowsFetched = context.rowsFetched();
             rowsReturned = context.rowsReturned();
-            tombstonesFetched = context.tombstonesFetched();
+            rowTombstonesFetched = context.rowTombstonesFetched();
             trieSegmentsHit = context.trieSegmentsHit();
             bkdPostingListsHit = context.bkdPostingListsHit();
             bkdSegmentsHit = context.bkdSegmentsHit();

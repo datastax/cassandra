@@ -193,9 +193,10 @@ public class TableQueryMetrics
         public final Counter totalKeysFetched;
         public final Counter totalPartitionsFetched;
         public final Counter totalPartitionsReturned;
+        public final Counter totalPartitionTombstonesFetched;
         public final Counter totalRowsFetched;
         public final Counter totalRowsReturned;
-        public final Counter totalTombstonesFetched;
+        public final Counter totalRowTombstonesFetched;
         public final Counter totalQueriesCompleted;
 
         public final Counter sortThenFilterQueriesCompleted;
@@ -213,9 +214,10 @@ public class TableQueryMetrics
             totalKeysFetched = Metrics.counter(createMetricName("TotalKeysFetched"));
             totalPartitionsFetched = Metrics.counter(createMetricName("TotalPartitionsFetched"));
             totalPartitionsReturned = Metrics.counter(createMetricName("TotalPartitionsReturned"));
+            totalPartitionTombstonesFetched = Metrics.counter(createMetricName("TotalPartitionTombstonesFetched"));
             totalRowsFetched = Metrics.counter(createMetricName("TotalRowsFetched"));
             totalRowsReturned = Metrics.counter(createMetricName("TotalRowsReturned"));
-            totalTombstonesFetched = Metrics.counter(createMetricName("TotalTombstonesFetched"));
+            totalRowTombstonesFetched = Metrics.counter(createMetricName("TotalRowTombstonesFetched"));
             totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
             totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
 
@@ -236,9 +238,10 @@ public class TableQueryMetrics
             totalKeysFetched.inc(snapshot.keysFetched);
             totalPartitionsFetched.inc(snapshot.partitionsFetched);
             totalPartitionsReturned.inc(snapshot.partitionsReturned);
+            totalPartitionTombstonesFetched.inc(snapshot.partitionTombstonesFetched);
             totalRowsFetched.inc(snapshot.rowsFetched);
             totalRowsReturned.inc(snapshot.rowsReturned);
-            totalTombstonesFetched.inc(snapshot.tombstonesFetched);
+            totalRowTombstonesFetched.inc(snapshot.rowTombstonesFetched);
 
             if (snapshot.filterSortOrder == QueryContext.FilterSortOrder.SCAN_THEN_FILTER)
                 sortThenFilterQueriesCompleted.inc();
@@ -264,9 +267,10 @@ public class TableQueryMetrics
         public final Histogram keysFetched;
         public final Histogram partitionsFetched;
         public final Histogram partitionsReturned;
+        public final Histogram partitionTombstonesFetched;
         public final Histogram rowsFetched;
         public final Histogram rowsReturned;
-        public final Histogram tombstonesFetched;
+        public final Histogram rowTombstonesFetched;
 
         /**
          * BKD index metrics.
@@ -305,9 +309,10 @@ public class TableQueryMetrics
             keysFetched = Metrics.histogram(createMetricName("KeysFetched"), false);
             partitionsFetched = Metrics.histogram(createMetricName("PartitionsFetched"), false);
             partitionsReturned = Metrics.histogram(createMetricName("PartitionsReturned"), false);
+            partitionTombstonesFetched = Metrics.histogram(createMetricName("PartitionTombstonesFetched"), false);
             rowsFetched = Metrics.histogram(createMetricName("RowsFetched"), false);
             rowsReturned = Metrics.histogram(createMetricName("RowsReturned"), false);
-            tombstonesFetched = Metrics.histogram(createMetricName("TombstonesFetched"), false);
+            rowTombstonesFetched = Metrics.histogram(createMetricName("RowTombstonesFetched"), false);
 
             kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), true);
             kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
@@ -329,9 +334,10 @@ public class TableQueryMetrics
             keysFetched.update(snapshot.keysFetched);
             partitionsFetched.update(snapshot.partitionsFetched);
             partitionsReturned.update(snapshot.partitionsReturned);
+            partitionTombstonesFetched.update(snapshot.partitionTombstonesFetched);
             rowsFetched.update(snapshot.rowsFetched);
             rowsReturned.update(snapshot.rowsReturned);
-            tombstonesFetched.update(snapshot.tombstonesFetched);
+            rowTombstonesFetched.update(snapshot.rowTombstonesFetched);
 
             // Record string index cache metrics.
             if (snapshot.trieSegmentsHit > 0)

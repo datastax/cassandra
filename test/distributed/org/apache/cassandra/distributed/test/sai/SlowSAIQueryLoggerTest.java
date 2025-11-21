@@ -96,9 +96,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "keysFetched: 3",
                               "partitionsFetched: 2",
                               "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
                               "rowsFetched: 3",
                               "rowsReturned: 3",
-                              "tombstonesFetched: 0",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 1",
                               "bkdSegmentsHit: 1",
@@ -121,9 +122,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "keysFetched: 3",
                               "partitionsFetched: 2",
                               "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
                               "rowsFetched: 3",
                               "rowsReturned: 3",
-                              "tombstonesFetched: 0",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 1",
                               "bkdSegmentsHit: 1",
@@ -146,9 +148,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "keysFetched: 2",
                               "partitionsFetched: 2",
                               "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
                               "rowsFetched: 2",
                               "rowsReturned: 2",
-                              "tombstonesFetched: 0",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 2",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -171,9 +174,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "keysFetched: 2",
                               "partitionsFetched: 2",
                               "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
                               "rowsFetched: 2",
                               "rowsReturned: 2",
-                              "tombstonesFetched: 0",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 2",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -196,9 +200,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "keysFetched: 4",
                               "partitionsFetched: 4",
                               "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
                               "rowsFetched: 4",
                               "rowsReturned: 4",
-                              "tombstonesFetched: 0",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -221,9 +226,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "keysFetched: 4",
                               "partitionsFetched: 4",
                               "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
                               "rowsFetched: 4",
                               "rowsReturned: 4",
-                              "tombstonesFetched: 0",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -246,9 +252,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "keysFetched: 4",
                               "partitionsFetched: 4",
                               "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
                               "rowsFetched: 4",
                               "rowsReturned: 3",
-                              "tombstonesFetched: 0",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -271,9 +278,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "keysFetched: 4",
                               "partitionsFetched: 4",
                               "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
                               "rowsFetched: 4",
                               "rowsReturned: 3",
-                              "tombstonesFetched: 0",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -296,9 +304,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                     "keysFetched: 3",
                     "partitionsFetched: 3",
                     "partitionsReturned: 2",
+                    "partitionTombstonesFetched: 0",
                     "rowsFetched: 3",
                     "rowsReturned: 3",
-                    "tombstonesFetched: 0",
+                    "rowTombstonesFetched: 0",
                     "trieSegmentsHit: 0",
                     "bkdPostingListsHit: 1",
                     "bkdSegmentsHit: 1",
@@ -371,6 +380,17 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             assertLogsContain(mark, node, "was slow 2 times", "WHERE n = ?", "SAI slowest query metrics:");
             assertLogsContain(mark, node, "was slow 3 times", "WHERE n > ?", "SAI slowest query metrics:");
             assertLogsDoNotContain(mark, node, "WHERE n = 1", "WHERE n = 2", "WHERE n > 1", "WHERE n > 2", "WHERE n > 3");
+
+            // test some partition and row deletions
+            coordinator.execute(withKeyspace("DELETE FROM %s.t WHERE k = 1 AND c = 1"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("DELETE FROM %s.t WHERE k = 1 AND c = 2"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("DELETE FROM %s.t WHERE k = 2"), ConsistencyLevel.ONE);
+            node.flush(KEYSPACE);
+            String selectAllQuery = withKeyspace("SELECT * FROM %s.t WHERE n >= 0");
+            coordinator.execute(selectAllQuery, ConsistencyLevel.ONE);
+            assertLogsContain(mark, node,
+                              "partitionTombstonesFetched: 1",
+                              "rowTombstonesFetched: 2");
         }
     }
 

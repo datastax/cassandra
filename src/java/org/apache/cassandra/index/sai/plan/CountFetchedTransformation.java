@@ -54,7 +54,7 @@ class CountFetchedTransformation extends Transformation<UnfilteredRowIterator>
     {
         queryContext.checkpoint();
         if (deletionTime.deletes(nowInSec))
-            queryContext.addTombstonesFetched(1);
+            queryContext.addPartitionTombstonesFetched(1);
         else
             queryContext.addPartitionsFetched(1);
         return deletionTime;
@@ -67,14 +67,14 @@ class CountFetchedTransformation extends Transformation<UnfilteredRowIterator>
         if (row.hasLiveData(nowInSec, false))
             queryContext.addRowsFetched(1);
         else
-            queryContext.addTombstonesFetched(1);
+            queryContext.addRowTombstonesFetched(1);
         return row;
     }
 
     @Override
     protected RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
     {
-        queryContext.addTombstonesFetched(1);
+        queryContext.addRowTombstonesFetched(1);
         return marker;
     }
 }
