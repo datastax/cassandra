@@ -185,7 +185,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                                                     ordering.context.getDefinition());
                     result = new TopKProcessor(command).filter(retriever);
                 }
-                return CountReturnedRowsTransformation.apply(result, queryContext, controller::finish);
+                return CountReturnedTransformation.apply(result, queryContext, controller::finish);
             }
             catch (QueryView.Builder.MissingIndexException e)
             {
@@ -248,7 +248,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final QueryContext queryContext;
         private final PrimaryKey.Factory keyFactory;
         private final int partitionRowBatchSize;
-        private final CountFetchedRowsTransformation fetchedRowsCounter;
+        private final CountFetchedTransformation fetchedRowsCounter;
 
         private PrimaryKey lastKey;
 
@@ -267,7 +267,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.executionController = executionController;
             this.queryContext = queryContext;
             this.keyFactory = controller.primaryKeyFactory();
-            this.fetchedRowsCounter = new CountFetchedRowsTransformation(queryContext, command.nowInSec());
+            this.fetchedRowsCounter = new CountFetchedTransformation(queryContext, command.nowInSec());
 
             this.firstPrimaryKey = controller.firstPrimaryKey();
 
@@ -563,7 +563,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final ReadExecutionController executionController;
         private final QueryContext queryContext;
         private final int nowInSec;
-        private final CountFetchedRowsTransformation fetchedRowsCounter;
+        private final CountFetchedTransformation fetchedRowsCounter;
 
         private final HashSet<PrimaryKey> processedKeys;
         private final Queue<UnfilteredRowIterator> pendingRows;
@@ -599,7 +599,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.executionController = executionController;
             this.queryContext = queryContext;
             this.nowInSec = nowInSec;
-            this.fetchedRowsCounter = new CountFetchedRowsTransformation(queryContext, nowInSec);
+            this.fetchedRowsCounter = new CountFetchedTransformation(queryContext, nowInSec);
 
             this.processedKeys = new HashSet<>(limit);
             this.pendingRows = new ArrayDeque<>(limit);

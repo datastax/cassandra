@@ -26,12 +26,12 @@ import org.apache.cassandra.index.sai.QueryContext;
 /**
  * Counts the number of partitions, rows and tombstones fetched by an index query, before post-filtering and sorting.
  */
-class CountFetchedRowsTransformation extends Transformation<UnfilteredRowIterator>
+class CountFetchedTransformation extends Transformation<UnfilteredRowIterator>
 {
     private final QueryContext queryContext;
     private final int nowInSec;
 
-    CountFetchedRowsTransformation(QueryContext queryContext, int nowInSec)
+    CountFetchedTransformation(QueryContext queryContext, int nowInSec)
     {
         this.queryContext = queryContext;
         this.nowInSec = nowInSec;

@@ -26,13 +26,13 @@ import org.apache.cassandra.index.sai.QueryContext;
  * Counts the final number of partitions and rows returned by a query to the coordinator, after post-filtering and sorting.
  * Tombstones are not counted because they are not returned to the coordinator.
  */
-class CountReturnedRowsTransformation extends Transformation<UnfilteredRowIterator>
+class CountReturnedTransformation extends Transformation<UnfilteredRowIterator>
 {
     private final QueryContext queryContext;
     private final Runnable onClose;
     private final Transformation<UnfilteredRowIterator> rowCounter;
 
-    private CountReturnedRowsTransformation(QueryContext queryContext, Runnable onClose)
+    private CountReturnedTransformation(QueryContext queryContext, Runnable onClose)
     {
         this.queryContext = queryContext;
         this.onClose = onClose;
@@ -58,7 +58,7 @@ class CountReturnedRowsTransformation extends Transformation<UnfilteredRowIterat
      */
     static UnfilteredPartitionIterator apply(UnfilteredPartitionIterator partition, QueryContext queryContext, Runnable onClose)
     {
-        return Transformation.apply(partition, new CountReturnedRowsTransformation(queryContext, onClose));
+        return Transformation.apply(partition, new CountReturnedTransformation(queryContext, onClose));
     }
 
     @Override
