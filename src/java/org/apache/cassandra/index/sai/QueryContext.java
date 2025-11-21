@@ -320,7 +320,9 @@ public class QueryContext
         public final boolean searchExecutedBeforeOrder;
         public final boolean filterExecutedAfterOrderedScan;
 
-        public final double rowsEstimated;
+        public final double rowsToReturnEstimated;
+        public final double rowsToFetchEstimated;
+        public final double keysToIterateEstimated;
         public final double selectivityEstimated;
         public final double costEstimated;
 
@@ -330,7 +332,9 @@ public class QueryContext
         public PlanInfo(@Nonnull Plan.RowsIteration originalPlan, @Nonnull Plan.RowsIteration optimizedPlan)
         {
             this.costEstimated = optimizedPlan.fullCost();
-            this.rowsEstimated = optimizedPlan.expectedRows();
+            this.rowsToReturnEstimated = optimizedPlan.expectedRows();
+            this.rowsToFetchEstimated = optimizedPlan.estimatedRowsToFetch();
+            this.keysToIterateEstimated = optimizedPlan.estimatedKeysToIterate();
             this.selectivityEstimated = optimizedPlan.selectivity();
             this.indexReferencesInQuery = originalPlan.referencedIndexCount();
             this.indexReferencesInPlan = optimizedPlan.referencedIndexCount();

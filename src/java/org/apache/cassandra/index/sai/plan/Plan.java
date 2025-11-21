@@ -28,6 +28,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import org.apache.commons.lang3.mutable.MutableDouble;
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -217,7 +218,7 @@ abstract public class Plan
      * If node of given type is not found, returns null.
      */
     @SuppressWarnings("unchecked")
-    final <T extends Plan> @Nullable T firstNodeOfType(Class<T> nodeType)
+    public final <T extends Plan> @Nullable T firstNodeOfType(Class<T> nodeType)
     {
         Plan[] result = new Plan[] { null };
         forEach(node -> {
@@ -536,6 +537,32 @@ abstract public class Plan
         MutableInt count = new MutableInt(0);
         visitIndexesRecursive(index -> count.increment());
         return count.intValue();
+    }
+
+    /**
+     * Returns the estimated number of rows to be fetched from storage.
+     */
+    public final double estimatedRowsToFetch()
+    {
+        Fetch fetch = firstNodeOfType(Plan.Fetch.class);
+        return fetch != null ? fetch.expectedRows() : 0.0;
+    }
+
+    /**
+     * Returns the estimated number of primary keys to be iterated by all index iterators.
+     * This may be larger than the number of rows to fetch because of intersections.
+     */
+    public final double estimatedKeysToIterate()
+    {
+        MutableDouble total = new MutableDouble(0.0);
+        forEach(node -> {
+            if (node instanceof IndexScan)
+            {
+                total.add(((IndexScan) node).expectedKeys());
+            }
+            return ControlFlow.Continue;
+        });
+        return total.doubleValue();
     }
 
     protected interface Cost

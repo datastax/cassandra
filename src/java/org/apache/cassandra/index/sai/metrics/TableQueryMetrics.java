@@ -194,7 +194,9 @@ public class TableQueryMetrics
         public final Counter totalRowsFiltered;
         public final Counter totalQueriesCompleted;
 
-        public final Counter totalRowsEstimated;
+        public final Counter totalRowsToReturnEstimated;
+        public final Counter totalRowsToFetchEstimated;
+        public final Counter totalKeysToIterateEstimated;
         public final Counter totalCostEstimated;
 
         public final Counter sortThenFilterQueriesCompleted;
@@ -213,7 +215,9 @@ public class TableQueryMetrics
             totalRowsFiltered = Metrics.counter(createMetricName("TotalRowsFiltered"));
             totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
             totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
-            totalRowsEstimated = Metrics.counter(createMetricName("TotalRowsEstimated"));
+            totalRowsToReturnEstimated = Metrics.counter(createMetricName("TotalRowsToReturnEstimated"));
+            totalRowsToFetchEstimated = Metrics.counter(createMetricName("TotalRowsToFetchEstimated"));
+            totalKeysToIterateEstimated = Metrics.counter(createMetricName("TotalKeysToIterateEstimated"));
             totalCostEstimated = Metrics.counter(createMetricName("TotalCostEstimated"));
 
             sortThenFilterQueriesCompleted = Metrics.counter(createMetricName("SortThenFilterQueriesCompleted"));
@@ -237,7 +241,9 @@ public class TableQueryMetrics
             if (queryPlanInfo != null)
             {
                 totalCostEstimated.inc(Math.round(queryPlanInfo.costEstimated));
-                totalRowsEstimated.inc(Math.round(queryPlanInfo.rowsEstimated));
+                totalRowsToReturnEstimated.inc(Math.round(queryPlanInfo.rowsToReturnEstimated));
+                totalRowsToFetchEstimated.inc(Math.round(queryPlanInfo.rowsToFetchEstimated));
+                totalKeysToIterateEstimated.inc(Math.round(queryPlanInfo.keysToIterateEstimated));
 
                 if (queryPlanInfo.filterExecutedAfterOrderedScan)
                     sortThenFilterQueriesCompleted.inc();
@@ -291,8 +297,14 @@ public class TableQueryMetrics
         /** Query execution cost as estimated by the planner */
         public final Histogram costEstimated;
 
-        /** Number of rows returned by the query estimated by the planner */
-        public final Histogram rowsEstimated;
+        /** Number of rows to be returned from the query as estimated by the planner */
+        public final Histogram rowsToReturnEstimated;
+
+        /** Number of rows to be fetched by the query as estimated by the planner */
+        public final Histogram rowsToFetchEstimated;
+
+        /** Number of rows to be fetched by the query as estimated by the planner */
+        public final Histogram keysToIterateEstimated;
 
         /**
          * Negative deceimal logarithm of selectivity of the query, before applying the LIMIT clause.
@@ -340,7 +352,9 @@ public class TableQueryMetrics
             annGraphSearchLatency = Metrics.timer(createMetricName("ANNGraphSearchLatency"));
 
             costEstimated = Metrics.histogram(createMetricName("CostEstimated"), false);
-            rowsEstimated = Metrics.histogram(createMetricName("RowsEstimated"), true);
+            rowsToReturnEstimated = Metrics.histogram(createMetricName("RowsToReturnEstimated"), true);
+            rowsToFetchEstimated = Metrics.histogram(createMetricName("RowsToFetchEstimated"), true);
+            keysToIterateEstimated = Metrics.histogram(createMetricName("KeysToIterateEstimated"), true);
             logSelectivityEstimated = Metrics.histogram(createMetricName("LogSelectivityEstimated"), true);
             indexReferencesInPlan = Metrics.histogram(createMetricName("IndexReferencesInPlan"), true);
             indexReferencesInQuery = Metrics.histogram(createMetricName("IndexReferencesInQuery"), false);
@@ -385,7 +399,9 @@ public class TableQueryMetrics
             if (queryPlanInfo != null)
             {
                 costEstimated.update(Math.round(queryPlanInfo.costEstimated));
-                rowsEstimated.update(Math.round(queryPlanInfo.rowsEstimated));
+                rowsToReturnEstimated.update(Math.round(queryPlanInfo.rowsToReturnEstimated));
+                rowsToFetchEstimated.update(Math.round(queryPlanInfo.rowsToFetchEstimated));
+                keysToIterateEstimated.update(Math.round(queryPlanInfo.keysToIterateEstimated));
                 double logSelectivity = -Math.log10(queryPlanInfo.selectivityEstimated);
                 logSelectivityEstimated.update((int) (Math.min(20, Math.floor(logSelectivity))));
                 indexReferencesInQuery.update(queryPlanInfo.indexReferencesInQuery);

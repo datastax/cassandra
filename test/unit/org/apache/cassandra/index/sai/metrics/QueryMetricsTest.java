@@ -612,9 +612,17 @@ public class QueryMetricsTest extends AbstractMetricsTest
         UntypedResultSet rows = execute("SELECT k FROM %s WHERE lc = 0");
         assertEquals(numRows / 2, rows.size());
 
-        var rowsEstimatedMetric = objectNameNoIndex("RowsEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
-        waitForHistogramCountEquals(rowsEstimatedMetric, 1);
-        waitForHistogramMeanBetween(rowsEstimatedMetric, numRows / 2.0 * 0.75, numRows / 2.0 * 1.25);
+        var rowsToReturnEstimatedMetric = objectNameNoIndex("RowsToReturnEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(rowsToReturnEstimatedMetric, 1);
+        waitForHistogramMeanBetween(rowsToReturnEstimatedMetric, numRows / 2.0 * 0.75, numRows / 2.0 * 1.25);
+
+        var rowsToFetchEstimatedMetric = objectNameNoIndex("RowsToFetchEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(rowsToFetchEstimatedMetric, 1);
+        waitForHistogramMeanBetween(rowsToFetchEstimatedMetric, numRows / 2.0 * 0.75, numRows / 2.0 * 1.25);
+
+        var keysToIterateEstimatedMetric = objectNameNoIndex("KeysToIterateEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(keysToIterateEstimatedMetric, 1);
+        waitForHistogramMeanBetween(keysToIterateEstimatedMetric, numRows / 2.0 * 0.75, numRows / 2.0 * 1.25);
 
         var objectName = objectNameNoIndex("CostEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
         waitForHistogramCountEquals(objectName, 1);
@@ -632,7 +640,13 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForHistogramCountEquals(objectName, 1);
         waitForHistogramMeanBetween(objectName, 1.0, 1.0);
 
-        objectName = objectNameNoIndex("TotalRowsEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        objectName = objectNameNoIndex("TotalRowsToReturnEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, (long)(numRows / 2.0 * 0.75), (long)(numRows / 2.0 * 1.25));
+
+        objectName = objectNameNoIndex("TotalRowsToFetchEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, (long)(numRows / 2.0 * 0.75), (long)(numRows / 2.0 * 1.25));
+
+        objectName = objectNameNoIndex("TotalKeysToIterateEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
         waitForMetricValueBetween(objectName, (long)(numRows / 2.0 * 0.75), (long)(numRows / 2.0 * 1.25));
 
         objectName = objectNameNoIndex("TotalCostEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
@@ -654,11 +668,11 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         // Check estimates are updated also for queries returning 0 rows
         // 0 is special, log selectivity would be -infinity, so we need to check if there is no overflow
-        var oldRowsEstimated = getHistogramMean(rowsEstimatedMetric);
+        var oldRowsEstimated = getHistogramMean(rowsToFetchEstimatedMetric);
         var oldLogSelectivityEstimated = getHistogramMean(logSelectivityEstimatedMetric);
         rows = execute("SELECT k FROM %s WHERE lc = -1");
         assertEquals(0, rows.size());
-        var newRowsEstimated = getHistogramMean(rowsEstimatedMetric);
+        var newRowsEstimated = getHistogramMean(rowsToFetchEstimatedMetric);
         assertTrue(newRowsEstimated < oldRowsEstimated);
         var newLogSelectivityEstimated = getHistogramMean(logSelectivityEstimatedMetric);
         assertTrue(Double.isFinite(newLogSelectivityEstimated));
