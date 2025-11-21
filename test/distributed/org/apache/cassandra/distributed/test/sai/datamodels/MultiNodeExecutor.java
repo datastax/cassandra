@@ -28,6 +28,7 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.sai.SAIUtil;
 import org.apache.cassandra.distributed.util.ColumnTypeUtil;
 import org.apache.cassandra.index.sai.cql.datamodels.DataModel;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 public class MultiNodeExecutor implements DataModel.Executor
 {
@@ -54,6 +55,17 @@ public class MultiNodeExecutor implements DataModel.Executor
     public void compact(String keyspace, String table)
     {
         cluster.forEach(node -> node.forceCompact(keyspace, table));
+    }
+
+    @Override
+    public void setCurrentVersion(Version version)
+    {
+        // need to pass version as String, because Version is not serializable and cannot be easily made to be so
+        String versionName = version.toString();
+        cluster.forEach((node) ->
+                        node.runOnInstance(() -> {
+                            org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion(Version.parse(versionName));
+                        }));
     }
 
     @Override
