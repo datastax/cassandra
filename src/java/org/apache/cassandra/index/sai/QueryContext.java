@@ -20,11 +20,15 @@ package org.apache.cassandra.index.sai;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.utils.MonotonicClock;
 
@@ -66,9 +70,7 @@ public class QueryContext
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
-    // Determines the order of using indexes for filtering and sorting.
-    // Null means the query execution order hasn't been decided yet.
-    private FilterSortOrder filterSortOrder = null;
+    private PlanInfo queryPlanInfo;
 
     @VisibleForTesting
     public QueryContext()
@@ -145,11 +147,6 @@ public class QueryContext
         annGraphSearchLatency.add(val);
     }
 
-    public void setFilterSortOrder(FilterSortOrder filterSortOrder)
-    {
-        this.filterSortOrder = filterSortOrder;
-    }
-
     // getters
 
     public long sstablesHit()
@@ -208,9 +205,10 @@ public class QueryContext
         return annGraphSearchLatency.longValue();
     }
 
-    public FilterSortOrder filterSortOrder()
+    @Nullable
+    public PlanInfo queryPlanInfo()
     {
-        return filterSortOrder;
+        return queryPlanInfo;
     }
 
     public void checkpoint()
@@ -246,17 +244,10 @@ public class QueryContext
             annRerankFloor = max(annRerankFloor, observedFloor);
     }
 
-    /**
-     * Determines the order of filtering and sorting operations.
-     * Currently used only by vector search.
-     */
-    public enum FilterSortOrder
+    public void recordQueryPlan(Plan.RowsIteration originalPlan, Plan.RowsIteration.RowsIteration optimizedPlan)
     {
-        /** First get the matching keys from the non-vector indexes, then use vector index to return the top K by similarity order */
-        SEARCH_THEN_ORDER,
-
-        /** First get the candidates in ANN order from the vector index, then fetch the rows and filter them until we find K matching the predicates */
-        SCAN_THEN_FILTER
+        if (CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean())
+            this.queryPlanInfo = new PlanInfo(originalPlan, optimizedPlan);
     }
 
     public Snapshot snapshot()
@@ -290,7 +281,9 @@ public class QueryContext
         public final long queryTimeouts;
         public final long annGraphSearchLatency;
         public final long shadowedPrimaryKeyCount;
-        public final FilterSortOrder filterSortOrder;
+
+        @Nullable
+        public final PlanInfo queryPlanInfo;
 
         /**
          * Creates a snapshot of all the metrics in the given {@link QueryContext}.
@@ -315,7 +308,38 @@ public class QueryContext
             queryTimeouts = context.queryTimeouts();
             annGraphSearchLatency = context.annGraphSearchLatency();
             shadowedPrimaryKeyCount = context.getShadowedPrimaryKeyCount();
-            filterSortOrder = context.filterSortOrder();
+            queryPlanInfo = context.queryPlanInfo();
+        }
+    }
+
+    /**
+     * Captures relevant information about a query plan, both original and optimized.
+     */
+    public static class PlanInfo
+    {
+        public final boolean searchExecutedBeforeOrder;
+        public final boolean filterExecutedAfterOrderedScan;
+
+        public final double rowsToReturnEstimated;
+        public final double rowsToFetchEstimated;
+        public final double keysToIterateEstimated;
+        public final double selectivityEstimated;
+        public final double costEstimated;
+
+        public final int indexReferencesInQuery;
+        public final int indexReferencesInPlan;
+
+        public PlanInfo(@Nonnull Plan.RowsIteration originalPlan, @Nonnull Plan.RowsIteration optimizedPlan)
+        {
+            this.costEstimated = optimizedPlan.fullCost();
+            this.rowsToReturnEstimated = optimizedPlan.expectedRows();
+            this.rowsToFetchEstimated = optimizedPlan.estimatedRowsToFetch();
+            this.keysToIterateEstimated = optimizedPlan.estimatedKeysToIterate();
+            this.selectivityEstimated = optimizedPlan.selectivity();
+            this.indexReferencesInQuery = originalPlan.referencedIndexCount();
+            this.indexReferencesInPlan = optimizedPlan.referencedIndexCount();
+            this.searchExecutedBeforeOrder = optimizedPlan.isSearchThenOrderHybrid();
+            this.filterExecutedAfterOrderedScan = optimizedPlan.isOrderedScanThenFilterHybrid();
         }
     }
 }
