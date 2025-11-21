@@ -556,9 +556,9 @@ abstract public class Plan
     {
         MutableDouble total = new MutableDouble(0.0);
         forEach(node -> {
-            if (node instanceof IndexScan)
+            if (node instanceof Leaf)
             {
-                total.add(((IndexScan) node).expectedKeys());
+                total.add(((Leaf) node).expectedKeys());
             }
             return ControlFlow.Continue;
         });

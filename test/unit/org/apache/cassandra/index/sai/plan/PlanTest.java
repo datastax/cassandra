@@ -120,6 +120,7 @@ public class PlanTest
         Plan.KeysIteration plan = factory.indexScan(saiPred1, 0);
         assertTrue(plan instanceof Plan.NumericIndexScan);
         assertEquals(0.0, plan.expectedKeys(), 0.01);
+        assertEquals(0.0, plan.estimatedKeysToIterate(), 0.01);
         assertEquals(0.0, plan.selectivity(), 0.01);
         assertEquals(0.0, plan.costPerKey(), 0.01);
     }
@@ -298,6 +299,7 @@ public class PlanTest
         Plan.KeysIteration i = factory.indexScan(saiPred1, (long) (0.5 * factory.tableMetrics.rows));
         Plan.RowsIteration s = factory.fetch(i);
         assertEquals(0.5 * factory.tableMetrics.rows, s.expectedRows(), 0.01);
+        assertEquals(0.5 * factory.tableMetrics.rows, s.estimatedRowsToFetch(), 0.01);
         assertTrue(s.fullCost() > 0.5 * factory.tableMetrics.rows * (SAI_KEY_COST + ROW_COST));
     }
 
@@ -340,6 +342,7 @@ public class PlanTest
         Plan.KeysIteration s = factory.sort(i, ordering);
 
         assertEquals(0.5 * factory.tableMetrics.rows, s.expectedKeys(), 0.01);
+        assertEquals(0.5 * factory.tableMetrics.rows, s.estimatedKeysToIterate(), 0.01);
         assertTrue(s.initCost() >= i.fullCost());
     }
 
@@ -367,6 +370,7 @@ public class PlanTest
     {
         Plan.KeysIteration i = factory.sort(factory.everything, ordering);
         assertEquals(factory.tableMetrics.rows, i.expectedKeys(), 0.01);
+        assertEquals(factory.tableMetrics.rows, i.estimatedKeysToIterate(), 0.01);
         assertEquals(i.initCost() + factory.costEstimator.estimateAnnSearchCost(ordering, (int) ceil(i.expectedKeys()), factory.tableMetrics.rows), i.fullCost(), 0.01);
     }
 
