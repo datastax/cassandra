@@ -394,14 +394,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // in which predicates it leaves in the plan and the probability of accidentally removing a good branch
         // here is even lower.
         int intersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
-        Plan plan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
-        queryContext.setOriginalPlan(plan);
+        Plan.RowsIteration origPlan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
+        Plan.RowsIteration plan = origPlan;
 
         if (QUERY_OPT_LEVEL > 0)
-            plan = plan.optimize();
+            plan = origPlan.optimize();
 
         plan = plan.limitIntersectedClauses(intersectionClauseLimit);
-        queryContext.setOptimizedPlan(plan);
+        queryContext.recordQueryPlan(origPlan, plan);
         updateIndexMetricsQueriesCount(plan);
 
         if (logger.isTraceEnabled())

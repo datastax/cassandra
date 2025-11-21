@@ -233,7 +233,7 @@ public class TableQueryMetrics
             totalPartitionReads.inc(snapshot.partitionsRead);
             totalRowsFiltered.inc(snapshot.rowsFiltered);
 
-            QueryContext.Snapshot.QueryPlanInfo queryPlanInfo = snapshot.queryPlanInfo;
+            QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
             if (queryPlanInfo != null)
             {
                 totalCostEstimated.inc(Math.round(queryPlanInfo.costEstimated));
@@ -381,7 +381,7 @@ public class TableQueryMetrics
 
             shadowedKeysScannedHistogram.update(snapshot.shadowedPrimaryKeyCount);
 
-            QueryContext.Snapshot.QueryPlanInfo queryPlanInfo = snapshot.queryPlanInfo;
+            QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
             if (queryPlanInfo != null)
             {
                 costEstimated.update(Math.round(queryPlanInfo.costEstimated));

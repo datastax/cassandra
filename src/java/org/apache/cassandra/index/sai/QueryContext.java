@@ -26,6 +26,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
@@ -69,10 +70,7 @@ public class QueryContext
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
-    private Plan originalPlan = null;
-
-
-    private Plan optimizedPlan = null;
+    private PlanInfo queryPlanInfo;
 
     @VisibleForTesting
     public QueryContext()
@@ -207,18 +205,10 @@ public class QueryContext
         return annGraphSearchLatency.longValue();
     }
 
-    /** Can return null when query plan hasn't been prepared and optimized yet */
     @Nullable
-    public Plan optimizedPlan()
+    public PlanInfo queryPlanInfo()
     {
-        return optimizedPlan;
-    }
-
-    /** Can return null when query plan hasn't been prepared yet */
-    @Nullable
-    public Plan originalPlan()
-    {
-        return originalPlan;
+        return queryPlanInfo;
     }
 
     public void checkpoint()
@@ -254,14 +244,10 @@ public class QueryContext
             annRerankFloor = max(annRerankFloor, observedFloor);
     }
 
-    public void setOriginalPlan(Plan originalPlan)
+    public void recordQueryPlan(Plan.RowsIteration originalPlan, Plan.RowsIteration.RowsIteration optimizedPlan)
     {
-        this.originalPlan = originalPlan;
-    }
-
-    public void setOptimizedPlan(Plan optimizedPlan)
-    {
-        this.optimizedPlan = optimizedPlan;
+        if (CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean())
+            this.queryPlanInfo = new PlanInfo(originalPlan, optimizedPlan);
     }
 
     public Snapshot snapshot()
@@ -297,7 +283,7 @@ public class QueryContext
         public final long shadowedPrimaryKeyCount;
 
         @Nullable
-        public final QueryPlanInfo queryPlanInfo;
+        public final PlanInfo queryPlanInfo;
 
         /**
          * Creates a snapshot of all the metrics in the given {@link QueryContext}.
@@ -322,40 +308,34 @@ public class QueryContext
             queryTimeouts = context.queryTimeouts();
             annGraphSearchLatency = context.annGraphSearchLatency();
             shadowedPrimaryKeyCount = context.getShadowedPrimaryKeyCount();
-
-            Plan originalPlan = context.originalPlan();
-            Plan optimizedPlan = context.optimizedPlan();
-            if (originalPlan != null && optimizedPlan != null) {
-                queryPlanInfo = new QueryPlanInfo(originalPlan, optimizedPlan);
-            } else {
-                queryPlanInfo = null;
-            }
+            queryPlanInfo = context.queryPlanInfo();
         }
-
-        public static class QueryPlanInfo
-        {
-            public final boolean searchExecutedBeforeOrder;
-            public final boolean filterExecutedAfterOrderedScan;
-
-            public final double rowsEstimated;
-            public final double selectivityEstimated;
-            public final double costEstimated;
-
-            public final int indexReferencesInQuery;
-            public final int indexReferencesInPlan;
-
-            public QueryPlanInfo(@Nonnull Plan originalPlan, @Nonnull Plan optimizedPlan)
-            {
-                this.costEstimated = optimizedPlan.fullCost();
-                this.rowsEstimated = optimizedPlan.expectedRows();
-                this.selectivityEstimated = optimizedPlan.selectivity();
-                this.indexReferencesInQuery = originalPlan.referencedIndexCount();
-                this.indexReferencesInPlan = optimizedPlan.referencedIndexCount();
-                this.searchExecutedBeforeOrder = optimizedPlan.isSearchThenOrderHybrid();
-                this.filterExecutedAfterOrderedScan = optimizedPlan.isOrderedScanThenFilterHybrid();
-            }
-        }
-
     }
 
+    /**
+     * Captures relevant information about a query plan, both original and optimized.
+     */
+    public static class PlanInfo
+    {
+        public final boolean searchExecutedBeforeOrder;
+        public final boolean filterExecutedAfterOrderedScan;
+
+        public final double rowsEstimated;
+        public final double selectivityEstimated;
+        public final double costEstimated;
+
+        public final int indexReferencesInQuery;
+        public final int indexReferencesInPlan;
+
+        public PlanInfo(@Nonnull Plan.RowsIteration originalPlan, @Nonnull Plan.RowsIteration optimizedPlan)
+        {
+            this.costEstimated = optimizedPlan.fullCost();
+            this.rowsEstimated = optimizedPlan.expectedRows();
+            this.selectivityEstimated = optimizedPlan.selectivity();
+            this.indexReferencesInQuery = originalPlan.referencedIndexCount();
+            this.indexReferencesInPlan = optimizedPlan.referencedIndexCount();
+            this.searchExecutedBeforeOrder = optimizedPlan.isSearchThenOrderHybrid();
+            this.filterExecutedAfterOrderedScan = optimizedPlan.isOrderedScanThenFilterHybrid();
+        }
+    }
 }

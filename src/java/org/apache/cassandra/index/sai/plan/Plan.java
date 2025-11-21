@@ -36,7 +36,6 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -395,7 +394,7 @@ abstract public class Plan
      * and recomputes the nodes above it. Then it returns the best plan from candidates obtained that way.
      * The expected running time is proportional to the height of the plan tree multiplied by the number of the leaves.
      */
-    public final Plan optimize()
+    protected Plan optimize()
     {
         if (logger.isTraceEnabled())
             logger.trace("Optimizing plan:\n{}", toRedactedStringRecursive());
@@ -428,7 +427,7 @@ abstract public class Plan
      * Modifies all intersections to not intersect more clauses than the given limit.
      * Retains the most selective clauses.
      */
-    public final Plan limitIntersectedClauses(int clauseLimit)
+    protected Plan limitIntersectedClauses(int clauseLimit)
     {
         Plan result = this;
         if (result instanceof Intersection)
@@ -527,19 +526,6 @@ abstract public class Plan
             selectivity = estimateSelectivity();
         assert 0.0 <= selectivity && selectivity <= 1.0 : "Invalid selectivity: " + selectivity;
         return selectivity;
-    }
-
-    /**
-     * Returns the number of rows produced by this plan.
-     * This can be only called on plans producing rows.
-     */
-    public final double expectedRows()
-    {
-        Cost cost = cost();
-        if (!(cost instanceof RowsIterationCost))
-            throw new UnsupportedOperationException("Expected rows is only supported for plans returning rows (called on " + this.getClass() + ')');
-
-        return ((RowsIterationCost) cost).expectedRows;
     }
 
     /**
@@ -727,6 +713,18 @@ abstract public class Plan
         final double costPerKey()
         {
             return cost().costPerKey();
+        }
+
+        @Override
+        public final KeysIteration optimize()
+        {
+            return (KeysIteration) super.optimize();
+        }
+
+        @Override
+        public final KeysIteration limitIntersectedClauses(int clauseLimit)
+        {
+            return (KeysIteration) super.limitIntersectedClauses(clauseLimit);
         }
 
         protected abstract boolean usesIncludedIndex();
@@ -1638,6 +1636,26 @@ abstract public class Plan
         final double costPerRow()
         {
             return cost().costPerRow();
+        }
+
+        /**
+         * Returns the number of rows produced by this plan.
+         */
+        public final double expectedRows()
+        {
+            return cost().expectedRows;
+        }
+
+        @Override
+        public final RowsIteration optimize()
+        {
+            return (RowsIteration) super.optimize();
+        }
+
+        @Override
+        public final RowsIteration limitIntersectedClauses(int clauseLimit)
+        {
+            return (RowsIteration) super.limitIntersectedClauses(clauseLimit);
         }
     }
 
