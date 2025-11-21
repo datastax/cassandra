@@ -28,7 +28,6 @@ import org.slf4j.Logger;
 
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 

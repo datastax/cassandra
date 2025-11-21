@@ -202,7 +202,7 @@ public class SegmentFlushTest
             minSegmentRowId = 0;
             maxSegmentRowId = 0;
             minKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());
-            maxKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());;
+            maxKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());
             minTerm = term2;
             maxTerm = term2;
             numRowsPerSegment = 1;
