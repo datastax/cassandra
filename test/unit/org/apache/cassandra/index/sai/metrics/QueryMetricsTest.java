@@ -576,25 +576,25 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 0);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 1);
 
-//        // Verify counters for total rows fetched.
-//        name = "TotalRowsFetched";
-//        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numRowsPerPartition + numRows + numRowsPerPartition + numRows + numRowsPerPartition + numRows);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), numRowsPerPartition);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numRows);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows);
-//
-//        // Verify counters for total rows returned.
-//        name = "TotalRowsReturned";
-//        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numRowsPerPartition + numRows + numRowsPerPartition + numRows + numRowsPerPartition + numRows);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), numRowsPerPartition);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numRows);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition);
-//        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows);
+        // Verify counters for total rows fetched.
+        name = "TotalRowsFetched";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numRowsPerPartition + numRows + numRowsPerPartition + numRows + numRowsPerPartition + numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows);
+
+        // Verify counters for total rows returned.
+        name = "TotalRowsReturned";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numRowsPerPartition + numRows + numRowsPerPartition + numRows + numRowsPerPartition + numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows);
 
         // Verify counters for total row tombstones fetched.
         name = "TotalRowTombstonesFetched";
