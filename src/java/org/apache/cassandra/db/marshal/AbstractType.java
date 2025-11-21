@@ -37,6 +37,7 @@ import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.exceptions.InvalidColumnTypeException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -117,10 +118,21 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
             throw new IllegalStateException();
         }
 
-        comparatorSet = new ValueComparators((l, r) ->
-                                             AbstractType.this.compare(l, ByteArrayAccessor.instance, r, ByteArrayAccessor.instance),
-                                             (l, r) ->
-                                             AbstractType.this.compare(l, ByteBufferAccessor.instance, r, ByteBufferAccessor.instance));
+        comparatorSet = new ValueComparators(new Comparator<>()
+        {
+            @Override
+            public int compare(byte[] l, byte[] r)
+            {
+                return AbstractType.this.compare(l, ByteArrayAccessor.instance, r, ByteArrayAccessor.instance);
+            }
+        }, new Comparator<>()
+        {
+            @Override
+            public int compare(ByteBuffer l, ByteBuffer r)
+            {
+                return AbstractType.this.compare(l, ByteBufferAccessor.instance, r, ByteBufferAccessor.instance);
+            }
+        });
 
         this.isMultiCell = isMultiCell;
 
