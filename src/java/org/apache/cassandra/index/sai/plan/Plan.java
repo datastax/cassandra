@@ -288,7 +288,36 @@ abstract public class Plan
      */
     public final String toStringRecursive()
     {
-        TreeFormatter<Plan> formatter = new TreeFormatter<>(Plan::toString, Plan::subplans);
+        return toStringRecursive(false, null);
+    }
+
+    /**
+     * Formats the whole plan as a pretty tree, redacting the queried column values.
+     */
+    public final String toRedactedStringRecursive()
+    {
+        return toRedactedStringRecursive(null);
+    }
+
+    /**
+     * Formats the whole plan as a pretty tree, redacting the queried column values, with indentation.
+     *
+     * @param indent a string used for indentation
+     */
+    public final String toRedactedStringRecursive(String indent)
+    {
+        return toStringRecursive(true, indent);
+    }
+
+    /**
+     * Formats the whole plan as a pretty tree, with indentation
+     *
+     * @param redact whether to redact the queried column values.
+     * @param indent a string used for indentation
+     */
+    private String toStringRecursive(boolean redact, String indent)
+    {
+        TreeFormatter<Plan> formatter = new TreeFormatter<>(Plan::toString, Plan::subplans, indent);
         return formatter.format(this);
     }
 
