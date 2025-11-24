@@ -773,8 +773,9 @@ public class SchemaCQLHelperTest extends CQLTester
             Assertions.assertThat(cql).doesNotContain("incremental_backups");
             // Should contain other properties
             Assertions.assertThat(cql).contains("bloom_filter_fp_chance");
-            // Should use map format for memtable (CC 4.0 compatible) with short class name
-            Assertions.assertThat(cql).contains("memtable = {'class': 'default'}");
+            // Should use empty map for default memtable (CC 4.0 compatible)
+            // This lets each Cassandra version interpret "default" according to its own configuration
+            Assertions.assertThat(cql).contains("memtable = {}");
             // Should NOT contain fully qualified class name
             Assertions.assertThat(cql).doesNotContain("org.apache.cassandra.db.memtable");
 
@@ -931,12 +932,13 @@ public class SchemaCQLHelperTest extends CQLTester
             Assertions.assertThat(cql5).contains("memtable = {'class': 'SkipListMemtable'");
             Assertions.assertThat(cql5).doesNotContain("org.apache.cassandra.db.memtable.SkipListMemtable");
 
-            // Test that tables created with memtable = 'default' output 'default' in CC 4.0 mode
+            // Test that tables created with memtable = 'default' output empty map in CC 4.0 mode
+            // This ensures backward compatibility with CC 4.0 which uses {} for default memtable
             String tableName6 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'default'");
             ColumnFamilyStore cfs6 = Keyspace.open(keyspace).getColumnFamilyStore(tableName6);
             String cql6 = SchemaCQLHelper.getTableMetadataAsCQL(cfs6.metadata(), cfs6.keyspace.getMetadata());
-            // Should output 'default' as the class name
-            Assertions.assertThat(cql6).contains("memtable = {'class': 'default'");
+            // Should output empty map to let each version interpret "default" according to its own configuration
+            Assertions.assertThat(cql6).contains("memtable = {}");
 
             // Test that custom memtables from other packages preserve fully qualified class names
             // Note: We can't easily test this without adding a custom memtable configuration to cassandra.yaml,
