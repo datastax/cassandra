@@ -40,6 +40,12 @@ import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
 import org.apache.commons.io.FileUtils;
+import org.assertj.core.api.Assertions;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.JSONValue;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -60,13 +66,12 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.tools.SSTableExport;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.Collectors3;
-import org.assertj.core.api.Assertions;
-import org.json.simple.JSONObject;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
 import static java.util.Arrays.asList;
+
 import static org.apache.cassandra.config.DatabaseDescriptor.getCommitLogLocation;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
@@ -79,9 +84,12 @@ public class DropUDTWithRestartTest extends TestBaseImpl
     private final static Logger logger = LoggerFactory.getLogger(DropUDTWithRestartTest.class);
 
     private final static Path TEST_DATA_UDT_PATH = Paths.get("test/data/udt");
+    private final static Path CASSANDRA_40_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("c40");
+    private final static Path CASSANDRA_41_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("c41");
+    private final static Path CASSANDRA_5_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("c50");
     private final static Path CC40_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("cc40");
     private final static Path CC50_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("cc50");
-    private final static Path DSE_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("dse");
+    private final static Path DSE6_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("dse");
     private final static Path THIS_PRODUCT_PATH = CC50_PRODUCT_PATH;
     private final static String COMMITLOG_DIR = "commitlog";
     private final static String KS = "ks";
@@ -259,9 +267,39 @@ public class DropUDTWithRestartTest extends TestBaseImpl
     }
 
     @Test
+    public void loadCommitLogAndSSTablesWithDroppedColumnTestCassandra40() throws Exception
+    {
+        // Cassandra limitations
+        // - user types cannot include other non-frozen udt
+        // - cannot drop non-frozen columns
+        // - doesn't support DROPPED COLUMN RECORD table option
+        loadCommitLogAndSSTablesWithDroppedColumnTest(CASSANDRA_40_PRODUCT_PATH);
+    }
+
+    @Test
     public void loadCommitLogAndSSTablesWithDroppedColumnTestCC40() throws Exception
     {
         loadCommitLogAndSSTablesWithDroppedColumnTest(CC40_PRODUCT_PATH);
+    }
+
+    @Test
+    public void loadCommitLogAndSSTablesWithDroppedColumnTestCassandra41() throws Exception
+    {
+        // Cassandra limitations
+        // - user types cannot include other non-frozen udt
+        // - cannot drop non-frozen columns
+        // - doesn't support DROPPED COLUMN RECORD table option
+        loadCommitLogAndSSTablesWithDroppedColumnTest(CASSANDRA_41_PRODUCT_PATH);
+    }
+
+    @Test
+    public void loadCommitLogAndSSTablesWithDroppedColumnTestCassandra5() throws Exception
+    {
+        // Cassandra limitations
+        // - user types cannot include other non-frozen udt
+        // - cannot drop non-frozen columns
+        // - doesn't support DROPPED COLUMN RECORD table option
+        loadCommitLogAndSSTablesWithDroppedColumnTest(CASSANDRA_5_PRODUCT_PATH);
     }
 
     @Test
@@ -271,12 +309,12 @@ public class DropUDTWithRestartTest extends TestBaseImpl
     }
 
     @Test
-    public void loadCommitLogAndSSTablesWithDroppedColumnTestDSE() throws Exception
+    public void loadCommitLogAndSSTablesWithDroppedColumnTestDSE6() throws Exception
     {
-        loadCommitLogAndSSTablesWithDroppedColumnTest(DSE_PRODUCT_PATH);
+        loadCommitLogAndSSTablesWithDroppedColumnTest(DSE6_PRODUCT_PATH);
     }
 
-    private void loadCommitLogAndSSTablesWithDroppedColumnTest(Path productPath) throws IOException, ExecutionException, InterruptedException, TimeoutException
+    private void loadCommitLogAndSSTablesWithDroppedColumnTest(Path productPath) throws IOException, ExecutionException, InterruptedException, TimeoutException, ParseException
     {
         try (Cluster cluster = startCluster())
         {
@@ -313,9 +351,30 @@ public class DropUDTWithRestartTest extends TestBaseImpl
 
             logger.info("Restarting node");
             node.startup();
-            Map<String, List<List<Object>>> data1 = selectData(node);
 
+            // verify same data new cluster and schema recreated
+            Map<String, List<List<Object>>> data1 = selectData(node);
             String jsonData0 = Files.readString(productPath.resolve(DATA_JSON), UTF_8);
+            for (String table1 : data1.keySet())
+            {
+                List<List<Object>> table1Data =  data1.get(table1);
+                JSONArray table1Json = new JSONArray();
+                table1Json.addAll(table1Data);
+                String table0Json = JSONValue.toJSONString(((JSONObject) new JSONParser().parse(jsonData0)).get(table1));
+                String missingRows = table0Json;
+                int originalRowCount = (missingRows.length() - missingRows.replace("[", "").length() -1);
+                for (List<Object> row1 : table1Data)
+                {
+                    JSONArray row1Json = new JSONArray();
+                    row1Json.addAll(row1);
+                    missingRows = missingRows.replace(row1Json.toJSONString(), "");
+                }
+                String missingMsg = String.format("missing %s/%s rows in %s: %s",
+                              (missingRows.length() - missingRows.replace("[", "").length() -1),
+                              originalRowCount, table1, missingRows.replaceAll(",+", ","));
+
+                assertThat(table1Json.toJSONString()).as(missingMsg).isEqualTo(table0Json);
+            }
             String jsonData1 = JSONObject.toJSONString(data1);
             assertThat(jsonData1).isEqualTo(jsonData0);
 
@@ -323,12 +382,16 @@ public class DropUDTWithRestartTest extends TestBaseImpl
             node.shutdown(true).get(10, TimeUnit.SECONDS);
             node.startup();
 
-            assertThat(selectData(node)).isEqualTo(data1);
+            // verify same data post-flush
+            for (String table : data1.keySet())
+                assertThat(selectData(node).get(table)).isEqualTo(data1.get(table));
 
             for (String table : data1.keySet())
                 node.forceCompact(KS, table);
 
-            assertThat(selectData(node)).isEqualTo(data1);
+            // verify same data post compact
+            for (String table : data1.keySet())
+                assertThat(selectData(node).get(table)).isEqualTo(data1.get(table));
         }
     }
 

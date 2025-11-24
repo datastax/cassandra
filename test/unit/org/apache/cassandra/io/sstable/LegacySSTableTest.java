@@ -375,8 +375,7 @@ public class LegacySSTableTest
                 QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val", legacyVersion));
                 QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val2", legacyVersion));
                 QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val3", legacyVersion));
-                // dropping non-frozen UDTs disabled, see AlterTableStatement.DropColumns.dropColumn(..)
-                //QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val4", legacyVersion));
+                QueryProcessor.executeInternal(String.format("ALTER TABLE legacy_tables.legacy_%s_tuple DROP val4", legacyVersion));
             }
 
             verifyOldSSTables("tuple");
@@ -388,8 +387,7 @@ public class LegacySSTableTest
                 alterTableAddColumn(legacyVersion, "val frozen<tuple<set<int>,set<text>>>");
                 alterTableAddColumn(legacyVersion, "val2 tuple<set<int>,set<text>>");
                 alterTableAddColumn(legacyVersion, String.format("val3 frozen<legacy_%s_tuple_udt>", legacyVersion));
-                // dropping non-frozen UDTs disabled, see AlterTableStatement.DropColumns.dropColumn(..)
-                //alterTableAddColumn(legacyVersion, String.format("val4 legacy_%s_tuple_udt", legacyVersion));
+                alterTableAddColumn(legacyVersion, String.format("val4 legacy_%s_tuple_udt", legacyVersion));
             }
         }
     }
