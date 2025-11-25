@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import javax.annotation.Nullable;
 import java.util.function.Function;
 
 /**
@@ -37,6 +38,7 @@ public class TreeFormatter<T>
 {
     private final Function<T, Iterable<? extends T>> children;
     private final Function<T, String> toString;
+    private final String indent;
 
     /**
      * Constructs a formatter that knows how to format trees of given type.
@@ -48,6 +50,21 @@ public class TreeFormatter<T>
     {
         this.children = children;
         this.toString = toString;
+        this.indent = "";
+    }
+
+    /**
+     * Constructs a formatter that knows how to format trees of given type.
+     *
+     * @param toString a function that returns the text describing each tree node
+     * @param children a function that returns a list of children nodes
+     * @param indent a string used for indentation
+     */
+    public TreeFormatter(Function<T, String> toString, Function<T, Iterable<? extends T>> children, @Nullable String indent)
+    {
+        this.children = children;
+        this.toString = toString;
+        this.indent = indent == null ? "" : indent;
     }
 
     /**
@@ -56,7 +73,7 @@ public class TreeFormatter<T>
      */
     public String format(T root)
     {
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder(indent);
         append(root, sb, new StringBuilder(), true, false);
         return sb.toString();
     }
@@ -70,6 +87,7 @@ public class TreeFormatter<T>
         int origPaddingLength = padding.length();
         if (!isRoot)
         {
+            sb.append(indent);
             sb.append(padding);
             sb.append(hasRightSibling ? " ├─ " : " └─ ");
             padding.append(hasRightSibling ? " │  " : "    ");
@@ -80,6 +98,7 @@ public class TreeFormatter<T>
         sb.append('\n');
         for (int i = 1; i < nodeStr.length; i++)
         {
+            sb.append(indent);
             sb.append(padding);
             sb.append(nodeStr[i]);
             sb.append('\n');

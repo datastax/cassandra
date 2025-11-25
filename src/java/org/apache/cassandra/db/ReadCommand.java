@@ -28,7 +28,7 @@ import java.util.function.BiFunction;
 import java.util.function.LongPredicate;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
+import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -134,6 +134,8 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     @Nullable
     protected final Index.QueryPlan indexQueryPlan;
+
+    private volatile Supplier<ExecutionInfo> executionInfoSupplier = ExecutionInfo.EMPTY_SUPPLIER;
 
     protected static abstract class SelectionDeserializer
     {
@@ -320,6 +322,12 @@ public abstract class ReadCommand extends AbstractReadQuery
         return indexQueryPlan == null ? null : indexQueryPlan.searcherFor(this);
     }
 
+    @Override
+    public ExecutionInfo executionInfo()
+    {
+        return executionInfoSupplier.get();
+    }
+
     /**
      * The clustering index filter this command to use for the provided key.
      * <p>
@@ -486,8 +494,9 @@ public abstract class ReadCommand extends AbstractReadQuery
         {
             ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
             Index.QueryPlan indexQueryPlan = indexQueryPlan();
+            cfs.indexManager.checkQueryability(indexQueryPlan);
+            Index.Searcher searcher = indexQueryPlan.searcherFor(this);
 
-            Index.Searcher searcher = null;
             if (indexQueryPlan != null)
             {
                 cfs.indexManager.checkQueryability(indexQueryPlan);
@@ -506,6 +515,9 @@ public abstract class ReadCommand extends AbstractReadQuery
             Context context = Context.from(this);
             var storageTarget = (null == searcher) ? queryStorage(cfs, executionController)
                                                    : searchStorage(searcher, executionController);
+            if (searcher != null)
+                executionInfoSupplier = searcher.monitorableExecutionInfo();
+
             UnfilteredPartitionIterator iterator = Transformation.apply(storageTarget, new TrackingRowIterator(context));
             iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 
