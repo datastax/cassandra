@@ -246,7 +246,7 @@ public class QueryContext
             annRerankFloor = max(annRerankFloor, observedFloor);
     }
 
-    public void recordQueryPlan(Plan.RowsIteration originalPlan, Plan.RowsIteration.RowsIteration optimizedPlan)
+    public void recordQueryPlan(Plan.RowsIteration originalPlan, Plan.RowsIteration optimizedPlan)
     {
         if (CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean())
             this.queryPlanInfo = new PlanInfo(originalPlan, optimizedPlan);
