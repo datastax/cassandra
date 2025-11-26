@@ -320,7 +320,7 @@ public class TableQueryMetrics
         /** Number of rows to be fetched by the query as estimated by the planner */
         public final Histogram rowsToFetchEstimated;
 
-        /** Number of rows to be fetched by the query as estimated by the planner */
+        /** Number of keys to be iterated by the query as estimated by the planner */
         public final Histogram keysToIterateEstimated;
 
         /**
