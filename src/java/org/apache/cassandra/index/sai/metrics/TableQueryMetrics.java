@@ -324,7 +324,7 @@ public class TableQueryMetrics
         public final Histogram keysToIterateEstimated;
 
         /**
-         * Negative deceimal logarithm of selectivity of the query, before applying the LIMIT clause.
+         * Negative decimal logarithm of selectivity of the query, before applying the LIMIT clause.
          * We use logarithm because selectivity values can be very small (e.g. 10^-9).
          */
         public final Histogram logSelectivityEstimated;
