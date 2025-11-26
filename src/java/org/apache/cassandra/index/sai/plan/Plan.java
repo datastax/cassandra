@@ -531,6 +531,8 @@ abstract public class Plan
 
     /**
      * Returns the number of indexes referenced by this plan.
+     * The same index referenced from unrelated query clauses,
+     * leading to separate index searches, are counted separately.
      */
     public final int referencedIndexCount()
     {
@@ -1757,7 +1759,7 @@ abstract public class Plan
      * In order to return one row in the result set it may need to retrieve many rows from the source node.
      * Hence, it will typically have higher cost-per-row than the source node, and will return fewer rows.
      */
-    public static class Filter extends RowsIteration
+    static class Filter extends RowsIteration
     {
         private final RowFilter filter;
         private final LazyTransform<RowsIteration> source;

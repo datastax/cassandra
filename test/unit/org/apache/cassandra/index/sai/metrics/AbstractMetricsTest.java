@@ -85,7 +85,6 @@ public abstract class AbstractMetricsTest extends SAITester
         }, 10, TimeUnit.SECONDS);
     }
 
-
     protected void waitForGreaterThanZero(ObjectName name)
     {
         waitForAssert(() -> {
