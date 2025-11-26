@@ -83,7 +83,6 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.btree.BTree;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
@@ -124,6 +123,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public ReadCommand command()
     {
         return command;
+    }
+
+    @VisibleForTesting
+    public QueryContext queryContext()
+    {
+        return queryContext;
     }
 
     @VisibleForTesting
@@ -173,19 +178,25 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
                 // Can't check for `command.isTopK()` because the planner could optimize sorting out
+                UnfilteredPartitionIterator result;
                 Orderer ordering = plan.ordering();
                 if (ordering == null)
                 {
                     assert keysIterator instanceof KeyRangeIterator;
-                    return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
+                    result = new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
                 }
-
-                assert !(keysIterator instanceof KeyRangeIterator);
-                var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
-                var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, executionController,
-                                                             command.limits().count(),
-                                                             ordering.context.getDefinition());
-                return new TopKProcessor(command).filter(result);
+                else
+                {
+                    assert !(keysIterator instanceof KeyRangeIterator);
+                    var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
+                    var retriever = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
+                                                                    executionController, queryContext,
+                                                                    command.nowInSec(),
+                                                                    command.limits().count(),
+                                                                    ordering.context.getDefinition());
+                    result = new TopKProcessor(command).filter(retriever);
+                }
+                return CountReturnedTransformation.apply(result, queryContext, controller::finish);
             }
             catch (QueryView.Builder.MissingIndexException e)
             {
@@ -270,6 +281,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final ReadExecutionController executionController;
         private final PrimaryKey.Factory keyFactory;
         private final int partitionRowBatchSize;
+        private final CountFetchedTransformation fetchedRowsCounter;
 
         private PrimaryKey lastKey;
 
@@ -284,6 +296,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.filterTree = filterTree;
             this.executionController = executionController;
             this.keyFactory = controller.primaryKeyFactory();
+            this.fetchedRowsCounter = new CountFetchedTransformation(queryContext, command.nowInSec());
 
             this.firstPrimaryKey = controller.firstPrimaryKey();
 
@@ -540,14 +553,15 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             long startTimeNanos = Clock.Global.nanoTime();
             UnfilteredRowIterator partition = controller.getPartition(keys, executionController);
-            queryContext.addPartitionsRead(1);
+            UnfilteredRowIterator counted = fetchedRowsCounter.apply(partition);
             queryContext.checkpoint();
-            UnfilteredRowIterator filtered = applyIndexFilter(partition, filterTree, queryContext);
 
             // Note that we record the duration of the read after post-filtering, which actually
             // materializes the rows from disk.
             queryContext.addPostFilteringReadLatency(Clock.Global.nanoTime() - startTimeNanos);
-            return filtered;
+
+            queryContext.addKeysFetched(keys.size());
+            return applyIndexFilter(counted, filterTree);
         }
 
         @Override
@@ -560,7 +574,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public void close()
         {
             FileUtils.closeQuietly(operation);
-            controller.finish();
             if (tableQueryMetrics != null)
                 tableQueryMetrics.record(queryContext, command);
         }
@@ -584,6 +597,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator;
         private final FilterTree filterTree;
         private final ReadExecutionController executionController;
+        private final QueryContext queryContext;
+        private final long nowInSec;
+        private final CountFetchedTransformation fetchedRowsCounter;
 
         private final HashSet<PrimaryKey> processedKeys;
         private final Queue<UnfilteredRowIterator> pendingRows;
@@ -601,7 +617,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         private ScoreOrderedResultRetriever(CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
-                                            ReadExecutionController executionController, int limit,
+                                            QueryController controller,
+                                            ReadExecutionController executionController,
+                                            QueryContext queryContext,
+                                            long nowInSec,
+                                            int limit,
                                             ColumnMetadata orderedColumn)
         {
             IndexContext context = controller.getOrderer().context;
@@ -612,6 +632,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.scoredPrimaryKeyIterator = scoredPrimaryKeyIterator;
             this.filterTree = filterTree;
             this.executionController = executionController;
+            this.queryContext = queryContext;
+            this.nowInSec = nowInSec;
+            this.fetchedRowsCounter = new CountFetchedTransformation(queryContext, nowInSec);
 
             this.processedKeys = new HashSet<>(limit);
             this.pendingRows = new ArrayDeque<>(limit);
@@ -749,14 +772,15 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
             try (UnfilteredRowIterator partition = controller.getPartition(pk, view, executionController))
             {
-                queryContext.addPartitionsRead(1);
                 queryContext.checkpoint();
-                UnfilteredRowIterator clusters = applyIndexFilter(partition, filterTree, queryContext);
+                queryContext.addKeysFetched(sourceKeys.size());
+
+                UnfilteredRowIterator counted = fetchedRowsCounter.apply(partition);
+                UnfilteredRowIterator clusters = applyIndexFilter(counted, filterTree);
 
                 if (clusters == null)
                     return null;
 
-                var now = FBUtilities.nowInSeconds();
                 var staticRow = partition.staticRow();
                 boolean isStaticValid = false;
 
@@ -764,11 +788,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 // Therefore, we check to see if the static row is valid for any of them.
                 for (PrimaryKeyWithSortKey sourceKey : sourceKeys)
                 {
-                    if (sourceKey.isIndexDataValid(staticRow, now))
+                    if (sourceKey.isIndexDataValid(staticRow, nowInSec))
                     {
                         // If there are no regular rows, return the static row only
                         if (!clusters.hasNext())
-                            return new PrimaryKeyIterator(partition, staticRow, null, sourceKey, syntheticScoreColumn, controller.getOrderer());
+                            return new PrimaryKeyIterator(partition, staticRow, null, sourceKey, syntheticScoreColumn, controller.getOrderer(), nowInSec);
 
                         isStaticValid = true;
                         break;
@@ -786,12 +810,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     {
                         // Each of these primary keys are equal, but they have different source tables.
                         // Only one can be valid.
-                        if (sourceKey.isIndexDataValid((Row) row, now))
+                        if (sourceKey.isIndexDataValid((Row) row, nowInSec))
                         {
                             // We can only count the pk as processed once we know it was valid for one of the
                             // scored keys.
                             processedKeys.add(pk);
-                            return new PrimaryKeyIterator(partition, staticRow, row, sourceKey, syntheticScoreColumn, controller.getOrderer());
+                            return new PrimaryKeyIterator(partition, staticRow, row, sourceKey, syntheticScoreColumn, controller.getOrderer(), nowInSec);
                         }
                     }
                 }
@@ -809,7 +833,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public void close()
         {
             FileUtils.closeQuietly(scoredPrimaryKeyIterator);
-            controller.finish();
             if (tableQueryMetrics != null)
                 tableQueryMetrics.record(queryContext, command);
         }
@@ -826,7 +849,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                       @Nullable Unfiltered content,
                                       PrimaryKeyWithSortKey primaryKeyWithSortKey,
                                       ColumnMetadata syntheticScoreColumn,
-                                      Orderer orderer)
+                                      Orderer orderer,
+                                      long nowInSec)
             {
                 super(partition.metadata(),
                       partition.partitionKey(),
@@ -856,7 +880,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 // inject +score as a new column
                 float score = ((PrimaryKeyWithScore) primaryKeyWithSortKey).getExactScore(orderer, originalRow);
                 columnData.add(BufferCell.live(syntheticScoreColumn,
-                                               FBUtilities.nowInSeconds(),
+                                               nowInSec,
                                                FloatType.instance.decompose(score)));
 
                 this.row = BTreeRow.create(originalRow.clustering(),
@@ -879,13 +903,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
     }
 
-    private static UnfilteredRowIterator applyIndexFilter(UnfilteredRowIterator partition, FilterTree tree, QueryContext queryContext)
+    private static UnfilteredRowIterator applyIndexFilter(UnfilteredRowIterator partition, FilterTree tree)
     {
-        FilteringPartitionIterator filtered = new FilteringPartitionIterator(partition, tree, queryContext);
+        FilteringPartitionIterator filtered = new FilteringPartitionIterator(partition, tree);
         if (!filtered.hasNext() && !filtered.matchesStaticRow())
         {
-            // shadowed by expired TTL or row tombstone or range tombstone
-            queryContext.addShadowed(1);
             filtered.close();
             return null;
         }
@@ -898,13 +920,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private static class FilteringPartitionIterator extends AbstractUnfilteredRowIterator
     {
         private final FilterTree filter;
-        private final QueryContext queryContext;
         private final UnfilteredRowIterator rows;
 
         private final DecoratedKey key;
         private final Row staticRow;
 
-        public FilteringPartitionIterator(UnfilteredRowIterator partition, FilterTree filter, QueryContext queryContext)
+        public FilteringPartitionIterator(UnfilteredRowIterator partition, FilterTree filter)
         {
             super(partition.metadata(),
                   partition.partitionKey(),
@@ -916,14 +937,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
             this.rows = partition;
             this.filter = filter;
-            this.queryContext = queryContext;
             this.key = partition.partitionKey();
             this.staticRow = partition.staticRow();
         }
 
         public boolean matchesStaticRow()
         {
-            queryContext.addRowsFiltered(1);
             return filter.isSatisfiedBy(key, staticRow, staticRow);
         }
 
@@ -933,7 +952,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             while (rows.hasNext())
             {
                 Unfiltered row = rows.next();
-                queryContext.addRowsFiltered(1);
 
                 if (!row.isRow() || ((Row)row).isStatic())
                     continue;
