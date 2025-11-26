@@ -71,7 +71,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class RowAwarePrimaryKeyMapFactory implements Factory
     {
-        private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final SortedTermsReader sortedTermsReader;
         private final long count;
@@ -89,7 +88,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         {
             try
             {
-                this.perSSTableComponents = perSSTableComponents;
                 MetadataSource metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
                 count = tokensMeta.valueCount;
