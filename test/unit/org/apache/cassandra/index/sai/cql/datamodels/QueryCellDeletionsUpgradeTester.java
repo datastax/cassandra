@@ -18,6 +18,10 @@ package org.apache.cassandra.index.sai.cql.datamodels;
 import org.junit.Ignore;
 import org.junit.Test;
 
+/**
+ * Tests cell deletions after upgrade from AA index version (non-row-aware) to all other row-aware index versions.
+ * @see IndexQuerySupport#cellDeletionsAfterUpgrade
+ */
 @Ignore
 abstract class QueryCellDeletionsUpgradeTester extends SingleNodeQueryTester
 {

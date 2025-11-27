@@ -21,7 +21,8 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 /**
- * Force generates segments due to a small RAM size on compaction, to test segment splitting
+ * Same as {@link QueryRowDeletionsUpgradeTester}, but
+ * force generates segments due to a small RAM size on compaction, to test segment splitting
  */
 @Ignore
 abstract class TinySegmentQueryRowDeletionsUpgradeTester extends SingleNodeQueryTester

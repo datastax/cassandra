@@ -128,6 +128,12 @@ public class IndexQuerySupport
         dataModel.truncateTables(executor);
     }
 
+    /**
+     * Tests inserts and updates after upgrade from AA index version (non-row-aware) to the current version.
+     * Inserts data in two parts to create a mix of AA and current version SSTable indexes.
+     * Then validates the query results at multiple stages: before flush, after flush,
+     * after updates, after another flush, after compaction.
+     */
     public static void writeLifecycleAfterUpgrade(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
     {
         Version targetVersion = SAIUtil.currentVersion();
@@ -199,6 +205,11 @@ public class IndexQuerySupport
         executeQueries(dataModel, executor, sets);
     }
 
+    /**
+     * Tests row deletions after upgrade from AA index version (non-row-aware) to the currently set version.
+     * Inserts data in two parts to create a mix of AA and current version SSTable indexes.
+     * Then deletes rows and validates the query results in each stage: before flush, after flush, after compaction.
+     */
     public static void rowDeletionsAfterUpgrade(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
     {
         Version targetVersion = SAIUtil.currentVersion();
@@ -270,6 +281,11 @@ public class IndexQuerySupport
         executeQueries(dataModel, executor, sets);
     }
 
+    /**
+     * Tests row deletions after upgrade from AA index version (non-row-aware) to the currently set version.
+     * Inserts data in two parts to create a mix of AA and current version SSTable indexes.
+     * Then deletes cells and validates the query results in each stage: before flush, after flush, after compaction.
+     */
     public static void cellDeletionsAfterUpgrade(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
     {
 
@@ -328,6 +344,12 @@ public class IndexQuerySupport
         executeQueries(dataModel, executor, sets);
     }
 
+    /**
+     * Tests the TTL behavior after upgrade from AA index version (non-row-aware) to the currently set version.
+     * First inserts rows in AA version without TTLs to create an AA indexed sstable.
+     * Then switches the version back to the original one and overwrites the rows with TTLs in Memtable.
+     * Tests rows with TTLs behave correctly before flush, after flush, and after overwrites with non-TTL rows.
+     */
     public static void timeToLiveAfterUpgrade(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
     {
         Version targetVersion = SAIUtil.currentVersion();

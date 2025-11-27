@@ -18,6 +18,10 @@ package org.apache.cassandra.index.sai.cql.datamodels;
 import org.junit.Ignore;
 import org.junit.Test;
 
+/**
+ * Tests inserts and updates after upgrade from AA index version (non-row-aware) to all other row-aware index versions.
+ * @see IndexQuerySupport#writeLifecycleAfterUpgrade
+ */
 @Ignore
 abstract class QueryWriteLifecycleUpgradeTester extends SingleNodeQueryTester
 {

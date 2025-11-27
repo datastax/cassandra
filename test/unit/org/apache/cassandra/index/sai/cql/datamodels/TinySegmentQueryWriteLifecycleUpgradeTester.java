@@ -21,6 +21,7 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 /**
+ * Same as {@link QueryWriteLifecycleUpgradeTester}, but
  * Force generates segments due to a small RAM size on compaction, to test segment splitting
  */
 @Ignore
