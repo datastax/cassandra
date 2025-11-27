@@ -167,7 +167,8 @@ public class IndexQuerySupport
         executeQueries(dataModel, executor, sets);
     }
 
-    public static void rowDeletions(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable {
+    public static void rowDeletions(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable 
+    {
         dataModel.createTables(executor);
 
         dataModel.disableCompaction(executor);
