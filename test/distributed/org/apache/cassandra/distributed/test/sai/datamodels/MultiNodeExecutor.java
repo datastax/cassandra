@@ -63,9 +63,7 @@ public class MultiNodeExecutor implements DataModel.Executor
         // need to pass version as String, because Version is not serializable and cannot be easily made to be so
         String versionName = version.toString();
         cluster.forEach((node) ->
-                        node.runOnInstance(() -> {
-                            org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion(Version.parse(versionName));
-                        }));
+                        node.runOnInstance(() -> org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion(Version.parse(versionName))));
     }
 
     @Override
