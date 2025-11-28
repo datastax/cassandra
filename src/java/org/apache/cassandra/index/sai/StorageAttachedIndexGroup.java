@@ -243,7 +243,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
 
             private void forEach(Consumer<Index.Indexer> action)
             {
-                indexers.forEach(action::accept);
+                indexers.forEach(action);
             }
         };
     }
@@ -333,7 +333,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
 
             // Avoid validation for index files just written following Memtable flush. ZCS streaming should
             // validate index checksum.
-            boolean validate = notice.fromStreaming() || !notice.memtable().isPresent();
+            boolean validate = notice.fromStreaming() || notice.memtable().isEmpty();
             onSSTableChanged(Collections.emptySet(), notice.added, indices, validate);
         }
         else if (notification instanceof SSTableListChangedNotification)
@@ -433,7 +433,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
      */
     public int totalQueryableIndexCount()
     {
-        return (int) indices.stream().filter(i -> baseCfs.indexManager.isIndexQueryable(i)).count();
+        return (int) indices.stream().filter(baseCfs.indexManager::isIndexQueryable).count();
     }
 
     /**
@@ -510,7 +510,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public void reset()
     {
         contextManager.clear();
-        indices.forEach(index -> index.makeIndexNonQueryable());
+        indices.forEach(StorageAttachedIndex::makeIndexNonQueryable);
         onSSTableChanged(baseCfs.getLiveSSTables(), Collections.emptySet(), indices, false);
     }
 }

@@ -808,7 +808,7 @@ public class SAITester extends CQLTester
         return null;
     }
 
-    protected void assertNumRows(int expected, String query, Object... args) throws Throwable
+    protected void assertNumRows(int expected, String query, Object... args)
     {
         ResultSet rs = executeNet(String.format(query, args));
         assertEquals(expected, rs.all().size());
@@ -923,7 +923,7 @@ public class SAITester extends CQLTester
         private final CountDownLatch taskCompleted = new CountDownLatch(1);
 
         private final int verificationIntervalInMs;
-        private final int verificationMaxInMs = 300_000; // 300s
+        private static final int verificationMaxInMs = 300_000; // 300s
 
         public TestWithConcurrentVerification(Runnable verificationTask, Runnable targetTask)
         {

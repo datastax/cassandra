@@ -134,9 +134,9 @@ public interface OnDiskFormat
      * @return The {@link PerIndexWriter} that will write the per-index on-disk components
      */
     PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
-                                            IndexDescriptor indexDescriptor,
-                                            LifecycleNewTracker tracker,
-                                            RowMapping rowMapping, long keyCount);
+                                     IndexDescriptor indexDescriptor,
+                                     LifecycleNewTracker tracker,
+                                     RowMapping rowMapping, long keyCount);
 
     /**
      * Validate the provided on-disk components (that must be for this version).
