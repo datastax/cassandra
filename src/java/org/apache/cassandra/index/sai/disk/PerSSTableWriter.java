@@ -28,7 +28,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
  */
 public interface PerSSTableWriter
 {
-    public static final PerSSTableWriter NONE = (key) -> {};
+    PerSSTableWriter NONE = key -> {};
 
     default void startPartition(long position) throws IOException
     {}

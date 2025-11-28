@@ -249,7 +249,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
 
             private void forEach(Consumer<Index.Indexer> action)
             {
-                indexers.forEach(action::accept);
+                indexers.forEach(action);
             }
         };
     }
@@ -326,7 +326,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             // validate index checksum. Also avoid validation for UNKNOWN operations (imports) as they
             // are already validated in SSTableImporter.
             boolean validate = notice.fromStreaming() || 
-                              (!notice.memtable().isPresent() && notice.operationType != OperationType.UNKNOWN);
+                              (notice.memtable().isEmpty() && notice.operationType != OperationType.UNKNOWN);
             onSSTableChanged(Collections.emptySet(), Lists.newArrayList(notice.added), indices, validate);
         }
         else if (notification instanceof SSTableListChangedNotification)
@@ -489,7 +489,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
      */
     public int totalQueryableIndexCount()
     {
-        return (int) indices.stream().filter(i -> baseCfs.indexManager.isIndexQueryable(i)).count();
+        return (int) indices.stream().filter(baseCfs.indexManager::isIndexQueryable).count();
     }
 
     /**
@@ -566,7 +566,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public void reset()
     {
         contextManager.clear();
-        indices.forEach(index -> index.makeIndexNonQueryable());
+        indices.forEach(StorageAttachedIndex::makeIndexNonQueryable);
         onSSTableChanged(baseCfs.getLiveSSTables(), Collections.emptySet(), indices, false);
     }
 
