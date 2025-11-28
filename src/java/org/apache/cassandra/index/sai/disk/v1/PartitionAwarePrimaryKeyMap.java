@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
@@ -106,8 +105,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         @Override
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
         {
-            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
-            final LongArray rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
+            final LongArray rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
+            final LongArray rowIdToOffset = new LongArray.DeferredLongArray(offsetReaderFactory::open);
 
             return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId);
         }

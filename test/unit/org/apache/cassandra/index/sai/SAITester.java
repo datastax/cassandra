@@ -227,7 +227,7 @@ public class SAITester extends CQLTester
     public TestRule testRules = new ResourceLeakDetector();
 
     @Before
-    public void resetQueryOptimizationLevel() throws Throwable
+    public void resetQueryOptimizationLevel()
     {
         // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
         QueryController.QUERY_OPT_LEVEL = 1;
@@ -235,7 +235,7 @@ public class SAITester extends CQLTester
     }
 
     @Before
-    public void resetLastValidSegmentRowId() throws Throwable
+    public void resetLastValidSegmentRowId()
     {
         // Don't want this setting to impact peer tests
         SegmentBuilder.updateLastValidSegmentRowId(-1);
@@ -361,7 +361,7 @@ public class SAITester extends CQLTester
         cfs.indexManager.listIndexes().forEach(index -> {
             ((StorageAttachedIndexGroup)cfs.indexManager.getIndexGroup(index)).reset();
         });
-        cfs.indexManager.listIndexes().forEach(index -> cfs.indexManager.buildIndex(index));
+        cfs.indexManager.listIndexes().forEach(cfs.indexManager::buildIndex);
         cfs.indexManager.executePreJoinTasksBlocking(true);
         if (wait)
         {
@@ -852,9 +852,9 @@ public class SAITester extends CQLTester
         return CompactionManager.instance.getActiveCompactions() + CompactionManager.instance.getPendingTasks();
     }
 
-    protected String getSingleTraceStatement(Session session, String query, String contains) throws Throwable
+    protected String getSingleTraceStatement(Session session, String query, String contains)
     {
-        query = String.format(query, KEYSPACE + "." + currentTable());
+        query = String.format(query, KEYSPACE + '.' + currentTable());
         QueryTrace trace = session.execute(session.prepare(query).bind().enableTracing()).getExecutionInfo().getQueryTrace();
         waitForTracingEvents();
 
@@ -866,7 +866,7 @@ public class SAITester extends CQLTester
         return null;
     }
 
-    protected void assertNumRows(int expected, String query, Object... args) throws Throwable
+    protected void assertNumRows(int expected, String query, Object... args)
     {
         ResultSet rs = executeNet(String.format(query, args));
         assertEquals(expected, rs.all().size());
@@ -981,7 +981,7 @@ public class SAITester extends CQLTester
         private final CountDownLatch taskCompleted = new CountDownLatch(1);
 
         private final int verificationIntervalInMs;
-        private final int verificationMaxInMs = 300_000; // 300s
+        private static final int verificationMaxInMs = 300_000; // 300s
 
         public TestWithConcurrentVerification(Runnable verificationTask, Runnable targetTask)
         {

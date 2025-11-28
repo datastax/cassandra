@@ -614,7 +614,7 @@ public class IndexContext
         }
         catch (NumberFormatException e)
         {
-            logger.error("Failed to parse index configuration " + name + " = " + value + " as integer");
+            logger.error("Failed to parse index configuration {} = {} as integer", name, value);
             return defaultValue;
         }
     }
@@ -1003,7 +1003,7 @@ public class IndexContext
     public IndexFeatureSet indexFeatureSet()
     {
         IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator(version);
-        getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
+        getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(accumulator::accumulate);
         return accumulator.complete();
     }
 }

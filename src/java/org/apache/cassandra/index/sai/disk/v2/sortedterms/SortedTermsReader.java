@@ -145,7 +145,7 @@ public class SortedTermsReader
         // The point id the cursor currently points to. -1 means before the first item.
         private long pointId = -1;
 
-        private TrieTermsDictionaryReader reader;
+        private final TrieTermsDictionaryReader reader;
 
         Cursor(FileHandle termsData, LongArray.Factory blockOffsetsFactory) throws IOException
         {

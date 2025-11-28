@@ -114,7 +114,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 primaryKeys.forEach(primaryKey -> {
                     try
                     {
-                        writer.add(v -> primaryKey.asComparableBytes(v));
+                        writer.add(primaryKey::asComparableBytes);
                     }
                     catch (IOException e)
                     {

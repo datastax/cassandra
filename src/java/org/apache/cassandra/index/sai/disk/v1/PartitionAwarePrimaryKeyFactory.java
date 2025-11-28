@@ -56,7 +56,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         return new PartitionAwarePrimaryKey(partitionKey.getToken(), partitionKey, null);
     }
 
-    private class PartitionAwarePrimaryKey implements PrimaryKey
+    private static class PartitionAwarePrimaryKey implements PrimaryKey
     {
         private final Token token;
         private DecoratedKey partitionKey;
