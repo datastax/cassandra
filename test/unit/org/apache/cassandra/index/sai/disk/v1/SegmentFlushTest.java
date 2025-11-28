@@ -155,6 +155,7 @@ public class SegmentFlushTest
                                                      MockSchema.newCFS("ks"));
 
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        long startingLimiterValue = V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER.currentBytesUsed();
         SSTableIndexWriter writer = new SSTableIndexWriter(components, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER, () -> false, () -> false, 2);
 
         List<DecoratedKey> keys = Arrays.asList(dk("1"), dk("2"));
@@ -172,6 +173,7 @@ public class SegmentFlushTest
         writer.addRow(SAITester.TEST_FACTORY.create(key2, Clustering.EMPTY), row2, sstableRowId2);
 
         writer.complete(Stopwatch.createStarted());
+        assertEquals(startingLimiterValue, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER.currentBytesUsed());
 
         MetadataSource source = MetadataSource.loadMetadata(components);
 
