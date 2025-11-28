@@ -15,8 +15,6 @@
  */
 package org.apache.cassandra.index.sai.cql.datamodels;
 
-import java.util.List;
-
 import org.junit.Ignore;
 import org.junit.Test;
 
