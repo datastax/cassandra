@@ -62,6 +62,12 @@ import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 import org.github.jamm.Unmetered;
+import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Collections;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class ChunkCache
         implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
@@ -113,6 +119,7 @@ public class ChunkCache
 
     // File id management
     private final ConcurrentHashMap<File, Long> fileIdMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, File> idToFileMap = new ConcurrentHashMap<>();
     private final AtomicLong nextFileId = new AtomicLong(0);
 
     // number of bits required to store the log2 of the chunk size
@@ -263,7 +270,9 @@ public class ChunkCache
 
     private long assignFileId(File file)
     {
-        return nextFileId.getAndIncrement();
+        long id = nextFileId.getAndIncrement();
+        idToFileMap.put(id, file);
+        return id;
     }
 
     /**
@@ -279,7 +288,11 @@ public class ChunkCache
     {
         // Removing the name from the id map suffices -- the next time someone wants to read this file, it will get
         // assigned a fresh id.
-        fileIdMap.remove(file);
+        Long id = fileIdMap.remove(file);
+        if (id != null)
+        {
+            idToFileMap.remove(id);
+        }
     }
 
     /**
@@ -770,4 +783,87 @@ public class ChunkCache
         long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
         return (int) cacheAsMap.keySet().stream().filter(x -> (x.readerId & mask) == fileId).count();
     }
+
+    /**
+     * A snapshot of a specific chunk currently held in the cache.
+     * Used for diagnostics and inspection tools.
+     */
+    public static class ChunkCacheInspectionEntry
+    {
+        public final File file;
+        public final long position;
+        public final int size;
+
+        public ChunkCacheInspectionEntry(File file, long position, int size)
+        {
+            this.file = file;
+            this.position = position;
+            this.size = size;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("Chunk{file='%s', pos=%d, size=%d}", file, position, size);
+        }
+    }
+
+
+    /**
+     * Inspects the "hottest" (most frequently/recently used) chunks in the cache.
+     * Uses a consumer pattern to avoid materializing a full list in memory.
+     *
+     * @param limit    maximum number of entries to inspect
+     * @param consumer consumer to process each entry
+     */
+    public void inspectHotEntries(int limit, java.util.function.Consumer<ChunkCacheInspectionEntry> consumer)
+    {
+        inspectCacheSegments(limit, true, consumer);
+    }
+
+    /**
+     * Inspects the "coldest" (candidates for eviction) chunks in the cache.
+     * Uses a consumer pattern to avoid materializing a full list in memory.
+     *
+     * @param limit    maximum number of entries to inspect
+     * @param consumer consumer to process each entry
+     */
+    public void inspectColdEntries(int limit, java.util.function.Consumer<ChunkCacheInspectionEntry> consumer)
+    {
+        inspectCacheSegments(limit, false, consumer);
+    }
+
+    private void inspectCacheSegments(int limit, boolean hottest, java.util.function.Consumer<ChunkCacheInspectionEntry> consumer)
+    {
+        if (!enabled)
+            return;
+
+        // The readerId packs multiple values into a single long: [File ID][Chunk Size][Reader Type]
+        // We need to shift right to extract just the File ID portion by discarding the lower bits
+        int shift = CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS;
+
+        synchronousCache.policy().eviction().ifPresent(policy -> {
+            Map<Key, Chunk> orderedMap = hottest ? policy.hottest(limit) : policy.coldest(limit);
+
+            orderedMap.forEach((key, chunk) -> {
+                // Skip entries where the chunk was evicted but the key still exists
+                if (chunk == null)
+                    return;
+
+                // Extract the file ID by shifting away the lower bits.
+                // The >>> operator does an unsigned right shift, moving the bits right and filling with zeros.
+                // For example, if readerId is [FileID:42][ChunkSize:3][ReaderType:1] and shift is 5,
+                // this operation discards the rightmost 5 bits (ChunkSize + ReaderType) leaving just FileID:42
+                long fileId = key.readerId >>> shift;
+
+                File file = idToFileMap.get(fileId);
+
+                // Skip if we can't find the file (it may have been invalidated)
+                if (file == null)
+                    return;
+
+                consumer.accept(new ChunkCacheInspectionEntry(file, key.position, chunk.capacity()));
+            });
+        });
+    }  
 }
