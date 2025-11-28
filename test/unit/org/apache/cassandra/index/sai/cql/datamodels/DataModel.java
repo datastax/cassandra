@@ -172,6 +172,9 @@ public interface DataModel
 
     List<Object> executeNonIndexed(Executor tester, String query, int fetchSize, Object... values) throws Throwable;
 
+    /** Returns the set of all SAI index versions in use by the model for the on-disk indexes */
+    Set<Version> getSSTableIndexVersions(Executor tester) throws Throwable;
+
     public class BaseDataModel implements DataModel
     {
         final List<Pair<String, String>> columns;
@@ -364,6 +367,12 @@ public interface DataModel
         public List<Object> executeNonIndexed(Executor tester, String query, int fetchSize, Object... values) throws Throwable
         {
             return tester.executeRemote(formatNonIndexedQuery(query), fetchSize, values);
+        }
+
+        @Override
+        public Set<Version> getSSTableIndexVersions(Executor tester) throws Throwable
+        {
+            return tester.getSSTableIndexVersions(KEYSPACE, indexedTable);
         }
 
         protected Set<Integer> deletable()
@@ -652,5 +661,11 @@ public interface DataModel
         void counterReset();
 
         long getCounter();
+
+        /**
+         * Returns the set of all SAI index versions in use by the specified table for the on-disk indexes.
+         * Memtable indexes are not included.
+         */
+        Set<Version> getSSTableIndexVersions(String keyspace, String indexedTable);
     }
 }

@@ -19,14 +19,18 @@
 package org.apache.cassandra.distributed.test.sai.datamodels;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.sai.SAIUtil;
 import org.apache.cassandra.distributed.util.ColumnTypeUtil;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.cql.datamodels.DataModel;
 import org.apache.cassandra.index.sai.disk.format.Version;
 
@@ -107,5 +111,23 @@ public class MultiNodeExecutor implements DataModel.Executor
     public long getCounter()
     {
         return MultiNodeQueryTester.Counter.get();
+    }
+
+    @Override
+    public Set<Version> getSSTableIndexVersions(String keyspace, String indexedTable)
+    {
+        // Need to pass version as String, because Version is not serializable
+        var versions = new HashSet<String>();
+        cluster.forEach((node) ->
+                        versions.addAll(
+                            node.callsOnInstance(() ->
+                                SAITester.getSSTableIndexVersions(keyspace, indexedTable)
+                                         .stream()
+                                         .map(Version::toString)
+                                         .collect(Collectors.toSet())
+                            ).call()
+            )
+        );
+        return versions.stream().map(Version::parse).collect(Collectors.toSet());
     }
 }

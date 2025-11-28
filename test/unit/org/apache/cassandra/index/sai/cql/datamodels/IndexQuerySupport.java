@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.utils.Pair;
+import org.assertj.core.api.Assertions;
 import org.hamcrest.Matchers;
 
 import static org.apache.cassandra.distributed.test.TestBaseImpl.list;
@@ -148,6 +149,7 @@ public class IndexQuerySupport
         // create an AA indexed sstable
         dataModel.insertRowsPartA(executor);
         dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(Version.AA);
 
         // create a current version indexed sstable
         executor.setCurrentVersion(targetVersion);
@@ -158,6 +160,7 @@ public class IndexQuerySupport
 
         // queries w/ multiple SSTable indexes, one AA and one current
         dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(targetVersion);
         executeQueries(dataModel, executor, sets);
 
         // queries against Memtable updates and the existing SSTable indexes of mixed versions
@@ -224,6 +227,7 @@ public class IndexQuerySupport
         // create an AA indexed sstable
         dataModel.insertRowsPartA(executor);
         dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(Version.AA);
 
         // create a current version indexed sstable
         executor.setCurrentVersion(targetVersion);
@@ -234,6 +238,7 @@ public class IndexQuerySupport
 
         // queries w/ multiple SSTable indexes, one AA and one current
         dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(targetVersion);
         executeQueries(dataModel, executor, sets);
 
         // queries against Memtable deletes and the existing SSTable indexes of mixed versions
@@ -300,6 +305,7 @@ public class IndexQuerySupport
 
         dataModel.insertRowsPartA(executor);
         dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(Version.AA);
 
         executor.setCurrentVersion(targetVersion);
         dataModel.insertRowsPartB(executor);
@@ -313,6 +319,7 @@ public class IndexQuerySupport
 
         // queries against the newly flushed SSTable index with deletes and the existing SSTable indexes (AA + current)
         dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(targetVersion);
         executeQueries(dataModel, executor, sets);
 
         // queries after compacting to a single SSTable index of the current version
@@ -366,6 +373,7 @@ public class IndexQuerySupport
         dataModel.createIndexes(executor);
         dataModel.insertRows(executor);
         dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(Version.AA);
 
         executor.setCurrentVersion(targetVersion);
 
@@ -380,6 +388,7 @@ public class IndexQuerySupport
 
         // Make sure TTLs are reflected in our query results from SSTables:
         dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(targetVersion);
         executeQueries(dataModel, executor, sets);
 
         // Make sure fresh overwrites invalidate TTLs:
