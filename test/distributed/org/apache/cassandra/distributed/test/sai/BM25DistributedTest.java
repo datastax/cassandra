@@ -76,7 +76,7 @@ public class BM25DistributedTest extends TestBaseImpl
         table = "table_" + seq.getAndIncrement();
         cluster.schemaChange(formatQuery(CREATE_TABLE));
         cluster.schemaChange(formatQuery(CREATE_INDEX));
-        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
     }
 
     @Test

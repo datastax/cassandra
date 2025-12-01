@@ -74,6 +74,15 @@ public final class PathUtils
 
     private static volatile boolean DAEMON_SETUP_COMPLETED = false;
 
+    private static final CopyOption[] ATOMIC_MOVE_OPTIONS = {
+        StandardCopyOption.REPLACE_EXISTING,
+        StandardCopyOption.ATOMIC_MOVE
+    };
+
+    private static final CopyOption[] REPLACE_EXISTING_OPTIONS = {
+        StandardCopyOption.REPLACE_EXISTING
+    };
+
     private static Consumer<Path> onDeletion = path -> {
         if (DAEMON_SETUP_COMPLETED)
             setDeletionListener(ignore -> {});
@@ -394,7 +403,7 @@ public final class PathUtils
 
     /**
      * Recursively delete the content of the directory, but not the directory itself.
-     * @param dirPath directory for which content should be deleted 
+     * @param dirPath directory for which content should be deleted
      */
     public static void deleteContent(Path dirPath)
     {
@@ -496,12 +505,12 @@ public final class PathUtils
     {
         try
         {
-            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            Files.move(from, to, ATOMIC_MOVE_OPTIONS);
         }
         catch (AtomicMoveNotSupportedException e)
         {
             logger.trace("Could not do an atomic move", e);
-            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(from, to, REPLACE_EXISTING_OPTIONS);
         }
     }
 

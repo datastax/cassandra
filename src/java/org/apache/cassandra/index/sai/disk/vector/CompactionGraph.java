@@ -199,8 +199,8 @@ public class CompactionGraph implements Closeable, Accountable
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         // Formatted so that the full resolution vector is written at the ordinal * vector dimension offset
-        Component vectorsByOrdinalComponent = new Component(Component.Type.CUSTOM, "vectors_by_ordinal" + Descriptor.TMP_EXT);
-        vectorsByOrdinalTmpFile = dd.fileFor(vectorsByOrdinalComponent);
+        Component vectorsByOrdinalComponent = new Component(Component.Type.CUSTOM, "vectors_by_ordinal");
+        vectorsByOrdinalTmpFile = dd.tmpFileFor(vectorsByOrdinalComponent);
         vectorsByOrdinalBufferedWriter = new BufferedRandomAccessWriter(vectorsByOrdinalTmpFile.toPath());
 
         // VSTODO add LVQ

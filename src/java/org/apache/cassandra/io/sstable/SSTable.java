@@ -341,7 +341,7 @@ public abstract class SSTable
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + "(" +
+        return getClass().getSimpleName() + '(' +
                "path='" + getFilename() + '\'' +
                ')';
     }
@@ -403,7 +403,7 @@ public abstract class SSTable
      */
     public static void writeTOC(File tocFile, Collection<Component> components, File.WriteMode writeMode)
     {
-        FileOutputStreamPlus fos = null;
+        FileOutputStreamPlus fos;
         try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(writeMode))))
         {
             for (Component component : components)

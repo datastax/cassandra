@@ -49,7 +49,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
-import static org.apache.cassandra.distributed.test.sai.SAIUtil.waitForIndexQueryable;
+import static org.apache.cassandra.distributed.test.sai.SAIUtil.waitForIndexQueryableOnFirstNode;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
@@ -90,7 +90,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
                 cluster.schemaChange(String.format(CREATE_TABLE, ks, cf1));
                 cluster.schemaChange(String.format(CREATE_INDEX, index1, ks, cf1, "v1"));
                 cluster.schemaChange(String.format(CREATE_INDEX, index2, ks, cf1, "v2"));
-                waitForIndexQueryable(cluster, ks);
+                waitForIndexQueryableOnFirstNode(cluster, ks);
                 cluster.forEach(node -> {
                     expectedNodeIndexQueryability.put(NodeIndex.create(ks, index1, node), Index.Status.BUILD_SUCCEEDED);
                     expectedNodeIndexQueryability.put(NodeIndex.create(ks, index2, node), Index.Status.BUILD_SUCCEEDED);
@@ -199,7 +199,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
 
             cluster.schemaChange(String.format(CREATE_INDEX, index1, ks2, cf1, "v1"));
             cluster.schemaChange(String.format(CREATE_INDEX, index2, ks2, cf1, "v2"));
-            waitForIndexQueryable(cluster, ks2);
+            waitForIndexQueryableOnFirstNode(cluster, ks2);
 
             // Mark only index2 as building on node3, leave index1 in BUILD_SUCCEEDED state
             markIndexBuilding(cluster.get(3), ks2, cf1, index2);
@@ -247,7 +247,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
             cluster.schemaChange(String.format(CREATE_TABLE, KEYSPACE, table));
             cluster.schemaChange(String.format(CREATE_INDEX, "", KEYSPACE, table, "v1"));
             cluster.schemaChange(String.format(CREATE_INDEX, "", KEYSPACE, table, "v2"));
-            waitForIndexQueryable(cluster, KEYSPACE);
+            waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
 
             // create 100 rows in 1 sstable
             int rows = 100;
