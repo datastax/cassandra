@@ -452,6 +452,36 @@ public class SAITester extends CQLTester
         }
     }
 
+    /**
+     * Returns the set containing all SAI index versions found among all sstable indexes of the given table.
+     * Memtable indexes are not included.
+     */
+    public static Set<Version> getSSTableIndexVersions(String keyspace, String table)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
+        var group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+        if (group == null)  // no indexes present on the table
+            return Set.of();
+
+        Set<IndexContext> indexContexts = group.getIndexes()
+                                               .stream()
+                                               .map(StorageAttachedIndex::getIndexContext)
+                                               .collect(Collectors.toSet());
+
+        var versions = new HashSet<Version>();
+        for (var sstable : cfs.getLiveSSTables())
+        {
+            var indexDescriptor = group.descriptorFor(sstable);
+            if (indexDescriptor != null)
+            {
+                versions.add(indexDescriptor.perSSTableComponents().version());
+                for (IndexContext indexContext : indexContexts)
+                    versions.add(indexDescriptor.perIndexComponents(indexContext).version());
+            }
+        }
+        return versions;
+    }
+
     protected static void assertFailureReason(ReadFailureException e, RequestFailureReason reason)
     {
         int expected = reason.codeForNativeProtocol();

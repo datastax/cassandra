@@ -31,6 +31,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.utils.Pair;
 
 public interface DataModel
@@ -155,6 +156,10 @@ public interface DataModel
 
     void insertRows(Executor tester) throws Throwable;
 
+    void insertRowsPartA(Executor tester) throws Throwable;
+
+    void insertRowsPartB(Executor tester) throws Throwable;
+
     void insertRowsWithTTL(Executor tester) throws Throwable;
 
     void updateCells(Executor tester) throws Throwable;
@@ -166,6 +171,9 @@ public interface DataModel
     List<Object> executeIndexed(Executor tester, String query, int fetchSize, Object... values) throws Throwable;
 
     List<Object> executeNonIndexed(Executor tester, String query, int fetchSize, Object... values) throws Throwable;
+
+    /** Returns the set of all SAI index versions in use by the model for the on-disk indexes */
+    Set<Version> getSSTableIndexVersions(Executor tester) throws Throwable;
 
     public class BaseDataModel implements DataModel
     {
@@ -272,6 +280,26 @@ public interface DataModel
             }
         }
 
+        @Override
+        public void insertRowsPartA(Executor tester) throws Throwable
+        {
+            String template = "INSERT INTO %%s (%s, %s) VALUES (%s, %s)";
+            for (int i = 0; i < keys.size() / 2; i++)
+            {
+                executeLocal(tester, String.format(template, primaryKey, columnNames, keys.get(i), rows.get(i)));
+            }
+        }
+
+        @Override
+        public void insertRowsPartB(Executor tester) throws Throwable
+        {
+            String template = "INSERT INTO %%s (%s, %s) VALUES (%s, %s)";
+            for (int i = keys.size() / 2; i < keys.size(); i++)
+            {
+                executeLocal(tester, String.format(template, primaryKey, columnNames, keys.get(i), rows.get(i)));
+            }
+        }
+
         public void insertRowsWithTTL(Executor tester) throws Throwable
         {
             String template = "INSERT INTO %%s (%s, %s) VALUES (%s, %s)%s";
@@ -339,6 +367,12 @@ public interface DataModel
         public List<Object> executeNonIndexed(Executor tester, String query, int fetchSize, Object... values) throws Throwable
         {
             return tester.executeRemote(formatNonIndexedQuery(query), fetchSize, values);
+        }
+
+        @Override
+        public Set<Version> getSSTableIndexVersions(Executor tester) throws Throwable
+        {
+            return tester.getSSTableIndexVersions(KEYSPACE, indexedTable);
         }
 
         protected Set<Integer> deletable()
@@ -614,6 +648,8 @@ public interface DataModel
 
         void compact(String keyspace, String table);
 
+        void setCurrentVersion(Version version);
+
         void disableCompaction(String keyspace, String table);
 
         void waitForTableIndexesQueryable(String keyspace, String table);
@@ -625,5 +661,11 @@ public interface DataModel
         void counterReset();
 
         long getCounter();
+
+        /**
+         * Returns the set of all SAI index versions in use by the specified table for the on-disk indexes.
+         * Memtable indexes are not included.
+         */
+        Set<Version> getSSTableIndexVersions(String keyspace, String indexedTable);
     }
 }
