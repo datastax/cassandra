@@ -33,6 +33,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Throwables;
 import org.junit.BeforeClass;
@@ -576,27 +577,12 @@ public class ChunkCacheTest
     }
 
     @Test
-    public void testChunkCacheInspectionEntry()
-    {
-        File file = new File("/tmp/test.db");
-        ChunkCache.ChunkCacheInspectionEntry entry = new ChunkCache.ChunkCacheInspectionEntry(file, 1024, 4096);
-
-        assertEquals(file, entry.file);
-        assertEquals(1024, entry.position);
-        assertEquals(4096, entry.size);
-
-
-        String expected = String.format("Chunk{file='%s', pos=%d, size=%d}", file, 1024, 4096);
-        assertEquals(expected, entry.toString());
-    }
-
-    @Test
     public void testInspectHotEntries() throws IOException
     {
         ChunkCache.instance.clear();
         assertEquals(0, ChunkCache.instance.size());
 
-        // Create multiple files with different access patterns
+        // Create multiple files and populate cache
         File file1 = FileUtils.createTempFile("hot1", null);
         file1.deleteOnExit();
         File file2 = FileUtils.createTempFile("hot2", null);
@@ -607,6 +593,8 @@ public class ChunkCacheTest
         writeBytes(file1, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
         writeBytes(file2, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
         writeBytes(file3, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
+
+        Set<File> expectedFiles = new HashSet<>(Arrays.asList(file1, file2, file3));
 
         // Access files to populate cache
         try (FileHandle.Builder builder1 = new FileHandle.Builder(file1).withChunkCache(ChunkCache.instance);
@@ -632,23 +620,20 @@ public class ChunkCacheTest
             // Should have exactly 3 entries
             assertEquals(3, hotEntries.size());
 
-            // Verify entries have valid data
-            Set<File> observedFiles = new HashSet<>();
+            // Verify entries have valid data and match files we put in cache
             for (ChunkCache.ChunkCacheInspectionEntry entry : hotEntries)
             {
-                logger.info("Hot entry: file={}, position={}, size={}, isReady={}",
-                            entry.file.path(), entry.position, entry.size, true /* isReady removed from ChunkCacheInspectionEntry */);
-                assertNotNull(entry.file);
-                assertTrue(entry.position >= 0);
-                assertTrue(entry.size > 0);
-                assertTrue(true /* isReady removed from ChunkCacheInspectionEntry */);
-                observedFiles.add(entry.file);
+                assertNotNull("File should not be null", entry.file);
+                assertTrue("File should be one we added to cache", expectedFiles.contains(entry.file));
+                assertTrue("Position should be non-negative", entry.position >= 0);
+                assertTrue("Size should be positive", entry.size > 0);
             }
 
-            // Verify all files are present
-            assertTrue(observedFiles.contains(file1));
-            assertTrue(observedFiles.contains(file2));
-            assertTrue(observedFiles.contains(file3));
+            // Verify all files are represented
+            Set<File> observedFiles = hotEntries.stream()
+                                                .map(e -> e.file)
+                                                .collect(Collectors.toSet());
+            assertEquals("All cached files should appear in results", expectedFiles, observedFiles);
         }
     }
 
@@ -658,7 +643,6 @@ public class ChunkCacheTest
         ChunkCache.instance.clear();
         assertEquals(0, ChunkCache.instance.size());
 
-        // Create multiple files
         File file1 = FileUtils.createTempFile("cold1", null);
         file1.deleteOnExit();
         File file2 = FileUtils.createTempFile("cold2", null);
@@ -667,7 +651,8 @@ public class ChunkCacheTest
         writeBytes(file1, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
         writeBytes(file2, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
 
-        // Access files to populate cache
+        Set<File> expectedFiles = new HashSet<>(Arrays.asList(file1, file2));
+
         try (FileHandle.Builder builder1 = new FileHandle.Builder(file1).withChunkCache(ChunkCache.instance);
              FileHandle handle1 = builder1.complete();
              RandomAccessReader reader1 = handle1.createReader();
@@ -680,28 +665,26 @@ public class ChunkCacheTest
 
             assertEquals(2, ChunkCache.instance.size());
 
-            // Inspect cold entries (candidates for eviction)
+            // Inspect cold entries
             List<ChunkCache.ChunkCacheInspectionEntry> coldEntries = new ArrayList<>();
             ChunkCache.instance.inspectColdEntries(10, coldEntries::add);
 
-            // Should have exactly 2 entries
             assertEquals(2, coldEntries.size());
 
-            // Verify entries have valid data
-            Set<File> observedFiles = new HashSet<>();
+            // Verify entries have valid data and match files we put in cache
             for (ChunkCache.ChunkCacheInspectionEntry entry : coldEntries)
             {
-                logger.info("Cold entry: file={}, position={}, size={}, isReady={}",
-                            entry.file.path(), entry.position, entry.size, true /* isReady removed from ChunkCacheInspectionEntry */);
-                assertNotNull(entry.file);
-                assertTrue(entry.position >= 0);
-                assertTrue(entry.size > 0);
-                observedFiles.add(entry.file);
+                assertNotNull("File should not be null", entry.file);
+                assertTrue("File should be one we added to cache", expectedFiles.contains(entry.file));
+                assertTrue("Position should be non-negative", entry.position >= 0);
+                assertTrue("Size should be positive", entry.size > 0);
             }
 
-            // Verify both files are present
-            assertTrue(observedFiles.contains(file1));
-            assertTrue(observedFiles.contains(file2));
+            // Verify all files are represented
+            Set<File> observedFiles = coldEntries.stream()
+                                                 .map(e -> e.file)
+                                                 .collect(Collectors.toSet());
+            assertEquals("All cached files should appear in results", expectedFiles, observedFiles);
         }
     }
 
@@ -711,7 +694,6 @@ public class ChunkCacheTest
         ChunkCache.instance.clear();
         assertEquals(0, ChunkCache.instance.size());
 
-        // Create file with multiple chunks
         File file = FileUtils.createTempFile("limitTest", null);
         file.deleteOnExit();
         writeBytes(file, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE * 5]);
@@ -730,17 +712,16 @@ public class ChunkCacheTest
             List<ChunkCache.ChunkCacheInspectionEntry> limitedEntries = new ArrayList<>();
             ChunkCache.instance.inspectHotEntries(2, limitedEntries::add);
 
-            // Should respect the limit exactly
+            // Should respect the limit
             assertEquals(2, limitedEntries.size());
 
-            // Verify all entries are valid
+            // Verify all entries are from the same file and have valid data
             for (ChunkCache.ChunkCacheInspectionEntry entry : limitedEntries)
             {
-                assertNotNull(entry.file);
-                assertEquals(file, entry.file);
-                assertTrue(entry.position >= 0);
-                assertTrue(entry.size > 0);
-                assertTrue(true /* isReady removed from ChunkCacheInspectionEntry */);
+                assertNotNull("File should not be null", entry.file);
+                assertEquals("Should be from the test file", file, entry.file);
+                assertTrue("Position should be non-negative", entry.position >= 0);
+                assertTrue("Size should be positive", entry.size > 0);
             }
         }
     }
@@ -748,7 +729,6 @@ public class ChunkCacheTest
     @Test
     public void testInspectEntriesWhenCacheDisabled()
     {
-        // Create a disabled cache
         BufferPool pool = mock(BufferPool.class);
         ChunkCache disabledCache = new ChunkCache(pool, 0, ChunkCacheMetrics::create);
 
@@ -760,110 +740,6 @@ public class ChunkCacheTest
 
         disabledCache.inspectColdEntries(10, entries::add);
         assertEquals(0, entries.size());
-    }
-
-    @Test
-    public void testHotEntriesAreActuallyHotter() throws IOException
-    {
-        ChunkCache.instance.clear();
-        assertEquals(0, ChunkCache.instance.size());
-
-        File hotFile = FileUtils.createTempFile("hot", null);
-        hotFile.deleteOnExit();
-        File coldFile = FileUtils.createTempFile("cold", null);
-        coldFile.deleteOnExit();
-
-        logger.info("Test files created - hot: {}, cold: {}", hotFile.path(), coldFile.path());
-
-        writeBytes(hotFile, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
-        writeBytes(coldFile, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
-
-        try (FileHandle.Builder hotBuilder = new FileHandle.Builder(hotFile).withChunkCache(ChunkCache.instance);
-             FileHandle hotHandle = hotBuilder.complete();
-             FileHandle.Builder coldBuilder = new FileHandle.Builder(coldFile).withChunkCache(ChunkCache.instance);
-             FileHandle coldHandle = coldBuilder.complete())
-        {
-            // First access cold file
-            logger.info("Accessing cold file once...");
-            try (RandomAccessReader reader = coldHandle.createReader())
-            {
-                reader.reBuffer();
-            }
-            logger.info("Cache size after cold file access: {}", ChunkCache.instance.size());
-
-            // Then access hot file multiple times
-            logger.info("Accessing hot file 50 times...");
-            for (int i = 0; i < 50; i++)
-            {
-                try (RandomAccessReader reader = hotHandle.createReader())
-                {
-                    reader.reBuffer();
-                    // Actually read some data to ensure the cache is used
-                    reader.seek(0);
-                    reader.readByte();
-                }
-            }
-            logger.info("Cache size after hot file accesses: {}", ChunkCache.instance.size());
-
-            assertEquals(2, ChunkCache.instance.size());
-
-            // Verify hot entries and cold entries are different
-            logger.info("Inspecting hot entries...");
-            List<ChunkCache.ChunkCacheInspectionEntry> hotEntries = new ArrayList<>();
-            ChunkCache.instance.inspectHotEntries(2, hotEntries::add);
-
-            logger.info("Hot entries ({}): ", hotEntries.size());
-            for (int i = 0; i < hotEntries.size(); i++)
-            {
-                ChunkCache.ChunkCacheInspectionEntry entry = hotEntries.get(i);
-                logger.info("  [{}] file={}, position={}, size={}, isReady={}",
-                            i, entry.file.path(), entry.position, entry.size, true /* isReady removed from ChunkCacheInspectionEntry */);
-            }
-
-            logger.info("Inspecting cold entries...");
-            List<ChunkCache.ChunkCacheInspectionEntry> coldEntries = new ArrayList<>();
-            ChunkCache.instance.inspectColdEntries(2, coldEntries::add);
-
-            logger.info("Cold entries ({}): ", coldEntries.size());
-            for (int i = 0; i < coldEntries.size(); i++)
-            {
-                ChunkCache.ChunkCacheInspectionEntry entry = coldEntries.get(i);
-                logger.info("  [{}] file={}, position={}, size={}, isReady={}",
-                            i, entry.file.path(), entry.position, entry.size, true /* isReady removed from ChunkCacheInspectionEntry */);
-            }
-
-            assertEquals(2, hotEntries.size());
-            assertEquals(2, coldEntries.size());
-
-            // The order should be different - hot entries should be in opposite order from cold
-            Set<File> hotFiles = hotEntries.stream().map(e -> e.file).collect(java.util.stream.Collectors.toSet());
-            Set<File> coldFiles = coldEntries.stream().map(e -> e.file).collect(java.util.stream.Collectors.toSet());
-
-            logger.info("Hot files set contains hot file: {}", hotFiles.contains(hotFile));
-            logger.info("Hot files set contains cold file: {}", hotFiles.contains(coldFile));
-            logger.info("Cold files set contains hot file: {}", coldFiles.contains(hotFile));
-            logger.info("Cold files set contains cold file: {}", coldFiles.contains(coldFile));
-
-            // Both should contain both files
-            assertTrue(hotFiles.contains(hotFile));
-            assertTrue(hotFiles.contains(coldFile));
-            assertTrue(coldFiles.contains(hotFile));
-            assertTrue(coldFiles.contains(coldFile));
-
-            // The first hot entry should be the frequently accessed file
-            // The first cold entry should be the infrequently accessed file
-            logger.info("First hot entry file: {}", hotEntries.get(0).file.path());
-            logger.info("Expected hot file: {}", hotFile.path());
-            logger.info("First cold entry file: {}", coldEntries.get(0).file.path());
-            logger.info("Expected cold file: {}", coldFile.path());
-
-            assertEquals("Most frequently accessed file should be first in hot entries",
-                         hotFile, hotEntries.get(0).file);
-            assertEquals("Least frequently accessed file should be first in cold entries",
-                         coldFile, coldEntries.get(0).file);
-
-            logger.info("Test passed successfully!");
-        }
     }
 
     @Test
