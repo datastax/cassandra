@@ -119,7 +119,6 @@ public class ChunkCache
 
     // File id management
     private final ConcurrentHashMap<File, Long> fileIdMap = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Long, File> idToFileMap = new ConcurrentHashMap<>();
     private final AtomicLong nextFileId = new AtomicLong(0);
 
     // number of bits required to store the log2 of the chunk size
@@ -271,7 +270,6 @@ public class ChunkCache
     private long assignFileId(File file)
     {
         long id = nextFileId.getAndIncrement();
-        idToFileMap.put(id, file);
         return id;
     }
 
@@ -288,11 +286,7 @@ public class ChunkCache
     {
         // Removing the name from the id map suffices -- the next time someone wants to read this file, it will get
         // assigned a fresh id.
-        Long id = fileIdMap.remove(file);
-        if (id != null)
-        {
-            idToFileMap.remove(id);
-        }
+        fileIdMap.remove(file);
     }
 
     /**
@@ -807,8 +801,6 @@ public class ChunkCache
             return String.format("Chunk{file='%s', pos=%d, size=%d}", file, position, size);
         }
     }
-
-
     /**
      * Inspects the "hottest" (most frequently/recently used) chunks in the cache.
      * Uses a consumer pattern to avoid materializing a full list in memory.
@@ -856,7 +848,12 @@ public class ChunkCache
                 // this operation discards the rightmost 5 bits (ChunkSize + ReaderType) leaving just FileID:42
                 long fileId = key.readerId >>> shift;
 
-                File file = idToFileMap.get(fileId);
+                // Look up the File by searching through fileIdMap entries
+                File file = fileIdMap.entrySet().stream()
+                                     .filter(e -> e.getValue().equals(fileId))
+                                     .map(Map.Entry::getKey)
+                                     .findFirst()
+                                     .orElse(null);
 
                 // Skip if we can't find the file (it may have been invalidated)
                 if (file == null)
@@ -865,5 +862,5 @@ public class ChunkCache
                 consumer.accept(new ChunkCacheInspectionEntry(file, key.position, chunk.capacity()));
             });
         });
-    }  
+    }
 }
