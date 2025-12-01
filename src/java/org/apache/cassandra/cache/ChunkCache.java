@@ -780,7 +780,7 @@ implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
      * A snapshot of a specific chunk currently held in the cache.
      * Used for diagnostics and inspection tools.
      */
-    enum CacheOrder
+    public enum CacheOrder
     {HOTTEST, COLDEST}
 
     public static class ChunkCacheInspectionEntry
