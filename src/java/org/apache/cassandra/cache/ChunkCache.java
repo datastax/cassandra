@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
@@ -52,8 +53,6 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.PrefetchingRebufferer;
-import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
@@ -62,22 +61,18 @@ import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 import org.github.jamm.Unmetered;
-import java.util.List;
+
 import java.util.Map;
-import java.util.HashMap;
-import java.util.Collections;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class ChunkCache
-        implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
+implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 16);
     private static final boolean ASYNC_CLEANUP = Boolean.parseBoolean(System.getProperty("cassandra.chunkcache.async_cleanup", "true"));
-    private static final int CLEANER_THREADS = Integer.getInteger("dse.chunk.cache.cleaner.threads",1);
+    private static final int CLEANER_THREADS = Integer.getInteger("dse.chunk.cache.cleaner.threads", 1);
 
     private static final Class PERFORM_CLEANUP_TASK_CLASS;
     // cached value in order to not call System.getProperty on a hotpath
@@ -192,7 +187,8 @@ public class ChunkCache
     /**
      * Clears the cache, used in the CNDB Writer for testing purposes.
      */
-    public void clear() {
+    public void clear()
+    {
         // Clear keysByFile first to prevent unnecessary computation in onRemoval method.
         synchronousCache.invalidateAll();
     }
@@ -246,7 +242,7 @@ public class ChunkCache
 
     /**
      * Maps a reader to a reader id, used by the cache to find content.
-     *
+     * <p>
      * Uses the file name (through the fileIdMap), reader type and chunk size to define the id.
      * The lowest {@link #READER_TYPE_BITS} are occupied by reader type, then the next {@link #CHUNK_SIZE_LOG2_BITS}
      * are occupied by log 2 of chunk size (we assume the chunk size is the power of 2), and the rest of the bits
@@ -269,15 +265,14 @@ public class ChunkCache
 
     private long assignFileId(File file)
     {
-        long id = nextFileId.getAndIncrement();
-        return id;
+        return nextFileId.getAndIncrement();
     }
 
     /**
      * Invalidate all buffers from the given file, i.e. make sure they can not be accessed by any reader using a
      * FileHandle opened after this call. The buffers themselves will remain in the cache until they get normally
      * evicted, because it is too costly to remove them.
-     *
+     * <p>
      * Note that this call has no effect of handles that are already opened. The correct usage is to call this when
      * a file is deleted, or when a file is created for writing. It cannot be used to update and resynchronize the
      * cached view of an existing file.
@@ -300,7 +295,7 @@ public class ChunkCache
         if (fileIdMaybeNull == null)
             return;
         long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
-        long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
+        long mask = -(1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
         synchronousCache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> (x.readerId & mask) == fileId));
     }
 
@@ -348,10 +343,14 @@ public class ChunkCache
      */
     abstract static class Chunk
     {
-        /** The offset in the file where the chunk is read */
+        /**
+         * The offset in the file where the chunk is read
+         */
         final long offset;
 
-        /** The number of bytes read from disk, this could be less than the memory space allocated */
+        /**
+         * The number of bytes read from disk, this could be less than the memory space allocated
+         */
         int bytesRead;
 
         private volatile int references;
@@ -381,7 +380,6 @@ public class ChunkCache
 
                 if (refCount == 0)
                     return null; // Buffer was released before we managed to reference it.
-
             } while (!referencesUpdater.compareAndSet(this, refCount, refCount + 1));
 
             return getBuffer(position);
@@ -761,8 +759,8 @@ public class ChunkCache
     public long weightedSize()
     {
         return synchronousCache.policy().eviction()
-                .map(policy -> policy.weightedSize().orElseGet(synchronousCache::estimatedSize))
-                .orElseGet(synchronousCache::estimatedSize);
+                               .map(policy -> policy.weightedSize().orElseGet(synchronousCache::estimatedSize))
+                               .orElseGet(synchronousCache::estimatedSize);
     }
 
     /**
@@ -774,7 +772,7 @@ public class ChunkCache
         if (fileIdMaybeNull == null)
             return 0;
         long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
-        long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
+        long mask = -(1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
         return (int) cacheAsMap.keySet().stream().filter(x -> (x.readerId & mask) == fileId).count();
     }
 
@@ -782,6 +780,9 @@ public class ChunkCache
      * A snapshot of a specific chunk currently held in the cache.
      * Used for diagnostics and inspection tools.
      */
+    enum CacheOrder
+    {HOTTEST, COLDEST}
+
     public static class ChunkCacheInspectionEntry
     {
         public final File file;
@@ -801,66 +802,65 @@ public class ChunkCache
             return String.format("Chunk{file='%s', pos=%d, size=%d}", file, position, size);
         }
     }
+
     /**
-     * Inspects the "hottest" (most frequently/recently used) chunks in the cache.
+     * Inspects chunks in the cache by access frequency/recency.
      * Uses a consumer pattern to avoid materializing a full list in memory.
      *
      * @param limit    maximum number of entries to inspect
+     * @param order    whether to inspect hottest (most used) or coldest (eviction candidates)
      * @param consumer consumer to process each entry
      */
-    public void inspectHotEntries(int limit, java.util.function.Consumer<ChunkCacheInspectionEntry> consumer)
+    public void inspectEntries(int limit, CacheOrder order, Consumer<ChunkCacheInspectionEntry> consumer)
     {
-        inspectCacheSegments(limit, true, consumer);
+        inspectCacheSegments(limit, order == CacheOrder.HOTTEST, consumer);
     }
 
-    /**
-     * Inspects the "coldest" (candidates for eviction) chunks in the cache.
-     * Uses a consumer pattern to avoid materializing a full list in memory.
-     *
-     * @param limit    maximum number of entries to inspect
-     * @param consumer consumer to process each entry
-     */
-    public void inspectColdEntries(int limit, java.util.function.Consumer<ChunkCacheInspectionEntry> consumer)
-    {
-        inspectCacheSegments(limit, false, consumer);
-    }
-
-    private void inspectCacheSegments(int limit, boolean hottest, java.util.function.Consumer<ChunkCacheInspectionEntry> consumer)
+    private void inspectCacheSegments(int limit, boolean hottest, Consumer<ChunkCacheInspectionEntry> consumer)
     {
         if (!enabled)
-            return;
+            throw new IllegalStateException("chunk cache not enabled");
+
+        // Eviction policy is required to determine hot/cold entries
+        // Note: In practice this will always be present due to maximumWeight() configuration,
+        // but we check explicitly to document the requirement and fail fast if cache setup changes.
+        if (synchronousCache.policy().eviction().isEmpty())
+            throw new IllegalStateException("no eviction policy configured - cannot determine hot/cold entries");
 
         // The readerId packs multiple values into a single long: [File ID][Chunk Size][Reader Type]
         // We need to shift right to extract just the File ID portion by discarding the lower bits
         int shift = CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS;
 
-        synchronousCache.policy().eviction().ifPresent(policy -> {
-            Map<Key, Chunk> orderedMap = hottest ? policy.hottest(limit) : policy.coldest(limit);
+        var policy = synchronousCache.policy().eviction().get();
+        Map<Key, Chunk> orderedMap = hottest ? policy.hottest(limit) : policy.coldest(limit);
 
-            orderedMap.forEach((key, chunk) -> {
-                // Skip entries where the chunk was evicted but the key still exists
-                if (chunk == null)
-                    return;
+        orderedMap.forEach((key, chunk) -> {
+            // Skip entries where the chunk was evicted but the key still exists
+            if (chunk == null)
+                return;
 
-                // Extract the file ID by shifting away the lower bits.
-                // The >>> operator does an unsigned right shift, moving the bits right and filling with zeros.
-                // For example, if readerId is [FileID:42][ChunkSize:3][ReaderType:1] and shift is 5,
-                // this operation discards the rightmost 5 bits (ChunkSize + ReaderType) leaving just FileID:42
-                long fileId = key.readerId >>> shift;
+            // Extract the file ID by shifting away the lower bits.
+            // The >>> operator does an unsigned right shift, moving the bits right and filling with zeros.
+            // For example, if readerId is [FileID:42][ChunkSize:3][ReaderType:1] and shift is 5,
+            // this operation discards the rightmost 5 bits (ChunkSize + ReaderType) leaving just FileID:42
+            long fileId = key.readerId >>> shift;
 
-                // Look up the File by searching through fileIdMap entries
-                File file = fileIdMap.entrySet().stream()
-                                     .filter(e -> e.getValue().equals(fileId))
-                                     .map(Map.Entry::getKey)
-                                     .findFirst()
-                                     .orElse(null);
+            // Look up the File by searching through fileIdMap entries
+            File file = null;
+            for (Map.Entry<File, Long> entry : fileIdMap.entrySet())
+            {
+                if (entry.getValue().equals(fileId))
+                {
+                    file = entry.getKey();
+                    break;
+                }
+            }
 
-                // Skip if we can't find the file (it may have been invalidated)
-                if (file == null)
-                    return;
+            // Skip if we can't find the file (it may have been invalidated)
+            if (file == null)
+                return;
 
-                consumer.accept(new ChunkCacheInspectionEntry(file, key.position, chunk.capacity()));
-            });
+            consumer.accept(new ChunkCacheInspectionEntry(file, key.position, chunk.capacity()));
         });
     }
 }

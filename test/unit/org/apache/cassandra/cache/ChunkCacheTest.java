@@ -615,7 +615,7 @@ public class ChunkCacheTest
 
             // Inspect hot entries
             List<ChunkCache.ChunkCacheInspectionEntry> hotEntries = new ArrayList<>();
-            ChunkCache.instance.inspectHotEntries(10, hotEntries::add);
+            ChunkCache.instance.inspectEntries(10, ChunkCache.CacheOrder.HOTTEST, hotEntries::add);
 
             // Should have exactly 3 entries
             assertEquals(3, hotEntries.size());
@@ -667,7 +667,7 @@ public class ChunkCacheTest
 
             // Inspect cold entries
             List<ChunkCache.ChunkCacheInspectionEntry> coldEntries = new ArrayList<>();
-            ChunkCache.instance.inspectColdEntries(10, coldEntries::add);
+            ChunkCache.instance.inspectEntries(10, ChunkCache.CacheOrder.COLDEST , coldEntries::add);
 
             assertEquals(2, coldEntries.size());
 
@@ -710,7 +710,7 @@ public class ChunkCacheTest
 
             // Test with limit smaller than cache size
             List<ChunkCache.ChunkCacheInspectionEntry> limitedEntries = new ArrayList<>();
-            ChunkCache.instance.inspectHotEntries(2, limitedEntries::add);
+            ChunkCache.instance.inspectEntries(2, ChunkCache.CacheOrder.HOTTEST, limitedEntries::add);
 
             // Should respect the limit
             assertEquals(2, limitedEntries.size());
@@ -726,20 +726,13 @@ public class ChunkCacheTest
         }
     }
 
-    @Test
+    @Test(expected = IllegalStateException.class)
     public void testInspectEntriesWhenCacheDisabled()
     {
         BufferPool pool = mock(BufferPool.class);
         ChunkCache disabledCache = new ChunkCache(pool, 0, ChunkCacheMetrics::create);
 
-        List<ChunkCache.ChunkCacheInspectionEntry> entries = new ArrayList<>();
-
-        // Should not throw and should return no entries
-        disabledCache.inspectHotEntries(10, entries::add);
-        assertEquals(0, entries.size());
-
-        disabledCache.inspectColdEntries(10, entries::add);
-        assertEquals(0, entries.size());
+        disabledCache.inspectEntries(10, ChunkCache.CacheOrder.HOTTEST, e -> {});
     }
 
     @Test
@@ -759,7 +752,7 @@ public class ChunkCacheTest
             assertEquals(1, ChunkCache.instance.size());
 
             List<ChunkCache.ChunkCacheInspectionEntry> entries = new ArrayList<>();
-            ChunkCache.instance.inspectHotEntries(0, entries::add);
+            ChunkCache.instance.inspectEntries(0, ChunkCache.CacheOrder.HOTTEST , entries::add);
 
             // Should return no entries when limit is 0
             assertEquals(0, entries.size());
@@ -776,10 +769,18 @@ public class ChunkCacheTest
         List<ChunkCache.ChunkCacheInspectionEntry> coldEntries = new ArrayList<>();
 
         // Should not throw when cache is empty
-        ChunkCache.instance.inspectHotEntries(10, hotEntries::add);
-        ChunkCache.instance.inspectColdEntries(10, coldEntries::add);
+        ChunkCache.instance.inspectEntries(10, ChunkCache.CacheOrder.HOTTEST , hotEntries::add);
+        ChunkCache.instance.inspectEntries(10, ChunkCache.CacheOrder.COLDEST , coldEntries::add);
 
         assertEquals(0, hotEntries.size());
         assertEquals(0, coldEntries.size());
+    }
+    @Test(expected = IllegalStateException.class)
+    public void testInspectEntriesThrowsWhenCacheDisabled()
+    {
+        BufferPool pool = mock(BufferPool.class);
+        ChunkCache disabledCache = new ChunkCache(pool, 0, ChunkCacheMetrics::create);
+
+        disabledCache.inspectEntries(10, ChunkCache.CacheOrder.HOTTEST, e -> {});
     }
 }
