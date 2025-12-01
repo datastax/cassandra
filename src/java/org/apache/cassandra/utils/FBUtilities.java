@@ -1396,10 +1396,12 @@ public class FBUtilities
         }
     }
 
-    public static void busyWaitWhile(Supplier<Boolean> condition)
+    public static void busyWaitWhile(Supplier<Boolean> condition, int timeoutMs)
     {
         while (condition.get())
         {
+            if (timeoutMs-- <= 0)
+                throw new RuntimeException("Timeout while waiting for condition");
             try
             {
                 Thread.sleep(1);
