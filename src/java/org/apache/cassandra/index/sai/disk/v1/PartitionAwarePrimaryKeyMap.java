@@ -164,19 +164,13 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long exactRowIdOrInvertedCeiling(PrimaryKey key)
     {
-        return rowIdToToken.indexOf(key.token().getLongValue());
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public long ceiling(PrimaryKey key)
     {
-        var rowId = exactRowIdOrInvertedCeiling(key);
-        if (rowId >= 0)
-            return rowId;
-        if (rowId == Long.MIN_VALUE)
-            return -1;
-        else
-            return -rowId - 1;
+        return rowIdToToken.ceilingRowId(key.token().getLongValue());
     }
 
     @Override
