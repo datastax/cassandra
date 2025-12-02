@@ -392,6 +392,12 @@ public enum CassandraRelevantProperties
      */
     SLOW_QUERY_LOG_MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
 
+    /**
+     * Whether to log detailed execution info when logging slow non-SAI queries.
+     * For SAI queries, see {@link #SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED}.
+     */
+    SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.monitoring_execution_info_enabled", "true"),
+
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
 
@@ -419,6 +425,7 @@ public enum CassandraRelevantProperties
     /**
      * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
      * This execution info includes the query metrics and the query plan of the slow queries.
+     * For non-SAI queries, see {@link #SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED}.
      */
     SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
 
