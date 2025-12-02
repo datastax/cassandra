@@ -19,6 +19,7 @@
 package org.apache.cassandra.distributed.test;
 
 import java.util.Arrays;
+import java.util.function.Consumer;
 
 import org.junit.Test;
 
@@ -246,6 +247,20 @@ public class CompactionControllerConfigTest extends TestBaseImpl
     @Test
     public void testDropTableOrphanedControllerConfigFileCleanup() throws Throwable
     {
+        testOrphanedControllerConfigFileCleanup(cluster -> cluster.schemaChange(withKeyspace("DROP TABLE test_ks.test_table;")));
+    }
+
+    /**
+     * Same as testDropTableOrphanedControllerConfigFileCleanup but for dropping keyspace
+     */
+    @Test
+    public void testDropKeyspaceOrphanedControllerConfigFileCleanup() throws Throwable
+    {
+        testOrphanedControllerConfigFileCleanup(cluster -> cluster.schemaChange(withKeyspace("DROP KEYSPACE test_ks;")));
+    }
+
+    private void testOrphanedControllerConfigFileCleanup(Consumer<Cluster> schemaRemover) throws Throwable
+    {
         try (Cluster cluster = init(Cluster.build(1).start()))
         {
             // create keyspace and table with UCS compaction strategy
@@ -270,8 +285,8 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                            Controller.getControllerConfigPath(metadata).exists());
             });
 
-            // drop the table - this should delete the controller-config.JSON file but currently doesn't
-            cluster.schemaChange(withKeyspace("DROP TABLE test_ks.test_table;"));
+            // drop the schema - this should delete the controller-config.JSON file but currently doesn't
+            schemaRemover.accept(cluster);
 
             // verify the orphaned file still exists
             cluster.get(1).runOnInstance(() -> {
