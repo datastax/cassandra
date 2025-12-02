@@ -252,10 +252,10 @@ public class CompactionManager implements CompactionManagerMBean
                             //table exists so keep the file
                             Schema.instance.getKeyspaceInstance(names[0]).getColumnFamilyStore(names[1]);
                         }
-                        catch (NullPointerException e)
+                        catch (NullPointerException | IllegalArgumentException e)
                         {
                             //table does not exist so delete the file
-                            logger.debug("Removing " + file + " because it does not correspond to an existing table");
+                            logger.debug("Removing {} because it does not correspond to an existing table", file);
                             file.delete();
                         }
                     }
@@ -266,7 +266,7 @@ public class CompactionManager implements CompactionManagerMBean
                         if (Schema.instance.getTableMetadata(tableId) == null)
                         {
                             //table does not exist so delete the file
-                            logger.debug("Removing " + file + " because it does not correspond to an existing table");
+                            logger.debug("Removing {} because it does not correspond to an existing table", file);
                             file.delete();
                         }
                     }
