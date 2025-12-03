@@ -236,13 +236,10 @@ public class CompactionControllerConfigTest extends TestBaseImpl
      *
      * The bug occurs when:
      * 1. A table with UCS compaction strategy is created
-     * 2. Data is written and flushed (creates controller-config.JSON file)
+     * 2. Data is written and flushed
      * 3. The UCS config file is saved
      * 4. Table is dropped (file is NOT deleted)
      * 5. Node is restarted (cleanupControllerConfig() throws IllegalArgumentException)
-     *
-     * Note: This test covers table drop scenario. Keyspace drop would also trigger
-     * cleanup via NullPointerException path in the same catch block.
      */
     @Test
     public void testDropTableOrphanedControllerConfigFileCleanup() throws Throwable
