@@ -64,8 +64,7 @@ import org.github.jamm.Unmetered;
 
 import java.util.Map;
 
-public class ChunkCache
-implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
+public class ChunkCache implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
@@ -777,18 +776,38 @@ implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
     }
 
     /**
-     * A snapshot of a specific chunk currently held in the cache.
-     * Used for diagnostics and inspection tools.
+     * Defines the ordering strategy for cache entries during inspection.
      */
     public enum CacheOrder
-    {HOTTEST, COLDEST}
+    {
+        /** Orders cache entries from most frequently accessed to least */
+        HOTTEST,
+        /** Orders cache entries from least frequently accessed to most */
+        COLDEST
+    }
 
+    /**
+     * Represents a single entry in the chunk cache for inspection purposes.
+     * Contains metadata about a cached chunk including its source file, position, and size.
+     */
     public static class ChunkCacheInspectionEntry
     {
+        /** The source file containing this chunk */
         public final File file;
+
+        /** The byte position of this chunk within the file */
         public final long position;
+
+        /** The size of this chunk in bytes */
         public final int size;
 
+        /**
+         * Constructs a new chunk cache inspection entry.
+         *
+         * @param file the source file containing this chunk
+         * @param position the byte position of this chunk within the file
+         * @param size the size of this chunk in bytes
+         */
         public ChunkCacheInspectionEntry(File file, long position, int size)
         {
             this.file = file;
@@ -796,6 +815,11 @@ implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
             this.size = size;
         }
 
+        /**
+         * Returns a string representation of this chunk cache entry.
+         *
+         * @return a formatted string containing the file path, position, and size
+         */
         @Override
         public String toString()
         {
@@ -813,11 +837,8 @@ implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
      */
     public void inspectEntries(int limit, CacheOrder order, Consumer<ChunkCacheInspectionEntry> consumer)
     {
-        inspectCacheSegments(limit, order == CacheOrder.HOTTEST, consumer);
-    }
+        boolean hottest = order == CacheOrder.HOTTEST;
 
-    private void inspectCacheSegments(int limit, boolean hottest, Consumer<ChunkCacheInspectionEntry> consumer)
-    {
         if (!enabled)
             throw new IllegalStateException("chunk cache not enabled");
 
