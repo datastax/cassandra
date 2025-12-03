@@ -61,6 +61,28 @@ public class SAICodecUtils
         writeHeader(out, out.version());
     }
 
+    /**
+     * Backward-compatible overload for code compiled against older versions of this class
+     * that had writeHeader(DataOutput) with a single parameter.
+     *
+     * @deprecated Use {@link #writeHeader(org.apache.cassandra.index.sai.disk.io.IndexOutput)} or
+     *             {@link #writeHeader(DataOutput, Version)} instead.
+     */
+    @Deprecated(since = "20251203")
+    public static void writeHeader(DataOutput out) throws IOException
+    {
+        if (out instanceof org.apache.cassandra.index.sai.disk.io.IndexOutput)
+        {
+            // If it's an IndexOutput, use the version-aware method
+            writeHeader((org.apache.cassandra.index.sai.disk.io.IndexOutput) out);
+        }
+        else
+        {
+            // For other DataOutput types, use LATEST version for backward compatibility
+            writeHeader(out, Version.LATEST);
+        }
+    }
+
     public static void writeHeader(DataOutput out, Version version) throws IOException
     {
         writeBEInt(out, CODEC_MAGIC);
