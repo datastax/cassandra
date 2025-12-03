@@ -22,18 +22,13 @@ package org.apache.cassandra.cache;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.stream.Collectors;
 
 import com.google.common.base.Throwables;
 import org.junit.BeforeClass;
@@ -57,7 +52,6 @@ import org.awaitility.Awaitility;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -574,213 +568,5 @@ public class ChunkCacheTest
         }
 
         assertEquals(0, ChunkCache.instance.sizeOfFile(file1));
-    }
-
-    @Test
-    public void testInspectHotEntries() throws IOException
-    {
-        ChunkCache.instance.clear();
-        assertEquals(0, ChunkCache.instance.size());
-
-        // Create multiple files and populate cache
-        File file1 = FileUtils.createTempFile("hot1", null);
-        file1.deleteOnExit();
-        File file2 = FileUtils.createTempFile("hot2", null);
-        file2.deleteOnExit();
-        File file3 = FileUtils.createTempFile("hot3", null);
-        file3.deleteOnExit();
-
-        writeBytes(file1, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
-        writeBytes(file2, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
-        writeBytes(file3, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
-
-        Set<File> expectedFiles = new HashSet<>(Arrays.asList(file1, file2, file3));
-
-        // Access files to populate cache
-        try (FileHandle.Builder builder1 = new FileHandle.Builder(file1).withChunkCache(ChunkCache.instance);
-             FileHandle handle1 = builder1.complete();
-             RandomAccessReader reader1 = handle1.createReader();
-             FileHandle.Builder builder2 = new FileHandle.Builder(file2).withChunkCache(ChunkCache.instance);
-             FileHandle handle2 = builder2.complete();
-             RandomAccessReader reader2 = handle2.createReader();
-             FileHandle.Builder builder3 = new FileHandle.Builder(file3).withChunkCache(ChunkCache.instance);
-             FileHandle handle3 = builder3.complete();
-             RandomAccessReader reader3 = handle3.createReader())
-        {
-            reader1.reBuffer();
-            reader2.reBuffer();
-            reader3.reBuffer();
-
-            assertEquals(3, ChunkCache.instance.size());
-
-            // Inspect hot entries
-            List<ChunkCache.ChunkCacheInspectionEntry> hotEntries = new ArrayList<>();
-            ChunkCache.instance.inspectEntries(10, ChunkCache.CacheOrder.HOTTEST, hotEntries::add);
-
-            // Should have exactly 3 entries
-            assertEquals(3, hotEntries.size());
-
-            // Verify entries have valid data and match files we put in cache
-            for (ChunkCache.ChunkCacheInspectionEntry entry : hotEntries)
-            {
-                assertNotNull("File should not be null", entry.file);
-                assertTrue("File should be one we added to cache", expectedFiles.contains(entry.file));
-                assertTrue("Position should be non-negative", entry.position >= 0);
-                assertTrue("Size should be positive", entry.size > 0);
-            }
-
-            // Verify all files are represented
-            Set<File> observedFiles = hotEntries.stream()
-                                                .map(e -> e.file)
-                                                .collect(Collectors.toSet());
-            assertEquals("All cached files should appear in results", expectedFiles, observedFiles);
-        }
-    }
-
-    @Test
-    public void testInspectColdEntries() throws IOException
-    {
-        ChunkCache.instance.clear();
-        assertEquals(0, ChunkCache.instance.size());
-
-        File file1 = FileUtils.createTempFile("cold1", null);
-        file1.deleteOnExit();
-        File file2 = FileUtils.createTempFile("cold2", null);
-        file2.deleteOnExit();
-
-        writeBytes(file1, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
-        writeBytes(file2, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
-
-        Set<File> expectedFiles = new HashSet<>(Arrays.asList(file1, file2));
-
-        try (FileHandle.Builder builder1 = new FileHandle.Builder(file1).withChunkCache(ChunkCache.instance);
-             FileHandle handle1 = builder1.complete();
-             RandomAccessReader reader1 = handle1.createReader();
-             FileHandle.Builder builder2 = new FileHandle.Builder(file2).withChunkCache(ChunkCache.instance);
-             FileHandle handle2 = builder2.complete();
-             RandomAccessReader reader2 = handle2.createReader())
-        {
-            reader1.reBuffer();
-            reader2.reBuffer();
-
-            assertEquals(2, ChunkCache.instance.size());
-
-            // Inspect cold entries
-            List<ChunkCache.ChunkCacheInspectionEntry> coldEntries = new ArrayList<>();
-            ChunkCache.instance.inspectEntries(10, ChunkCache.CacheOrder.COLDEST , coldEntries::add);
-
-            assertEquals(2, coldEntries.size());
-
-            // Verify entries have valid data and match files we put in cache
-            for (ChunkCache.ChunkCacheInspectionEntry entry : coldEntries)
-            {
-                assertNotNull("File should not be null", entry.file);
-                assertTrue("File should be one we added to cache", expectedFiles.contains(entry.file));
-                assertTrue("Position should be non-negative", entry.position >= 0);
-                assertTrue("Size should be positive", entry.size > 0);
-            }
-
-            // Verify all files are represented
-            Set<File> observedFiles = coldEntries.stream()
-                                                 .map(e -> e.file)
-                                                 .collect(Collectors.toSet());
-            assertEquals("All cached files should appear in results", expectedFiles, observedFiles);
-        }
-    }
-
-    @Test
-    public void testInspectEntriesWithLimit() throws IOException
-    {
-        ChunkCache.instance.clear();
-        assertEquals(0, ChunkCache.instance.size());
-
-        File file = FileUtils.createTempFile("limitTest", null);
-        file.deleteOnExit();
-        writeBytes(file, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE * 5]);
-
-        try (FileHandle.Builder builder = new FileHandle.Builder(file).withChunkCache(ChunkCache.instance);
-             FileHandle handle = builder.complete();
-             RandomAccessReader reader = handle.createReader())
-        {
-            // Read all chunks to populate cache
-            for (int i = 0; i < RandomAccessReader.DEFAULT_BUFFER_SIZE * 5; i++)
-                reader.readByte();
-
-            assertEquals(5, ChunkCache.instance.size());
-
-            // Test with limit smaller than cache size
-            List<ChunkCache.ChunkCacheInspectionEntry> limitedEntries = new ArrayList<>();
-            ChunkCache.instance.inspectEntries(2, ChunkCache.CacheOrder.HOTTEST, limitedEntries::add);
-
-            // Should respect the limit
-            assertEquals(2, limitedEntries.size());
-
-            // Verify all entries are from the same file and have valid data
-            for (ChunkCache.ChunkCacheInspectionEntry entry : limitedEntries)
-            {
-                assertNotNull("File should not be null", entry.file);
-                assertEquals("Should be from the test file", file, entry.file);
-                assertTrue("Position should be non-negative", entry.position >= 0);
-                assertTrue("Size should be positive", entry.size > 0);
-            }
-        }
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testInspectEntriesWhenCacheDisabled()
-    {
-        BufferPool pool = mock(BufferPool.class);
-        ChunkCache disabledCache = new ChunkCache(pool, 0, ChunkCacheMetrics::create);
-
-        disabledCache.inspectEntries(10, ChunkCache.CacheOrder.HOTTEST, e -> {});
-    }
-
-    @Test
-    public void testInspectEntriesWithZeroLimit() throws IOException
-    {
-        ChunkCache.instance.clear();
-
-        File file = FileUtils.createTempFile("zeroLimit", null);
-        file.deleteOnExit();
-        writeBytes(file, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
-
-        try (FileHandle.Builder builder = new FileHandle.Builder(file).withChunkCache(ChunkCache.instance);
-             FileHandle handle = builder.complete();
-             RandomAccessReader reader = handle.createReader())
-        {
-            reader.reBuffer();
-            assertEquals(1, ChunkCache.instance.size());
-
-            List<ChunkCache.ChunkCacheInspectionEntry> entries = new ArrayList<>();
-            ChunkCache.instance.inspectEntries(0, ChunkCache.CacheOrder.HOTTEST , entries::add);
-
-            // Should return no entries when limit is 0
-            assertEquals(0, entries.size());
-        }
-    }
-
-    @Test
-    public void testInspectEntriesWithEmptyCache()
-    {
-        ChunkCache.instance.clear();
-        assertEquals(0, ChunkCache.instance.size());
-
-        List<ChunkCache.ChunkCacheInspectionEntry> hotEntries = new ArrayList<>();
-        List<ChunkCache.ChunkCacheInspectionEntry> coldEntries = new ArrayList<>();
-
-        // Should not throw when cache is empty
-        ChunkCache.instance.inspectEntries(10, ChunkCache.CacheOrder.HOTTEST , hotEntries::add);
-        ChunkCache.instance.inspectEntries(10, ChunkCache.CacheOrder.COLDEST , coldEntries::add);
-
-        assertEquals(0, hotEntries.size());
-        assertEquals(0, coldEntries.size());
-    }
-    @Test(expected = IllegalStateException.class)
-    public void testInspectEntriesThrowsWhenCacheDisabled()
-    {
-        BufferPool pool = mock(BufferPool.class);
-        ChunkCache disabledCache = new ChunkCache(pool, 0, ChunkCacheMetrics::create);
-
-        disabledCache.inspectEntries(10, ChunkCache.CacheOrder.HOTTEST, e -> {});
     }
 }
