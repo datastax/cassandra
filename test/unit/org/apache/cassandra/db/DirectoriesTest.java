@@ -91,6 +91,8 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
+import static org.junit.Assert.assertNotSame;
+
 import static org.apache.cassandra.schema.MockSchema.sstableId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -290,8 +292,19 @@ public class DirectoriesTest
         assertEquals(SSTableFormat.Type.BIG, resolved.formatType);
         assertEquals(BigFormat.instance.getVersion("me"), resolved.version);
         assertEquals("123", resolved.id.toString());
-    }
 
+        Descriptor resolved2 = directories.resolve("me-234-big-Data.db", 0);
+
+        assertEquals(cfm.keyspace, resolved2.ksname);
+        assertEquals(cfm.name, resolved2.cfname);
+        assertEquals(SSTableFormat.Type.BIG, resolved2.formatType);
+        assertEquals(BigFormat.instance.getVersion("me"), resolved2.version);
+        assertEquals("234", resolved2.id.toString());
+
+        // not the same instance because of toCanonical() in Descriptor constructor
+        assertEquals(resolved.directory, resolved2.directory);
+        assertNotSame(resolved.directory, resolved2.directory);
+    }
 
     @Test
     public void testSecondaryIndexDirectories()
