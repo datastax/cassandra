@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -47,6 +48,7 @@ import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
@@ -180,29 +182,36 @@ public class ExecuteMessage extends Message.Request
                 // CoordinatorWarnings.done() on the same thread that called init(). Reset CoordinatorWarnings on the
                 // current thread, and init on the new thread. See CNDB-13432 and CNDB-10759.
                 CoordinatorWarnings.reset();
+                // Capture ExecutorLocals (including ClientWarn.State) to propagate to the async stage thread
+                // so that warnings generated during query execution are properly captured.
+                ExecutorLocals executorLocals = ExecutorLocals.current();
                 QueryHandler.Prepared finalPrepared = prepared;
                 return asyncStage.get().submit(() ->
                                                {
-                                                   try
+                                                   // Restore ExecutorLocals on the async stage thread
+                                                   try (Closeable ignored = executorLocals.get())
                                                    {
-                                                       if (isTrackable())
-                                                           CoordinatorWarnings.init();
-
-                                                       // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
-                                                       // and any time spent in the queue for the async stage
-                                                       long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-                                                       ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
-                                                       if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                                                       try
                                                        {
-                                                           ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
-                                                           throw new OverloadedException("Query timed out before it could start");
+                                                           if (isTrackable())
+                                                               CoordinatorWarnings.init();
+
+                                                           // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
+                                                           // and any time spent in the queue for the async stage
+                                                           long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+                                                           ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                           if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                                                           {
+                                                               ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
+                                                               throw new OverloadedException("Query timed out before it could start");
+                                                           }
                                                        }
+                                                       catch (Exception e)
+                                                       {
+                                                           return handleException(queryState, finalPrepared, e);
+                                                       }
+                                                       return handleRequest(queryState, requestTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime);
                                                    }
-                                                   catch (Exception e)
-                                                   {
-                                                       return handleException(queryState, finalPrepared, e);
-                                                   }
-                                                   return handleRequest(queryState, requestTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime);
                                                });
             }
             else
