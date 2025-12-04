@@ -564,9 +564,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
         {
             if (compressor instanceof ProductQuantization)
             {
-                ProductQuantization quantization = (ProductQuantization) compressor;
-                IntFunction<ByteSequence<?>> func = (oldNodeId) -> quantization.encode(vectorValues.getVector(oldNodeId));
-                features.put(FeatureId.FUSED_PQ, nodeId -> new FusedPQ.State(view, func, nodeId));
+                // TODO temporary hack to parallelize computation
+                PQVectors pqVectors = (PQVectors) compressor.encodeAll(vectorValues);
+                features.put(FeatureId.FUSED_PQ, nodeId -> new FusedPQ.State(view, pqVectors::get, nodeId));
             }
         }
 
