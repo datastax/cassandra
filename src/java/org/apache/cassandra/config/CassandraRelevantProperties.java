@@ -519,7 +519,9 @@ public enum CassandraRelevantProperties
     IMMUTABLE_SAI_COMPONENTS_MIN_VERSION("cassandra.sai.immutable_components.min_version", "ca"),
 
     // Enables parallel index read.
+    @Deprecated // unused since BM25 removed parallel index read
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
+    @Deprecated // unused since BM25 removed parallel index read
     PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
 
     // The quantile used by the dynamic endpoint snitch to compute the score for a replica.
