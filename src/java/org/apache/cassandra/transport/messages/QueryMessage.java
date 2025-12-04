@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -42,6 +43,7 @@ import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -140,7 +142,8 @@ public class QueryMessage extends Message.Request
                 CQLStatement finalStatement = statement;
                 return asyncStage.get().submit(() ->
                                                {
-                                                   try
+                                                   // Restore ExecutorLocals on the async stage thread
+                                                   try (Closeable ignored = executorLocals.get())
                                                    {
                                                        Response response;
                                                        try
@@ -173,11 +176,6 @@ public class QueryMessage extends Message.Request
                                                        }
                                                        return response;
                                                    }
-                                                   catch (Exception e)
-                                                   {
-                                                       return handleException(state, finalStatement, e);
-                                                   }
-                                                   return handleRequest(state, queryHandler, requestTime, finalStatement, requestStartMillisTime);
                                                });
             }
             else
