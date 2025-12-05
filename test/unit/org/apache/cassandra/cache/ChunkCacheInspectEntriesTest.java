@@ -19,6 +19,7 @@
 package org.apache.cassandra.cache;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -110,7 +111,7 @@ public class ChunkCacheInspectEntriesTest
             {
                 File file = FileUtils.createTempFile("test" + i, null);
                 file.deleteOnExit();
-                writeBytes(file, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
+                Files.write(file.toPath(), new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
                 files.add(file);
 
                 FileHandle.Builder builder = new FileHandle.Builder(file).withChunkCache(cache);
@@ -200,12 +201,4 @@ public class ChunkCacheInspectEntriesTest
         logger.info("Verified empty cache returns 0 entries");
     }
 
-    private void writeBytes(File file, byte[] bytes) throws IOException
-    {
-        try (SequentialWriter writer = new SequentialWriter(file))
-        {
-            writer.write(bytes);
-            writer.flush();
-        }
-    }
 }
