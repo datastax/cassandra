@@ -27,6 +27,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
+import org.apache.cassandra.index.sai.disk.v2.TokenOnlyPrimaryKey;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -55,7 +56,11 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
          * @param token the {@link Token}
          * @return a {@link PrimaryKey} represented by a token only
          */
-        PrimaryKey createTokenOnly(Token token);
+        default PrimaryKey createTokenOnly(Token token)
+        {
+            assert token != null;
+            return new TokenOnlyPrimaryKey(token);
+        }
 
         /**
          * Creates a {@link PrimaryKey} that is represented by a {@link DecoratedKey}.
@@ -117,6 +122,11 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
      * @return a {@link PrimaryKey} for the static row
      */
     PrimaryKey forStaticRow();
+
+    default boolean isTokenOnly()
+    {
+        return false;
+    }
 
     /**
      * Returns the {@link Token} associated with this primary key.

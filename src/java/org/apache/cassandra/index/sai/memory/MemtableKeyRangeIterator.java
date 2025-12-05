@@ -90,9 +90,9 @@ public class MemtableKeyRangeIterator extends KeyRangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        PartitionPosition start = nextKey.partitionKey() != null
-                                  ? nextKey.partitionKey()
-                                  : nextKey.token().minKeyBound();
+        PartitionPosition start = nextKey.isTokenOnly()
+                                  ? nextKey.token().minKeyBound()
+                                  : nextKey.partitionKey();
         if (!keyRange.right.isMinimum() && start.compareTo(keyRange.right) > 0)
         {
             partitionIterator = EmptyIterators.unfilteredPartition(memtable.metadata());
