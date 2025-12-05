@@ -201,103 +201,6 @@ public class QueryContext
         this.filterSortOrder = filterSortOrder;
     }
 
-    // getters
-
-    public long sstablesHit()
-    {
-        return sstablesHit;
-    }
-
-    public long segmentsHit()
-    {
-        return segmentsHit;
-    }
-
-    public long keysFetched()
-    {
-        return keysFetched;
-    }
-
-    public long partitionsFetched()
-    {
-        return partitionsFetched;
-    }
-
-    public long partitionsReturned()
-    {
-        return partitionsReturned;
-    }
-
-    public long partitionTombstonesFetched()
-    {
-        return partitionTombstonesFetched;
-    }
-
-    public long rowsFetched()
-    {
-        return rowsFetched;
-    }
-
-    public long rowsReturned()
-    {
-        return rowsReturned;
-    }
-
-    public long rowTombstonesFetched()
-    {
-        return rowTombstonesFetched;
-    }
-
-    public long trieSegmentsHit()
-    {
-        return trieSegmentsHit;
-    }
-
-    public long bkdPostingListsHit()
-    {
-        return bkdPostingListsHit;
-    }
-
-    public long bkdSegmentsHit()
-    {
-        return bkdSegmentsHit;
-    }
-
-    public long bkdPostingsSkips()
-    {
-        return bkdPostingsSkips;
-    }
-
-    public long bkdPostingsDecodes()
-    {
-        return bkdPostingsDecodes;
-    }
-
-    public long triePostingsSkips()
-    {
-        return triePostingsSkips;
-    }
-
-    public long triePostingsDecodes()
-    {
-        return triePostingsDecodes;
-    }
-
-    public long queryTimeouts()
-    {
-        return queryTimeouts;
-    }
-
-    public long annGraphSearchLatency()
-    {
-        return annGraphSearchLatency;
-    }
-
-    public FilterSortOrder filterSortOrder()
-    {
-        return filterSortOrder;
-    }
-
     public void checkpoint()
     {
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
@@ -375,25 +278,25 @@ public class QueryContext
         private Snapshot(QueryContext context)
         {
             totalQueryTimeNs = context.totalQueryTimeNs();
-            sstablesHit = context.sstablesHit();
-            segmentsHit = context.segmentsHit();
-            keysFetched = context.keysFetched();
-            partitionsFetched = context.partitionsFetched();
-            partitionsReturned = context.partitionsReturned();
-            partitionTombstonesFetched = context.partitionTombstonesFetched();
-            rowsFetched = context.rowsFetched();
-            rowsReturned = context.rowsReturned();
-            rowTombstonesFetched = context.rowTombstonesFetched();
-            trieSegmentsHit = context.trieSegmentsHit();
-            bkdPostingListsHit = context.bkdPostingListsHit();
-            bkdSegmentsHit = context.bkdSegmentsHit();
-            bkdPostingsSkips = context.bkdPostingsSkips();
-            bkdPostingsDecodes = context.bkdPostingsDecodes();
-            triePostingsSkips = context.triePostingsSkips();
-            triePostingsDecodes = context.triePostingsDecodes();
-            queryTimeouts = context.queryTimeouts();
-            annGraphSearchLatency = context.annGraphSearchLatency();
-            filterSortOrder = context.filterSortOrder();
+            sstablesHit = context.sstablesHit;
+            segmentsHit = context.segmentsHit;
+            keysFetched = context.keysFetched;
+            partitionsFetched = context.partitionsFetched;
+            partitionsReturned = context.partitionsReturned;
+            partitionTombstonesFetched = context.partitionTombstonesFetched;
+            rowsFetched = context.rowsFetched;
+            rowsReturned = context.rowsReturned;
+            rowTombstonesFetched = context.rowTombstonesFetched;
+            trieSegmentsHit = context.trieSegmentsHit;
+            bkdPostingListsHit = context.bkdPostingListsHit;
+            bkdSegmentsHit = context.bkdSegmentsHit;
+            bkdPostingsSkips = context.bkdPostingsSkips;
+            bkdPostingsDecodes = context.bkdPostingsDecodes;
+            triePostingsSkips = context.triePostingsSkips;
+            triePostingsDecodes = context.triePostingsDecodes;
+            queryTimeouts = context.queryTimeouts;
+            annGraphSearchLatency = context.annGraphSearchLatency;
+            filterSortOrder = context.filterSortOrder;
         }
     }
 }
