@@ -171,6 +171,9 @@ public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<Parti
         assertToCQLString("SELECT * FROM %s WHERE n = 0 ORDER BY n LIMIT 10",
                           "SELECT * FROM %s WHERE n = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE n = ? ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0 ORDER BY n LIMIT 10",
+                          "SELECT * FROM %s WHERE k = 0 AND c > 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c > ? ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
 
         // test ANN index-based ORDER BY
         createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY (k, c))");
