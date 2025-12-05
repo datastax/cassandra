@@ -29,8 +29,11 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -53,11 +56,14 @@ import static java.lang.String.format;
  */
 public class IndexHints
 {
+    private static final Logger logger = LoggerFactory.getLogger(IndexHints.class);
+
     public static final String CONFLICTING_INDEXES_ERROR = "Indexes cannot be both included and excluded: ";
     public static final String WRONG_KEYSPACE_ERROR = "Index %s is not in the same keyspace as the queried table.";
     public static final String MISSING_INDEX_ERROR = "Table %s doesn't have an index named %s";
     public static final String NON_INCLUDABLE_INDEXES_ERROR = "It's not possible to use all the specified included indexes with this query.";
-    public static final String TOO_MANY_INDEXES_ERROR = format("Cannot have more than %d included/excluded indexes, found ", Short.MAX_VALUE);
+    // The limit is determined by maxIncludedOrExcludedIndexCount() which uses the guardrail or 128 by default
+    public static final String TOO_MANY_INDEXES_ERROR = "Exceeded the maximum number of included/excluded indexes. Found ";
 
     public static final IndexHints NONE = new IndexHints(Collections.emptySet(), Collections.emptySet())
     {
@@ -592,7 +598,7 @@ public class IndexHints
                 return;
 
             int n = indexes.size();
-            assert n < maxIncludedOrExcludedIndexCount() : TOO_MANY_INDEXES_ERROR + n;
+            assert n <= maxIncludedOrExcludedIndexCount() : TOO_MANY_INDEXES_ERROR + n;
 
             out.writeVInt32(n);
             for (IndexMetadata index : indexes)
@@ -605,8 +611,19 @@ public class IndexHints
             Set<IndexMetadata> indexes = new HashSet<>(n);
             for (short i = 0; i < n; i++)
             {
-                IndexMetadata metadata = IndexMetadata.serializer.deserialize(in, version, table);
-                indexes.add(metadata);
+                try
+                {
+                    IndexMetadata metadata = IndexMetadata.serializer.deserialize(in, version, table);
+                    indexes.add(metadata);
+                }
+                catch (UnknownIndexException e)
+                {
+                    logger.info("Couldn't find a defined index on {}.{} with the id {}. " +
+                                "If an index was just created, this is likely due to the schema not " +
+                                "being fully propagated. Index hints for this index will be ignored. " +
+                                "Please wait for schema agreement after index creation.",
+                                table.keyspace, table.name, e.indexId);
+                }
             }
             return indexes;
         }
