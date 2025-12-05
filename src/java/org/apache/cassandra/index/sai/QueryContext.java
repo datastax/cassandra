@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai;
 
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.LongAdder;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -33,7 +32,7 @@ import static java.lang.Math.max;
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
  */
-@NotThreadSafe
+@NotThreadSafe // this should only be manipulated by the single thread running the query it belongs to
 public class QueryContext
 {
     public static final boolean DISABLE_TIMEOUT = Boolean.getBoolean("cassandra.sai.test.disable.timeout");
@@ -42,47 +41,47 @@ public class QueryContext
 
     public final long executionQuotaNano;
 
-    private final LongAdder sstablesHit = new LongAdder();
-    private final LongAdder segmentsHit = new LongAdder();
+    private long sstablesHit = 0;
+    private long segmentsHit = 0;
 
     /**
      * The partition/row keys that will be used to fetch rows from the base table.
      * They will be either partition keys in AA, or row keys in the later row-aware disk formats.
      */
-    private final LongAdder keysFetched = new LongAdder();
+    private long keysFetched = 0;
 
     /** The number of live partitions fetched from the storage engine, before post-filtering. */
-    private final LongAdder partitionsFetched = new LongAdder();
+    private long partitionsFetched = 0;
 
     /** The number of live partitions returned to the coordinator, after post-filtering. */
-    private final LongAdder partitionsReturned = new LongAdder();
+    private long partitionsReturned = 0;
 
     /** The number of deleted partitions that are fetched. */
-    private final LongAdder partitionTombstonesFetched = new LongAdder();
+    private long partitionTombstonesFetched = 0;
 
     /** The number of live rows fetched from the storage engine, before post-filtering. */
-    private final LongAdder rowsFetched = new LongAdder();
+    private long rowsFetched = 0;
 
     /** The number of live rows returned to the coordinator, after post-filtering. */
-    private final LongAdder rowsReturned = new LongAdder();
+    private long rowsReturned = 0;
 
     /** The number of deleted individual rows or ranges of rows that are fetched. */
-    private final LongAdder rowTombstonesFetched = new LongAdder();
+    private long rowTombstonesFetched = 0;
 
-    private final LongAdder trieSegmentsHit = new LongAdder();
+    private long trieSegmentsHit = 0;
 
-    private final LongAdder bkdPostingListsHit = new LongAdder();
-    private final LongAdder bkdSegmentsHit = new LongAdder();
+    private long bkdPostingListsHit = 0;
+    private long bkdSegmentsHit = 0;
 
-    private final LongAdder bkdPostingsSkips = new LongAdder();
-    private final LongAdder bkdPostingsDecodes = new LongAdder();
+    private long bkdPostingsSkips = 0;
+    private long bkdPostingsDecodes = 0;
 
-    private final LongAdder triePostingsSkips = new LongAdder();
-    private final LongAdder triePostingsDecodes = new LongAdder();
+    private long triePostingsSkips = 0;
+    private long triePostingsDecodes = 0;
 
-    private final LongAdder queryTimeouts = new LongAdder();
+    private long queryTimeouts = 0;
 
-    private final LongAdder annGraphSearchLatency = new LongAdder();
+    private long annGraphSearchLatency = 0;
 
     private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
@@ -110,192 +109,96 @@ public class QueryContext
     // setters
     public void addSstablesHit(long val)
     {
-        sstablesHit.add(val);
+        sstablesHit += val;
     }
 
     public void addSegmentsHit(long val) {
-        segmentsHit.add(val);
+        segmentsHit += val;
     }
 
     public void addKeysFetched(long val)
     {
-        keysFetched.add(val);
+        keysFetched += val;
     }
 
     public void addPartitionsFetched(long val)
     {
-        partitionsFetched.add(val);
+        partitionsFetched += val;
     }
 
     public void addPartitionsReturned(long val)
     {
-        partitionsReturned.add(val);
+        partitionsReturned += val;
     }
 
     public void addPartitionTombstonesFetched(long val)
     {
-        partitionTombstonesFetched.add(val);
+        partitionTombstonesFetched += val;
     }
 
     public void addRowsFetched(long val)
     {
-        rowsFetched.add(val);
+        rowsFetched += val;
     }
 
     public void addRowsReturned(long val)
     {
-        rowsReturned.add(val);
+        rowsReturned += val;
     }
 
     public void addRowTombstonesFetched(long val)
     {
-        rowTombstonesFetched.add(val);
+        rowTombstonesFetched += val;
     }
 
     public void addTrieSegmentsHit(long val)
     {
-        trieSegmentsHit.add(val);
+        trieSegmentsHit += val;
     }
 
     public void addBkdPostingListsHit(long val)
     {
-        bkdPostingListsHit.add(val);
+        bkdPostingListsHit += val;
     }
 
     public void addBkdSegmentsHit(long val)
     {
-        bkdSegmentsHit.add(val);
+        bkdSegmentsHit += val;
     }
 
     public void addBkdPostingsSkips(long val)
     {
-        bkdPostingsSkips.add(val);
+        bkdPostingsSkips += val;
     }
 
     public void addBkdPostingsDecodes(long val)
     {
-        bkdPostingsDecodes.add(val);
+        bkdPostingsDecodes += val;
     }
 
     public void addTriePostingsSkips(long val)
     {
-        triePostingsSkips.add(val);
+        triePostingsSkips += val;
     }
 
     public void addTriePostingsDecodes(long val)
     {
-        triePostingsDecodes.add(val);
+        triePostingsDecodes += val;
     }
 
     public void addQueryTimeouts(long val)
     {
-        queryTimeouts.add(val);
+        queryTimeouts += val;
     }
 
     public void addAnnGraphSearchLatency(long val)
     {
-        annGraphSearchLatency.add(val);
+        annGraphSearchLatency += val;
     }
 
     public void setFilterSortOrder(FilterSortOrder filterSortOrder)
     {
         this.filterSortOrder = filterSortOrder;
-    }
-
-    // getters
-
-    public long sstablesHit()
-    {
-        return sstablesHit.longValue();
-    }
-
-    public long segmentsHit() {
-        return segmentsHit.longValue();
-    }
-
-    public long keysFetched()
-    {
-        return keysFetched.longValue();
-    }
-
-    public long partitionsFetched()
-    {
-        return partitionsFetched.longValue();
-    }
-
-    public long partitionsReturned()
-    {
-        return partitionsReturned.longValue();
-    }
-
-    public long partitionTombstonesFetched()
-    {
-        return partitionTombstonesFetched.longValue();
-    }
-
-    public long rowsFetched()
-    {
-        return rowsFetched.longValue();
-    }
-
-    public long rowsReturned()
-    {
-        return rowsReturned.longValue();
-    }
-
-    public long rowTombstonesFetched()
-    {
-        return rowTombstonesFetched.longValue();
-    }
-
-    public long trieSegmentsHit()
-    {
-        return trieSegmentsHit.longValue();
-    }
-
-    public long bkdPostingListsHit()
-    {
-        return bkdPostingListsHit.longValue();
-    }
-
-    public long bkdSegmentsHit()
-    {
-        return bkdSegmentsHit.longValue();
-    }
-
-    public long bkdPostingsSkips()
-    {
-        return bkdPostingsSkips.longValue();
-    }
-
-    public long bkdPostingsDecodes()
-    {
-        return bkdPostingsDecodes.longValue();
-    }
-
-    public long triePostingsSkips()
-    {
-        return triePostingsSkips.longValue();
-    }
-
-    public long triePostingsDecodes()
-    {
-        return triePostingsDecodes.longValue();
-    }
-
-    public long queryTimeouts()
-    {
-        return queryTimeouts.longValue();
-    }
-
-    public long annGraphSearchLatency()
-    {
-        return annGraphSearchLatency.longValue();
-    }
-
-    public FilterSortOrder filterSortOrder()
-    {
-        return filterSortOrder;
     }
 
     public void checkpoint()
@@ -375,25 +278,25 @@ public class QueryContext
         private Snapshot(QueryContext context)
         {
             totalQueryTimeNs = context.totalQueryTimeNs();
-            sstablesHit = context.sstablesHit();
-            segmentsHit = context.segmentsHit();
-            keysFetched = context.keysFetched();
-            partitionsFetched = context.partitionsFetched();
-            partitionsReturned = context.partitionsReturned();
-            partitionTombstonesFetched = context.partitionTombstonesFetched();
-            rowsFetched = context.rowsFetched();
-            rowsReturned = context.rowsReturned();
-            rowTombstonesFetched = context.rowTombstonesFetched();
-            trieSegmentsHit = context.trieSegmentsHit();
-            bkdPostingListsHit = context.bkdPostingListsHit();
-            bkdSegmentsHit = context.bkdSegmentsHit();
-            bkdPostingsSkips = context.bkdPostingsSkips();
-            bkdPostingsDecodes = context.bkdPostingsDecodes();
-            triePostingsSkips = context.triePostingsSkips();
-            triePostingsDecodes = context.triePostingsDecodes();
-            queryTimeouts = context.queryTimeouts();
-            annGraphSearchLatency = context.annGraphSearchLatency();
-            filterSortOrder = context.filterSortOrder();
+            sstablesHit = context.sstablesHit;
+            segmentsHit = context.segmentsHit;
+            keysFetched = context.keysFetched;
+            partitionsFetched = context.partitionsFetched;
+            partitionsReturned = context.partitionsReturned;
+            partitionTombstonesFetched = context.partitionTombstonesFetched;
+            rowsFetched = context.rowsFetched;
+            rowsReturned = context.rowsReturned;
+            rowTombstonesFetched = context.rowTombstonesFetched;
+            trieSegmentsHit = context.trieSegmentsHit;
+            bkdPostingListsHit = context.bkdPostingListsHit;
+            bkdSegmentsHit = context.bkdSegmentsHit;
+            bkdPostingsSkips = context.bkdPostingsSkips;
+            bkdPostingsDecodes = context.bkdPostingsDecodes;
+            triePostingsSkips = context.triePostingsSkips;
+            triePostingsDecodes = context.triePostingsDecodes;
+            queryTimeouts = context.queryTimeouts;
+            annGraphSearchLatency = context.annGraphSearchLatency;
+            filterSortOrder = context.filterSortOrder;
         }
     }
 }
