@@ -114,7 +114,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     @Nullable
     protected final Index.QueryPlan indexQueryPlan;
 
-    private volatile Supplier<ExecutionInfo> executionInfoSupplier = ExecutionInfo.EMPTY_SUPPLIER;
+    private Supplier<ExecutionInfo> executionInfoSupplier = ExecutionInfo.EMPTY_SUPPLIER;
 
     protected static abstract class SelectionDeserializer
     {
