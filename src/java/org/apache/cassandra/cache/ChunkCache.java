@@ -778,9 +778,14 @@ public class ChunkCache
      */
     public enum InspectEntriesOrder
     {
-        /** Orders cache entries from most frequently accessed to least */
+        /**
+         * Orders cache entries from most frequently accessed to least
+         */
         HOTTEST,
-        /** Orders cache entries from least frequently accessed to most */
+
+        /**
+         * Orders cache entries from least frequently accessed to most
+         */
         COLDEST
     }
 
