@@ -258,6 +258,11 @@ public class CompactionManager implements CompactionManagerMBean
                             logger.debug("Removing {} because it does not correspond to an existing table", file);
                             file.delete();
                         }
+                        catch (Throwable e)
+                        {
+                            logger.error("Encountered an exception while cleaning up the orphaned compaction settings file ({}) for {}.{}", file, names[0], names[1]);
+                            throw e;
+                        }
                     }
                     else if (names.length == 3) // if keyspace/table names are long, we include table id as a 3rd component while the keyspace and table names are abbreviated
                     {
