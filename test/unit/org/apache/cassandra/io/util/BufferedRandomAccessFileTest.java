@@ -32,6 +32,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import static org.apache.cassandra.Util.expectEOF;
 import static org.apache.cassandra.Util.expectException;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class BufferedRandomAccessFileTest
@@ -40,6 +41,41 @@ public class BufferedRandomAccessFileTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
+    }
+
+    @Test
+    public void testZeroLenRead() throws IOException
+    {
+        // empty file
+        try (final RandomAccessReader r = RandomAccessReader.open(FileUtils.createTempFile("brafZeroLenRead", ".txt")))
+        {
+            byte[] buffer = new byte[8];
+            assertEquals(0, r.read(buffer, 0, 0));
+
+            final ByteBuffer targetBuffer = ByteBuffer.allocate(4);
+            targetBuffer.limit(0);
+            r.readFully(targetBuffer); // just assert it doesn't throw EOF
+        }
+    }
+
+    @Test
+    public void testOutOfBounds() throws IOException
+    {
+        try (final RandomAccessReader r = RandomAccessReader.open(writeTemporaryFile(new byte[10])))
+        {
+            byte[] buffer = new byte[8];
+            assertThrows(IndexOutOfBoundsException.class, () -> r.read(buffer, 0, buffer.length + 1));
+            assertThrows(IndexOutOfBoundsException.class, () -> r.read(buffer, buffer.length, 1));
+            assertThrows(IndexOutOfBoundsException.class, () -> r.read(buffer, buffer.length + 1, 0));
+            assertThrows(IndexOutOfBoundsException.class, () -> r.read(buffer, -1, 0));
+            assertThrows(IndexOutOfBoundsException.class, () -> r.read(buffer, 0, -1));
+
+            assertThrows(IndexOutOfBoundsException.class, () -> r.readFully(buffer, 0, buffer.length + 1));
+            assertThrows(IndexOutOfBoundsException.class, () -> r.readFully(buffer, buffer.length, 1));
+            assertThrows(IndexOutOfBoundsException.class, () -> r.readFully(buffer, buffer.length + 1, 0));
+            assertThrows(IndexOutOfBoundsException.class, () -> r.readFully(buffer, -1, 0));
+            assertThrows(IndexOutOfBoundsException.class, () -> r.readFully(buffer, 0, -1));
+        }
     }
 
     @Test
@@ -346,8 +382,9 @@ public class BufferedRandomAccessFileTest
         for (int bufferSize : Arrays.asList(1, 2, 3, 5, 8, 64))  // smaller, equal, bigger buffer sizes
         {
             final byte[] target = new byte[32];
+            final ByteBuffer targetBuffer = ByteBuffer.allocate(32);
 
-            // single too-large read
+            // single too-large read into array
             for (final int offset : Arrays.asList(0, 8))
             {
                 File file1 = writeTemporaryFile(new byte[16]);
@@ -356,6 +393,23 @@ public class BufferedRandomAccessFileTest
                      RandomAccessReader file = fh.createReader())
                 {
                     expectEOF(() -> { file.readFully(target, offset, 17); return null; });
+                }
+            }
+
+            // single too-large read into ByteBuffer
+            for (final int offset : Arrays.asList(0, 8))
+            {
+                File file1 = writeTemporaryFile(new byte[16]);
+                try (FileHandle.Builder builder = new FileHandle.Builder(file1).bufferSize(bufferSize);
+                     FileHandle fh = builder.complete();
+                     RandomAccessReader file = fh.createReader())
+                {
+                    expectEOF(() -> {
+                        targetBuffer.clear();
+                        targetBuffer.position(offset);
+                        file.readFully(targetBuffer);
+                        return null;
+                    });
                 }
             }
 
@@ -373,6 +427,26 @@ public class BufferedRandomAccessFileTest
                     });
                 }
             }
+
+            // first read into Buffer is ok but eventually EOFs
+            for (final int n : Arrays.asList(1, 2, 4, 8))
+            {
+                File file1 = writeTemporaryFile(new byte[16]);
+                try (FileHandle.Builder builder = new FileHandle.Builder(file1).bufferSize(bufferSize);
+                     FileHandle fh = builder.complete();
+                     RandomAccessReader file = fh.createReader())
+                {
+                    expectEOF(() -> {
+                        while (true)
+                        {
+                            targetBuffer.clear();
+                            targetBuffer.limit(n);
+                            file.readFully(targetBuffer);
+                        }
+                    });
+                }
+            }
+
         }
     }
 
