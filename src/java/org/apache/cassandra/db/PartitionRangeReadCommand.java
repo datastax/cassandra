@@ -479,19 +479,9 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
     }
 
     @Override
-    protected void appendCQLWhereClause(CqlBuilder builder)
+    public void appendCQLWhereClause(CqlBuilder builder)
     {
-        if (dataRange.isUnrestricted(metadata()) && rowFilter().isEmpty())
-            return;
-
-        // Pass the rowFilter to dataRange.toCQLString so it can handle 
-        // combining with clustering restrictions properly
-        String rangeString = dataRange.toCQLString(metadata(), rowFilter());
-        if (!rangeString.isEmpty())
-        {
-            builder.append(" WHERE ");
-            builder.append(rangeString);
-        }
+        PartitionRangeReadQuery.super.appendCQLWhereClause(builder);
     }
 
     @Override
