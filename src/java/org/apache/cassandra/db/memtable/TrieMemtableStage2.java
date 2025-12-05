@@ -576,8 +576,6 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
         // The smallest timestamp for all partitions stored in this shard
         private volatile long minTimestamp = Long.MAX_VALUE;
 
-        private volatile long minLocalDeletionTime = Long.MAX_VALUE;
-
         private volatile long liveDataSize = 0;
 
         private volatile long currentOperations = 0;

@@ -45,9 +45,9 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.partitions.TrieBackedPartition;
-import org.apache.cassandra.db.partitions.TriePartitionUpdate;
-import org.apache.cassandra.db.partitions.TriePartitionUpdater;
+import org.apache.cassandra.db.partitions.TrieBackedPartitionStage3;
+import org.apache.cassandra.db.partitions.TriePartitionUpdateStage3;
+import org.apache.cassandra.db.partitions.TriePartitionUpdaterStage3;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -66,14 +66,13 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
@@ -90,9 +89,9 @@ import org.github.jamm.Unmetered;
  *
  * Also see Memtable_API.md.
  */
-public class TrieMemtable extends AbstractShardedMemtable
+public class TrieMemtableStage3 extends AbstractShardedMemtable
 {
-    private static final Logger logger = LoggerFactory.getLogger(TrieMemtable.class);
+    private static final Logger logger = LoggerFactory.getLogger(TrieMemtableStage3.class);
 
     /// Buffer type to use for memtable tries (on- vs off-heap)
     public static final BufferType BUFFER_TYPE = DatabaseDescriptor.getMemtableAllocationType().toBufferType();
@@ -100,20 +99,10 @@ public class TrieMemtable extends AbstractShardedMemtable
     /// Force copy checker (see [InMemoryTrie#apply]) ensuring all modifications apply atomically and consistently to
     /// the whole partition.
     public static final Predicate<InMemoryBaseTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY =
-        features -> TrieBackedPartition.isPartitionBoundary(features.content());
+        features -> TrieBackedPartitionStage3.isPartitionBoundary(features.content());
 
-    public static volatile int SHARD_COUNT = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.getInt(autoShardCount());
-    public static volatile boolean SHARD_LOCK_FAIRNESS = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS.getBoolean();
-
-    public static final String TRIE_MEMTABLE_CONFIG_OBJECT_NAME = "org.apache.cassandra.db:type=TrieMemtableConfig";
-
-    static
-    {
-        MBeanWrapper.instance.registerMBean(new TrieMemtableConfig(), TRIE_MEMTABLE_CONFIG_OBJECT_NAME, MBeanWrapper.OnException.LOG);
-    }
-
-    // Set to true when the memtable requests a switch (e.g. for trie size limit being reached) to ensure only one
-    // thread calls cfs.switchMemtableIfCurrent.
+    /// Set to true when the memtable requests a switch (e.g. for trie size limit being reached) to ensure only one
+    /// thread calls cfs.switchMemtableIfCurrent.
     private final AtomicBoolean switchRequested = new AtomicBoolean(false);
 
     /// Sharded memtable sections. Each is responsible for a contiguous range of the token space (between `boundaries[i]`
@@ -128,18 +117,13 @@ public class TrieMemtable extends AbstractShardedMemtable
     @Unmetered
     private final TrieMemtableMetricsView metrics;
 
-    TrieMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner, Integer shardCountOption)
+    TrieMemtableStage3(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner, Integer shardCountOption)
     {
         super(commitLogLowerBound, metadataRef, owner, shardCountOption);
         this.metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
         this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics, owner.readOrdering());
         this.mergedTrie = makeMergedTrie(shards);
         logger.trace("Created memtable with {} shards", this.shards.length);
-    }
-
-    private static int autoShardCount()
-    {
-        return 4 * FBUtilities.getAvailableProcessors();
     }
 
     private static MemtableShard[] generatePartitionShards(int splits,
@@ -384,7 +368,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         return createPartition(metadata(), allocator.ensureOnHeap(), key, trie);
     }
 
-    private static TrieBackedPartition createPartition(TableMetadata metadata, EnsureOnHeap ensureOnHeap, DecoratedKey key, DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    private static TrieBackedPartitionStage3 createPartition(TableMetadata metadata, EnsureOnHeap ensureOnHeap, DecoratedKey key, DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
         if (trie == null)
             return null;
@@ -394,14 +378,14 @@ public class TrieMemtable extends AbstractShardedMemtable
         // PartitionData (because the attachment of a new or modified partition to the trie is atomic).
         assert holder != null : "Entry for " + key + " without associated PartitionData";
 
-        return TrieBackedPartition.create(key,
-                                          holder.columns(),
-                                          holder.stats(),
-                                          holder.rowCountIncludingStatic(),
-                                          holder.tombstoneCount(),
-                                          trie,
-                                          metadata,
-                                          ensureOnHeap);
+        return TrieBackedPartitionStage3.create(key,
+                                                holder.columns(),
+                                                holder.stats(),
+                                                holder.rowCountIncludingStatic(),
+                                                holder.tombstoneCount(),
+                                                trie,
+                                                metadata,
+                                                ensureOnHeap);
     }
 
     @Override
@@ -424,16 +408,16 @@ public class TrieMemtable extends AbstractShardedMemtable
     private static DecoratedKey getPartitionKeyFromPath(TableMetadata metadata, ByteComparable path)
     {
         return BufferDecoratedKey.fromByteComparable(path,
-                                                     TrieBackedPartition.BYTE_COMPARABLE_VERSION,
+                                                     TrieBackedPartitionStage3.BYTE_COMPARABLE_VERSION,
                                                      metadata.partitioner);
     }
 
     /// Metadata object signifying the root node of a partition. Holds row and tombstone counts as well as a link
     /// to the owning subrange, which is used for compiling encoding statistics and column sets.
     ///
-    /// Descends from [TrieBackedPartition.PartitionMarker] to permit tail tries to be passed directly to
-    /// [TrieBackedPartition].
-    public static class PartitionData implements TrieBackedPartition.PartitionMarker
+    /// Descends from [TrieBackedPartitionStage3.PartitionMarker] to permit tail tries to be passed directly to
+    /// [TrieBackedPartitionStage3].
+    public static class PartitionData implements TrieBackedPartitionStage3.PartitionMarker
     {
         @Unmetered
         public final MemtableShard owner;
@@ -516,14 +500,14 @@ public class TrieMemtable extends AbstractShardedMemtable
             assert content instanceof PartitionData;
             ++keyCount;
             byte[] keyBytes = DecoratedKey.keyFromByteSource(ByteSource.preencoded(bytes, 0, byteLength),
-                                                             TrieBackedPartition.BYTE_COMPARABLE_VERSION,
+                                                             TrieBackedPartitionStage3.BYTE_COMPARABLE_VERSION,
                                                              metadata().partitioner);
             keySize += keyBytes.length;
         }
     }
 
     @Override
-    public FlushablePartitionSet<TrieBackedPartition> getFlushSet(PartitionPosition from, PartitionPosition to)
+    public FlushablePartitionSet<TrieBackedPartitionStage3> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
         DeletionAwareTrie<Object, TrieTombstoneMarker> toFlush = mergedTrie.subtrie(toComparableBound(from, true), toComparableBound(to, true));
 
@@ -536,7 +520,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         {
             public Memtable memtable()
             {
-                return TrieMemtable.this;
+                return TrieMemtableStage3.this;
             }
 
             public PartitionPosition from()
@@ -554,7 +538,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                 return partitionCount;
             }
 
-            public Iterator<TrieBackedPartition> iterator()
+            public Iterator<TrieBackedPartitionStage3> iterator()
             {
                 return new PartitionIterator(toFlush, metadata(), EnsureOnHeap.NOOP);
             }
@@ -582,7 +566,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         private volatile int partitionCount = 0;
 
         @Unmetered
-        private final ReentrantLock writeLock = new ReentrantLock(SHARD_LOCK_FAIRNESS);
+        private final ReentrantLock writeLock = new ReentrantLock(TrieMemtable.SHARD_LOCK_FAIRNESS);
 
         /// Content map for the given shard. This is implemented as an in-memory trie which uses the prefix-free
         /// byte-comparable [ByteSource] representations of keys to address partitions and individual rows within
@@ -621,7 +605,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics, OpOrder opOrder)
         {
             this.metadata = metadata;
-            this.data = InMemoryDeletionAwareTrie.longLived(TrieBackedPartition.BYTE_COMPARABLE_VERSION, BUFFER_TYPE, opOrder);
+            this.data = InMemoryDeletionAwareTrie.longLived(TrieBackedPartitionStage3.BYTE_COMPARABLE_VERSION, BUFFER_TYPE, opOrder);
             this.columns = RegularAndStaticColumns.NONE;
             this.stats = EncodingStats.NO_STATS;
             this.allocator = allocator;
@@ -630,7 +614,7 @@ public class TrieMemtable extends AbstractShardedMemtable
 
         public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
         {
-            TriePartitionUpdater updater = new TriePartitionUpdater(allocator.cloner(opGroup), indexer, update.partitionLevelDeletion(), metadata.get(), this);
+            TriePartitionUpdaterStage3 updater = new TriePartitionUpdaterStage3(allocator.cloner(opGroup), indexer, update.partitionLevelDeletion(), metadata.get(), this);
             boolean locked = writeLock.tryLock();
             if (locked)
             {
@@ -655,7 +639,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                     long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
                     try
                     {
-                        data.apply(TriePartitionUpdate.asMergableTrie(update),
+                        data.apply(TriePartitionUpdateStage3.asMergableTrie(update),
                                    updater,
                                    updater::mergeMarkers,
                                    updater::applyIncomingMarker,
@@ -748,7 +732,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
     }
 
-    static class PartitionIterator extends TrieTailsIterator.DeletionAware<Object, TrieTombstoneMarker, TrieBackedPartition>
+    static class PartitionIterator extends TrieTailsIterator.DeletionAware<Object, TrieTombstoneMarker, TrieBackedPartitionStage3>
     {
         final TableMetadata metadata;
         final EnsureOnHeap ensureOnHeap;
@@ -760,27 +744,27 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
 
         @Override
-        protected TrieBackedPartition mapContent(Object content, DeletionAwareTrie<Object, TrieTombstoneMarker> tailTrie, byte[] bytes, int byteLength)
+        protected TrieBackedPartitionStage3 mapContent(Object content, DeletionAwareTrie<Object, TrieTombstoneMarker> tailTrie, byte[] bytes, int byteLength)
         {
             PartitionData pd = (PartitionData) content;
             DecoratedKey key = getPartitionKeyFromPath(metadata,
-                                                       ByteComparable.preencoded(TrieBackedPartition.BYTE_COMPARABLE_VERSION,
+                                                       ByteComparable.preencoded(TrieBackedPartitionStage3.BYTE_COMPARABLE_VERSION,
                                                                                  bytes, 0, byteLength));
-            return TrieBackedPartition.create(key,
-                                              pd.columns(),
-                                              pd.stats(),
-                                              pd.rowCountIncludingStatic(),
-                                              pd.tombstoneCount(),
-                                              tailTrie,
-                                              metadata,
-                                              ensureOnHeap);
+            return TrieBackedPartitionStage3.create(key,
+                                                    pd.columns(),
+                                                    pd.stats(),
+                                                    pd.rowCountIncludingStatic(),
+                                                    pd.tombstoneCount(),
+                                                    tailTrie,
+                                                    metadata,
+                                                    ensureOnHeap);
         }
     }
 
     static class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator implements Memtable.MemtableUnfilteredPartitionIterator
     {
         private final TableMetadata metadata;
-        private final Iterator<TrieBackedPartition> iter;
+        private final Iterator<TrieBackedPartitionStage3> iter;
         private final ColumnFilter columnFilter;
         private final DataRange dataRange;
         private final long minLocalDeletionTime;
@@ -824,11 +808,42 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
     }
 
-    public static Factory factory(Map<String, String> optionsCopy)
+    public static Memtable.Factory factory(Map<String, String> optionsCopy)
     {
         String shardsString = optionsCopy.remove(SHARDS_OPTION);
         Integer shardCount = shardsString != null ? Integer.parseInt(shardsString) : null;
-        return new TrieMemtableFactory(shardCount);
+        return new Factory(shardCount);
+    }
+
+
+    static class Factory implements Memtable.Factory
+    {
+        final Integer shardCount;
+
+        Factory(Integer shardCount)
+        {
+            this.shardCount = shardCount;
+        }
+
+        public Memtable create(AtomicReference<CommitLogPosition> commitLogLowerBound,
+                               TableMetadataRef metadaRef,
+                               Owner owner)
+        {
+            return new TrieMemtableStage3(commitLogLowerBound, metadaRef, owner, shardCount);
+        }
+
+        @Override
+        public PartitionUpdate.Factory partitionUpdateFactory()
+        {
+            return TriePartitionUpdateStage3.FACTORY;
+        }
+
+        @Override
+        public TableMetrics.ReleasableMetric createMemtableMetrics(TableMetadataRef metadataRef)
+        {
+            TrieMemtableMetricsView metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
+            return metrics::release;
+        }
     }
 
     @Override
@@ -851,53 +866,5 @@ public class TrieMemtable extends AbstractShardedMemtable
     {
         for (MemtableShard shard : shards)
             shard.data.releaseReferencesUnsafe();
-    }
-
-    public static class TrieMemtableConfig implements TrieMemtableConfigMXBean
-    {
-        @Override
-        public void setShardCount(String shardCount)
-        {
-            if ("auto".equalsIgnoreCase(shardCount))
-            {
-                SHARD_COUNT = autoShardCount();
-                CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
-            }
-            else
-            {
-                try
-                {
-                    SHARD_COUNT = Integer.parseInt(shardCount);
-                    CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
-                }
-                catch (NumberFormatException ex)
-                {
-                    logger.warn("Unable to parse {} as valid value for shard count; leaving it as {}",
-                                shardCount, SHARD_COUNT);
-                    return;
-                }
-            }
-            logger.info("Requested setting shard count to {}; set to: {}", shardCount, SHARD_COUNT);
-        }
-
-        @Override
-        public String getShardCount()
-        {
-            return "" + SHARD_COUNT;
-        }
-
-        @Override
-        public void setLockFairness(String fairness)
-        {
-            SHARD_LOCK_FAIRNESS = Boolean.parseBoolean(fairness);
-            CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS.setBoolean(SHARD_LOCK_FAIRNESS);
-            logger.info("Requested setting shard lock fairness to {}; set to: {}", fairness, SHARD_LOCK_FAIRNESS);
-        }
-
-        @Override
-        public String getLockFairness()
-        {
-            return "" + SHARD_LOCK_FAIRNESS;
-        }
     }
 }
