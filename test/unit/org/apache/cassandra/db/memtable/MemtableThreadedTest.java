@@ -58,6 +58,7 @@ public class MemtableThreadedTest extends CQLTester
                                 "TrieMemtable",
                                 "TrieMemtableStage1",
                                 "TrieMemtableStage2",
+                                "TrieMemtableStage3",
                                 "PersistentMemoryMemtable");
     }
 

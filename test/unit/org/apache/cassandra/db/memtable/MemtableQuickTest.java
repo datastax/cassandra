@@ -66,6 +66,7 @@ public class MemtableQuickTest extends CQLTester
                                 "trie",
                                 "trie_stage1",
                                 "trie_stage2",
+                                "trie_stage3",
                                 "persistent_memory");
     }
 
