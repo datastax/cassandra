@@ -125,28 +125,28 @@ public class ChunkCacheTest
 
         try (FileHandle.Builder builder1 = new FileHandle.Builder(file).withChunkCache(ChunkCache.instance))
         {
-            try (FileHandle handle1 = builder1.complete();
-                 RandomAccessReader reader1 = handle1.createReader())
-            {
-                // Read 2 chunks and verify contents
-                for (int i = 0; i < RandomAccessReader.DEFAULT_BUFFER_SIZE * 2; i++)
-                    assertEquals((byte) 0, reader1.readByte());
+             try (FileHandle handle1 = builder1.complete();
+                  RandomAccessReader reader1 = handle1.createReader())
+             {
+                 // Read 2 chunks and verify contents
+                 for (int i = 0; i < RandomAccessReader.DEFAULT_BUFFER_SIZE * 2; i++)
+                     assertEquals((byte) 0, reader1.readByte());
 
-                // Overwrite the file's contents
-                var bytes = new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE * 3];
-                Arrays.fill(bytes, (byte) 1);
-                writeBytes(file, bytes);
+                 // Overwrite the file's contents
+                 var bytes = new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE * 3];
+                 Arrays.fill(bytes, (byte) 1);
+                 writeBytes(file, bytes);
 
-                // Verify rebuffer pulls from cache for first 2 bytes and then from disk for third byte
-                reader1.seek(0);
-                for (int i = 0; i < RandomAccessReader.DEFAULT_BUFFER_SIZE * 2; i++)
-                    assertEquals((byte) 0, reader1.readByte());
-                // Trigger read of next chunk and see it is the new data
-                assertEquals((byte) 1, reader1.readByte());
+                 // Verify rebuffer pulls from cache for first 2 bytes and then from disk for third byte
+                 reader1.seek(0);
+                 for (int i = 0; i < RandomAccessReader.DEFAULT_BUFFER_SIZE * 2; i++)
+                     assertEquals((byte) 0, reader1.readByte());
+                 // Trigger read of next chunk and see it is the new data
+                 assertEquals((byte) 1, reader1.readByte());
 
-                assertEquals(3, ChunkCache.instance.size());
-                assertEquals(3, ChunkCache.instance.sizeOfFile(file));
-            }
+                 assertEquals(3, ChunkCache.instance.size());
+                 assertEquals(3, ChunkCache.instance.sizeOfFile(file));
+             }
 
             // Invalidate cache for both chunks
             ChunkCache.instance.invalidateFile(file);

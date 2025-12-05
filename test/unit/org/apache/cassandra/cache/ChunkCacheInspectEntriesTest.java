@@ -42,19 +42,21 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.cassandra.utils.memory.BufferPools;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.mock;
 
 @RunWith(Parameterized.class)
 public class ChunkCacheInspectEntriesTest
 {
     private static final Logger logger = LoggerFactory.getLogger(ChunkCacheInspectEntriesTest.class);
 
+    private ChunkCache cache;
+
     @Parameterized.Parameter(0)
-    public ChunkCache.CacheOrder order;
+    public ChunkCache.InspectEntriesOrder order;
 
     @Parameterized.Parameter(1)
     public int numFiles;
@@ -69,10 +71,10 @@ public class ChunkCacheInspectEntriesTest
     public static Collection<Object[]> parameters()
     {
         return Arrays.asList(new Object[][]{
-            {ChunkCache.CacheOrder.HOTTEST, 3, 10, "testInspectHotEntriesWithMultipleFiles"},
-            {ChunkCache.CacheOrder.COLDEST, 2, 10, "testInspectColdEntriesWithMultipleFiles"},
-            {ChunkCache.CacheOrder.HOTTEST, 5, 2, "testInspectHotEntriesWithLimit"},
-            {ChunkCache.CacheOrder.HOTTEST, 1, 0, "testInspectHotEntriesWithZeroLimit"}
+            {ChunkCache.InspectEntriesOrder.HOTTEST, 3, 10, "testInspectHotEntriesWithMultipleFiles"},
+            {ChunkCache.InspectEntriesOrder.COLDEST, 2, 10, "testInspectColdEntriesWithMultipleFiles"},
+            {ChunkCache.InspectEntriesOrder.HOTTEST, 5, 2, "testInspectHotEntriesWithLimit"},
+            {ChunkCache.InspectEntriesOrder.HOTTEST, 1, 0, "testInspectHotEntriesWithZeroLimit"}
         });
     }
 
@@ -80,7 +82,13 @@ public class ChunkCacheInspectEntriesTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        DatabaseDescriptor.enableChunkCache(512);
+    }
+
+    @org.junit.Before
+    public void setUp()
+    {
+        BufferPool pool = BufferPools.forChunkCache();
+        cache = new ChunkCache(pool, 512, ChunkCacheMetrics::create);
     }
 
     @Test
@@ -88,8 +96,7 @@ public class ChunkCacheInspectEntriesTest
     {
         logger.info("Starting test: {} with order={}, numFiles={}, limit={}", testName, order, numFiles, limit);
         
-        ChunkCache.instance.clear();
-        assertEquals(0, ChunkCache.instance.size());
+        assertEquals(0, cache.size());
 
         List<File> files = new ArrayList<>();
         List<FileHandle> handles = new ArrayList<>();
@@ -106,7 +113,7 @@ public class ChunkCacheInspectEntriesTest
                 writeBytes(file, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE]);
                 files.add(file);
 
-                FileHandle.Builder builder = new FileHandle.Builder(file).withChunkCache(ChunkCache.instance);
+                FileHandle.Builder builder = new FileHandle.Builder(file).withChunkCache(cache);
                 FileHandle handle = builder.complete();
                 handles.add(handle);
 
@@ -116,7 +123,7 @@ public class ChunkCacheInspectEntriesTest
                 logger.trace("Created and cached file {}: {}", i, file.path());
             }
 
-            assertEquals(numFiles, ChunkCache.instance.size());
+            assertEquals(numFiles, cache.size());
             logger.debug("Cache populated with {} entries", numFiles);
 
             Set<File> expectedFiles = new HashSet<>(files);
@@ -124,7 +131,7 @@ public class ChunkCacheInspectEntriesTest
             // Inspect entries
             logger.debug("Inspecting cache entries with limit={} and order={}", limit, order);
             List<ChunkCache.ChunkCacheInspectionEntry> entries = new ArrayList<>();
-            ChunkCache.instance.inspectEntries(limit, order, entries::add);
+            cache.inspectEntries(limit, order, entries::add);
 
             // Verify count respects limit
             int expectedCount = Math.min(limit, numFiles);
@@ -168,7 +175,7 @@ public class ChunkCacheInspectEntriesTest
     public void testInspectEntriesWhenCacheDisabled()
     {
         logger.info("Testing inspect entries with disabled cache for order={}", order);
-        BufferPool pool = mock(BufferPool.class);
+        BufferPool pool = BufferPools.forChunkCache();
         ChunkCache disabledCache = new ChunkCache(pool, 0, ChunkCacheMetrics::create);
 
         logger.debug("Attempting to inspect entries on disabled cache - expecting IllegalStateException");
@@ -180,15 +187,14 @@ public class ChunkCacheInspectEntriesTest
     public void testInspectEntriesWithEmptyCache()
     {
         logger.info("Testing inspect entries with empty cache for order={}", order);
-        ChunkCache.instance.clear();
-        assertEquals(0, ChunkCache.instance.size());
-        logger.debug("Cache cleared and verified empty");
+        assertEquals(0, cache.size());
+        logger.debug("Cache verified empty");
 
         List<ChunkCache.ChunkCacheInspectionEntry> entries = new ArrayList<>();
 
         // Should not throw when cache is empty
         logger.debug("Inspecting empty cache with order={}", order);
-        ChunkCache.instance.inspectEntries(10, order, entries::add);
+        cache.inspectEntries(10, order, entries::add);
 
         assertEquals(0, entries.size());
         logger.info("Verified empty cache returns 0 entries");
