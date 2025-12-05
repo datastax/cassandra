@@ -77,6 +77,7 @@ public class MemtableQuickTest extends CQLTester
         params.add("trie");
         params.add("trie_stage1");
         params.add("trie_stage2",
+                                "trie_stage3",
                                 "persistent_memory");
 
         return params.build();
