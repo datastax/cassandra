@@ -51,12 +51,6 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
     }
 
     @Override
-    public PrimaryKey createTokenOnly(Token token)
-    {
-        return new RowAwarePrimaryKey(token, null, null, null);
-    }
-
-    @Override
     public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
     {
         return new RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
@@ -95,12 +89,6 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
-        public boolean isTokenOnly()
-        {
-            return partitionKey == null && clustering == null && primaryKeySupplier == null;
-        }
-
-        @Override
         public Token token()
         {
             return token;
@@ -129,6 +117,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
                 this.partitionKey = deferredPrimaryKey.partitionKey();
                 this.clustering = deferredPrimaryKey.clustering();
                 primaryKeySupplier = null;
+                assert this.token == this.partitionKey.getToken() : "Deferred primary key must contain the same token";
             }
             return this;
         }

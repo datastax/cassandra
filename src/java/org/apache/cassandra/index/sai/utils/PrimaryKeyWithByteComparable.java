@@ -77,12 +77,6 @@ public class PrimaryKeyWithByteComparable extends PrimaryKeyWithSortKey
     }
 
     @Override
-    public boolean isTokenOnly()
-    {
-        return false;
-    }
-
-    @Override
     public int compareTo(PrimaryKey o)
     {
         if (!(o instanceof PrimaryKeyWithByteComparable))
