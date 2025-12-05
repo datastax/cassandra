@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.validation.miscellaneous;
 
 import java.util.Arrays;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Throwables;
@@ -33,7 +34,9 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.memtable.TrieMemtableStage3;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -58,6 +61,8 @@ public class TombstonesTest extends CQLTester
         return Arrays.asList(new Object[] {"SkipListMemtable", false},
                              new Object[] {"TrieMemtableStage1", true}, // this uses the same partition code as SkipListMemtable
                              new Object[] {"TrieMemtableStage2", false}, // this flushes like SkipListMemtable, no need to test flushed
+                             new Object[] {"TrieMemtableStage3", false},
+                             new Object[] {"TrieMemtableStage3", true},
                              new Object[] {"TrieMemtable", false},
                              new Object[] {"TrieMemtable", true});
     }
@@ -66,6 +71,8 @@ public class TombstonesTest extends CQLTester
     static final int FAILURE_THRESHOLD = 100;
 
     static final int WARN_THRESHOLD = 50;
+
+    public static final Set<Class<? extends Memtable>> tombstoneIndependentMemtables = Set.of(TrieMemtable.class, TrieMemtableStage3.class);
 
     @BeforeClass
     public static void setUp() throws Throwable
@@ -88,7 +95,7 @@ public class TombstonesTest extends CQLTester
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();
-        boolean tombstonesCountTowardsThresholds = flush || !(cfs.getCurrentMemtable() instanceof TrieMemtable);
+        boolean tombstonesCountTowardsThresholds = flush || !tombstoneIndependentMemtables.contains(cfs.getCurrentMemtable().getClass());
 
         // insert exactly the amount of tombstones that shouldn't trigger an exception
         for (int i = 0; i < FAILURE_THRESHOLD; i++)
@@ -115,7 +122,7 @@ public class TombstonesTest extends CQLTester
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();
-        boolean tombstonesCountTowardsThresholds = flush || !(cfs.getCurrentMemtable() instanceof TrieMemtable);
+        boolean tombstonesCountTowardsThresholds = flush || !tombstoneIndependentMemtables.contains(cfs.getCurrentMemtable().getClass());
 
         // insert exactly the amount of tombstones that *SHOULD* trigger an exception
         for (int i = 0; i < FAILURE_THRESHOLD + 1; i++)
@@ -264,7 +271,7 @@ public class TombstonesTest extends CQLTester
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();
-        boolean tombstonesCountTowardsThresholds = flush || !(cfs.getCurrentMemtable() instanceof TrieMemtable);
+        boolean tombstonesCountTowardsThresholds = flush || !tombstoneIndependentMemtables.contains(cfs.getCurrentMemtable().getClass());
 
         // insert the number of tombstones that *SHOULD* trigger an Warning
         for (int i = 0; i < WARN_THRESHOLD + 1; i++)
