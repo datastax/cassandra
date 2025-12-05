@@ -15,14 +15,11 @@
  */
 package org.apache.cassandra.distributed.test.sai;
 
-import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 
 import com.google.common.util.concurrent.Uninterruptibles;
-import org.apache.cassandra.index.sai.plan.QueryController;
 import org.junit.Test;
 
 import net.bytebuddy.ByteBuddy;
@@ -42,14 +39,13 @@ import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.SecondaryIndexManager;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.QueryMonitorableExecutionInfo;
-import org.assertj.core.api.AbstractIterableAssert;
-import org.assertj.core.api.Assertions;
-import org.assertj.core.api.ListAssert;
 import org.awaitility.Awaitility;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
-import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+import static org.apache.cassandra.distributed.test.SlowQueryLoggerTest.assertLogsContain;
+import static org.apache.cassandra.distributed.test.SlowQueryLoggerTest.assertLogsDoNotContain;
 
 /**
  * Tests {@link QueryMonitorableExecutionInfo} combined with the {@link MonitoringTask} mechanism,
@@ -394,16 +390,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
         }
     }
 
-    private static void assertLogsContain(long mark, IInvokableInstance node, String... lines)
-    {
-        assertLogs(mark, node, AbstractIterableAssert::isNotEmpty, lines);
-    }
-
-    private static void assertLogsDoNotContain(long mark, IInvokableInstance node, String... lines)
-    {
-        assertLogs(mark, node, AbstractIterableAssert::isEmpty, lines);
-    }
-
     private static void assertLogsDoNotContainSAIExecutionInfo(long mark, IInvokableInstance node)
     {
         assertLogsDoNotContain(mark, node,
@@ -411,18 +397,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                                "SAI slow query plan:",
                                "SAI slowest query metrics:",
                                "SAI slowest query plan:");
-    }
-
-    private static void assertLogs(long mark, IInvokableInstance node, Consumer<ListAssert<String>> listAssert, String... lines)
-    {
-        // manually trigger the monitoring task to log the slow operations
-        node.runOnInstance(() -> MonitoringTask.instance.logOperations(approxTime.now()));
-
-        for (String line : lines)
-        {
-            List<String> matchingLines = node.logs().grep(mark, line).getResult();
-            listAssert.accept(Assertions.assertThat(matchingLines));
-        }
     }
 
     /**

@@ -1,0 +1,174 @@
+/*
+ * Copyright DataStax, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.test.microbench;
+
+
+import java.io.IOException;
+import java.util.Random;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.monitoring.Monitorable;
+import org.apache.cassandra.db.monitoring.MonitoringTask;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
+import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Warmup;
+
+/**
+ * Benchmarks {@link ReadCommand}'s extended {@link Monitorable.ExecutionInfo}, to verify whether it has a noticeable
+ * performance impact compared to the default {@link Monitorable.ExecutionInfo#EMPTY}.
+ * </p>
+ * The cost of reporting should be evaluated on the context of a slow query, which by default should have taken at least
+ * 500ms, possibly more, as defined by {@link org.apache.cassandra.config.Config#slow_query_log_timeout_in_ms}. Note
+ * that this is a worst case scenario, as repeated slow queries within the same reporting window will be aggregated
+ * and not logged individually.
+ * </p>
+ * This also benchmarks the cost of running a not-slow query that won't produce a log entry, which is the normal case.
+ * This is done to see the cost of keeping track of read items in case the query is later determined to be slow.
+ */
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Warmup(iterations = 5, time = 10, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 10, time = 10, timeUnit = TimeUnit.SECONDS)
+@Fork(value = 1)
+@Threads(1)
+@State(Scope.Benchmark)
+public class ReadCommandExecutionInfoBench extends CQLTester
+{
+    private static final Logger LOGGER = LoggerFactory.getLogger(ReadCommandExecutionInfoBench.class);
+    private static final Random RANDOM = new Random(1234);
+    private static final String QUERY = "SELECT * FROM %%s WHERE k = %d AND v IN (%d, %<d) ALLOW FILTERING";
+    private static final int NUM_PARTITIONS = 100;
+    private static final int NUM_CLUSTERINGS = 10_000;
+    private static final int NUM_VALUES = 10;
+
+    /**
+     * Whether to enable the execution info logging.
+     */
+    @Param({ "false", "true" })
+    public boolean enabled;
+
+    private ReadCommand command;
+
+    @Setup(Level.Trial)
+    public void setup() throws Throwable
+    {
+        CassandraRelevantProperties.SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(enabled);
+        CQLTester.setUpClass();
+        CQLTester.prepareServer();
+        beforeTest();
+
+        // create the schema
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+
+        // insert some data
+        for (int k = 0; k < NUM_PARTITIONS; k++)
+        {
+            for (int c = 0; c < NUM_CLUSTERINGS; c++)
+            {
+                int v = RANDOM.nextInt(NUM_VALUES);
+                execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", k, c, v);
+            }
+        }
+        flush();
+    }
+
+    @Setup(Level.Invocation)
+    public void setupTest()
+    {
+        command = generateRunAndConsumeCommand();
+    }
+
+    private ReadCommand generateRunAndConsumeCommand()
+    {
+        int randomKey = RANDOM.nextInt(NUM_PARTITIONS);
+        int randomValue = RANDOM.nextInt(NUM_VALUES);
+        String query = String.format(QUERY, randomKey, randomValue);
+        ReadCommand command = parseReadCommandGroup(query).get(0);
+        try (UnfilteredPartitionIterator partitions = command.executeLocally(command.executionController(false)))
+        {
+            while (partitions.hasNext())
+            {
+                try (UnfilteredRowIterator partition = partitions.next())
+                {
+                    while (partition.hasNext())
+                        partition.next();
+                }
+            }
+        }
+        return command;
+    }
+
+    @TearDown(Level.Trial)
+    public void teardown() throws IOException, ExecutionException, InterruptedException
+    {
+        CommitLog.instance.shutdownBlocking();
+        CQLTester.cleanup();
+    }
+
+    /**
+     * Test the cost of creating the execution info object.
+     */
+    @Benchmark
+    public Object executionInfo()
+    {
+        Monitorable.ExecutionInfo info = command.executionInfo();
+        return info.toLogString(true);
+    }
+
+    /**
+     * Test the cost of creating a slow operation and logging it.
+     */
+    @Benchmark
+    public Object logSlowOperation()
+    {
+        MonitoringTask.SlowOperation operation = new MonitoringTask.SlowOperation(command, 0);
+        String log = operation.getLogMessage();
+        LOGGER.info(log);
+        return log;
+    }
+
+    /**
+     * Test the cost of running a query without logging it as slow, just to see the effect of counting things in case
+     * it is slow.
+     */
+    @Benchmark
+    public Object runFastOperation()
+    {
+        return generateRunAndConsumeCommand();
+    }
+}
