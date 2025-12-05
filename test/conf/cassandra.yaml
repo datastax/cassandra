@@ -93,6 +93,8 @@ memtable:
             class_name: TrieMemtableStage1
         trie_stage2:
             class_name: TrieMemtableStage2
+        trie_stage3:
+            class_name: TrieMemtableStage3
         skiplist_sharded:
             class_name: ShardedSkipListMemtable
             parameters:

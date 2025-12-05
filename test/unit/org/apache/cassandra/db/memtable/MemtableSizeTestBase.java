@@ -89,6 +89,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
             params.add("skiplist_sharded");
         params.add("trie_stage1");
         params.add("trie_stage2",
+                                "trie_stage3",
                                 "trie");
 
         return params.build();
@@ -203,6 +204,10 @@ public abstract class MemtableSizeTestBase extends CQLTester
 
             if (memtable instanceof TrieMemtable)
                 ((TrieMemtable) memtable).releaseReferencesUnsafe();
+            if (memtable instanceof TrieMemtableStage2)
+                ((TrieMemtableStage2) memtable).releaseReferencesUnsafe();
+            if (memtable instanceof TrieMemtableStage3)
+                ((TrieMemtableStage3) memtable).releaseReferencesUnsafe();
 
 //            System.out.println("Take jmap -histo:live <pid>");
 //            Thread.sleep(10000);

@@ -65,22 +65,22 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  * The builder holds a mutable trie to which content may be added in any order, also taking care of
  * merging any duplicate rows, and keeping track of statistics and column coverage.
  */
-public class TriePartitionUpdate extends TrieBackedPartition implements PartitionUpdate
+public class TriePartitionUpdateStage3 extends TrieBackedPartitionStage3 implements PartitionUpdate
 {
-    protected static final Logger logger = LoggerFactory.getLogger(TriePartitionUpdate.class);
+    protected static final Logger logger = LoggerFactory.getLogger(TriePartitionUpdateStage3.class);
 
     public static final Factory FACTORY = new TrieFactory();
 
     final int dataSize;
 
-    private TriePartitionUpdate(TableMetadata metadata,
-                                DecoratedKey key,
-                                RegularAndStaticColumns columns,
-                                EncodingStats stats,
-                                int rowCountIncludingStatic,
-                                int tombstoneCount,
-                                int dataSize,
-                                DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    private TriePartitionUpdateStage3(TableMetadata metadata,
+                                      DecoratedKey key,
+                                      RegularAndStaticColumns columns,
+                                      EncodingStats stats,
+                                      int rowCountIncludingStatic,
+                                      int tombstoneCount,
+                                      int dataSize,
+                                      DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
         super(key, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata);
         this.dataSize = dataSize;
@@ -123,16 +123,16 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @return the newly created empty (and immutable) update.
      */
-    public static TriePartitionUpdate emptyUpdate(TableMetadata metadata, DecoratedKey key)
+    public static TriePartitionUpdateStage3 emptyUpdate(TableMetadata metadata, DecoratedKey key)
     {
-        return new TriePartitionUpdate(metadata,
-                                       key,
-                                       RegularAndStaticColumns.NONE,
-                                       EncodingStats.NO_STATS,
-                                       0,
-                                       0,
-                                       0,
-                                       newTrie());
+        return new TriePartitionUpdateStage3(metadata,
+                                             key,
+                                             RegularAndStaticColumns.NONE,
+                                             EncodingStats.NO_STATS,
+                                             0,
+                                             0,
+                                             0,
+                                             newTrie());
     }
 
     /**
@@ -145,18 +145,18 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @return the newly created partition deletion update.
      */
-    public static TriePartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, long nowInSec)
+    public static TriePartitionUpdateStage3 fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, long nowInSec)
     {
         InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = newTrie();
         putPartitionDeletionInTrie(trie, DeletionTime.build(timestamp, nowInSec));
-        return new TriePartitionUpdate(metadata,
-                                       key,
-                                       RegularAndStaticColumns.NONE,
-                                       new EncodingStats(timestamp, nowInSec, LivenessInfo.NO_TTL),
-                                       0,
-                                       1,
-                                       0,
-                                       trie);
+        return new TriePartitionUpdateStage3(metadata,
+                                             key,
+                                             RegularAndStaticColumns.NONE,
+                                             new EncodingStats(timestamp, nowInSec, LivenessInfo.NO_TTL),
+                                             0,
+                                             1,
+                                             0,
+                                             trie);
     }
 
     /**
@@ -168,7 +168,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @return the newly created partition update containing only {@code row}.
      */
-    public static TriePartitionUpdate singleRowUpdate(TableMetadata metadata, DecoratedKey key, Row row)
+    public static TriePartitionUpdateStage3 singleRowUpdate(TableMetadata metadata, DecoratedKey key, Row row)
     {
         EncodingStats stats = EncodingStats.Collector.forRow(row);
         InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = newTrie();
@@ -188,7 +188,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             throw new AssertionError(e);
         }
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.deletion().isLive() ? 0 : 1, row.dataSize(), trie);
+        return new TriePartitionUpdateStage3(metadata, key, columns, stats, 1, row.deletion().isLive() ? 0 : 1, row.dataSize(), trie);
     }
 
     /**
@@ -200,7 +200,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      *
      * @return the newly created partition update containing only {@code row}.
      */
-    public static TriePartitionUpdate singleRowUpdate(TableMetadata metadata, ByteBuffer key, Row row)
+    public static TriePartitionUpdateStage3 singleRowUpdate(TableMetadata metadata, ByteBuffer key, Row row)
     {
         return singleRowUpdate(metadata, metadata.partitioner.decorateKey(key), row);
     }
@@ -214,24 +214,24 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      * the caller to close it.
      */
     @SuppressWarnings("resource")
-    public static TriePartitionUpdate fromIterator(UnfilteredRowIterator iterator)
+    public static TriePartitionUpdateStage3 fromIterator(UnfilteredRowIterator iterator)
     {
         ContentBuilder builder = build(iterator, true);
 
-        return new TriePartitionUpdate(iterator.metadata(),
-                                       iterator.partitionKey(),
-                                       iterator.columns(),
-                                       iterator.stats(),
-                                       builder.rowCountIncludingStatic(),
-                                       builder.tombstoneCount(),
-                                       builder.dataSize(),
-                                       builder.trie());
+        return new TriePartitionUpdateStage3(iterator.metadata(),
+                                             iterator.partitionKey(),
+                                             iterator.columns(),
+                                             iterator.stats(),
+                                             builder.rowCountIncludingStatic(),
+                                             builder.tombstoneCount(),
+                                             builder.dataSize(),
+                                             builder.trie());
     }
 
-    public static TriePartitionUpdate asTrieUpdate(PartitionUpdate update)
+    public static TriePartitionUpdateStage3 asTrieUpdate(PartitionUpdate update)
     {
-        if (update instanceof TriePartitionUpdate)
-            return (TriePartitionUpdate) update;
+        if (update instanceof TriePartitionUpdateStage3)
+            return (TriePartitionUpdateStage3) update;
 
         try (UnfilteredRowIterator iterator = update.unfilteredIterator())
         {
@@ -259,7 +259,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
      * delete anything from a previous update.
      */
     @Override
-    public TriePartitionUpdate withUpdatedTimestamps(long newTimestamp)
+    public TriePartitionUpdateStage3 withUpdatedTimestamps(long newTimestamp)
     {
 
         InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> t = InMemoryDeletionAwareTrie.shortLived(BYTE_COMPARABLE_VERSION);
@@ -295,7 +295,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             throw new AssertionError(e);
         }
-        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, t);
+        return new TriePartitionUpdateStage3(metadata, partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, t);
     }
 
     @Override
@@ -436,7 +436,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 columnSet.add(column.column());
 
         RegularAndStaticColumns columns = RegularAndStaticColumns.builder().addAll(columnSet).build();
-        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, trie);
+        return new TriePartitionUpdateStage3(metadata, partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, trie);
     }
 
     /**
@@ -615,7 +615,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             return metadata;
         }
 
-        public TriePartitionUpdate build()
+        public TriePartitionUpdateStage3 build()
         {
             try
             {
@@ -625,14 +625,14 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             {
                 throw new AssertionError(e);
             }
-            TriePartitionUpdate pu = new TriePartitionUpdate(metadata,
-                                                             partitionKey(),
-                                                             columns,
-                                                             statsCollector.get(),
-                                                             rowCountIncludingStatic,
-                                                             tombstoneCount,
-                                                             Ints.saturatedCast(dataSize),
-                                                             trie);
+            TriePartitionUpdateStage3 pu = new TriePartitionUpdateStage3(metadata,
+                                                                         partitionKey(),
+                                                                         columns,
+                                                                         statsCollector.get(),
+                                                                         rowCountIncludingStatic,
+                                                                         tombstoneCount,
+                                                                         Ints.saturatedCast(dataSize),
+                                                                         trie);
 
             return pu;
         }
@@ -706,43 +706,43 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         }
     }
 
-    public static class TrieFactory implements PartitionUpdate.Factory
+    public static class TrieFactory implements Factory
     {
 
         @Override
         public PartitionUpdate.Builder builder(TableMetadata metadata, DecoratedKey partitionKey, RegularAndStaticColumns columns, int initialRowCapacity)
         {
-            return new TriePartitionUpdate.Builder(metadata, partitionKey, columns);
+            return new TriePartitionUpdateStage3.Builder(metadata, partitionKey, columns);
         }
 
         @Override
         public PartitionUpdate emptyUpdate(TableMetadata metadata, DecoratedKey partitionKey)
         {
-            return TriePartitionUpdate.emptyUpdate(metadata, partitionKey);
+            return TriePartitionUpdateStage3.emptyUpdate(metadata, partitionKey);
         }
 
         @Override
         public PartitionUpdate singleRowUpdate(TableMetadata metadata, DecoratedKey valueKey, Row row)
         {
-            return TriePartitionUpdate.singleRowUpdate(metadata, valueKey, row);
+            return TriePartitionUpdateStage3.singleRowUpdate(metadata, valueKey, row);
         }
 
         @Override
         public PartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, long nowInSec)
         {
-            return TriePartitionUpdate.fullPartitionDelete(metadata, key, timestamp, nowInSec);
+            return TriePartitionUpdateStage3.fullPartitionDelete(metadata, key, timestamp, nowInSec);
         }
 
         @Override
         public PartitionUpdate fromIterator(UnfilteredRowIterator iterator)
         {
-            return TriePartitionUpdate.fromIterator(iterator);
+            return TriePartitionUpdateStage3.fromIterator(iterator);
         }
 
         @Override
         public PartitionUpdate fromIterator(UnfilteredRowIterator iterator, ColumnFilter filter)
         {
-            return TriePartitionUpdate.fromIterator(UnfilteredRowIterators.withOnlyQueriedData(iterator, filter));
+            return TriePartitionUpdateStage3.fromIterator(UnfilteredRowIterators.withOnlyQueriedData(iterator, filter));
         }
     }
 }
