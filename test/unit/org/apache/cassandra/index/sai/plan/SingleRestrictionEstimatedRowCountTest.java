@@ -57,7 +57,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
     @Parameterized.Parameters(name = "{0}")
     public static String[] memtableClasses()
     {
-        return new String[]{ "trie", "trie_stage2", "trie_stage1" };
+        return new String[]{ "trie", "trie_stage3", "trie_stage2", "trie_stage1" };
     }
 
     static protected Map<Map.Entry<Version, CQL3Type.Native>, ColumnFamilyStore> tables = new HashMap<>();

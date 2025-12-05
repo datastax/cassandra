@@ -23,7 +23,6 @@ import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
@@ -37,12 +36,12 @@ import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
+import org.apache.cassandra.cql3.validation.miscellaneous.TombstonesTest;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -85,6 +84,7 @@ public class RangeTombstoneTest
         return ImmutableSet.of(new Object[] {CompactionParams.stcs(ImmutableMap.of()), "skiplist"},
                                new Object[] {CompactionParams.lcs(ImmutableMap.of()), "trie_stage1"},
                                new Object[] {CompactionParams.ucs(ImmutableMap.of()), "trie_stage2"},
+                               new Object[] {CompactionParams.ucs(ImmutableMap.of()), "trie_stage3"},
                                new Object[] {CompactionParams.ucs(ImmutableMap.of()), "trie"});
     }
 
@@ -742,7 +742,7 @@ public class RangeTombstoneTest
 
         Util.flush(cfs);
 
-        if (cfs.getCurrentMemtable() instanceof TrieMemtable)
+        if (TombstonesTest.tombstoneIndependentMemtables.contains(cfs.getCurrentMemtable().getClass()))
         {
             // TrieMemtable deletes the row on receiving the tombstone (issuing an update), and then insert it a second
             // time.
