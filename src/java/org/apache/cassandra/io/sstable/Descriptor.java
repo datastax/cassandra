@@ -26,6 +26,7 @@ import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 
 import org.apache.cassandra.db.Directories;
@@ -221,7 +222,7 @@ public class Descriptor
      * @param filename the filename to a sstable component.
      * @return the descriptor for the parsed file.
      *
-     * @throws IllegalArgumentException if the provided {@code file} does point to a valid sstable filename. This could
+     * @throws IllegalArgumentException if the provided {@code filename} does not point to a valid sstable filename. This could
      * mean either that the filename doesn't look like a sstable file, or that it is for an old and unsupported
      * versions.
      */
@@ -243,7 +244,7 @@ public class Descriptor
      * @param file the {@code File} object for the filename to parse.
      * @return the descriptor for the parsed file.
      *
-     * @throws IllegalArgumentException if the provided {@code file} does point to a valid sstable filename. This could
+     * @throws IllegalArgumentException if the provided {@code file} does not point to a valid sstable filename. This could
      * mean either that the filename doesn't look like a sstable file, or that it is for an old and unsupported
      * versions.
      */
@@ -253,12 +254,12 @@ public class Descriptor
     }
 
     /**
-     * Parse a sstable filename, extracting both the {@code Descriptor} and {@code Component} part.
+     * Parse a sstable file, extracting both the {@code Descriptor} and {@code Component} part.
      *
      * @param file the {@code File} object for the filename to parse.
      * @return a pair of the descriptor and component corresponding to the provided {@code file}.
      *
-     * @throws IllegalArgumentException if the provided {@code file} does point to a valid sstable filename. This could
+     * @throws IllegalArgumentException if the provided {@code file} does not point to a valid sstable filename. This could
      * mean either that the filename doesn't look like a sstable file, or that it is for an old and unsupported
      * versions.
      */
@@ -270,6 +271,31 @@ public class Descriptor
             file = file.toAbsolute();
 
         String name = file.name();
+        File tableDirectory = parentOf(name, file);
+        return fromFilenameWithComponent(tableDirectory, name);
+    }
+
+    /**
+     * Parse a table directory and sstable file name, extracting both the {@code Descriptor} and {@code Component} part.
+     *
+     * @param tableDirectory the {@code File} object for the sstable directory
+     * @param name the name of the sstable to parse
+     * @return a pair of the descriptor and component corresponding to the provided {@code file}.
+     *
+     * @throws IllegalArgumentException if the provided {@code name} does not point to a valid sstable filename. This could
+     * mean either that the filename doesn't look like a sstable file, or that it is for an old and unsupported
+     * versions.
+     */
+    public static Pair<Descriptor, Component> fromFilenameWithComponent(File tableDirectory, String name)
+    {
+        Preconditions.checkNotNull(tableDirectory);
+        Preconditions.checkNotNull(name);
+
+        // We need to extract the keyspace and table names from the parent directories, so make sure we deal with the
+        // absolute path.
+        if (!tableDirectory.isAbsolute())
+            tableDirectory = tableDirectory.toAbsolute();
+
         List<String> tokens = filenameTokens(name);
 
         String versionString = tokens.get(0);
@@ -303,8 +329,7 @@ public class Descriptor
         if (!version.isCompatible())
             throw invalidSSTable(name, "incompatible sstable version (%s); you should have run upgradesstables before upgrading", versionString);
 
-        File directory = parentOf(name, file);
-        File tableDir = directory;
+        File tableDir = tableDirectory;
 
         // Check if it's a 2ndary index directory (not that it doesn't exclude it to be also a backup or snapshot)
         String indexName = "";
@@ -328,7 +353,7 @@ public class Descriptor
         String table = tableDir.name().split("-")[0] + indexName;
         String keyspace = parentOf(name, tableDir).name();
 
-        return Pair.create(new Descriptor(version, directory, keyspace, table, id, format), component);
+        return Pair.create(new Descriptor(version, tableDirectory, keyspace, table, id, format), component);
     }
 
     public static Component validFilenameWithComponent(String name)
