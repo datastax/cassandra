@@ -81,12 +81,6 @@ class PrimaryKeyWithSource implements PrimaryKey
     }
 
     @Override
-    public boolean isTokenOnly()
-    {
-        return false;
-    }
-
-    @Override
     public DecoratedKey partitionKey()
     {
         return primaryKey().partitionKey();

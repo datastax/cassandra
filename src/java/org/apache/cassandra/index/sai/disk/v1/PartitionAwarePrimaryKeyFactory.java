@@ -36,13 +36,6 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     @Override
-    public PrimaryKey createTokenOnly(Token token)
-    {
-        assert token != null;
-        return new PartitionAwarePrimaryKey(token, null, null);
-    }
-
-    @Override
     public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
     {
         assert token != null;
@@ -84,12 +77,6 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         public PartitionAwarePrimaryKey forStaticRow()
         {
             return this;
-        }
-
-        @Override
-        public boolean isTokenOnly()
-        {
-            return partitionKey == null && primaryKeySupplier == null;
         }
 
         @Override
