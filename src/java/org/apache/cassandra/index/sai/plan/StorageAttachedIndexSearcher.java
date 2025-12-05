@@ -222,7 +222,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             String msg = String.format("Query %s attempted to read from too many indexes (%s) but max allowed is %s; " +
                                        "query aborted (see sai_sstable_indexes_per_query_fail_threshold)",
-                                       command.toCQLString(),
+                                       command.toRedactedCQLString(),
                                        numReferencedIndexes,
                                        Guardrails.CONFIG_PROVIDER.getOrCreate(null).getSaiSSTableIndexesPerQueryFailThreshold());
             Tracing.trace(msg);
