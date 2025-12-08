@@ -488,7 +488,7 @@ public class SinglePartitionSliceCommandTest
                                                             DataLimits.NONE,
                                                             key,
                                                             sliceFilter);
-        String ret = cmd.toCQLString();
+        String ret = cmd.toRedactedCQLString();
         Assert.assertNotNull(ret);
         assertFalse(ret.isEmpty());
     }
