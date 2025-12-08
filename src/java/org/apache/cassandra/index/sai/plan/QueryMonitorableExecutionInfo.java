@@ -28,9 +28,6 @@ import org.apache.cassandra.index.sai.QueryContext;
  */
 public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
 {
-    private static final String INDENT = "  ";
-    private static final String DOUBLE_INDENT = INDENT + INDENT;
-
     private final QueryContext.Snapshot metrics;
     private final String plan;
 
