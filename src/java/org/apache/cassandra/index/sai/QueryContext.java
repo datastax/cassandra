@@ -37,7 +37,10 @@ public class QueryContext
 {
     public static final boolean DISABLE_TIMEOUT = Boolean.getBoolean("cassandra.sai.test.disable.timeout");
 
-    protected final long queryStartTimeNanos;
+    /** The thread ID that the query is running on, used to verify single-threaded access. */
+    private final long owningThreadId = Thread.currentThread().getId();
+
+    private final long queryStartTimeNanos;
 
     public final long executionQuotaNano;
 
@@ -103,106 +106,129 @@ public class QueryContext
 
     public long totalQueryTimeNs()
     {
+        checkThreadOwnership();
         return MonotonicClock.approxTime.now() - queryStartTimeNanos;
     }
 
     // setters
     public void addSstablesHit(long val)
     {
+        checkThreadOwnership();
         sstablesHit += val;
     }
 
-    public void addSegmentsHit(long val) {
+    public void addSegmentsHit(long val)
+    {
+        checkThreadOwnership();
         segmentsHit += val;
     }
 
     public void addKeysFetched(long val)
     {
+        checkThreadOwnership();
         keysFetched += val;
     }
 
     public void addPartitionsFetched(long val)
     {
+        checkThreadOwnership();
         partitionsFetched += val;
     }
 
     public void addPartitionsReturned(long val)
     {
+        checkThreadOwnership();
         partitionsReturned += val;
     }
 
     public void addPartitionTombstonesFetched(long val)
     {
+        checkThreadOwnership();
         partitionTombstonesFetched += val;
     }
 
     public void addRowsFetched(long val)
     {
+        checkThreadOwnership();
         rowsFetched += val;
     }
 
     public void addRowsReturned(long val)
     {
+        checkThreadOwnership();
         rowsReturned += val;
     }
 
     public void addRowTombstonesFetched(long val)
     {
+        checkThreadOwnership();
         rowTombstonesFetched += val;
     }
 
     public void addTrieSegmentsHit(long val)
     {
+        checkThreadOwnership();
         trieSegmentsHit += val;
     }
 
     public void addBkdPostingListsHit(long val)
     {
+        checkThreadOwnership();
         bkdPostingListsHit += val;
     }
 
     public void addBkdSegmentsHit(long val)
     {
+        checkThreadOwnership();
         bkdSegmentsHit += val;
     }
 
     public void addBkdPostingsSkips(long val)
     {
+        checkThreadOwnership();
         bkdPostingsSkips += val;
     }
 
     public void addBkdPostingsDecodes(long val)
     {
+        checkThreadOwnership();
         bkdPostingsDecodes += val;
     }
 
     public void addTriePostingsSkips(long val)
     {
+        checkThreadOwnership();
         triePostingsSkips += val;
     }
 
     public void addTriePostingsDecodes(long val)
     {
+        checkThreadOwnership();
         triePostingsDecodes += val;
     }
 
     public void addQueryTimeouts(long val)
     {
+        checkThreadOwnership();
         queryTimeouts += val;
     }
 
     public void addAnnGraphSearchLatency(long val)
     {
+        checkThreadOwnership();
         annGraphSearchLatency += val;
     }
 
     public void setFilterSortOrder(FilterSortOrder filterSortOrder)
     {
+        checkThreadOwnership();
         this.filterSortOrder = filterSortOrder;
     }
 
     public void checkpoint()
     {
+        checkThreadOwnership();
+
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
         {
             addQueryTimeouts(1);
@@ -212,11 +238,14 @@ public class QueryContext
 
     public float getAnnRerankFloor()
     {
+        checkThreadOwnership();
         return annRerankFloor;
     }
 
     public void updateAnnRerankFloor(float observedFloor)
     {
+        checkThreadOwnership();
+
         if (observedFloor < Float.POSITIVE_INFINITY)
             annRerankFloor = max(annRerankFloor, observedFloor);
     }
@@ -236,7 +265,21 @@ public class QueryContext
 
     public Snapshot snapshot()
     {
+        checkThreadOwnership();
         return new Snapshot(this);
+    }
+
+    /**
+     * Verifies that the current thread is the owning thread of this QueryContext.
+     * This is used to enforce single-threaded access to the QueryContext.
+     *
+     * @throws AssertionError if assertions are enabled and the current thread is not the owning thread
+     */
+    private void checkThreadOwnership()
+    {
+        assert Thread.currentThread().getId() == owningThreadId
+                : String.format("QueryContext accessed from wrong thread. Expected thread ID: %d, Actual thread: %s (ID: %d)",
+                owningThreadId, Thread.currentThread().getName(), Thread.currentThread().getId());
     }
 
     /**
