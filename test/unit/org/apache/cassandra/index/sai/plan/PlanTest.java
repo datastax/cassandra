@@ -108,7 +108,8 @@ public class PlanTest
     private static RowFilter.Expression filerPred(String column, Operator operation)
     {
         RowFilter.Expression pred = Mockito.mock(RowFilter.Expression.class);
-        Mockito.when(pred.toCQLString()).thenReturn(column + ' ' + operation + " X");
+        Mockito.when(pred.toCQLString(false)).thenReturn(column + ' ' + operation + " X");
+        Mockito.when(pred.toCQLString(true)).thenReturn(column + ' ' + operation + " ?");
         Mockito.when(pred.operator()).thenReturn(operation);
         return pred;
     }
@@ -562,20 +563,21 @@ public class PlanTest
         Plan.RowsIteration filter = factory.recheckFilter(RowFilter.builder(true).add(pred1).add(pred2).add(pred4).build(), fetch);
         Plan.RowsIteration limit = factory.limit(filter, 3);
 
-        String prettyStr = limit.toStringRecursive();
+        String expectedPlan = "Limit 3 (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
+                              " └─ Filter pred1 < %s AND pred2 < %<s AND pred4 < %<s (sel: 1.000000000) (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
+                              "     └─ Fetch (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
+                              "         └─ KeysSort (keys: 3.0, cost/key: 3792.4, cost: 44171.3..55548.4)\n" +
+                              "             └─ Union (keys: 1999.0, cost/key: 14.8, cost: 13500.0..43001.3)\n" +
+                              "                 ├─ Intersection (keys: 1000.0, cost/key: 29.4, cost: 9000.0..38401.3)\n" +
+                              "                 │   ├─ NumericIndexScan of pred2_idx (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 0.1, cost: 4500.0..4700.0)\n" +
+                              "                 │   │  predicate: RANGE(pred2)\n" +
+                              "                 │   └─ NumericIndexScan of pred1_idx (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 14.6, cost: 4500.0..33701.3)\n" +
+                              "                 │      predicate: RANGE(pred1)\n" +
+                              "                 └─ LiteralIndexScan of pred4_idx (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 0.1, cost: 4500.0..4600.0)\n" +
+                              "                    predicate: RANGE(pred4)\n";
 
-        assertEquals("Limit 3 (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
-                     " └─ Filter pred1 < X AND pred2 < X AND pred4 < X (sel: 1.000000000) (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
-                     "     └─ Fetch (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
-                     "         └─ KeysSort (keys: 3.0, cost/key: 3792.4, cost: 44171.3..55548.4)\n" +
-                     "             └─ Union (keys: 1999.0, cost/key: 14.8, cost: 13500.0..43001.3)\n" +
-                     "                 ├─ Intersection (keys: 1000.0, cost/key: 29.4, cost: 9000.0..38401.3)\n" +
-                     "                 │   ├─ NumericIndexScan of pred2_idx (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 0.1, cost: 4500.0..4700.0)\n" +
-                     "                 │   │  predicate: RANGE(pred2)\n" +
-                     "                 │   └─ NumericIndexScan of pred1_idx (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 14.6, cost: 4500.0..33701.3)\n" +
-                     "                 │      predicate: RANGE(pred1)\n" +
-                     "                 └─ LiteralIndexScan of pred4_idx (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 0.1, cost: 4500.0..4600.0)\n" +
-                     "                    predicate: RANGE(pred4)\n", prettyStr);
+        assertEquals(String.format(expectedPlan, 'X'), limit.toUnredactedStringRecursive());
+        assertEquals(String.format(expectedPlan, '?'), limit.toRedactedStringRecursive());
     }
 
     @Test
@@ -867,7 +869,7 @@ public class PlanTest
 
         Plan optimizedPlan = origPlan.optimize();
         List<Plan.IndexScan> resultIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
-        assertTrue("original:\n" + origPlan.toStringRecursive() + "optimized:\n" + optimizedPlan.toStringRecursive(),
+        assertTrue("original:\n" + origPlan.toRedactedStringRecursive() + "optimized:\n" + optimizedPlan.toRedactedStringRecursive(),
                      expectedIndexScanCount.contains(resultIndexScans.size()));
     }
 
@@ -996,7 +998,7 @@ public class PlanTest
 
         Plan optimizedPlan = origPlan.optimize();
         List<Plan.IndexScan> resultIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
-        assertTrue("original:\n" + origPlan.toStringRecursive() + "optimized:\n" + optimizedPlan.toStringRecursive(),
+        assertTrue("original:\n" + origPlan.toRedactedStringRecursive() + "optimized:\n" + optimizedPlan.toRedactedStringRecursive(),
                      expectedIndexScanCount.contains(resultIndexScans.size()));
     }
 
@@ -1036,7 +1038,6 @@ public class PlanTest
         Mockito.when(indexScan1.withAccess(Mockito.any())).thenReturn(indexScan1);
         Mockito.when(indexScan1.estimateCost()).thenReturn(new Plan.KeysIterationCost(20,0.0, 0.5));
         Mockito.when(indexScan1.estimateSelectivity()).thenReturn(0.001);
-        Mockito.when(indexScan1.title()).thenReturn("");
 
         Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan3 = factory.indexScan(saiPred3, (long) (0.5 * factory.tableMetrics.rows));

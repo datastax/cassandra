@@ -460,7 +460,7 @@ public abstract class AbstractReadExecutor
             if (logBlockingReadRepairAttempt)
             {
                 logger.info("Blocking Read Repair triggered for query [{}] at CL.{} with endpoints {}",
-                            command.toCQLString(),
+                            command.toRedactedCQLString(),
                             replicaPlan().consistencyLevel(),
                             replicaPlan().contacts());
             }

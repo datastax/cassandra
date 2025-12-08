@@ -393,7 +393,7 @@ public class RowIndexEntry extends AbstractRowIndexEntry
                 String msg = String.format("Query %s attempted to access a large RowIndexEntry estimated to be %d bytes " +
                                            "in-memory (total entries: %d, total bytes: %d) but the max allowed is %s;" +
                                            " query aborted  (see row_index_read_size_fail_threshold)",
-                                           command.toCQLString(), estimatedMemory, entries, bytes, failThreshold);
+                                           command.toRedactedCQLString(), estimatedMemory, entries, bytes, failThreshold);
                 MessageParams.remove(ParamType.ROW_INDEX_READ_SIZE_WARN);
                 MessageParams.add(ParamType.ROW_INDEX_READ_SIZE_FAIL, estimatedMemory);
 

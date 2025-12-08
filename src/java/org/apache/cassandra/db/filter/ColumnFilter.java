@@ -298,9 +298,10 @@ public abstract class ColumnFilter
     /**
      * Returns the CQL string corresponding to this {@code ColumnFilter}.
      *
+     * @param redact whether to redact the queried column names, in case they contain sensitive data.
      * @return the CQL string corresponding to this {@code ColumnFilter}.
      */
-    public abstract String toCQLString();
+    public abstract String toCQLString(boolean redact);
 
     /**
      * Returns the sub-selections or {@code null} if there are none.
@@ -613,7 +614,8 @@ public abstract class ColumnFilter
             return "*/*";
         }
 
-        public String toCQLString()
+        @Override
+        public String toCQLString(boolean redact)
         {
             return "*";
         }
@@ -815,20 +817,22 @@ public abstract class ColumnFilter
             {
                 prefix = queried.statics.isEmpty()
                        ? "<all regulars>/"
-                       : String.format("<all regulars>+%s/", toString(queried.statics.selectOrderIterator(), false));
+                       : String.format("<all regulars>+%s/", toString(queried.statics.selectOrderIterator(), false, false));
             }
 
-            return prefix + toString(queried.selectOrderIterator(), false);
+            return prefix + toString(queried.selectOrderIterator(), false, false);
         }
 
         @Override
-        public String toCQLString()
+        public String toCQLString(boolean redact)
         {
-            return queried.isEmpty() ? "*" : toString(queried.selectOrderIterator(), true);
+            return queried.isEmpty() ? "*" : toString(queried.selectOrderIterator(), true, redact);
         }
 
-        private String toString(Iterator<ColumnMetadata> columns, boolean cql)
+        private String toString(Iterator<ColumnMetadata> columns, boolean cql, boolean redact)
         {
+            assert cql || !redact : "Cannot redact non-CQL representation";
+
             StringJoiner joiner = cql ? new StringJoiner(", ") : new StringJoiner(", ", "[", "]");
 
             while (columns.hasNext())
@@ -843,7 +847,7 @@ public abstract class ColumnFilter
                 if (s.isEmpty())
                     joiner.add(columnName);
                 else
-                    s.forEach(subSel -> joiner.add(String.format("%s%s", columnName, subSel.toString(cql))));
+                    s.forEach(subSel -> joiner.add(String.format("%s%s", columnName, subSel.toString(cql, redact))));
             }
             return joiner.toString();
         }

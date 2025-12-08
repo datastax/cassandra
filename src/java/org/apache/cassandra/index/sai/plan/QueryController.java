@@ -420,11 +420,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         updateIndexMetricsQueriesCount(plan);
 
         if (logger.isTraceEnabled())
-            logger.trace("Query execution plan:\n" + plan.toStringRecursive());
+            logger.trace("Query execution plan:\n" + plan.toRedactedStringRecursive());
 
         if (Tracing.isTracing())
         {
-            Tracing.trace("Query execution plan:\n" + plan.toStringRecursive());
+            Tracing.trace("Query execution plan:\n" + plan.toUnredactedStringRecursive());
             List<Plan.IndexScan> origIndexScans = keysIterationPlan.nodesOfType(Plan.IndexScan.class);
             List<Plan.IndexScan> selectedIndexScans = plan.nodesOfType(Plan.IndexScan.class);
             Tracing.trace("Selecting {} {} of {} out of {} indexes",

@@ -201,6 +201,23 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return getSerializer().serialize(value);
     }
 
+    /**
+     * Returns a CQL literal representing the specified binary value, or "?" if redaction is requested.
+     *
+     * @param bytes the value to convert to a CQL literal
+     * @param redact whether to mask the value with '?' (for redaction purposes)
+     */
+    public String toCQLString(ByteBuffer bytes, boolean redact)
+    {
+        if (redact)
+            return "?";
+
+        if (bytes == null)
+            return "null";
+
+        return asCQL3Type().toCQLLiteral(bytes);
+    }
+
     /** get a string representation of the bytes used for various identifier (NOT just for log messages) */
     public <V> String getString(V value, ValueAccessor<V> accessor)
     {
@@ -232,12 +249,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public String toCQLString(ByteBuffer bytes)
     {
         return bytes == null ? "null" : asCQL3Type().toCQLLiteral(bytes);
-    }
-
-    public String toCQLString(ByteBuffer bytes, boolean truncate)
-    {
-        String s = toCQLString(bytes);
-        return truncate ? truncateString(s) : s;
     }
 
     private static String truncateString(String valueString)

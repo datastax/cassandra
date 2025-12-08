@@ -155,16 +155,16 @@ public interface SinglePartitionReadQuery extends ReadQuery
         return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
-    default void appendCQLWhereClause(CqlBuilder builder)
+    default void appendCQLWhereClause(CqlBuilder builder, boolean redact)
     {
         builder.append(" WHERE ");
 
         // Append the partition key restrictions.
         TableMetadata metadata = metadata();
-        builder.append(partitionKey().toCQLString(metadata));
+        builder.append(partitionKey().toCQLString(metadata, redact));
 
         // Append the clustering index filter and the row filter.
-        String filter = clusteringIndexFilter().toCQLString(metadata(), rowFilter());
+        String filter = clusteringIndexFilter().toCQLString(metadata(), rowFilter(), redact);
         builder.appendRestrictions(filter, true);
     }
 

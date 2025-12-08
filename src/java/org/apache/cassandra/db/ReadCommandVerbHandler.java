@@ -140,7 +140,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         }
         catch (AssertionError t)
         {
-            throw new AssertionError(String.format("Caught an error while trying to process the command: %s", command.toCQLString()), t);
+            throw new AssertionError(String.format("Caught an error while trying to process the command: %s", command.toRedactedCQLString()), t);
         }
         catch (QueryCancelledException e)
         {
