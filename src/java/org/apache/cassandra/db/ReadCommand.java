@@ -138,7 +138,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     @Nullable
     protected final Index.QueryPlan indexQueryPlan;
 
-    private volatile Supplier<ExecutionInfo> executionInfoSupplier = ExecutionInfo.EMPTY_SUPPLIER;
+    private Supplier<ExecutionInfo> executionInfoSupplier = ExecutionInfo.EMPTY_SUPPLIER;
 
     protected static abstract class SelectionDeserializer
     {
@@ -516,8 +516,8 @@ public abstract class ReadCommand extends AbstractReadQuery
             Context context = Context.from(this);
             var storageTarget = (null == searcher) ? queryStorage(cfs, executionController)
                                                    : searchStorage(searcher, executionController);
-            if (searcher != null)
-                executionInfoSupplier = searcher.monitorableExecutionInfo();
+            // Prepare the monitorable execution info, which will be null if it's deferred to the index
+            ReadCommandExecutionInfo executionInfo = setupExecutionInfo(searcher);
 
             UnfilteredPartitionIterator iterator = Transformation.apply(storageTarget, new TrackingRowIterator(context));
             iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
@@ -530,6 +530,8 @@ public abstract class ReadCommand extends AbstractReadQuery
                 iterator = withReadObserver(iterator);
                 iterator = RTBoundValidator.validate(withoutPurgeableTombstones(iterator, cfs, executionController), Stage.PURGED, false);
                 iterator = withMetricsRecording(iterator, cfs.metric, startTimeNanos);
+                if (executionInfo != null)
+                    iterator = executionInfo.countFetched(iterator, nowInSec());
 
                 // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
                 // no point in checking it again.
@@ -562,8 +564,13 @@ public abstract class ReadCommand extends AbstractReadQuery
                     iterator = limits().filter(iterator, nowInSec(), selectsFullPartition());
                 }
 
-                // because of the above, we need to append an aritifical end bound if the source iterator was stopped short by a counter.
-                return RTBoundCloser.close(iterator);
+                // because of the above, we need to append an artifical end bound if the source iterator was stopped short by a counter.
+                iterator = RTBoundCloser.close(iterator);
+
+                if (executionInfo != null)
+                    iterator = executionInfo.countReturned(iterator, nowInSec());
+
+                return iterator;
             }
             catch (RuntimeException | Error e)
             {
@@ -1371,5 +1378,29 @@ public abstract class ReadCommand extends AbstractReadQuery
                    + command.selectionSerializedSize(version)
                    + command.indexSerializedSize(version);
         }
+    }
+
+    @Nullable
+    private ReadCommandExecutionInfo setupExecutionInfo(Index.Searcher searcher)
+    {
+        // if we have a searcher, it may use its own custom execution info instead of the generic one
+        if (searcher != null)
+        {
+            Supplier<ExecutionInfo> searcherExecutionInfoSupplier = searcher.monitorableExecutionInfo();
+            if (searcherExecutionInfoSupplier != null)
+            {
+                executionInfoSupplier = searcherExecutionInfoSupplier;
+                return null;
+            }
+        }
+
+        // if execution info is disabled, return null so we will keep using the default empty supplier
+        if (!CassandraRelevantProperties.MONITORING_EXECUTION_INFO_ENABLED.getBoolean())
+            return null;
+
+        // otherwise, create and use the generic execution info
+        ReadCommandExecutionInfo commandExecutionInfo = new ReadCommandExecutionInfo();
+        executionInfoSupplier = () -> commandExecutionInfo;
+        return commandExecutionInfo;
     }
 }

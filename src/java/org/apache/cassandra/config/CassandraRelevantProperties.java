@@ -589,6 +589,11 @@ public enum CassandraRelevantProperties
     MEMTABLE_TRIE_SIZE_LIMIT("cassandra.trie_size_limit_mb"),
     MIGRATION_DELAY("cassandra.migration_delay_ms", "60000"),
     MMAPPED_MAX_SEGMENT_SIZE_IN_MB("cassandra.mmapped_max_segment_size"),
+    /**
+     * Whether to log detailed execution info when logging slow non-SAI queries.
+     * For SAI queries, see {@link #SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED}.
+     */
+    MONITORING_EXECUTION_INFO_ENABLED("cassandra.monitoring_execution_info_enabled", "true"),
     /** Defines the maximum number of unique timed out queries that will be reported in the logs. Use a negative number to remove any limit. */
     MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
     /** Defines the interval for reporting any operations that have timed out. */
@@ -792,6 +797,7 @@ public enum CassandraRelevantProperties
     /**
      * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
      * This execution info includes the query metrics and the query plan of the slow queries.
+     * For non-SAI queries, see {@link #MONITORING_EXECUTION_INFO_ENABLED}.
      */
     SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
 
