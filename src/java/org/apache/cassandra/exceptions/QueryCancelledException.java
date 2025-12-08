@@ -23,6 +23,6 @@ public class QueryCancelledException extends RuntimeException
 {
     public QueryCancelledException(ReadCommand command)
     {
-        super("Query cancelled for taking too long: " + command.toCQLString());
+        super("Query cancelled for taking too long: " + command.toRedactedCQLString());
     }
 }
