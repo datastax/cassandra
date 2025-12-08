@@ -65,6 +65,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.STARTUP;
@@ -360,7 +361,8 @@ public class CommitLog implements CommitLogMBean
     {
         assert mutation != null;
 
-        mutation.validateSize(MessagingService.current_version, ENTRY_OVERHEAD_SIZE);
+        int storageVersion = StorageCompatibilityMode.current().storageMessagingVersion();
+        mutation.validateSize(storageVersion, ENTRY_OVERHEAD_SIZE);
 
         if (shouldRejectMutations())
         {
@@ -371,7 +373,7 @@ public class CommitLog implements CommitLogMBean
 
         try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
         {
-            Mutation.serializer.serialize(mutation, dob, MessagingService.current_version);
+            Mutation.serializer.serialize(mutation, dob, storageVersion);
             int size = dob.getLength();
             int totalSize = size + ENTRY_OVERHEAD_SIZE;
             Allocation alloc = segmentManager.allocate(mutation, totalSize);
