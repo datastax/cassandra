@@ -655,6 +655,8 @@ public class QueryMetricsTest extends AbstractMetricsTest
     @Test
     public void testQueryPlannerMetrics()
     {
+        CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(true);
+
         String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, lc int, hc int)");
         createIndex("CREATE CUSTOM INDEX ON %s(lc) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(hc) USING 'StorageAttachedIndex'");
@@ -737,6 +739,62 @@ public class QueryMetricsTest extends AbstractMetricsTest
         var newLogSelectivityEstimated = getHistogramMean(logSelectivityEstimatedMetric);
         assertTrue(Double.isFinite(newLogSelectivityEstimated));
         assertTrue(newLogSelectivityEstimated > oldLogSelectivityEstimated);
+    }
+
+    @Test
+    public void testDisableQueryPlanMetrics()
+    {
+        CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(false);
+
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, lc int, hc int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(lc) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(hc) USING 'StorageAttachedIndex'");
+
+        int numRows = 10000;
+        for (int i = 0; i < numRows; i++)
+        {
+            execute("INSERT INTO %s (k, lc, hc) VALUES (?, ?, ?)", i, i % 2, i);
+        }
+
+        flush();
+
+        // Check if SAI queries still work correctly when plan metrics are disabled
+        UntypedResultSet rows;
+        rows = execute("SELECT k FROM %s WHERE lc = 0");
+        assertEquals(numRows / 2, rows.size());
+        rows = execute("SELECT k FROM %s WHERE lc = 0 AND hc < 10");
+        assertEquals(5, rows.size());
+        rows = execute("SELECT k FROM %s WHERE lc = 0 ORDER BY hc LIMIT 100");
+        assertEquals(100, rows.size());
+        rows = execute("SELECT k FROM %s WHERE k = 1 AND hc = 1");
+        assertEquals(1, rows.size());
+
+        // Check if metrics aren't updated
+        ObjectName objectName;
+        objectName = objectNameNoIndex("RowsToReturnEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(objectName, 0);
+        objectName = objectNameNoIndex("RowsToFetchEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(objectName, 0);
+        objectName = objectNameNoIndex("KeysToIterateEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(objectName, 0);
+        objectName = objectNameNoIndex("CostEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(objectName, 0);
+        objectName = objectNameNoIndex("LogSelectivityEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(objectName, 0);
+
+        objectName = objectNameNoIndex("IndexReferencesInQuery", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(objectName, 0);
+        objectName = objectNameNoIndex("IndexReferencesInPlan", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(objectName, 0);
+
+        objectName = objectNameNoIndex("TotalRowsToReturnEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForEquals(objectName, 0);
+        objectName = objectNameNoIndex("TotalRowsToFetchEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForEquals(objectName, 0);
+        objectName = objectNameNoIndex("TotalKeysToIterateEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForEquals(objectName, 0);
+        objectName = objectNameNoIndex("TotalCostEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForEquals(objectName, 0);
     }
 
     private ObjectName objectName(String name, String type)
