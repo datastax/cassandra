@@ -255,7 +255,7 @@ public class ReadExecutionController implements AutoCloseable
     {
         return repairedDataInfo.isConclusive();
     }
-    
+
     public RepairedDataInfo getRepairedDataInfo()
     {
         return repairedDataInfo;
@@ -263,7 +263,7 @@ public class ReadExecutionController implements AutoCloseable
 
     private void addSample()
     {
-        String cql = command.toCQLString();
+        String cql = command.toRedactedCQLString();
         int timeMicros = (int) Math.min(TimeUnit.NANOSECONDS.toMicros(clock.now() - createdAtNanos), Integer.MAX_VALUE);
         ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(baseMetadata.id);
         if (cfs != null)

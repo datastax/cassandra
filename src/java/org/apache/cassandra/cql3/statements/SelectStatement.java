@@ -2158,7 +2158,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
         StringBuilder sb = new StringBuilder();
 
-        sb.append("SELECT ").append(queriedColumns().toCQLString());
+        sb.append("SELECT ").append(queriedColumns().toCQLString(false));
         sb.append(" FROM ").append(table.keyspace).append('.').append(table.name);
         if (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing())
         {
@@ -2188,7 +2188,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                         sb.append(" AND ");
                 }
                 if (!dataRange.isUnrestricted(table))
-                    sb.append(dataRange.toCQLString(table, rowFilter));
+                    sb.append(dataRange.toCQLString(table, rowFilter, false));
             }
         }
         else
@@ -2212,7 +2212,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             {
                 sb.append(" = ");
                 if (compoundPk) sb.append('(');
-                DataRange.appendKeyString(sb, table.partitionKeyType, Iterables.getOnlyElement(keys));
+                DataRange.appendKeyString(sb, table.partitionKeyType, Iterables.getOnlyElement(keys), false);
                 if (compoundPk) sb.append(')');
             }
             else
@@ -2225,7 +2225,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                         sb.append(", ");
 
                     if (compoundPk) sb.append('(');
-                    DataRange.appendKeyString(sb, table.partitionKeyType, key);
+                    DataRange.appendKeyString(sb, table.partitionKeyType, key, false);
                     if (compoundPk) sb.append(')');
                     first = false;
                 }
@@ -2237,7 +2237,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             if (!rowFilter.isEmpty())
                 sb.append(" AND ").append(rowFilter);
 
-            String filterString = filter.toCQLString(table, rowFilter);
+            String filterString = filter.toCQLString(table, rowFilter, false);
             if (!filterString.isEmpty())
                 sb.append(" AND ").append(filterString);
         }

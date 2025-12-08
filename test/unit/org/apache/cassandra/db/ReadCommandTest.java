@@ -1232,7 +1232,7 @@ public class ReadCommandTest
 
         ReadCommand readCommand = Util.cmd(cfs, key).build();
 
-        String result = readCommand.toCQLString();
+        String result = readCommand.toUnredactedCQLString();
 
         assertEquals(result, String.format("SELECT * FROM \"ReadCommandTest\".\"Standard2\" WHERE key = 0x%s ALLOW FILTERING", ByteBufferUtil.bytesToHex(key.getKey())));
     }
