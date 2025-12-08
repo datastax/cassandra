@@ -79,13 +79,13 @@ public interface Clustering<V> extends ClusteringPrefix<V>, IMeasurableMemory
         return sb.toString();
     }
 
-    public default String toCQLString(TableMetadata metadata)
+    default String toCQLString(TableMetadata metadata, boolean redact)
     {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < size(); i++)
         {
             ColumnMetadata c = metadata.clusteringColumns().get(i);
-            sb.append(i == 0 ? "" : ", ").append(c.type.toCQLString(bufferAt(i)));
+            sb.append(i == 0 ? "" : ", ").append(c.type.toCQLString(bufferAt(i), redact));
         }
         return sb.toString();
     }

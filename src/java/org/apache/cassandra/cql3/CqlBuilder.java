@@ -289,11 +289,12 @@ public final class CqlBuilder
      *
      * @param filter the row filter to append
      * @param hasKeyRestrictions whether the query has key restrictions that have already been appended
+     * @param redact whether to redact the column values in the row filter
      * @return this CQL builder after appending the row filter
      */
-    public CqlBuilder append(RowFilter filter, boolean hasKeyRestrictions)
+    public CqlBuilder append(RowFilter filter, boolean hasKeyRestrictions, boolean redact)
     {
-        return filter.isEmpty() ? this : appendRestrictions(filter.toCQLString(), hasKeyRestrictions);
+        return filter.isEmpty() ? this : appendRestrictions(filter.toCQLString(redact), hasKeyRestrictions);
     }
 
     /**
