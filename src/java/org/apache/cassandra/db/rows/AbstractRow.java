@@ -140,10 +140,10 @@ public abstract class AbstractRow implements Row
             sb.append(" ]");
         }
         sb.append(": ");
-        if(includeClusterKeys)
+        if (includeClusterKeys)
             sb.append(clustering().toString(metadata));
         else
-            sb.append(clustering().toCQLString(metadata));
+            sb.append(clustering().toCQLString(metadata, false));
         sb.append(" | ");
         boolean isFirst = true;
         for (ColumnData cd : this)

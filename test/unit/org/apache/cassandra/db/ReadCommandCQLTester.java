@@ -15,6 +15,7 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.CQLTester;
@@ -22,23 +23,33 @@ import org.assertj.core.api.Assertions;
 
 public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTester
 {
+    private static final Pattern PATTERN = Pattern.compile("%");
+
     protected abstract T parseCommand(String query);
 
-    protected void assertToCQLString(String query, String expected)
+    protected void assertToCQLString(String query, String expectedUnredactedCQL, String expectedRedactedCQL)
     {
-        assertToCQLString(query, expected, null);
+        assertToCQLString(query, expectedUnredactedCQL, expectedRedactedCQL, null);
     }
 
-    protected void assertToCQLString(String query, String expected, @Nullable String expectedErrorMessage)
+    protected void assertToCQLString(String query,
+                                     String expectedUnredactedCQL,
+                                     String expectedRedactedCQL,
+                                     @Nullable String expectedErrorMessage)
     {
         T command = parseCommand(query);
-        String actual = command.toCQLString();
 
-        Assertions.assertThat(actual).isEqualTo(formatQuery(expected));
+        String actualUnredactedCQL = command.toUnredactedCQLString();
+        Assertions.assertThat(actualUnredactedCQL)
+                  .isEqualTo(formatQuery(expectedUnredactedCQL));
+
+        String actualRedactedCQL = command.toRedactedCQLString();
+        Assertions.assertThat(actualRedactedCQL)
+                  .isEqualTo(formatQuery(expectedRedactedCQL));
 
         if (expectedErrorMessage == null)
-            execute(actual);
+            execute(PATTERN.matcher(actualUnredactedCQL).replaceAll("%%"));
         else
-            Assertions.assertThatThrownBy(() -> execute(actual)).hasMessageContaining(expectedErrorMessage);
+            Assertions.assertThatThrownBy(() -> execute(actualUnredactedCQL)).hasMessageContaining(expectedErrorMessage);
     }
 }

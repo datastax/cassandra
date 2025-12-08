@@ -28,18 +28,18 @@ public interface MultiPartitionReadQuery extends ReadQuery
 {
     List<DataRange> ranges();
 
-    default void appendCQLWhereClause(CqlBuilder builder)
+    default void appendCQLWhereClause(CqlBuilder builder, boolean redact)
     {
         // Append the data ranges.
         TableMetadata metadata = metadata();
-        boolean hasRanges = appendRanges(builder);
+        boolean hasRanges = appendRanges(builder, redact);
 
         // Append the clustering index filter and the row filter.
-        String filter = ranges().get(0).clusteringIndexFilter.toCQLString(metadata, rowFilter());
+        String filter = ranges().get(0).clusteringIndexFilter.toCQLString(metadata, rowFilter(), redact);
         builder.appendRestrictions(filter, hasRanges);
     }
 
-    private boolean appendRanges(CqlBuilder builder)
+    private boolean appendRanges(CqlBuilder builder, boolean redact)
     {
         List<DataRange> ranges = ranges();
         if (ranges.size() == 1)
@@ -48,7 +48,7 @@ public interface MultiPartitionReadQuery extends ReadQuery
             if (range.isUnrestricted(metadata()))
                 return false;
 
-            String rangeString = range.toCQLString(metadata(), rowFilter());
+            String rangeString = range.toCQLString(metadata(), rowFilter(), redact);
             if (!rangeString.isEmpty())
             {
                 builder.append(" WHERE ").append(rangeString);
@@ -62,7 +62,7 @@ public interface MultiPartitionReadQuery extends ReadQuery
             {
                 if (i > 0)
                     builder.append(" OR ");
-                builder.append(ranges.get(i).toCQLString(metadata(), rowFilter()));
+                builder.append(ranges.get(i).toCQLString(metadata(), rowFilter(), redact));
             }
             builder.append(')');
             return true;
