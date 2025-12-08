@@ -54,6 +54,9 @@ public interface Monitorable
      */
     interface ExecutionInfo
     {
+        String INDENT = "  ";
+        String DOUBLE_INDENT = INDENT + INDENT;
+
         /**
          * An empty no-op implementation.
          */
