@@ -252,7 +252,7 @@ public abstract class Message
          */
         protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
-            return timeUnit.convert(MonotonicClock.Global.approxTime.now() - createdAtNanos, TimeUnit.NANOSECONDS);
+            return timeUnit.convert(MonotonicClock.Global.preciseTime.now() - createdAtNanos, TimeUnit.NANOSECONDS);
         }
 
 
