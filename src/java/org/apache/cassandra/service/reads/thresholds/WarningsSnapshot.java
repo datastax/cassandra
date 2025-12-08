@@ -107,19 +107,19 @@ public class WarningsSnapshot
     public void maybeAbort(ReadCommand command, ConsistencyLevel cl, int received, int blockFor, boolean isDataPresent, Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint)
     {
         if (!tombstones.aborts.instances.isEmpty())
-            throw new TombstoneAbortException(tombstoneAbortMessage(tombstones.aborts.instances.size(), tombstones.aborts.maxValue, command.toCQLString()), tombstones.aborts.instances.size(), tombstones.aborts.maxValue, isDataPresent,
+            throw new TombstoneAbortException(tombstoneAbortMessage(tombstones.aborts.instances.size(), tombstones.aborts.maxValue, command.toRedactedCQLString()), tombstones.aborts.instances.size(), tombstones.aborts.maxValue, isDataPresent,
                                               cl, received, blockFor, failureReasonByEndpoint);
 
         if (!localReadSize.aborts.instances.isEmpty())
-            throw new ReadSizeAbortException(localReadSizeAbortMessage(localReadSize.aborts.instances.size(), localReadSize.aborts.maxValue, command.toCQLString()),
+            throw new ReadSizeAbortException(localReadSizeAbortMessage(localReadSize.aborts.instances.size(), localReadSize.aborts.maxValue, command.toRedactedCQLString()),
                                              cl, received, blockFor, isDataPresent, failureReasonByEndpoint);
 
         if (!rowIndexReadSize.aborts.instances.isEmpty())
-            throw new ReadSizeAbortException(rowIndexReadSizeAbortMessage(rowIndexReadSize.aborts.instances.size(), rowIndexReadSize.aborts.maxValue, command.toCQLString()),
+            throw new ReadSizeAbortException(rowIndexReadSizeAbortMessage(rowIndexReadSize.aborts.instances.size(), rowIndexReadSize.aborts.maxValue, command.toRedactedCQLString()),
                                              cl, received, blockFor, isDataPresent, failureReasonByEndpoint);
 
         if (!indexReadSSTablesCount.aborts.instances.isEmpty())
-            throw new QueryReferencesTooManyIndexesAbortException(tooManyIndexesReadAbortMessage(indexReadSSTablesCount.aborts.instances.size(), indexReadSSTablesCount.aborts.maxValue, command.toCQLString()),
+            throw new QueryReferencesTooManyIndexesAbortException(tooManyIndexesReadAbortMessage(indexReadSSTablesCount.aborts.instances.size(), indexReadSSTablesCount.aborts.maxValue, command.toRedactedCQLString()),
                                                                   indexReadSSTablesCount.aborts.instances.size(),
                                                                   indexReadSSTablesCount.aborts.maxValue,
                                                                   isDataPresent,

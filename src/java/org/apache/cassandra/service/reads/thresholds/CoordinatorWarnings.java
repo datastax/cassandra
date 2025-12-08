@@ -86,7 +86,7 @@ public class CoordinatorWarnings
             if (cfs == null)
                 return;
 
-            String cql = command.toCQLString();
+            String cql = command.toRedactedCQLString();
             String loggableTokens = command.loggableTokens();
             recordAborts(merged.tombstones, cql, loggableTokens, cfs.metric.clientTombstoneAborts, WarningsSnapshot::tombstoneAbortMessage);
             recordWarnings(merged.tombstones, cql, loggableTokens, cfs.metric.clientTombstoneWarnings, WarningsSnapshot::tombstoneWarnMessage);

@@ -68,7 +68,7 @@ public class SAICodecUtils
      * @deprecated Use {@link #writeHeader(org.apache.cassandra.index.sai.disk.io.IndexOutput)} or
      *             {@link #writeHeader(DataOutput, Version)} instead.
      */
-    @Deprecated(since = "20251203")
+    @Deprecated(since = "CC5")
     public static void writeHeader(DataOutput out) throws IOException
     {
         if (out instanceof org.apache.cassandra.index.sai.disk.io.IndexOutput)

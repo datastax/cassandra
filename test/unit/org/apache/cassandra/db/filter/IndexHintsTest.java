@@ -357,7 +357,7 @@ public class IndexHintsTest extends CQLTester
         // without index hints
         String formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0");
         ReadCommand command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString())
+        Assertions.assertThat(command.toRedactedCQLString())
                   .doesNotContain("included_indexes")
                   .doesNotContain("excluded_indexes");
 
@@ -365,7 +365,7 @@ public class IndexHintsTest extends CQLTester
         formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 " +
                                      "WITH included_indexes={} AND excluded_indexes={}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString())
+        Assertions.assertThat(command.toRedactedCQLString())
                   .doesNotContain("included_indexes")
                   .doesNotContain("excluded_indexes");
 
@@ -373,7 +373,7 @@ public class IndexHintsTest extends CQLTester
         formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 " +
                                      "WITH included_indexes={idx1,idx2}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString())
+        Assertions.assertThat(command.toRedactedCQLString())
                   .contains(" WITH included_indexes = {idx1, idx2}")
                   .doesNotContain("excluded_indexes");
 
@@ -381,7 +381,7 @@ public class IndexHintsTest extends CQLTester
         formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 ALLOW FILTERING " +
                                      "WITH excluded_indexes={idx1,idx2}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString())
+        Assertions.assertThat(command.toRedactedCQLString())
                   .contains(" WITH excluded_indexes = {idx1, idx2}")
                   .doesNotContain("included_indexes");
 
@@ -389,14 +389,14 @@ public class IndexHintsTest extends CQLTester
         formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 ALLOW FILTERING " +
                                      "WITH included_indexes={idx1} AND excluded_indexes={idx2}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString())
+        Assertions.assertThat(command.toRedactedCQLString())
                   .contains(" WITH included_indexes = {idx1} AND excluded_indexes = {idx2}");
 
         // with a single-partition read command
         formattedQuery = formatQuery("SELECT * FROM %%s WHERE k=1 AND a = 0 AND b = 0 ALLOW FILTERING " +
                                      "WITH included_indexes={idx1} AND excluded_indexes={idx2}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString())
+        Assertions.assertThat(command.toRedactedCQLString())
                   .contains(" WITH included_indexes = {idx1} AND excluded_indexes = {idx2}");
     }
 

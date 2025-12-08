@@ -65,7 +65,7 @@ final class ReadRepairEvent extends DiagnosticEvent
     {
         this.keyspace = readRepair.cfs.keyspace;
         this.tableName = readRepair.cfs.getTableName();
-        this.cqlCommand = readRepair.command.toCQLString();
+        this.cqlCommand = readRepair.command.toRedactedCQLString();
         this.consistency = readRepair.replicaPlan().consistencyLevel();
         this.speculativeRetry = readRepair.cfs.metadata().params.speculativeRetry.kind();
         this.destinations = destinations;
