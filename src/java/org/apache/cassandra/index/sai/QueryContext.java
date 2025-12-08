@@ -342,22 +342,22 @@ public class QueryContext
         public final boolean searchExecutedBeforeOrder;
         public final boolean filterExecutedAfterOrderedScan;
 
-        public final double rowsToReturnEstimated;
-        public final double rowsToFetchEstimated;
-        public final double keysToIterateEstimated;
-        public final double selectivityEstimated;
-        public final double costEstimated;
+        public final long costEstimated;
+        public final long rowsToReturnEstimated;
+        public final long rowsToFetchEstimated;
+        public final long keysToIterateEstimated;
+        public final int logSelectivityEstimated;
 
         public final int indexReferencesInQuery;
         public final int indexReferencesInPlan;
 
         public PlanInfo(@Nonnull Plan.RowsIteration originalPlan, @Nonnull Plan.RowsIteration optimizedPlan)
         {
-            this.costEstimated = optimizedPlan.fullCost();
-            this.rowsToReturnEstimated = optimizedPlan.expectedRows();
-            this.rowsToFetchEstimated = optimizedPlan.estimatedRowsToFetch();
-            this.keysToIterateEstimated = optimizedPlan.estimatedKeysToIterate();
-            this.selectivityEstimated = optimizedPlan.selectivity();
+            this.costEstimated = Math.round(optimizedPlan.fullCost());
+            this.rowsToReturnEstimated = Math.round(optimizedPlan.expectedRows());
+            this.rowsToFetchEstimated = Math.round(optimizedPlan.estimatedRowsToFetch());
+            this.keysToIterateEstimated = Math.round(optimizedPlan.estimatedKeysToIterate());
+            this.logSelectivityEstimated = (Math.min(20, (int) Math.floor(-Math.log10(optimizedPlan.selectivity()))));
             this.indexReferencesInQuery = originalPlan.referencedIndexCount();
             this.indexReferencesInPlan = optimizedPlan.referencedIndexCount();
             this.searchExecutedBeforeOrder = optimizedPlan.isSearchThenOrderHybrid();

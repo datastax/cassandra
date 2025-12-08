@@ -255,10 +255,10 @@ public class TableQueryMetrics
             QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
             if (queryPlanInfo != null)
             {
-                totalCostEstimated.inc(Math.round(queryPlanInfo.costEstimated));
-                totalRowsToReturnEstimated.inc(Math.round(queryPlanInfo.rowsToReturnEstimated));
-                totalRowsToFetchEstimated.inc(Math.round(queryPlanInfo.rowsToFetchEstimated));
-                totalKeysToIterateEstimated.inc(Math.round(queryPlanInfo.keysToIterateEstimated));
+                totalCostEstimated.inc(queryPlanInfo.costEstimated);
+                totalRowsToReturnEstimated.inc(queryPlanInfo.rowsToReturnEstimated);
+                totalRowsToFetchEstimated.inc(queryPlanInfo.rowsToFetchEstimated);
+                totalKeysToIterateEstimated.inc(queryPlanInfo.keysToIterateEstimated);
 
                 if (queryPlanInfo.filterExecutedAfterOrderedScan)
                     sortThenFilterQueriesCompleted.inc();
@@ -420,12 +420,11 @@ public class TableQueryMetrics
             QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
             if (queryPlanInfo != null)
             {
-                costEstimated.update(Math.round(queryPlanInfo.costEstimated));
-                rowsToReturnEstimated.update(Math.round(queryPlanInfo.rowsToReturnEstimated));
-                rowsToFetchEstimated.update(Math.round(queryPlanInfo.rowsToFetchEstimated));
-                keysToIterateEstimated.update(Math.round(queryPlanInfo.keysToIterateEstimated));
-                double logSelectivity = -Math.log10(queryPlanInfo.selectivityEstimated);
-                logSelectivityEstimated.update((int) (Math.min(20, Math.floor(logSelectivity))));
+                costEstimated.update(queryPlanInfo.costEstimated);
+                rowsToReturnEstimated.update(queryPlanInfo.rowsToReturnEstimated);
+                rowsToFetchEstimated.update(queryPlanInfo.rowsToFetchEstimated);
+                keysToIterateEstimated.update(queryPlanInfo.keysToIterateEstimated);
+                logSelectivityEstimated.update(queryPlanInfo.logSelectivityEstimated);
                 indexReferencesInQuery.update(queryPlanInfo.indexReferencesInQuery);
                 indexReferencesInPlan.update(queryPlanInfo.indexReferencesInPlan);
             }
