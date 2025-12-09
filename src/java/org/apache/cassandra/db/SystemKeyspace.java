@@ -82,7 +82,6 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.metrics.TopPartitionTracker;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.nodes.INodeInfo;
 import org.apache.cassandra.nodes.IPeerInfo;
 import org.apache.cassandra.nodes.Nodes;

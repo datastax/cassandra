@@ -21,7 +21,6 @@ import java.io.Closeable;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
