@@ -392,8 +392,12 @@ public class Directories
     {
         Preconditions.checkArgument(dirNumber < dataPaths.length, "Invalid dir number: " + dirNumber);
         File dir = dataPaths[dirNumber];
+<<<<<<< HEAD
         File file = dir.resolve(filename);
         return Descriptor.fromFile(file);
+=======
+        return Descriptor.fromFilenameWithComponent(dir, filename).left;
+>>>>>>> 79f25c7cf0 (CNDB-16135: reuse table directory from Directories into Descriptor (#2150))
     }
 
     /**
