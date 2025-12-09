@@ -18,6 +18,11 @@
 
 package org.apache.cassandra.utils;
 
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
@@ -54,6 +59,9 @@ public enum StorageCompatibilityMode
      * enabled, assuming that all nodes in the cluster are in the same major version as this node.
      */
     NONE(Integer.MAX_VALUE);
+
+    private static final Logger logger = LoggerFactory.getLogger(StorageCompatibilityMode.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     public final int major;
 
@@ -94,15 +102,20 @@ public enum StorageCompatibilityMode
      */
     public int storageMessagingVersion()
     {
+        int version;
         switch (this)
         {
             case CASSANDRA_4:
             case CC_4:
-                return MessagingService.VERSION_40;
+                version = MessagingService.VERSION_40;
+                break;
             case UPGRADING:
             case NONE:
             default:
-                return MessagingService.current_version;
+                version = MessagingService.current_version;
+                break;
         }
+        noSpamLogger.info("Storage messaging version selected: {} for compatibility mode: {}", version, this);
+        return version;
     }
 }
