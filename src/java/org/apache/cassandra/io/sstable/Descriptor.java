@@ -294,7 +294,7 @@ public class Descriptor
      * @param file the {@code File} object for the filename to parse.
      * @return the descriptor for the parsed file.
      *
-     * @throws IllegalArgumentException if the provided {@code file} does point to a valid sstable filename. This could
+     * @throws IllegalArgumentException if the provided {@code file} does not point to a valid sstable filename. This could
      * mean either that the filename doesn't look like a sstable file, or that it is for an old and unsupported
      * versions.
      */
@@ -352,13 +352,13 @@ public class Descriptor
     }
 
     /**
-     * Parse a sstable filename, extracting both the {@code Descriptor} and {@code Component} part.
+     * Parse a sstable file, extracting both the {@code Descriptor} and {@code Component} part.
      * The keyspace/table name will be extracted from the directory path.
      *
      * @param file the {@code File} object for the filename to parse.
      * @return a pair of the descriptor and component corresponding to the provided {@code file}.
      *
-     * @throws IllegalArgumentException if the provided {@code file} does point to a valid sstable filename. This could
+     * @throws IllegalArgumentException if the provided {@code file} does not point to a valid sstable filename. This could
      * mean either that the filename doesn't look like a sstable file, or that it is for an old and unsupported
      * versions.
      */
