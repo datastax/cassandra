@@ -248,4 +248,46 @@ public class HintsDescriptorTest
         assertEquals("CC_4 mode should produce VERSION_40 hints for rollback compatibility",
                      MessagingService.VERSION_40, version);
     }
+
+    @Test
+    public void testHintsVersionFromMessagingVersion()
+    {
+        // Test that all supported messaging versions can be translated to valid hints versions
+        int[] messagingVersions = {
+            MessagingService.VERSION_30,
+            MessagingService.VERSION_3014,
+            MessagingService.VERSION_40,
+            MessagingService.VERSION_50,
+            MessagingService.VERSION_DS_10,
+            MessagingService.VERSION_DS_11,
+            MessagingService.VERSION_DS_12,
+            MessagingService.VERSION_DS_20
+        };
+
+        for (int msgVersion : messagingVersions)
+        {
+            int hintsVersion = HintsDescriptor.hintsVersionFromMessagingVersion(msgVersion);
+            // Verify the translated version is valid by calling messagingVersion() on it
+            // This will throw if the hints version is not recognized
+            int roundTripped = HintsDescriptor.messagingVersion(hintsVersion);
+            assertThat(roundTripped).as("Messaging version for hints version derived from " + msgVersion)
+                                    .isGreaterThan(0);
+        }
+    }
+
+    @Test
+    public void testHintsVersionFromMessagingVersionCC4Compatibility()
+    {
+        int messagingVersion = StorageCompatibilityMode.CC_4.storageMessagingVersion();
+        assertEquals("CC_4 should return VERSION_40 messaging version", MessagingService.VERSION_40, messagingVersion);
+
+        int hintsVersion = HintsDescriptor.hintsVersionFromMessagingVersion(messagingVersion);
+        assertEquals("VERSION_40 messaging version should translate to hints VERSION_40",
+                     HintsDescriptor.VERSION_40, hintsVersion);
+
+        // Verify the hints version can be used without throwing AssertionError
+        int resolvedMsgVersion = HintsDescriptor.messagingVersion(hintsVersion);
+        assertEquals("Hints VERSION_40 should resolve back to messaging VERSION_40",
+                     MessagingService.Version.VERSION_40.value, resolvedMsgVersion);
+    }
 }
