@@ -63,6 +63,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
     @ThreadSafe
     public static class Factory extends SkinnyPrimaryKeyMap.Factory
     {
+        private final IndexComponents.ForRead perSSTableComponents;
         private final ClusteringComparator clusteringComparator;
         private final KeyLookup clusteringKeyReader;
         private final FileHandle clusteringKeyBlockOffsetsFile;
@@ -75,6 +76,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
 
             try
             {
+                this.perSSTableComponents = perSSTableComponents;
                 this.clusteringKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle(this::close);
                 this.clustingingKeyBlocksFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle(this::close);
                 this.clusteringComparator = sstable.metadata().comparator;

@@ -75,6 +75,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     public static class Factory implements PrimaryKeyMap.Factory
     {
         //        private final long count;
+        private final IndexComponents.ForRead perSSTableComponents;
         private final FileHandle tokensFile;
         private final ClusteringComparator clusteringComparator;
         protected final SSTableId<?> sstableId;
@@ -96,6 +97,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         {
             try
             {
+                this.perSSTableComponents = perSSTableComponents;
                 metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
                 this.tokensFile = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES).createFileHandle(this::close);
