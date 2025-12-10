@@ -18,10 +18,16 @@
 
 package org.apache.cassandra.utils;
 
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.net.MessagingService;
 
 /**
  * The mode of compatibility with older Cassandra versions.
@@ -54,6 +60,9 @@ public enum StorageCompatibilityMode
      */
     NONE(Integer.MAX_VALUE);
 
+    private static final Logger logger = LoggerFactory.getLogger(StorageCompatibilityMode.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
     public final int major;
 
     StorageCompatibilityMode(int major)
@@ -82,5 +91,31 @@ public enum StorageCompatibilityMode
             throw new ConfigurationException(String.format("Selected sstable format '%s' is not available when in storage compatibility mode '%s'.",
                                                            selectedFormat.name(),
                                                            this));
+    }
+
+    /**
+     * Returns the messaging version to use for on-disk storage formats (commit log, hints, batch logs).
+     * When a compatibility mode is set (e.g., CC_4), this ensures that on-disk formats are written
+     * in a way that older versions can read.
+     *
+     * @return the messaging version appropriate for storage serialization
+     */
+    public int storageMessagingVersion()
+    {
+        int version;
+        switch (this)
+        {
+            case CASSANDRA_4:
+            case CC_4:
+                version = MessagingService.VERSION_40;
+                break;
+            case UPGRADING:
+            case NONE:
+            default:
+                version = MessagingService.current_version;
+                break;
+        }
+        noSpamLogger.info("Storage messaging version selected: {} for compatibility mode: {}", version, this);
+        return version;
     }
 }

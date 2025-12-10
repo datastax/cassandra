@@ -21,7 +21,7 @@ import java.io.Closeable;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.MAX_HINT_BUFFERS;
@@ -58,7 +58,7 @@ final class HintsBufferPool implements Closeable
      */
     void write(Iterable<UUID> hostIds, Hint hint)
     {
-        int hintSize = (int) Hint.serializer.serializedSize(hint, MessagingService.current_version);
+        int hintSize = (int) Hint.serializer.serializedSize(hint, StorageCompatibilityMode.current().storageMessagingVersion());
         try (HintsBuffer.Allocation allocation = allocate(hintSize))
         {
             allocation.write(hostIds, hint);
