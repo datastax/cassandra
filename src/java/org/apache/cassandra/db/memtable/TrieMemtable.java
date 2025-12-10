@@ -48,6 +48,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdater;
+import org.apache.cassandra.db.partitions.TriePartitionUpdaterLegacyIndex;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -123,7 +124,8 @@ public class TrieMemtable extends AbstractShardedMemtable
 
     /// A merged view of the memtable map. Used for partition range queries and flush.
     /// For efficiency we serve single partition requests off the shard which offers more direct [InMemoryTrie] methods.
-    private final DeletionAwareTrie<Object, TrieTombstoneMarker> mergedTrie;
+    @VisibleForTesting
+    final DeletionAwareTrie<Object, TrieTombstoneMarker> mergedTrie;
 
     @Unmetered
     private final TrieMemtableMetricsView metrics;
@@ -612,6 +614,9 @@ public class TrieMemtable extends AbstractShardedMemtable
 
         private final TableMetadataRef metadata;
 
+        private TriePartitionUpdater noIndexUpdater;
+        private TriePartitionUpdaterLegacyIndex legacyIndexUpdater;
+
         MemtableShard(TableMetadataRef metadata, TrieMemtableMetricsView metrics, OpOrder opOrder)
         {
             this(metadata, AbstractAllocatorMemtable.MEMORY_POOL.newAllocator(metadata.toString()), metrics, opOrder);
@@ -628,9 +633,25 @@ public class TrieMemtable extends AbstractShardedMemtable
             this.metrics = metrics;
         }
 
+        private TriePartitionUpdater getAndConfigureUpdater(PartitionUpdate update, UpdateTransaction indexer)
+        {
+            if (indexer == UpdateTransaction.NO_OP)
+            {
+                if (noIndexUpdater == null)
+                    noIndexUpdater = new TriePartitionUpdater(this, data);
+                return noIndexUpdater;
+            }
+            else
+            {
+                if (legacyIndexUpdater == null)
+                    legacyIndexUpdater = new TriePartitionUpdaterLegacyIndex(this, data, metadata.get());
+                legacyIndexUpdater.setIndexContext(indexer);
+                return legacyIndexUpdater;
+            }
+        }
+
         public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
         {
-            TriePartitionUpdater updater = new TriePartitionUpdater(allocator.cloner(opGroup), indexer, update.partitionLevelDeletion(), metadata.get(), this);
             boolean locked = writeLock.tryLock();
             if (locked)
             {
@@ -643,34 +664,19 @@ public class TrieMemtable extends AbstractShardedMemtable
                 writeLock.lock();
                 metrics.contentionTime.addNano(Clock.Global.nanoTime() - lockStartTime);
             }
+
+            TriePartitionUpdater updater = getAndConfigureUpdater(update, indexer);
             try
             {
                 try
                 {
-                    indexer.start();
-                    // Add the initial trie size on the first operation. This technically isn't correct (other shards
-                    // do take their memory share even if they are empty) but doing it during construction may cause
-                    // the allocator to block while we are trying to flush a memtable and become a deadlock.
-                    long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
-                    long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
-                    try
-                    {
-                        data.apply(TriePartitionUpdate.asMergableTrie(update),
-                                   updater,
-                                   updater::mergeMarkers,
-                                   updater::applyIncomingMarker,
-                                   updater::applyExistingMarkerToIncomingRow,
-                                   true,
-                                   FORCE_COPY_PARTITION_BOUNDARY);
-                    }
-                    catch (TrieSpaceExhaustedException e)
-                    {
-                        // This should never really happen as a flush would be triggered long before this limit is reached.
-                        throw new AssertionError(e);
-                    }
-                    allocator.offHeap().adjust(data.usedSizeOffHeap() - offHeap, opGroup);
-                    allocator.onHeap().adjust((data.usedSizeOnHeap() - onHeap) + updater.heapSize, opGroup);
-                    partitionCount += updater.partitionsAdded;
+                    int partitionsAdded = mergeUpdate(data,
+                                                      allocator,
+                                                      TriePartitionUpdate.asMergableTrie(update),
+                                                      indexer,
+                                                      opGroup,
+                                                      updater);
+                    partitionCount += partitionsAdded;
                 }
                 finally
                 {
@@ -748,13 +754,44 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
     }
 
-    static class PartitionIterator extends TrieTailsIterator.DeletionAware<Object, TrieTombstoneMarker, TrieBackedPartition>
+    /// Merge an update into the given data trie using the given helpers. Extracted to separate method for testing.
+    @VisibleForTesting
+    public static int mergeUpdate(InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> dataTrie,
+                                  MemtableAllocator allocator,
+                                  DeletionAwareTrie<Object, TrieTombstoneMarker> updateTrie,
+                                  UpdateTransaction indexer,
+                                  OpOrder.Group opGroup,
+                                  TriePartitionUpdater updater)
+    {
+        indexer.start();
+        // Add the initial trie size on the first operation. This technically isn't correct (other shards
+        // do take their memory share even if they are empty) but doing it during construction may cause
+        // the allocator to block while we are trying to flush a memtable and become a deadlock.
+        long onHeap = dataTrie.isEmpty() ? 0 : dataTrie.usedSizeOnHeap();
+        long offHeap = dataTrie.isEmpty() ? 0 : dataTrie.usedSizeOffHeap();
+        try
+        {
+            updater.mergeUpdate(allocator.cloner(opGroup), updateTrie);
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            // This should never really happen as a flush would be triggered long before this limit is reached.
+            throw new AssertionError(e);
+        }
+        allocator.offHeap().adjust(dataTrie.usedSizeOffHeap() - offHeap, opGroup);
+        allocator.onHeap().adjust((dataTrie.usedSizeOnHeap() - onHeap) + updater.heapSize, opGroup);
+        return updater.partitionsAdded;
+    }
+
+    /// Iterator over partitions of the given trie. Looks for partition markers and presents the branch of each
+    /// partition marker as a [TrieBackedPartition].
+    static class PartitionIterator extends TrieTailsIterator.DeletionAwareWithoutCoveringDeletions<Object, TrieTombstoneMarker, TrieBackedPartition>
     {
         final TableMetadata metadata;
         final EnsureOnHeap ensureOnHeap;
         PartitionIterator(DeletionAwareTrie<Object, TrieTombstoneMarker> source, TableMetadata metadata, EnsureOnHeap ensureOnHeap)
         {
-            super(source, Direction.FORWARD, PartitionData.class::isInstance);
+            super(source, Direction.FORWARD, TrieBackedPartition.IS_PARTITION_BOUNDARY);
             this.metadata = metadata;
             this.ensureOnHeap = ensureOnHeap;
         }
@@ -777,7 +814,10 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
     }
 
-    static class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator implements Memtable.MemtableUnfilteredPartitionIterator
+    /// The implementation of [UnfilteredPartitionIterator] used to walk partition ranges.
+    static class MemtableUnfilteredPartitionIterator
+    extends AbstractUnfilteredPartitionIterator
+    implements Memtable.MemtableUnfilteredPartitionIterator
     {
         private final TableMetadata metadata;
         private final Iterator<TrieBackedPartition> iter;

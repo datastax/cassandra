@@ -329,13 +329,13 @@ public class LivenessInfo implements IMeasurableMemory
         }
     }
 
-    private static class ExpiringLivenessInfo extends LivenessInfo
+    protected static class ExpiringLivenessInfo extends LivenessInfo
     {
         private final int ttl;
         private final long localExpirationTime;
         private static final long UNSHARED_HEAP_SIZE = ObjectSizes.measure(new ExpiringLivenessInfo(-1, -1, -1));
 
-        private ExpiringLivenessInfo(long timestamp, int ttl, long localExpirationTime)
+        protected ExpiringLivenessInfo(long timestamp, int ttl, long localExpirationTime)
         {
             super(timestamp);
             assert ttl != NO_TTL && localExpirationTime != NO_EXPIRATION_TIME;

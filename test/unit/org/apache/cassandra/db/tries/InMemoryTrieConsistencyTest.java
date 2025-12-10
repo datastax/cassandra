@@ -96,7 +96,12 @@ public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTri
     }
 
     @Override
-    void apply(InMemoryTrie<Content> trie, Trie<Content> mutation, InMemoryBaseTrie.UpsertTransformer<Content, Content> mergeResolver, Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker) throws TrieSpaceExhaustedException
+    void apply(InMemoryTrie<Content> trie,
+               Trie<Content> mutation,
+               InMemoryBaseTrie.UpsertTransformer<Content, Content> mergeResolver,
+               Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker,
+               Predicate<InMemoryBaseTrie.NodeFeatures<TestRangeState>> forcedCopyCheckerRanges)
+    throws TrieSpaceExhaustedException
     {
         trie.apply(mutation, mergeResolver, forcedCopyChecker);
     }
@@ -107,11 +112,13 @@ public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTri
                 TestRangeState partitionMarker,
                 RangeTrie<TestRangeState> deletion,
                 InMemoryBaseTrie.UpsertTransformer<Content, TestRangeState> mergeResolver,
-                Predicate<InMemoryBaseTrie.NodeFeatures<TestRangeState>> forcedCopyChecker) throws TrieSpaceExhaustedException
+                Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker,
+                Predicate<InMemoryBaseTrie.NodeFeatures<TestRangeState>> forcedCopyCheckerRanges)
+    throws TrieSpaceExhaustedException
     {
         deletion = TrieUtil.withRootMetadata(deletion, partitionMarker);
         deletion = deletion.prefixedBy(deletionPrefix);
-        trie.apply(deletion, mergeResolver, forcedCopyChecker);
+        trie.rangeMutator(mergeResolver, forcedCopyCheckerRanges).apply(deletion);
     }
 
     @Override

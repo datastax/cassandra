@@ -23,6 +23,8 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.NavigableMap;
 
+import javax.annotation.Nonnull;
+
 import com.google.common.base.Predicates;
 
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -60,15 +62,30 @@ extends PrefixTailTestBase<InMemoryDeletionAwareTrie<Object, TestRangeState>,
     }
 
     @Override
-    void apply(InMemoryDeletionAwareTrie<Object, TestRangeState> destination, DeletionAwareTrie<Object, TestRangeState> tail, InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object> upsertTransformer) throws TrieSpaceExhaustedException
+    void apply(InMemoryDeletionAwareTrie<Object, TestRangeState> destination, DeletionAwareTrie<Object, TestRangeState> tail, UpsertTransformerWithKeys upsertTransformer) throws TrieSpaceExhaustedException
     {
-        destination.apply(tail,
-                          upsertTransformer,
-                          (x, y, keyProducer) -> (TestRangeState) upsertTransformer.apply(x, y, (InMemoryBaseTrie.KeyProducer) keyProducer),
-                          (x, y, keyProducer) -> { throw new AssertionError(); },
-                          (x, y) -> { throw new AssertionError(); },
-                          true,
-                          Predicates.alwaysFalse());
+        class Updater implements InMemoryTrie.UpsertTransformer<Object, Object>
+        {
+            InMemoryDeletionAwareTrie<Object, TestRangeState>.Mutator<Object, TestRangeState> mutator =
+                destination.mutator(this,
+                                    this::applyRangeState,
+                                    (x, y) -> { throw new AssertionError(); },
+                                    (x, y) -> { throw new AssertionError(); },
+                                    true,
+                                    Predicates.alwaysFalse());
+
+            @Override
+            public Object apply(Object existing, @Nonnull Object update)
+            {
+                return upsertTransformer.apply(existing, update, mutator);
+            }
+
+            public TestRangeState applyRangeState(TestRangeState existing, @Nonnull TestRangeState update)
+            {
+                return (TestRangeState) upsertTransformer.apply(existing, update, mutator);
+            }
+        }
+        new Updater().mutator.apply(tail);
     }
 
     @Override

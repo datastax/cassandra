@@ -113,6 +113,15 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
                             (applicableAfter ? APPLICABLE_AFTER : 0)];
         }
 
+        public static RangeState fromPropertiesAsRangeState(boolean applicableBefore, boolean applicableAfter)
+        {
+            int index = (applicableBefore ? APPLICABLE_BEFORE : 0) |
+                        (applicableAfter ? APPLICABLE_AFTER : 0);
+            if (index == 0)
+                return null;
+            return values()[index];
+        }
+
         // Implementations of methods from the general RangeState interface (used to treat sets as range tries)
 
         @Override
@@ -127,19 +136,23 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
             return succeedingIncluded(direction) ? CONTAINED : null;
         }
 
+        // Note: this method is not used by the set code, only by the RangeCursor interpretation of it. It will return
+        // null instead of NOT_CONTAINED as expected for Range trie states.
         @Override
         public RangeState restrict(boolean applicableBefore, boolean applicableAfter)
         {
-            return fromProperties(this.applicableBefore && applicableBefore,
-                                  this.applicableAfter && applicableAfter);
+            return fromPropertiesAsRangeState(this.applicableBefore && applicableBefore,
+                                              this.applicableAfter && applicableAfter);
         }
 
+        // Note: this method is not used by the set code, only by the RangeCursor interpretation of it. It will return
+        // null instead of NOT_CONTAINED as expected for Range trie states.
         @Override
         public RangeState asBoundary(Direction direction)
         {
             final boolean isForward = direction.isForward();
-            return fromProperties(this.applicableBefore && !isForward,
-                                  this.applicableAfter && isForward);
+            return fromPropertiesAsRangeState(this.applicableBefore && !isForward,
+                                              this.applicableAfter && isForward);
         }
 
 
@@ -246,7 +259,10 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
             switch (overriding)
             {
                 case ROOT:
-                    return source.state().negation().asBoundary(direction());
+                    if (!source.state().succeedingIncluded(direction()))
+                        return direction().select(RangeState.START, RangeState.END);
+                    else
+                        return RangeState.NOT_CONTAINED;
                 case ROOT_RETURN:
                     return direction().select(RangeState.END, RangeState.START);
                 case EXHAUSTED:

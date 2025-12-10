@@ -335,6 +335,11 @@ public class TrieUtil
         return sources;
     }
 
+    static Preencoded generateKeyAllowingPrefixes(Random rand)
+    {
+        return generateKey(rand, MIN_LENGTH, MAX_LENGTH, -1);
+    }
+
     static Preencoded generateKey(Random rand)
     {
         return generateKey(rand, MIN_LENGTH, MAX_LENGTH, ByteSource.TERMINATOR);
@@ -361,7 +366,10 @@ public class TrieUtil
             while (p < m)
                 bytes[p++] = (byte) r2.nextInt(256);
         }
-        return ((ByteComparable)(v -> ByteSource.withTerminator(terminator, ByteSource.of(bytes, v)))).preencode(VERSION);
+        if (terminator != -1)
+            return ((ByteComparable)(v -> ByteSource.withTerminator(terminator, ByteSource.of(bytes, v)))).preencode(VERSION);
+        else
+            return ByteComparable.preencoded(VERSION, bytes);
     }
 
     public static <T> Trie<T> withRootMetadata(Trie<T> wrapped, T metadata)
@@ -728,10 +736,5 @@ public class TrieUtil
                                           .reduce("", (x, y) -> x + y));
             return stringBuilder.toString();
         }
-    }
-
-    public static <T, V> Trie<V> processContent(BaseTrie<T, ?, ?> trie, Function<T, V> processor)
-    {
-        return direction -> new ContentProcessingCursor<>(processor, trie.cursor(direction));
     }
 }

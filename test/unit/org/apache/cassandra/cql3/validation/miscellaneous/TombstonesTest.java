@@ -58,16 +58,16 @@ public class TombstonesTest extends CQLTester
     @Parameterized.Parameters(name = "{0} flush: {1}")
     public static Iterable<Object[]> parameters()
     {
-        return Arrays.asList(new Object[] {"SkipListMemtable", false},
-                             new Object[] {"TrieMemtableStage1", true}, // this uses the same partition code as SkipListMemtable
-                             new Object[] {"TrieMemtableStage2", false}, // this flushes like SkipListMemtable, no need to test flushed
-                             new Object[] {"TrieMemtableStage3", false},
-                             new Object[] {"TrieMemtableStage3", true},
-                             new Object[] {"TrieMemtable", false},
-                             new Object[] {"TrieMemtable", true});
+        return Arrays.asList(new Object[] {"skiplist", false},
+                             new Object[] {"trie_stage1", true}, // this uses the same partition code as SkipListMemtable
+                             new Object[] {"trie_stage2", false}, // this flushes like SkipListMemtable, no need to test flushed
+                             new Object[] {"trie_stage3", false},
+                             new Object[] {"trie_stage3", true},
+                             new Object[] {"trie", false},
+                             new Object[] {"trie", true});
     }
 
-    static final int ORIGINAL_FAILURE_THRESHOLD = DatabaseDescriptor.getGuardrailsConfig().getTombstoneFailThreshold();
+    static int ORIGINAL_FAILURE_THRESHOLD;
     static final int FAILURE_THRESHOLD = 100;
 
     static final int WARN_THRESHOLD = 50;
@@ -78,6 +78,7 @@ public class TombstonesTest extends CQLTester
     public static void setUp() throws Throwable
     {
         DatabaseDescriptor.daemonInitialization();
+        ORIGINAL_FAILURE_THRESHOLD = DatabaseDescriptor.getGuardrailsConfig().getTombstoneFailThreshold();
         DatabaseDescriptor.getGuardrailsConfig().setTombstonesThreshold(WARN_THRESHOLD, FAILURE_THRESHOLD);
     }
 
@@ -91,7 +92,7 @@ public class TombstonesTest extends CQLTester
     public void testBelowThresholdSelect() throws Throwable
     {
 
-        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b)) WITH memtable = {'class': '" + memtableClass + "'};");
+        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b)) WITH memtable = '" + memtableClass + "';");
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();

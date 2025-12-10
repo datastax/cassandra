@@ -121,15 +121,18 @@ extends ConsistencyTestBase<InMemoryDeletionAwareTrieConsistencyTest.Content,
     void apply(InMemoryDeletionAwareTrie<Content, TestRangeState> trie,
                DeletionAwareTrie<Content, TestRangeState> mutation,
                InMemoryBaseTrie.UpsertTransformer<Content, Content> mergeResolver,
-               Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker) throws TrieSpaceExhaustedException
+               Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker,
+               Predicate<InMemoryBaseTrie.NodeFeatures<TestRangeState>> forcedCopyCheckerRanges)
+    throws TrieSpaceExhaustedException
     {
-        trie.apply(mutation,
-                  mergeResolver, // Use the provided merge resolver for content
-                   (del, incoming) -> { throw new AssertionError(); },
-                   (del, incoming) -> { throw new AssertionError(); },
-                   (del, incoming) -> { throw new AssertionError(); },
-                  true, // deletionsAtFixedPoints = true for consistency
-                  forcedCopyChecker); // Use the provided forced copy checker
+        trie.mutator(mergeResolver, // Use the provided merge resolver for content
+                     (del, incoming) -> { throw new AssertionError(); },
+                     (del, incoming) -> { throw new AssertionError(); },
+                     (del, incoming) -> { throw new AssertionError(); },
+                     true, // deletionsAtFixedPoints = true for consistency
+                     forcedCopyChecker,
+                     forcedCopyCheckerRanges)
+            .apply(mutation); // Use the provided forced copy checker
     }
 
     @Override
@@ -138,19 +141,22 @@ extends ConsistencyTestBase<InMemoryDeletionAwareTrieConsistencyTest.Content,
                 TestRangeState partitionMarker,
                 RangeTrie<TestRangeState> deletionBranch,
                 InMemoryBaseTrie.UpsertTransformer<Content, TestRangeState> mergeResolver,
-                Predicate<InMemoryBaseTrie.NodeFeatures<TestRangeState>> forcedCopyChecker) throws TrieSpaceExhaustedException
+                Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker,
+                Predicate<InMemoryBaseTrie.NodeFeatures<TestRangeState>> forcedCopyCheckerRanges)
+    throws TrieSpaceExhaustedException
     {
         DeletionAwareTrie<TestRangeState, TestRangeState> deletion = DeletionAwareTrie.deletionBranch(ByteComparable.EMPTY, VERSION, deletionBranch);
         deletion = TrieUtil.withRootMetadata(deletion, partitionMarker);
         deletion = deletion.prefixedBy(deletionPrefix);
 
-        trie.apply(deletion,
-                  mergeResolver,
-                  (existing, incoming) -> TestRangeState.combine(existing, incoming),
-                  mergeResolver,
-                  BIFUNCTION_THROW,
-                  true,
-                  forcedCopyChecker);
+        trie.mutator(mergeResolver,
+                     (existing, incoming) -> TestRangeState.combine(existing, incoming),
+                     mergeResolver,
+                     BIFUNCTION_THROW,
+                     true,
+                     forcedCopyCheckerRanges,
+                     forcedCopyCheckerRanges)
+        .apply(deletion);
     }
 
     @Override

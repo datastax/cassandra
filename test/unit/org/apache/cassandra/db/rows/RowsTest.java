@@ -32,6 +32,8 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.junit.Assert;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -47,6 +49,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.db.CellTest.assertCellsEqual;
 
+@RunWith(Parameterized.class)
 public class RowsTest
 {
     private static final String KEYSPACE = "rows_test";
@@ -55,6 +58,20 @@ public class RowsTest
     private static final ColumnMetadata v;
     private static final ColumnMetadata m;
     private static final Clustering<?> c1;
+
+    enum RowImplementation
+    {
+        BTREE, TRIE_BACKED
+    }
+
+    @Parameterized.Parameter(0)
+    public static RowImplementation implementation;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static RowImplementation[] implementations()
+    {
+        return RowImplementation.values();
+    }
 
     static
     {
@@ -217,7 +234,16 @@ public class RowsTest
 
     private static Row.Builder createBuilder(Clustering<?> c)
     {
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder;
+        switch (implementation)
+        {
+            case TRIE_BACKED:
+                builder = TrieBackedRow.builder(kcvm.regularAndStaticColumns());
+                break;
+            case BTREE:
+            default:
+                builder = BTreeRow.unsortedBuilder();
+        }
         builder.newRow(c);
         return builder;
     }
@@ -525,7 +551,7 @@ public class RowsTest
 
         Assert.assertEquals(expectedDeletion, merged.deletion());
         Assert.assertEquals(LivenessInfo.EMPTY, merged.primaryKeyLivenessInfo());
-        Assert.assertEquals(0, merged.columns().size());
+        Assert.assertEquals(0, merged.columnCount());
     }
 
 
@@ -616,96 +642,5 @@ public class RowsTest
             builder.addCell(cell);
 
         return builder.build();
-    }
-
-    @Test
-    public void testLegacyCellIterator()
-    {
-        // Creates a table with
-        //   - 3 Simple columns: a, c and e
-        //   - 2 Complex columns: b and d
-        TableMetadata metadata =
-            TableMetadata.builder("dummy_ks", "dummy_tbl")
-                         .addPartitionKeyColumn("k", BytesType.instance)
-                         .addRegularColumn("a", BytesType.instance)
-                         .addRegularColumn("b", MapType.getInstance(Int32Type.instance, BytesType.instance, true))
-                         .addRegularColumn("c", BytesType.instance)
-                         .addRegularColumn("d", MapType.getInstance(Int32Type.instance, BytesType.instance, true))
-                         .addRegularColumn("e", BytesType.instance)
-                         .build();
-
-        ColumnMetadata a = metadata.getColumn(new ColumnIdentifier("a", false));
-        ColumnMetadata b = metadata.getColumn(new ColumnIdentifier("b", false));
-        ColumnMetadata c = metadata.getColumn(new ColumnIdentifier("c", false));
-        ColumnMetadata d = metadata.getColumn(new ColumnIdentifier("d", false));
-        ColumnMetadata e = metadata.getColumn(new ColumnIdentifier("e", false));
-
-        Row row;
-
-        // Row with only simple columns
-
-        row = makeDummyRow(liveCell(a),
-                           liveCell(c),
-                           liveCell(e));
-
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, false),
-                        liveCell(a),
-                        liveCell(c),
-                        liveCell(e));
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, true),
-                        liveCell(e),
-                        liveCell(c),
-                        liveCell(a));
-
-        // Row with only complex columns
-
-        row = makeDummyRow(liveCell(b, 1),
-                           liveCell(b, 2),
-                           liveCell(d, 3),
-                           liveCell(d, 4));
-
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, false),
-                        liveCell(b, 1),
-                        liveCell(b, 2),
-                        liveCell(d, 3),
-                        liveCell(d, 4));
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, true),
-                        liveCell(d, 4),
-                        liveCell(d, 3),
-                        liveCell(b, 2),
-                        liveCell(b, 1));
-
-        // Row with mixed simple and complex columns
-
-        row = makeDummyRow(liveCell(a),
-                           liveCell(c),
-                           liveCell(e),
-                           liveCell(b, 1),
-                           liveCell(b, 2),
-                           liveCell(d, 3),
-                           liveCell(d, 4));
-
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, false),
-                        liveCell(a),
-                        liveCell(b, 1),
-                        liveCell(b, 2),
-                        liveCell(c),
-                        liveCell(d, 3),
-                        liveCell(d, 4),
-                        liveCell(e));
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, true),
-                        liveCell(e),
-                        liveCell(d, 4),
-                        liveCell(d, 3),
-                        liveCell(c),
-                        liveCell(b, 2),
-                        liveCell(b, 1),
-                        liveCell(a));
     }
 }

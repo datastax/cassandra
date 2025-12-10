@@ -36,6 +36,7 @@ import org.apache.cassandra.db.MutableDeletionInfo;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
@@ -354,13 +355,21 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
         return marks;
     }
 
-    private static void addMarksForRow(Row row, List<CounterMark> marks)
+    private void addMarksForRow(Row row, List<CounterMark> marks)
     {
         for (Cell<?> cell : row.cells())
         {
             if (cell.isCounterCell())
-                marks.add(new CounterMark(row, cell.column(), cell.path()));
+                marks.add(new CounterMark(this, row, cell.column(), cell.path()));
         }
+    }
+
+    @Override
+    public void setCounterMarkValue(CounterMark mark, ByteBuffer value)
+    {
+        // Please read the warning in BTreeRow.setValue before using this method.
+        BTreeRow row = (BTreeRow) mark.row();
+        row.setValue(mark.column(), mark.path(), value);
     }
 
     @Override
