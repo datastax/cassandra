@@ -37,6 +37,7 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.db.TypeSizes;
@@ -993,5 +994,19 @@ public class ByteBufferUtil
             bytes.limit(bytes.position() + maxSize);
         }
         return "0x" + bytesToHex(bytes);
+    }
+
+    /**
+     * Overwrite a buffer with random data. Used for testing.
+     */
+    public static void overwriteWithRandomBytes(ByteBuffer byteBuffer)
+    {
+        byte[] bytes = new byte[Math.min(byteBuffer.capacity(), 256)];
+        ByteBuffer buf = byteBuffer.duplicate();
+        while (buf.remaining() > 0)
+        {
+            ThreadLocalRandom.current().nextBytes(bytes);
+            buf.put(bytes, 0, Math.min(bytes.length, buf.remaining()));
+        }
     }
 }

@@ -63,7 +63,7 @@ public class LongVectorTest extends SAITester
 
     public void testConcurrentOps(Op op) throws ExecutionException, InterruptedException
     {
-        Assert.assertEquals(4 * threadCount, TrieMemtable.SHARD_COUNT);
+        Assert.assertEquals(4 * threadCount, TrieMemtable.getDefaultShardCount());
         createTable(String.format("CREATE TABLE %%s (key int primary key, value vector<float, %s>)", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function': 'dot_product' }");
 

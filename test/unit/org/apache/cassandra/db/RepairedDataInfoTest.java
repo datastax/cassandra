@@ -28,15 +28,14 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
@@ -46,12 +45,14 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.Util.clustering;
 import static org.apache.cassandra.Util.dk;
-import static org.apache.cassandra.utils.ByteBufferUtil.*;
+import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.apache.cassandra.utils.ByteBufferUtil.getArray;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
@@ -251,7 +252,7 @@ public class RepairedDataInfoTest
 
     private Row staticRow(long nowInSec)
     {
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(metadata, true, false);
         builder.newRow(Clustering.STATIC_CLUSTERING);
         builder.addCell(cell(staticMetadata, "static value"));
         return builder.build();
@@ -259,7 +260,7 @@ public class RepairedDataInfoTest
 
     private Row staticRow(long nowInSec, DeletionTime deletion)
     {
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(metadata, true, false);
         builder.newRow(Clustering.STATIC_CLUSTERING);
         builder.addRowDeletion(new Row.Deletion(deletion, false));
         return builder.build();
@@ -267,7 +268,7 @@ public class RepairedDataInfoTest
 
     private Row row(int clustering, int value, long nowInSec)
     {
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(metadata, false, false);
         builder.newRow(clustering(metadata.comparator, Integer.toString(clustering)));
         builder.addCell(cell(valueMetadata, Integer.toString(value)));
         return builder.build();
@@ -275,7 +276,7 @@ public class RepairedDataInfoTest
 
     private Row row(int clustering, long nowInSec, DeletionTime deletion)
     {
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(metadata, false, false);
         builder.newRow(clustering(metadata.comparator, Integer.toString(clustering)));
         builder.addRowDeletion(new Row.Deletion(deletion, false));
         return builder.build();

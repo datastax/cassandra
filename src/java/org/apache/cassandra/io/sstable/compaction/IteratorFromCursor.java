@@ -47,13 +47,15 @@ public class IteratorFromCursor implements UnfilteredPartitionIterator
 {
     final TableMetadata metadata;
     final SSTableCursor cursor;
-    final Row.Builder rowBuilder;
+    final Row.Builder rowBuilderStatic;
+    final Row.Builder rowBuilderRegular;
 
     public IteratorFromCursor(TableMetadata metadata, SSTableCursor cursor)
     {
         this.metadata = metadata;
         this.cursor = cursor;
-        this.rowBuilder = BTreeRow.sortedBuilder();
+        this.rowBuilderRegular = BTreeRow.sortedBuilder();
+        this.rowBuilderStatic = metadata.hasStaticColumns() ? BTreeRow.sortedBuilder() : null;
     }
 
     public TableMetadata metadata()
@@ -122,7 +124,7 @@ public class IteratorFromCursor implements UnfilteredPartitionIterator
             this.partitionLevelDeletion = cursor.partitionLevelDeletion();
             if (Clustering.STATIC_CLUSTERING.equals(cursor.clusteringKey()))
             {
-                staticRow = collectRow(cursor, rowBuilder);
+                staticRow = collectRow(cursor, rowBuilderStatic);
             }
             else
             {
@@ -140,7 +142,7 @@ public class IteratorFromCursor implements UnfilteredPartitionIterator
             switch (cursor.type())
             {
                 case ROW:
-                    return collectRow(cursor, rowBuilder);
+                    return collectRow(cursor, rowBuilderRegular);
                 case RANGE_TOMBSTONE:
                     return collectRangeTombstoneMarker(cursor);
                 default:

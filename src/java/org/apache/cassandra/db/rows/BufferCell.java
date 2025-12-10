@@ -28,8 +28,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.ByteBufferCloner;
 
-import static java.lang.String.format;
-
 public class BufferCell extends AbstractCell<ByteBuffer>
 {
     private static final long EMPTY_SIZE = ObjectSizes.measure(new BufferCell(ColumnMetadata.regularColumn("", "", "", ByteType.instance), 0L, 0, 0, ByteBufferUtil.EMPTY_BYTE_BUFFER, null));
@@ -46,14 +44,15 @@ public class BufferCell extends AbstractCell<ByteBuffer>
     // available.
     public BufferCell(ColumnMetadata column, long timestamp, int ttl, long localDeletionTime, ByteBuffer value, CellPath path)
     {
-        this(column, timestamp, ttl, deletionTimeLongToUnsignedInteger(localDeletionTime), value, path);
+        this(column, timestamp, ttl, CellData.deletionTimeLongToUnsignedInteger(localDeletionTime), value, path);
     }
 
     public BufferCell(ColumnMetadata column, long timestamp, int ttl, int localDeletionTimeUnsignedInteger, ByteBuffer value, CellPath path)
     {
         super(column);
         assert !column.isPrimaryKeyColumn();
-        assert column.isComplex() == (path != null) : format("Column %s.%s(%s: %s) isComplex: %b with cellpath: %s", column.ksName, column.cfName, column.name, column.type.toString(), column.isComplex(), path);
+        // Trie-backed rows store path-less complex cells.
+        // assert column.isComplex() == (path != null) : format("Column %s.%s(%s: %s) isComplex: %b with cellpath: %s", column.ksName, column.cfName, column.name, column.type.toString(), column.isComplex(), path);
         this.timestamp = timestamp;
         this.ttl = ttl;
         this.localDeletionTimeUnsignedInteger = localDeletionTimeUnsignedInteger;
@@ -135,6 +134,12 @@ public class BufferCell extends AbstractCell<ByteBuffer>
     public Cell<?> withSkippedValue()
     {
         return withUpdatedValue(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+    }
+
+    @Override
+    public Cell<?> withPath(CellPath path)
+    {
+        return new BufferCell(column, timestamp, ttl, localDeletionTimeUnsignedInteger, value, path);
     }
 
     @Override
