@@ -24,12 +24,12 @@ import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 
 import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -970,7 +970,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// To make this as efficient and GC-friendly as possible, we use an integer array (instead of is an object stack)
     /// and we reuse the same object. The latter is safe because memtable tries cannot be mutated in parallel by
     /// multiple writers.
-    static class ApplyState<T> implements KeyProducer<T>
+    static class ApplyState<T>
     {
         static final int STATE_SIZE = 5;
 
@@ -1071,17 +1071,17 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
 
         /// Advance to the given depth and transition. Returns false if the depth signals mutation cursor is exhausted.
-        boolean advanceTo(int depth, int transition, int forcedCopyDepth) throws TrieSpaceExhaustedException
+        boolean advanceTo(int depth, int transition, int forcedCopyDepth, Predicate<? super T> danglingMetadataCleaner) throws TrieSpaceExhaustedException
         {
-            return advanceTo(depth, transition, forcedCopyDepth, 0);
+            return advanceTo(depth, transition, forcedCopyDepth, 0, danglingMetadataCleaner);
         }
         /// Advance to the given depth and transition. Returns false if the depth signals mutation cursor is exhausted.
-        boolean advanceTo(int depth, int transition, int forcedCopyDepth, int ascendLimit) throws TrieSpaceExhaustedException
+        boolean advanceTo(int depth, int transition, int forcedCopyDepth, int ascendLimit, Predicate<? super T> danglingMetadataCleaner) throws TrieSpaceExhaustedException
         {
             while (currentDepth >= Math.max(ascendLimit + 1, depth))
             {
                 // There are no more children. Ascend to the parent state to continue walk.
-                attachAndMoveToParentState(forcedCopyDepth);
+                attachAndMoveToParentState(forcedCopyDepth, danglingMetadataCleaner);
             }
             if (depth <= ascendLimit)
                 return false;
@@ -1097,7 +1097,12 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         ///
         /// The `limitDepth`, `limitTransition` and `limitIsOnReturnPath` parameters specify the limit position. This
         /// must be a valid non-exhausted position.
-        boolean advanceToNextExistingOr(int limitDepth, int limitTransition, boolean limitIsOnReturnPath, int forcedCopyDepth, int ascendLimit)
+        boolean advanceToNextExistingOr(int limitDepth,
+                                        int limitTransition,
+                                        boolean limitIsOnReturnPath,
+                                        int forcedCopyDepth,
+                                        int ascendLimit,
+                                        Predicate<? super T> danglingMetadataCleaner)
         throws TrieSpaceExhaustedException
         {
             assert limitDepth >= ascendLimit;
@@ -1120,12 +1125,13 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                     (limitDepth == ascendLimit || transitionAtDepth(currentDepth - 1) == limitTransition))
                     return false;
 
-                attachAndMoveToParentState(forcedCopyDepth);
+                attachAndMoveToParentState(forcedCopyDepth, danglingMetadataCleaner);
             }
         }
 
         /// Advance to the next existing position in the trie.
-        boolean advanceToNextExisting(int forcedCopyDepth, int ascendLimit) throws TrieSpaceExhaustedException
+        boolean advanceToNextExisting(int forcedCopyDepth, int ascendLimit, Predicate<? super T> danglingMetadataCleaner)
+        throws TrieSpaceExhaustedException
         {
             while (true)
             {
@@ -1140,7 +1146,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 if (currentDepth <= ascendLimit)
                     return false;
 
-                attachAndMoveToParentState(forcedCopyDepth);
+                attachAndMoveToParentState(forcedCopyDepth, danglingMetadataCleaner);
             }
         }
 
@@ -1237,7 +1243,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
         /// Apply the collected content to a node. If there is content to add, converts `NONE` to a leaf node, and adds
         /// or updates a prefix for all others.
-        protected int applyContent(boolean forcedCopy) throws TrieSpaceExhaustedException
+        protected int applyContent(boolean forcedCopy, Predicate<? super T> danglingMetadataCleaner)
+        throws TrieSpaceExhaustedException
         {
             // Note: the old content id itself is already released by setContent. Here we must release any standalone
             // prefix nodes that may reference it.
@@ -1249,6 +1256,14 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             // applyPrefixChange does not understand leaf nodes, handle upgrade from and to one explicitly.
             if (isNull(updatedPostContentNode))
             {
+                // This node has no children. If the content is metadata that has no meaning if no children exist,
+                // remove it.
+                if (!isNull(contentId) && danglingMetadataCleaner.test(trie.getContent(contentId)))
+                {
+                    trie.releaseContent(contentId);
+                    contentId = NONE;
+                }
+
                 if (existingPreContentNode != existingPostContentNode
                     && !isNullOrLeaf(existingPreContentNode)
                     && !trie.isEmbeddedPrefixNode(existingPreContentNode))
@@ -1329,9 +1344,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// After a node's children are processed, this is called to ascend from it. This means applying the collected
         /// content to the compiled `updatedPostContentNode` and creating a mapping in the parent to it (or updating if
         /// one already exists).
-        void attachAndMoveToParentState(int forcedCopyDepth) throws TrieSpaceExhaustedException
+        void attachAndMoveToParentState(int forcedCopyDepth, Predicate<? super T> danglingMetadataCleaner) throws TrieSpaceExhaustedException
         {
-            attachBranchAndMoveToParentState(applyContent(currentDepth >= forcedCopyDepth), forcedCopyDepth);
+            attachBranchAndMoveToParentState(applyContent(currentDepth >= forcedCopyDepth, danglingMetadataCleaner), forcedCopyDepth);
         }
 
         void attachBranchAndMoveToParentState(int updatedFullNode, int forcedCopyDepth) throws TrieSpaceExhaustedException {
@@ -1344,9 +1359,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
 
         /// Ascend and update the root at the end of processing.
-        void attachAndUpdateRoot(int forcedCopyDepth) throws TrieSpaceExhaustedException
+        void attachAndUpdateRoot(int forcedCopyDepth, Predicate<? super T> danglingMetadataCleaner) throws TrieSpaceExhaustedException
         {
-            attachRoot(applyContent(0 >= forcedCopyDepth), forcedCopyDepth);
+            attachRoot(applyContent(0 >= forcedCopyDepth, danglingMetadataCleaner), forcedCopyDepth);
         }
 
         void attachRoot(int updatedFullNode, int ignoredForcedCopyDepth)
@@ -1367,12 +1382,13 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             setTransition(-1);
         }
 
-        public byte[] getBytes()
+        public byte[] getBytes(int startDepth)
         {
-            int arrSize = currentDepth;
+            Preconditions.checkArgument(startDepth >= 0 && startDepth <= currentDepth);
+            int arrSize = currentDepth - startDepth;
             byte[] data = new byte[arrSize];
             int pos = 0;
-            for (int i = 0; i < currentDepth; ++i)
+            for (int i = startDepth; i < currentDepth; ++i)
             {
                 int trans = transitionAtDepth(i);
                 data[pos++] = (byte) trans;
@@ -1380,31 +1396,21 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             return data;
         }
 
-        @Override
-        public byte[] getBytes(Predicate<T> shouldStop)
+        public int getNearestAncestorDepthSatisfying(Predicate<T> shouldStop)
         {
-            if (currentDepth == 0)
-                return new byte[0];
+            return getNearestAncestorDepthSatisfying(shouldStop, currentDepth - 1);
+        }
 
-            int arrSize = 1;
+        public int getNearestAncestorDepthSatisfying(Predicate<T> shouldStop, int startDepth)
+        {
             int i;
-            for (i = currentDepth - 1; i > 0; --i)
+            for (i = startDepth; i >= 0; --i)
             {
                 int content = descentPathContentIdAtDepth(i);
                 if (!isNull(content) && shouldStop.test(trie.getContent(content)))
-                    break;
-                ++arrSize;
+                    return i;
             }
-            assert i > 0 || arrSize == currentDepth; // if the loop covers the whole stack, the array must cover the full depth
-
-            byte[] data = new byte[arrSize];
-            int pos = 0;
-            for (; i < currentDepth; ++i)
-            {
-                int trans = transitionAtDepth(i);
-                data[pos++] = (byte) trans;
-            }
-            return data;
+            return -1;
         }
 
         public ByteComparable.Version byteComparableVersion()
@@ -1434,46 +1440,13 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     }
 
 
-    public interface KeyProducer<T>
-    {
-        /// Get the bytes of the path leading to this node.
-        byte[] getBytes();
-
-        /// Get the bytes of the path leading to this node from the closest ancestor whose content, after any new inserts
-        /// have been applied, satisfies the given predicate.
-        /// Note that the predicate is not called for the current position, because its content is not yet prepared when
-        /// the method is being called.
-        byte[] getBytes(Predicate<T> shouldStop);
-
-        ByteComparable.Version byteComparableVersion();
-    }
-
     /// Somewhat similar to [Trie.MergeResolver], this encapsulates logic to be applied whenever new content is
     /// being upserted into a [InMemoryBaseTrie]. Unlike [Trie.MergeResolver], [UpsertTransformer] will be
     /// applied no matter if there's pre-existing content for that trie key/path or not.
     ///
     /// @param <T> The content type for this [InMemoryBaseTrie].
     /// @param <U> The type of the new content being applied to this [InMemoryBaseTrie].
-    public interface UpsertTransformerWithKeyProducer<T, U>
-    {
-        /// Called when there's content in the updating trie.
-        ///
-        /// @param existing Existing content for this key, or null if there isn't any.
-        /// @param update   The update, always non-null.
-        /// @param keyState An interface that can be used to retrieve the path of the value being updated.
-        /// @return The combined value to use. A value of null will delete the existing entry.
-        T apply(T existing, @Nonnull U update, KeyProducer<T> keyState);
-    }
-
-    /// Somewhat similar to [Trie.MergeResolver], this encapsulates logic to be applied whenever new content is
-    /// being upserted into a [InMemoryBaseTrie]. Unlike [Trie.MergeResolver], [UpsertTransformer] will be
-    /// applied no matter if there's pre-existing content for that trie key/path or not.
-    ///
-    /// A version of the above that does not use a [KeyProducer].
-    ///
-    /// @param <T> The content type for this [InMemoryBaseTrie].
-    /// @param <U> The type of the new content being applied to this [InMemoryBaseTrie].
-    public interface UpsertTransformer<T, U> extends UpsertTransformerWithKeyProducer<T, U>
+    public interface UpsertTransformer<T, U>
     {
         /// Called when there's content in the updating trie.
         ///
@@ -1481,17 +1454,6 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// @param update   The update, always non-null.
         /// @return The combined value to use. A value of null will delete the existing entry.
         T apply(T existing, @Nonnull U update);
-
-        /// Version of the above that also provides the path of a value being updated.
-        ///
-        /// @param existing Existing content for this key, or null if there isn't any.
-        /// @param update   The update, always non-null.
-        /// @param keyState An interface that can be used to retrieve the path of the value being updated.
-        /// @return The combined value to use. A value of null will delete the existing entry.
-        default T apply(T existing, @Nonnull U update, @Nonnull KeyProducer<T> keyState)
-        {
-            return apply(existing, update);
-        }
     }
 
     /// Interface providing features of the mutating node during mutation done using [InMemoryTrie#apply].
@@ -1515,28 +1477,50 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         T content();
     }
 
-    static class Mutation<T, U, C extends Cursor<U>, A extends ApplyState<T>> implements NodeFeatures<U>
+    /// This class includes the common functionality of the various trie mutators.
+    ///
+    /// Stores the configured transformers and flags of the operations, and can be reused to apply
+    /// modifications with the same configuration multiple times.
+    ///
+    /// The mutator provides some methods that can be called by the given transformer to obtain information about the
+    /// state when merging in data.
+    protected static class Mutator<T, U, C extends Cursor<U>, A extends ApplyState<T>> implements NodeFeatures<U>
     {
-        final UpsertTransformerWithKeyProducer<T, U> transformer;
+        final UpsertTransformer<T, U> transformer;
         final Predicate<NodeFeatures<U>> needsForcedCopy;
-        final C mutationCursor;
+        final Predicate<? super T> danglingMetadataCleaner;
         final A state;
+
+        C mutationCursor;
         int forcedCopyDepth;
 
-        Mutation(UpsertTransformerWithKeyProducer<T, U> transformer,
-                 Predicate<NodeFeatures<U>> needsForcedCopy,
-                 C mutationCursor,
-                 A state)
+        Mutator(UpsertTransformer<T, U> transformer,
+                Predicate<NodeFeatures<U>> needsForcedCopy,
+                Predicate<? super T> danglingMetadataCleaner,
+                A state)
         {
-            mutationCursor.assertFresh();
             this.transformer = transformer;
             this.needsForcedCopy = needsForcedCopy;
-            this.mutationCursor = mutationCursor;
+            this.danglingMetadataCleaner = danglingMetadataCleaner;
             this.state = state;
-            this.forcedCopyDepth = Integer.MAX_VALUE;
         }
 
-        void apply() throws TrieSpaceExhaustedException
+        Mutator<T, U, C, A> start(int root, C mutationCursor, int initialForcedCopyDepth)
+        {
+            mutationCursor.assertFresh();
+
+            this.mutationCursor = mutationCursor;
+            this.forcedCopyDepth = initialForcedCopyDepth;
+            this.state.start(root);
+            return this;
+        }
+
+        Mutator<T, U, C, A> start(C mutationCursor)
+        {
+            return start(state.trie.root, mutationCursor, Integer.MAX_VALUE);
+        }
+
+        Mutator<T, U, C, A> apply() throws TrieSpaceExhaustedException
         {
             int depth = state.currentDepth;
             while (true)
@@ -1544,27 +1528,27 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 if (depth < forcedCopyDepth)
                     forcedCopyDepth = needsForcedCopy.test(this) ? depth : Integer.MAX_VALUE;
 
-                applyContent();
+                applyContent(mutationCursor.content());
 
                 long position = mutationCursor.advance();
                 assert !Cursor.isOnReturnPath(position) : "Return path in forward direction can only be used in range tries.";
                 depth = Cursor.depth(position);
-                if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
+                if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth, danglingMetadataCleaner))
                     break;
                 assert state.currentDepth == depth : "Unexpected change to applyState. Concurrent trie modification?";
             }
+            return this;
         }
 
-        void applyContent() throws TrieSpaceExhaustedException
+        void applyContent(U content) throws TrieSpaceExhaustedException
         {
-            U content = mutationCursor.content();
             if (content != null)
             {
                 T existingContent = state.getDescentPathContent();
-                T combinedContent = transformer.apply(existingContent, content, state);
+                T combinedContent = transformer.apply(existingContent, content);
                 if (combinedContent != existingContent)
-                    state.setDescentPathContent(combinedContent, // can be null
-                                                state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
+                state.setDescentPathContent(combinedContent, // can be null
+                                            state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
             }
         }
 
@@ -1572,7 +1556,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         void complete() throws TrieSpaceExhaustedException
         {
             assert state.currentDepth == 0 : "Unexpected change to applyState. Concurrent trie modification?";
-            state.attachAndUpdateRoot(forcedCopyDepth);
+            state.attachAndUpdateRoot(forcedCopyDepth, danglingMetadataCleaner);
         }
 
         @Override
@@ -1593,6 +1577,52 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         public U content()
         {
             return mutationCursor.content();
+        }
+
+        /// Return the depth of the currently processed node.
+        ///
+        /// This method may be called by the upsert transformer to get information about the current state.
+        public int currentDepth()
+        {
+            return state.currentDepth;
+        }
+
+        /// Get the bytes of the path leading to this node. The returned array can be safely modified and/or stored.
+        ///
+        /// This method may be called by the upsert transformer to get information about the current state.
+        public byte[] getCurrentKeyBytes()
+        {
+            return getCurrentKeyBytes(0);
+        }
+
+        /// Get the bytes of the path leading to this node from the given depth.
+        /// The returned array can be safely modified and/or stored.
+        ///
+        /// This method may be called by the upsert transformer to get information about the current state.
+        public byte[] getCurrentKeyBytes(int startDepth)
+        {
+            return state.getBytes(startDepth);
+        }
+
+        /// Get the depth of the nearest ancestor that has content satisfying the given predicate.
+        ///
+        /// This method may be called by the upsert transformer to get information about the current state.
+        public int getNearestAncestorDepthSatisfying(Predicate<T> shouldStop)
+        {
+            return state.getNearestAncestorDepthSatisfying(shouldStop);
+        }
+
+        /// Get the key bytes to the nearest ancestor that has content satisfying the given predicate.
+        ///
+        /// This method may be called by the upsert transformer to get information about the current state.
+        public byte[] getCurrentKeyBytesToNearestAncestorSatisfying(Predicate<T> shouldStop)
+        {
+            return state.getBytes(Math.max(0, getNearestAncestorDepthSatisfying(shouldStop)));
+        }
+
+        public ByteComparable.Version byteComparableVersion()
+        {
+            return state.byteComparableVersion();
         }
     }
 
@@ -1823,7 +1853,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     }
 
     @VisibleForTesting
-    long usedBufferSpace()
+    public long usedBufferSpace()
     {
         return allocatedPos - cellAllocator.indexCountInPipeline() * CELL_SIZE;
     }

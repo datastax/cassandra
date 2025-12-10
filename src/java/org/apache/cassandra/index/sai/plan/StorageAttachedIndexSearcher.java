@@ -37,6 +37,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterables;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -857,7 +858,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 // Clone the original Row
                 Row originalRow = (Row) content;
                 ArrayList<ColumnData> columnData = new ArrayList<>(originalRow.columnCount() + 1);
-                columnData.addAll(originalRow.columnData());
+                Iterables.addAll(columnData, originalRow);
 
                 // inject +score as a new column
                 float score = ((PrimaryKeyWithScore) primaryKeyWithSortKey).getExactScore(orderer, originalRow);
