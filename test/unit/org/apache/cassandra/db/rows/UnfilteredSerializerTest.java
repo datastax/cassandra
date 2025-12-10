@@ -32,6 +32,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.schema.TableMetadata;
@@ -102,7 +103,7 @@ public class UnfilteredSerializerTest
         random.nextBytes(data1.array());
         random.nextBytes(data2.array());
 
-        Row.Builder builder = BTreeRow.sortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(md, false, true);
         builder.newRow(Clustering.EMPTY);
         builder.addCell(BufferCell.live(md.regularColumns().getSimple(0), FBUtilities.timestampMicros(), data1.duplicate()));
         builder.addCell(BufferCell.live(md.regularColumns().getSimple(1), FBUtilities.timestampMicros(), data2.duplicate()));
@@ -114,7 +115,7 @@ public class UnfilteredSerializerTest
             UnfilteredSerializer.serializer.serialize(writtenRow, new SerializationHelper(header), out, 0, 0);
             try (DataInputBuffer in = new DataInputBuffer(transform.apply(out.buffer()), false))
             {
-                builder = BTreeRow.sortedBuilder();
+                builder = PartitionUpdate.rowBuilder(md, false, true);
                 DeserializationHelper helper = new DeserializationHelper(md, 0, DeserializationHelper.Flag.LOCAL);
                 Unfiltered readRow = UnfilteredSerializer.serializer.deserialize(in, header, helper, builder);
                 assertEquals(writtenRow, readRow);
