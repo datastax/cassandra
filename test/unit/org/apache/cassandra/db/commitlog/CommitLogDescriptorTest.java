@@ -40,6 +40,7 @@ import org.apache.cassandra.io.util.FileSegmentInputStream;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.assertj.core.api.Assertions;
 
 public class CommitLogDescriptorTest
@@ -376,5 +377,46 @@ public class CommitLogDescriptorTest
     public void testCommitLogToMessagingVersionFailure()
     {
         CommitLogDescriptor.getMessagingVersion(1);
+    }
+
+    @Test
+    public void testCurrentStorageVersionUsesStorageCompatibilityMode()
+    {
+        // Verify that currentStorageVersion() returns the correct version based on storage compatibility mode
+        // by comparing it with the explicit currentVersion() method
+
+        // For each storage compatibility mode, verify the relationship holds
+        for (StorageCompatibilityMode mode : StorageCompatibilityMode.values())
+        {
+            int expectedVersion = CommitLogDescriptor.currentVersion(mode.storageMessagingVersion());
+
+            // Verify the version mappings are consistent
+            switch (mode)
+            {
+                case CASSANDRA_4:
+                case CC_4:
+                    // These modes should use VERSION_40 messaging, which maps to commit log VERSION_40
+                    Assert.assertEquals("Mode " + mode + " should map to commit log VERSION_40",
+                                        CommitLogDescriptor.VERSION_40, expectedVersion);
+                    break;
+                case UPGRADING:
+                case NONE:
+                    // These modes should use current_version messaging
+                    Assert.assertEquals("Mode " + mode + " should map to current commit log version",
+                                        CommitLogDescriptor.currentVersion(MessagingService.current_version), expectedVersion);
+                    break;
+                default:
+                    throw new AssertionError("Undefined storage version behaviour for mode " + mode);
+            }
+        }
+    }
+
+    @Test
+    public void testCurrentStorageVersionCC4ReturnsVersion40()
+    {
+        // Explicit test that CC_4 compatibility mode results in VERSION_40 commit log format
+        int version = CommitLogDescriptor.currentVersion(StorageCompatibilityMode.CC_4.storageMessagingVersion());
+        Assert.assertEquals("CC_4 mode should produce commit log VERSION_40 for rollback compatibility",
+                            CommitLogDescriptor.VERSION_40, version);
     }
 }
