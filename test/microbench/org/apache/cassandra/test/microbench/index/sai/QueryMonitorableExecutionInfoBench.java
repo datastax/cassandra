@@ -81,7 +81,7 @@ public class QueryMonitorableExecutionInfoBench extends SAITester
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-        CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(enabled);
+        CassandraRelevantProperties.SAI_MONITORING_EXECUTION_INFO_ENABLED.setBoolean(enabled);
         CQLTester.setUpClass();
         CQLTester.prepareServer();
         beforeTest();
