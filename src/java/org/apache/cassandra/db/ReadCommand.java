@@ -1137,7 +1137,7 @@ public abstract class ReadCommand extends AbstractReadQuery
         }
 
         // if execution info is disabled, return null so we will keep using the default empty supplier
-        if (!CassandraRelevantProperties.SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.getBoolean())
+        if (!CassandraRelevantProperties.MONITORING_EXECUTION_INFO_ENABLED.getBoolean())
             return null;
 
         // otherwise, create and use the generic execution info
