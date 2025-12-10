@@ -2267,6 +2267,28 @@
           This can be verified in 'Project Structure/Project Setting/Project' and 'Project Structure/Platform Setting/SDKs'.
       </echo>
   </target>
+  <!-- Generate VSCode project description files -->
+  <target name="generate-vscode-files" depends="init,maven-ant-tasks-init,resolver-dist-lib,gen-cql3-grammar,createVersionPropFile" description="Generate VSCode files">
+    <delete dir=".vscode"/>
+    <mkdir dir=".vscode"/>
+    <copy todir=".vscode" overwrite="true">
+        <fileset dir="ide/vscode"/>
+    </copy>
+    <echo>
+        VSCode configuration in .vscode/ created.
+
+        Please ensure you have the following extensions installed:
+        - Language Support for Java(TM) by Red Hat (redhat.java)
+        - Debugger for Java (vscjava.vscode-java-debug)
+        - Test Runner for Java (vscjava.vscode-java-test)
+        - Project Manager for Java (vscjava.vscode-java-dependency)
+
+        The project is configured to use JDK 11 from Homebrew.
+        If your JDK 11 installation path is different, please update the
+        'java.configuration.runtimes' setting in .vscode/settings.json
+    </echo>
+  </target>
+
 
   <!-- Generate Eclipse project description files -->
   <target name="generate-eclipse-files" depends="build-test" description="Generate eclipse files">

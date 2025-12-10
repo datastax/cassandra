@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Debug Cassandra",
+            "request": "launch",
+            "mainClass": "org.apache.cassandra.service.CassandraDaemon",
+            "projectName": "cassandra",
+            "cwd": "${workspaceFolder}",
+            "vmArgs": "-Xms1G -Xmx1G -Dcassandra.config=file:///${workspaceFolder}/conf/cassandra.yaml -Dlogback.configurationFile=file:///${workspaceFolder}/conf/logback.xml -Dcassandra.logdir=${workspaceFolder}/logs -javaagent:${workspaceFolder}/build/lib/jamm-0.4.0.jar",
+            "args": "",
+            "console": "integratedTerminal"
+        },
+        {
+            "type": "java",
+            "name": "Debug Current Test",
+            "request": "launch",
+            "mainClass": "",
+            "projectName": "cassandra",
+            "cwd": "${workspaceFolder}",
+            "vmArgs": "-Dstorage-config=${workspaceFolder}/test/conf -Djava.awt.headless=true -javaagent:${workspaceFolder}/build/lib/jamm-0.4.0.jar -ea -Xss256k -Dcassandra.skip_sync=true",
+            "console": "integratedTerminal"
+        }
+    ]
+}

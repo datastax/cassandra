@@ -1,0 +1,64 @@
+{
+    "java.configuration.runtimes": [
+        {
+            "name": "JavaSE-11",
+            "path": "/opt/homebrew/opt/openjdk@11/libexec/openjdk.jdk/Contents/Home",
+            "default": true
+        }
+    ],
+    "java.project.sourcePaths": [
+        "src/java",
+        "src/gen-java",
+        "test/unit",
+        "test/distributed",
+        "test/microbench",
+        "tools/stress/src",
+        "tools/fqltool/src"
+    ],
+    "java.project.outputPath": "build/classes/main",
+    "java.project.referencedLibraries": [
+        "build/lib/jars/**/*.jar"
+    ],
+    "java.test.config": {
+        "workingDirectory": "${workspaceFolder}",
+        "vmArgs": [
+            "-Dstorage-config=${workspaceFolder}/test/conf",
+            "-Djava.awt.headless=true",
+            "-javaagent:${workspaceFolder}/build/lib/jamm-0.4.0.jar",
+            "-ea",
+            "-Xss256k",
+            "-Dcassandra.skip_sync=true"
+        ]
+    },
+    "java.format.settings.url": "${workspaceFolder}/ide/vscode/java-formatter.xml",
+    "java.format.settings.profile": "Cassandra",
+    "java.format.enabled": true,
+    "java.format.comments.enabled": true,
+    "java.codeGeneration.hashCodeEquals.useJava7Objects": true,
+    "java.codeGeneration.useBlocks": true,
+    "java.saveActions.organizeImports": true,
+    "java.sources.organizeImports.starThreshold": 100,
+    "java.sources.organizeImports.staticStarThreshold": 100,
+    "editor.formatOnSave": true,
+    "editor.tabSize": 4,
+    "editor.formatOnSaveMode": "modifications",
+    "editor.insertSpaces": true,
+    "editor.detectIndentation": false,
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/build": true,
+        "**/.idea": true,
+        "**/.settings": true,
+        "**/data": true,
+        "**/logs": true,
+        "**/commitlog": true,
+        "**/hints": true,
+        "**/saved_caches": true
+    }
+}
