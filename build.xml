@@ -2267,6 +2267,94 @@
           This can be verified in 'Project Structure/Project Setting/Project' and 'Project Structure/Platform Setting/SDKs'.
       </echo>
   </target>
+  <!-- Generate VS Code project description files -->
+  <target name="generate-vscode-files" depends="init,maven-ant-tasks-init,resolver-dist-lib,gen-cql3-grammar,createVersionPropFile" description="Generate VS Code files">
+    <!-- Create .vscode directory if it doesn't exist (mkdir is safe if directory exists) -->
+    <mkdir dir=".vscode"/>
+    <!-- Delete only the files we're about to regenerate -->
+    <delete file=".vscode/settings.json" quiet="true"/>
+    <delete file=".vscode/extensions.json" quiet="true"/>
+    <delete file=".vscode/launch.json" quiet="true"/>
+    <delete file=".vscode/java-formatter.xml" quiet="true"/>
+    <!-- Copy template files -->
+    <copy todir=".vscode" overwrite="true">
+        <fileset dir="ide/vscode">
+            <include name="settings.json"/>
+            <include name="extensions.json"/>
+            <include name="launch.json"/>
+            <include name="java-formatter.xml"/>
+        </fileset>
+    </copy>
+    <!-- Replace project name placeholders -->
+    <replace file=".vscode/launch.json" token="PROJECT_NAME" value="${eclipse.project.name}"/>
+    
+    <!-- Generate .classpath file for Eclipse JDT (used by VSCode Java extension) -->
+    <echo file=".classpath"><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+ <classpathentry kind="src" path="src/java"/>
+ <classpathentry kind="src" path="src/gen-java"/>
+ <classpathentry kind="src" path="src/antlr"/>
+ <classpathentry kind="src" path="test/unit"/>
+ <classpathentry kind="src" path="test/distributed"/>
+ <classpathentry kind="src" path="test/microbench"/>
+ <classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-11">
+  <attributes>
+   <attribute name="module" value="true"/>
+  </attributes>
+  <accessrules>
+   <accessrule kind="accessible" pattern="jdk/internal/**"/>
+   <accessrule kind="accessible" pattern="sun/nio/**"/>
+   <accessrule kind="accessible" pattern="sun/rmi/**"/>
+   <accessrule kind="accessible" pattern="com/sun/jmx/**"/>
+  </accessrules>
+ </classpathentry>
+ <classpathentry kind="lib" path="lib" includes="**/*.jar"/>
+ <classpathentry kind="lib" path="build/lib/jars" includes="**/*.jar"/>
+ <classpathentry kind="lib" path="build/test/lib/jars" includes="**/*.jar"/>
+ <classpathentry kind="output" path="build/classes"/>
+</classpath>
+]]></echo>
+    
+    <!-- Generate Eclipse .settings directory for JDT preferences -->
+    <mkdir dir=".settings"/>
+    <echo file=".settings/org.eclipse.jdt.core.prefs"><![CDATA[eclipse.preferences.version=1
+org.eclipse.jdt.core.compiler.codegen.targetPlatform=11
+org.eclipse.jdt.core.compiler.compliance=11
+org.eclipse.jdt.core.compiler.source=11
+org.eclipse.jdt.core.compiler.problem.forbiddenReference=ignore
+org.eclipse.jdt.core.compiler.problem.reportPreviewFeatures=warning
+org.eclipse.jdt.core.compiler.release=disabled
+]]></echo>
+    
+    <echo>
+        VS Code configuration files have been generated/updated in .vscode/
+        
+        Files updated:
+        - settings.json (Java formatting and project settings)
+        - extensions.json (recommended extensions)
+        - launch.json (debug configurations)
+        - java-formatter.xml (Eclipse formatter profile)
+        - .classpath (Eclipse JDT configuration for Java 11)
+        - .settings/org.eclipse.jdt.core.prefs (Java 11 compiler settings)
+        
+        Dependencies have been resolved to:
+        - build/lib/jars/ (runtime dependencies)
+        - build/test/lib/jars/ (test dependencies)
+        
+        Generated sources created in:
+        - src/gen-java/ (ANTLR grammar files)
+        
+        Any other files in .vscode/ have been preserved.
+        
+        To complete the setup:
+        1. Install the recommended Java extensions when prompted
+        2. Reload VS Code window (Cmd+Shift+P -> "Developer: Reload Window")
+        3. Wait for Java Language Server to index the project (watch status bar)
+        4. Clean Java workspace if needed: Cmd+Shift+P -> "Java: Clean Java Language Server Workspace"
+        5. The project is now configured for Java 11 compliance
+    </echo>
+  </target>
+
 
   <!-- Generate Eclipse project description files -->
   <target name="generate-eclipse-files" depends="build-test" description="Generate eclipse files">

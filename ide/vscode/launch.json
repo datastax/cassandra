@@ -1,0 +1,31 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Launch Cassandra",
+            "request": "launch",
+            "mainClass": "org.apache.cassandra.service.CassandraDaemon",
+            "projectName": "PROJECT_NAME",
+            "args": "",
+            "vmArgs": "--add-exports=java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports=java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED --add-exports=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED -Dcassandra.config=file:///${workspaceFolder}/conf/cassandra.yaml -Dcassandra.logdir=${workspaceFolder}/logs -Dcassandra.storagedir=${workspaceFolder}/data -Dlogback.configurationFile=file:///${workspaceFolder}/conf/logback.xml -Dcassandra.use_nix_recursive_delete=true",
+            "console": "integratedTerminal"
+        },
+        {
+            "type": "java",
+            "name": "Debug Current Test",
+            "request": "launch",
+            "mainClass": "",
+            "projectName": "PROJECT_NAME",
+            "vmArgs": "--add-exports=java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports=java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED --add-exports=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED",
+            "console": "integratedTerminal"
+        },
+        {
+            "type": "java",
+            "name": "Attach to Remote JVM",
+            "request": "attach",
+            "hostName": "localhost",
+            "port": 5005
+        }
+    ]
+}
