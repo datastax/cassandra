@@ -33,8 +33,8 @@ import java.util.zip.CRC32;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksum;
@@ -245,7 +245,7 @@ final class HintsBuffer
                 updateChecksumInt(crc, hintSize);
                 dop.writeInt((int) crc.getValue());
 
-                Hint.serializer.serialize(hint, dop, MessagingService.current_version);
+                Hint.serializer.serialize(hint, dop, StorageCompatibilityMode.current().storageMessagingVersion());
                 updateChecksum(crc, buffer, buffer.position() - hintSize, hintSize);
                 dop.writeInt((int) crc.getValue());
             }
