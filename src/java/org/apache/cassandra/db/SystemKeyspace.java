@@ -82,7 +82,6 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.metrics.TopPartitionTracker;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.nodes.INodeInfo;
 import org.apache.cassandra.nodes.IPeerInfo;
 import org.apache.cassandra.nodes.Nodes;
@@ -118,6 +117,7 @@ import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MD5Digest;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Future;
 
@@ -1212,6 +1212,7 @@ public final class SystemKeyspace
 
     public static void savePaxosProposal(Commit proposal)
     {
+        int storageVersion = StorageCompatibilityMode.current().storageMessagingVersion();
         if (proposal instanceof AcceptedWithTTL)
         {
             long localDeletionTime = ((Commit.AcceptedWithTTL) proposal).localDeletionTime;
@@ -1223,8 +1224,8 @@ public final class SystemKeyspace
                                         proposal.ballot.unixMicros(),
                                         ttlInSec,
                                         proposal.ballot,
-                                        PartitionUpdate.toBytes(proposal.update, MessagingService.current_version),
-                                        MessagingService.current_version,
+                                        PartitionUpdate.toBytes(proposal.update, storageVersion),
+                                        storageVersion,
                                         proposal.update.partitionKey().getKey(),
                                         proposal.update.metadata().id.asUUID()));
         }
@@ -1234,8 +1235,8 @@ public final class SystemKeyspace
             trackPaxosBytes(proposal, () -> executeInternal(cql,
                             proposal.ballot.unixMicros(),
                             proposal.ballot,
-                            PartitionUpdate.toBytes(proposal.update, MessagingService.current_version),
-                            MessagingService.current_version,
+                            PartitionUpdate.toBytes(proposal.update, storageVersion),
+                            storageVersion,
                             proposal.update.partitionKey().getKey(),
                             proposal.update.metadata().id.asUUID()));
         }
@@ -1243,6 +1244,7 @@ public final class SystemKeyspace
 
     public static void savePaxosCommit(Commit commit)
     {
+        int storageVersion = StorageCompatibilityMode.current().storageMessagingVersion();
         // We always erase the last proposal (with the commit timestamp to no erase more recent proposal in case the commit is old)
         // even though that's really just an optimization  since SP.beginAndRepairPaxos will exclude accepted proposal older than the mrc.
         if (commit instanceof Commit.CommittedWithTTL)
@@ -1256,8 +1258,8 @@ public final class SystemKeyspace
                             commit.ballot.unixMicros(),
                             ttlInSec,
                             commit.ballot,
-                            PartitionUpdate.toBytes(commit.update, MessagingService.current_version),
-                            MessagingService.current_version,
+                            PartitionUpdate.toBytes(commit.update, storageVersion),
+                            storageVersion,
                             commit.update.partitionKey().getKey(),
                             commit.update.metadata().id.asUUID()));
         }
@@ -1267,8 +1269,8 @@ public final class SystemKeyspace
             trackPaxosBytes(commit, () -> executeInternal(cql,
                             commit.ballot.unixMicros(),
                             commit.ballot,
-                            PartitionUpdate.toBytes(commit.update, MessagingService.current_version),
-                            MessagingService.current_version,
+                            PartitionUpdate.toBytes(commit.update, storageVersion),
+                            storageVersion,
                             commit.update.partitionKey().getKey(),
                             commit.update.metadata().id.asUUID()));
         }
