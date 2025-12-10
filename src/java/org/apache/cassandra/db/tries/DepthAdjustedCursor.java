@@ -112,18 +112,6 @@ class DepthAdjustedCursor<T, C extends Cursor<T>> implements Cursor<T>
         return source.tailCursor(direction);
     }
 
-    @Override
-    public <R> R process(Walker<? super T, R> walker)
-    {
-        throw new AssertionError("Depth-adjusted cursors cannot be walked directly.");
-    }
-
-    @Override
-    public <R> R processSkippingBranches(Walker<? super T, R> walker)
-    {
-        throw new AssertionError("Depth-adjusted cursors cannot be walked directly.");
-    }
-
     static <T> Cursor<T> make(Cursor<T> source, long matchingPositionAtRoot)
     {
         return Cursor.depth(matchingPositionAtRoot) == 0 ? source : new Plain<>(source, matchingPositionAtRoot);
