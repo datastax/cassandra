@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
+import javax.annotation.Nullable;
+
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Timer;
@@ -199,13 +201,8 @@ public class TableQueryMetrics
         public final Counter totalRowTombstonesFetched;
         public final Counter totalQueriesCompleted;
 
-        public final Counter totalRowsToReturnEstimated;
-        public final Counter totalRowsToFetchEstimated;
-        public final Counter totalKeysToIterateEstimated;
-        public final Counter totalCostEstimated;
-
-        public final Counter sortThenFilterQueriesCompleted;
-        public final Counter filterThenSortQueriesCompleted;
+        @Nullable
+        public final QueryPlanMetrics queryPlanMetrics;
 
         /**
          * @param table the table to measure metrics for
@@ -225,13 +222,9 @@ public class TableQueryMetrics
             totalRowTombstonesFetched = Metrics.counter(createMetricName("TotalRowTombstonesFetched"));
             totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
             totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
-            totalRowsToReturnEstimated = Metrics.counter(createMetricName("TotalRowsToReturnEstimated"));
-            totalRowsToFetchEstimated = Metrics.counter(createMetricName("TotalRowsToFetchEstimated"));
-            totalKeysToIterateEstimated = Metrics.counter(createMetricName("TotalKeysToIterateEstimated"));
-            totalCostEstimated = Metrics.counter(createMetricName("TotalCostEstimated"));
-
-            sortThenFilterQueriesCompleted = Metrics.counter(createMetricName("SortThenFilterQueriesCompleted"));
-            filterThenSortQueriesCompleted = Metrics.counter(createMetricName("FilterThenSortQueriesCompleted"));
+            queryPlanMetrics = (CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean())
+                                 ? new QueryPlanMetrics()
+                                 : null;
         }
 
         @Override
@@ -253,17 +246,40 @@ public class TableQueryMetrics
             totalRowTombstonesFetched.inc(snapshot.rowTombstonesFetched);
 
             QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
-            if (queryPlanInfo != null)
+            if (queryPlanInfo != null && queryPlanMetrics != null)
             {
-                totalCostEstimated.inc(queryPlanInfo.costEstimated);
-                totalRowsToReturnEstimated.inc(queryPlanInfo.rowsToReturnEstimated);
-                totalRowsToFetchEstimated.inc(queryPlanInfo.rowsToFetchEstimated);
-                totalKeysToIterateEstimated.inc(queryPlanInfo.keysToIterateEstimated);
+                queryPlanMetrics.totalCostEstimated.inc(queryPlanInfo.costEstimated);
+                queryPlanMetrics.totalRowsToReturnEstimated.inc(queryPlanInfo.rowsToReturnEstimated);
+                queryPlanMetrics.totalRowsToFetchEstimated.inc(queryPlanInfo.rowsToFetchEstimated);
+                queryPlanMetrics.totalKeysToIterateEstimated.inc(queryPlanInfo.keysToIterateEstimated);
 
                 if (queryPlanInfo.filterExecutedAfterOrderedScan)
-                    sortThenFilterQueriesCompleted.inc();
+                    queryPlanMetrics.sortThenFilterQueriesCompleted.inc();
                 if (queryPlanInfo.searchExecutedBeforeOrder)
-                    filterThenSortQueriesCompleted.inc();
+                    queryPlanMetrics.filterThenSortQueriesCompleted.inc();
+            }
+        }
+
+        public class QueryPlanMetrics
+        {
+            public final Counter totalRowsToReturnEstimated;
+            public final Counter totalRowsToFetchEstimated;
+            public final Counter totalKeysToIterateEstimated;
+            public final Counter totalCostEstimated;
+
+            public final Counter sortThenFilterQueriesCompleted;
+            public final Counter filterThenSortQueriesCompleted;
+
+
+            public QueryPlanMetrics()
+            {
+                totalRowsToReturnEstimated = Metrics.counter(createMetricName("TotalRowsToReturnEstimated"));
+                totalRowsToFetchEstimated = Metrics.counter(createMetricName("TotalRowsToFetchEstimated"));
+                totalKeysToIterateEstimated = Metrics.counter(createMetricName("TotalKeysToIterateEstimated"));
+                totalCostEstimated = Metrics.counter(createMetricName("TotalCostEstimated"));
+
+                sortThenFilterQueriesCompleted = Metrics.counter(createMetricName("SortThenFilterQueriesCompleted"));
+                filterThenSortQueriesCompleted = Metrics.counter(createMetricName("FilterThenSortQueriesCompleted"));
             }
         }
     }
@@ -311,33 +327,8 @@ public class TableQueryMetrics
          */
         public final Timer annGraphSearchLatency;
 
-        /** Query execution cost as estimated by the planner */
-        public final Histogram costEstimated;
-
-        /** Number of rows to be returned from the query as estimated by the planner */
-        public final Histogram rowsToReturnEstimated;
-
-        /** Number of rows to be fetched by the query as estimated by the planner */
-        public final Histogram rowsToFetchEstimated;
-
-        /** Number of keys to be iterated by the query as estimated by the planner */
-        public final Histogram keysToIterateEstimated;
-
-        /**
-         * Negative decimal logarithm of selectivity of the query, before applying the LIMIT clause.
-         * We use logarithm because selectivity values can be very small (e.g. 10^-9).
-         */
-        public final Histogram logSelectivityEstimated;
-
-        /**
-         * Number of indexes referenced by the optimized query plan.
-         * The same index referenced from unrelated query clauses,
-         * leading to separate index searches, are counted separately.
-         */
-        public final Histogram indexReferencesInPlan;
-
-        /** Number of indexes referenced by the original query plan before optimization (as stated in the query text) */
-        public final Histogram indexReferencesInQuery;
+        @Nullable
+        public final QueryPlanMetrics queryPlanMetrics;
 
         /**
          * @param table the table to measure metrics for
@@ -370,13 +361,9 @@ public class TableQueryMetrics
             // Key vector metrics that translate to performance
             annGraphSearchLatency = Metrics.timer(createMetricName("ANNGraphSearchLatency"));
 
-            costEstimated = Metrics.histogram(createMetricName("CostEstimated"), false);
-            rowsToReturnEstimated = Metrics.histogram(createMetricName("RowsToReturnEstimated"), true);
-            rowsToFetchEstimated = Metrics.histogram(createMetricName("RowsToFetchEstimated"), true);
-            keysToIterateEstimated = Metrics.histogram(createMetricName("KeysToIterateEstimated"), true);
-            logSelectivityEstimated = Metrics.histogram(createMetricName("LogSelectivityEstimated"), true);
-            indexReferencesInPlan = Metrics.histogram(createMetricName("IndexReferencesInPlan"), true);
-            indexReferencesInQuery = Metrics.histogram(createMetricName("IndexReferencesInQuery"), false);
+            queryPlanMetrics = CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean()
+                                 ? new QueryPlanMetrics()
+                                 : null;
         }
 
         @Override
@@ -418,16 +405,73 @@ public class TableQueryMetrics
             }
 
             QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
-            if (queryPlanInfo != null)
+            if (queryPlanInfo != null && queryPlanMetrics != null)
             {
-                costEstimated.update(queryPlanInfo.costEstimated);
-                rowsToReturnEstimated.update(queryPlanInfo.rowsToReturnEstimated);
-                rowsToFetchEstimated.update(queryPlanInfo.rowsToFetchEstimated);
-                keysToIterateEstimated.update(queryPlanInfo.keysToIterateEstimated);
-                logSelectivityEstimated.update(queryPlanInfo.logSelectivityEstimated);
-                indexReferencesInQuery.update(queryPlanInfo.indexReferencesInQuery);
-                indexReferencesInPlan.update(queryPlanInfo.indexReferencesInPlan);
+                queryPlanMetrics.costEstimated.update(queryPlanInfo.costEstimated);
+                queryPlanMetrics.rowsToReturnEstimated.update(queryPlanInfo.rowsToReturnEstimated);
+                queryPlanMetrics.rowsToFetchEstimated.update(queryPlanInfo.rowsToFetchEstimated);
+                queryPlanMetrics.keysToIterateEstimated.update(queryPlanInfo.keysToIterateEstimated);
+                queryPlanMetrics.logSelectivityEstimated.update(queryPlanInfo.logSelectivityEstimated);
+                queryPlanMetrics.indexReferencesInQuery.update(queryPlanInfo.indexReferencesInQuery);
+                queryPlanMetrics.indexReferencesInPlan.update(queryPlanInfo.indexReferencesInPlan);
             }
         }
+
+        /// Metrics related to query planning.
+        /// Moved to separate class so they can be enabled/disabled as a group.
+        public class QueryPlanMetrics
+        {
+            /**
+             * Query execution cost as estimated by the planner
+             */
+            public final Histogram costEstimated;
+
+            /**
+             * Number of rows to be returned from the query as estimated by the planner
+             */
+            public final Histogram rowsToReturnEstimated;
+
+            /**
+             * Number of rows to be fetched by the query as estimated by the planner
+             */
+            public final Histogram rowsToFetchEstimated;
+
+            /**
+             * Number of keys to be iterated by the query as estimated by the planner
+             */
+            public final Histogram keysToIterateEstimated;
+
+            /**
+             * Negative decimal logarithm of selectivity of the query, before applying the LIMIT clause.
+             * We use logarithm because selectivity values can be very small (e.g. 10^-9).
+             */
+            public final Histogram logSelectivityEstimated;
+
+            /**
+             * Number of indexes referenced by the optimized query plan.
+             * The same index referenced from unrelated query clauses,
+             * leading to separate index searches, are counted separately.
+             */
+            public final Histogram indexReferencesInPlan;
+
+            /**
+             * Number of indexes referenced by the original query plan before optimization (as stated in the query text)
+             */
+            public final Histogram indexReferencesInQuery;
+
+            QueryPlanMetrics()
+            {
+                costEstimated = Metrics.histogram(createMetricName("CostEstimated"), false);
+                rowsToReturnEstimated = Metrics.histogram(createMetricName("RowsToReturnEstimated"), true);
+                rowsToFetchEstimated = Metrics.histogram(createMetricName("RowsToFetchEstimated"), true);
+                keysToIterateEstimated = Metrics.histogram(createMetricName("KeysToIterateEstimated"), true);
+                logSelectivityEstimated = Metrics.histogram(createMetricName("LogSelectivityEstimated"), true);
+                indexReferencesInPlan = Metrics.histogram(createMetricName("IndexReferencesInPlan"), true);
+                indexReferencesInQuery = Metrics.histogram(createMetricName("IndexReferencesInQuery"), false);
+            }
+        }
+
     }
+
+
 }

@@ -769,32 +769,17 @@ public class QueryMetricsTest extends AbstractMetricsTest
         rows = execute("SELECT k FROM %s WHERE k = 1 AND hc = 1");
         assertEquals(1, rows.size());
 
-        // Check if metrics aren't updated
-        ObjectName objectName;
-        objectName = objectNameNoIndex("RowsToReturnEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
-        waitForHistogramCountEquals(objectName, 0);
-        objectName = objectNameNoIndex("RowsToFetchEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
-        waitForHistogramCountEquals(objectName, 0);
-        objectName = objectNameNoIndex("KeysToIterateEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
-        waitForHistogramCountEquals(objectName, 0);
-        objectName = objectNameNoIndex("CostEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
-        waitForHistogramCountEquals(objectName, 0);
-        objectName = objectNameNoIndex("LogSelectivityEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
-        waitForHistogramCountEquals(objectName, 0);
-
-        objectName = objectNameNoIndex("IndexReferencesInQuery", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
-        waitForHistogramCountEquals(objectName, 0);
-        objectName = objectNameNoIndex("IndexReferencesInPlan", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
-        waitForHistogramCountEquals(objectName, 0);
-
-        objectName = objectNameNoIndex("TotalRowsToReturnEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
-        waitForEquals(objectName, 0);
-        objectName = objectNameNoIndex("TotalRowsToFetchEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
-        waitForEquals(objectName, 0);
-        objectName = objectNameNoIndex("TotalKeysToIterateEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
-        waitForEquals(objectName, 0);
-        objectName = objectNameNoIndex("TotalCostEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
-        waitForEquals(objectName, 0);
+        assertMetricDoesNotExist(objectNameNoIndex("RowsToReturnEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("RowsToFetchEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("KeysToIterateEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("CostEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("LogSelectivityEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("IndexReferencesInQuery", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("IndexReferencesInPlan", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalRowsToReturnEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalRowsToFetchEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalKeysToIterateEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalCostEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
     }
 
     private ObjectName objectName(String name, String type)
