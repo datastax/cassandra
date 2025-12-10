@@ -518,10 +518,6 @@ public enum CassandraRelevantProperties
     // to `true`. You can set this to `aa` to enable immutable components on every version.
     IMMUTABLE_SAI_COMPONENTS_MIN_VERSION("cassandra.sai.immutable_components.min_version", "ca"),
 
-    // Enables parallel index read.
-    USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
-    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
-
     // The quantile used by the dynamic endpoint snitch to compute the score for a replica.
     DYNAMIC_ENDPOINT_SNITCH_QUANTILE("cassandra.dynamic_endpoint_snitch_quantile", "0.5"),
 
