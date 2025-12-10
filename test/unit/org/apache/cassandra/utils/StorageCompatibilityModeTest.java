@@ -24,7 +24,10 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.net.MessagingService;
 import org.assertj.core.api.Assertions;
+
+import static org.junit.Assert.assertEquals;
 
 public class StorageCompatibilityModeTest
 {
@@ -52,6 +55,43 @@ public class StorageCompatibilityModeTest
                     break;
                 default:
                     throw new AssertionError("Undefined behaviour for mode " + mode);
+            }
+        }
+    }
+
+    @Test
+    public void testStorageMessagingVersion()
+    {
+        // CASSANDRA_4 and CC_4 should use VERSION_40 for storage compatibility
+        assertEquals(MessagingService.VERSION_40, StorageCompatibilityMode.CASSANDRA_4.storageMessagingVersion());
+        assertEquals(MessagingService.VERSION_40, StorageCompatibilityMode.CC_4.storageMessagingVersion());
+
+        // UPGRADING and NONE should use the current messaging version
+        assertEquals(MessagingService.current_version, StorageCompatibilityMode.UPGRADING.storageMessagingVersion());
+        assertEquals(MessagingService.current_version, StorageCompatibilityMode.NONE.storageMessagingVersion());
+    }
+
+    @Test
+    public void testStorageMessagingVersionForAllModes()
+    {
+        // Ensure all modes have defined behavior
+        for (StorageCompatibilityMode mode : StorageCompatibilityMode.values())
+        {
+            int version = mode.storageMessagingVersion();
+            switch (mode)
+            {
+                case CASSANDRA_4:
+                case CC_4:
+                    assertEquals("Mode " + mode + " should use VERSION_40 for storage",
+                                 MessagingService.VERSION_40, version);
+                    break;
+                case UPGRADING:
+                case NONE:
+                    assertEquals("Mode " + mode + " should use current_version for storage",
+                                 MessagingService.current_version, version);
+                    break;
+                default:
+                    throw new AssertionError("Undefined storage messaging version behaviour for mode " + mode);
             }
         }
     }

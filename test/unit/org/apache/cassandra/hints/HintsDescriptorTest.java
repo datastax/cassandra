@@ -33,6 +33,7 @@ import org.junit.Test;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
@@ -209,5 +210,42 @@ public class HintsDescriptorTest
         assertEquals(expected.version, actual.version);
         assertEquals(expected.timestamp, actual.timestamp);
         assertEquals(expected.parameters, actual.parameters);
+    }
+
+    @Test
+    public void testCurrentStorageVersionUsesStorageCompatibilityMode()
+    {
+        // Verify that currentStorageVersion() returns the correct version based on storage compatibility mode
+        for (StorageCompatibilityMode mode : StorageCompatibilityMode.values())
+        {
+            int expectedVersion = mode.storageMessagingVersion();
+
+            switch (mode)
+            {
+                case CASSANDRA_4:
+                case CC_4:
+                    // These modes should use VERSION_40 for storage
+                    assertEquals("Mode " + mode + " should use VERSION_40 for hints storage",
+                                 MessagingService.VERSION_40, expectedVersion);
+                    break;
+                case UPGRADING:
+                case NONE:
+                    // These modes should use current_version
+                    assertEquals("Mode " + mode + " should use current_version for hints storage",
+                                 MessagingService.current_version, expectedVersion);
+                    break;
+                default:
+                    throw new AssertionError("Undefined hints storage version behaviour for mode " + mode);
+            }
+        }
+    }
+
+    @Test
+    public void testCurrentStorageVersionCC4ReturnsVersion40()
+    {
+        // Explicit test that CC_4 compatibility mode results in VERSION_40 hints format
+        int version = StorageCompatibilityMode.CC_4.storageMessagingVersion();
+        assertEquals("CC_4 mode should produce VERSION_40 hints for rollback compatibility",
+                     MessagingService.VERSION_40, version);
     }
 }
