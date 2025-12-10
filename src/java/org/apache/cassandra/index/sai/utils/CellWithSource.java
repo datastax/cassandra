@@ -148,6 +148,12 @@ public class CellWithSource<T> extends Cell<T>
     }
 
     @Override
+    public Cell<?> withPath(CellPath path)
+    {
+        return wrapIfNew(cell.withPath(path));
+    }
+
+    @Override
     public Cell<?> clone(ByteBufferCloner cloner)
     {
         return wrapIfNew(cell.clone(cloner));
@@ -157,6 +163,12 @@ public class CellWithSource<T> extends Cell<T>
     public int dataSize()
     {
         return cell.dataSize();
+    }
+
+    @Override
+    public int liveDataSize(long nowInSec)
+    {
+        return cell.liveDataSize(nowInSec);
     }
 
     @Override
@@ -190,16 +202,9 @@ public class CellWithSource<T> extends Cell<T>
     }
 
     @Override
-    public ColumnData updateAllTimestamp(long newTimestamp)
+    public Cell<?> updateAllTimestamp(long newTimestamp)
     {
-        ColumnData maybeNewCell = cell.updateAllTimestamp(newTimestamp);
-        if (maybeNewCell instanceof Cell)
-            return wrapIfNew((Cell<?>) maybeNewCell);
-        if (maybeNewCell instanceof ComplexColumnData)
-            return ((ComplexColumnData) maybeNewCell).transform(this::wrapIfNew);
-        // It's not clear when we would hit this code path, but it seems we should not
-        // hit this from SAI.
-        throw new IllegalStateException("Expected a Cell instance, but got " + maybeNewCell);
+        return wrapIfNew(cell.updateAllTimestamp(newTimestamp));
     }
 
     @Override
@@ -223,8 +228,7 @@ public class CellWithSource<T> extends Cell<T>
     @Override
     public int localDeletionTimeAsUnsignedInt()
     {
-        // Cannot call cell's localDeletionTimeAsUnsignedInt() because it's protected.
-        throw new UnsupportedOperationException();
+        return cell.localDeletionTimeAsUnsignedInt();
     }
 
     @Override
@@ -237,12 +241,6 @@ public class CellWithSource<T> extends Cell<T>
     public long minTimestamp()
     {
         return cell.minTimestamp();
-    }
-
-    @Override
-    public int liveDataSize(long nowInSec)
-    {
-        return cell.liveDataSize(nowInSec);
     }
 
     private Cell<?> wrapIfNew(Cell<?> maybeNewCell)
