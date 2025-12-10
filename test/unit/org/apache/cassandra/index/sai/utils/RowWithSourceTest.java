@@ -24,13 +24,14 @@ import org.apache.cassandra.db.CellSourceIdentifier;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Digest;
-import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.ArrayCell;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
@@ -40,6 +41,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.HeapCloner;
 
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
@@ -91,7 +93,7 @@ public class RowWithSourceTest {
         complexCell = new ArrayCell(complexColumn, System.currentTimeMillis(), Cell.NO_TTL, Cell.NO_DELETION_TIME, value, complexCellPath);
         cell = new ArrayCell(column, System.currentTimeMillis(), Cell.NO_TTL, Cell.NO_DELETION_TIME, value, null);
         // Use unsorted builder to avoid the need to manually sort cells here
-        var builder = BTreeRow.unsortedBuilder();
+        var builder = PartitionUpdate.rowBuilder(tableMetadata, false, false);
         builder.newRow(Clustering.EMPTY);
         builder.addCell(complexCell);
         builder.addCell(cell);
@@ -261,8 +263,8 @@ public class RowWithSourceTest {
     @Test
     public void testColumnData()
     {
-        var columnDataCollection = rowWithSource.columnData();
-        assertEquals(2, columnDataCollection.size());
+        var columnDataCollection = rowWithSource;
+        assertEquals(2, columnDataCollection.columnCount());
         var iter = columnDataCollection.iterator();
         while (iter.hasNext())
         {
@@ -290,47 +292,15 @@ public class RowWithSourceTest {
     }
 
     @Test
-    public void testCellsInLegacyOrder()
-    {
-        var cells = originalRow.cellsInLegacyOrder(tableMetadata, false).iterator();
-        var wrappedCells = rowWithSource.cellsInLegacyOrder(tableMetadata, false).iterator();
-        while (cells.hasNext())
-        {
-            var cell = cells.next();
-            var wrappedCell = wrappedCells.next();
-            assertTrue(wrappedCell instanceof CellWithSource);
-            assertSame(source, ((CellWithSource<?>)wrappedCell).sourceTable());
-            assertSame(cell.value(), wrappedCell.value());
-        }
-        assertFalse(wrappedCells.hasNext());
-    }
-
-    @Test
     public void testHasComplexDeletion()
     {
         assertFalse(rowWithSource.hasComplexDeletion());
     }
 
     @Test
-    public void testHasComplex()
-    {
-        assertTrue(rowWithSource.hasComplex());
-    }
-
-    @Test
     public void testHasDeletion()
     {
         assertFalse(rowWithSource.hasDeletion(1000));
-    }
-
-    @Test
-    public void testSearchIterator()
-    {
-        var iterator = rowWithSource.searchIterator();
-        var columnData = iterator.next(column);
-        assertTrue(columnData instanceof CellWithSource);
-        assertSame(source, ((CellWithSource<?>)columnData).sourceTable());
-        assertNull(iterator.next(column));
     }
 
     @Test
@@ -348,14 +318,20 @@ public class RowWithSourceTest {
     @Test
     public void testTransformAndFilter()
     {
-        assertSame(rowWithSource, rowWithSource.transformAndFilter(LivenessInfo.EMPTY, Row.Deletion.LIVE, c -> c));
+        // Only valid for BTreeRow as trie-backed-ones' transformAndFilter wraps the input row
+        Assume.assumeTrue(tableMetadata.params.memtable.factory.partitionUpdateFactory() instanceof BTreePartitionUpdate.BTreeFactory);
+        assertNull(rowWithSource.transformAndFilter(li -> li, RowWithSourceTest::toNull));
+        assertSame(rowWithSource, rowWithSource.transformAndFilter(li -> li, RowWithSourceTest::unchanged));
     }
 
-    @Test
-    public void testTransformAndFilterWithFunction() 
+    private static <C extends CellData<?, C>> C toNull(C c)
     {
-        assertNull(rowWithSource.transformAndFilter(c -> null));
-        assertSame(rowWithSource, rowWithSource.transformAndFilter(c -> c));
+        return null;
+    }
+
+    private static <C extends CellData<?, C>> C unchanged(C c)
+    {
+        return c;
     }
 
     @Test

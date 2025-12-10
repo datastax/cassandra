@@ -23,6 +23,7 @@ package org.apache.cassandra.db.transform;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 
@@ -81,7 +82,7 @@ final class UnfilteredRows extends BaseRows<Unfiltered, UnfilteredRowIterator> i
             return false;
 
         // If we are stopping tombstones, we must check if any already prepared `next` is a tombstone and drop it if so.
-        if (next != null && next.isRangeTombstoneMarker())
+        if (next != null && (next.isRangeTombstoneMarker() || ((Row) next).isEmptyAfterDeletion()))
             next = null;
         return true;
     }

@@ -53,6 +53,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.db.tries.Direction;
+import org.apache.cassandra.db.tries.InMemoryBaseTrie;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieEntriesIterator;
@@ -261,7 +262,7 @@ public class TrieBackedPartitionStage2 implements Partition
 
     static RowData rowToData(Row row)
     {
-        BTreeRow brow = (BTreeRow) row;
+        BTreeRow brow = BTreeRow.asBTreeRow(row);
         return new RowData(brow.getBTree(), row.primaryKeyLivenessInfo(), row.deletion().time(), brow.getMinLocalDeletionTime());
     }
 
@@ -608,7 +609,7 @@ public class TrieBackedPartitionStage2 implements Partition
     /**
      * Resolver for operations with trie-backed partitions. We don't permit any overwrites/merges.
      */
-    public static final InMemoryTrie.UpsertTransformer<Object, Object> NO_CONFLICT_RESOLVER =
+    public static final InMemoryBaseTrie.UpsertTransformer<Object, Object> NO_CONFLICT_RESOLVER =
             (existing, update) ->
             {
                 if (existing != null)
