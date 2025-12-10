@@ -339,7 +339,12 @@ public class SerializationHeader
             }
             catch (InvalidColumnTypeException e)
             {
-                AbstractType<?> fixed = (allowImplicitlyFrozenTuples || isForOfflineTool) ? tryFix(type, columnName, isPrimaryKeyColumn, metadata.isCounter(), dropped, isForOfflineTool) : null;
+                // Always try to fix tuple types regardless of allowImplicitlyFrozenTuples. Tuples are
+                // always implicitly frozen in CQL, so a multi-cell tuple indicates old data that needs fixing.
+                // The allowImplicitlyFrozenTuples flag controls whether to allow implicit freezing for OTHER types
+                // (like UDTs), but tuples must always be frozen to ensure consistent column ordering.
+                boolean shouldTryFix = allowImplicitlyFrozenTuples || isForOfflineTool || type.isTuple();
+                AbstractType<?> fixed = shouldTryFix ? tryFix(type, columnName, isPrimaryKeyColumn, metadata.isCounter(), dropped, isForOfflineTool) : null;
                 if (fixed == null)
                 {
                     // We don't know how to fix. We throw an error here because reading such table may result in corruption
@@ -351,6 +356,20 @@ public class SerializationHeader
                 }
                 else
                 {
+                    // For dropped columns, the schema's dropped column type preserves the original
+                    // frozen status (frozen<tuple<...>> for plain tuples, tuple<...> for non-frozen UDTs).
+                    // If the fixed type's isMultiCell differs from the schema's type, adjust to match the schema.
+                    // This ensures column ordering (based on isComplex) matches the write-time expectation.
+                    if (dropped && fixed.isTuple())
+                    {
+                        ColumnMetadata droppedColumn = metadata.getDroppedColumn(columnName);
+                        if (droppedColumn != null && droppedColumn.type.isMultiCell() != fixed.isMultiCell())
+                        {
+                            logger.debug("Adjusting dropped column {} isMultiCell from {} to {} to match schema",
+                                         ColumnIdentifier.toCQLString(columnName), fixed.isMultiCell(), droppedColumn.type.isMultiCell());
+                            fixed = fixed.with(fixed.subTypes(), droppedColumn.type.isMultiCell());
+                        }
+                    }
                     logger.debug("Error reading SSTable header {}, the type for column {} in {} is {}, which is " +
                                  "invalid ({}); The type has been automatically fixed to {}, but please contact " +
                                  "support if this is incorrect",
@@ -398,11 +417,15 @@ public class SerializationHeader
             else
             {
                 // Here again, it's mainly issues of frozen-ness that are fixable, namely multi-cell types that either:
-                // - are tuples, yet not for a dropped column (and so _should_ be frozen). In which case we freeze it.
+                // - are plain tuples (which _should_ be frozen). In which case we freeze it.
                 // - has non-frozen subtypes. In which case, we just freeze all subtypes.
                 if (invalidType.isMultiCell())
                 {
-                    boolean isMultiCell = !invalidType.isTuple() || isDroppedColumn;
+                    // For tuples, default to frozen (isMultiCell=false) since plain tuples in CQL are
+                    // always implicitly frozen. For dropped columns, validateAndMaybeFixColumnType will adjust
+                    // the isMultiCell to match the schema's dropped column type (which preserves the original
+                    // frozen status from before the column was dropped).
+                    boolean isMultiCell = !invalidType.isTuple();
                     return invalidType.with(AbstractType.freeze(invalidType.subTypes()), isMultiCell);
                 }
 
@@ -484,9 +507,24 @@ public class SerializationHeader
                         // If we don't find the definition, it could be we have data for a dropped column, and we shouldn't
                         // fail deserialization because of that. So we grab a "fake" ColumnDefinition that ensure proper
                         // deserialization. The column will be ignored later on anyway.
-                        column = metadata.getDroppedColumn(name, isStatic);
-                        if (column == null)
+                        ColumnMetadata droppedColumn = metadata.getDroppedColumn(name, isStatic);
+                        if (droppedColumn == null)
                             throw new UnknownColumnException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
+
+                        // Use the SSTable's validated type for the dropped column metadata instead of the
+                        // schema's type. This is critical because column ordering depends on isComplex() which depends
+                        // on the type's isMultiCell(). If the schema's dropped column type has different isMultiCell()
+                        // than the SSTable's type, the column order will be wrong, causing bitmap decode errors and
+                        // data corruption. The SSTable's 'type' (variable) has already been fixed above.
+                        // We must also expand user types since droppedColumn() asserts that the type has no UDT refs.
+                        // expandUserTypes() preserves the isMultiCell() property which is what we need.
+                        AbstractType<?> expandedType = type.expandUserTypes();
+                        column = ColumnMetadata.droppedColumn(droppedColumn.ksName,
+                                                              droppedColumn.cfName,
+                                                              droppedColumn.name,
+                                                              expandedType,
+                                                              droppedColumn.kind,
+                                                              droppedColumn.getMask());
                     }
                     builder.add(column);
                 }
