@@ -77,6 +77,7 @@ import org.apache.cassandra.service.WriteResponseHandler;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
@@ -144,6 +145,7 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void store(Batch batch, WriteOptions writeOptions)
     {
+        int storageVersion = StorageCompatibilityMode.current().storageMessagingVersion();
         List<ByteBuffer> mutations = new ArrayList<>(batch.encodedMutations.size() + batch.decodedMutations.size());
         mutations.addAll(batch.encodedMutations);
 
@@ -151,7 +153,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         {
             try (DataOutputBuffer buffer = new DataOutputBuffer())
             {
-                Mutation.serializer.serialize(mutation, buffer, MessagingService.current_version);
+                Mutation.serializer.serialize(mutation, buffer, storageVersion);
                 mutations.add(buffer.buffer());
             }
             catch (IOException e)
@@ -164,7 +166,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(SystemKeyspace.Batches, batch.id);
         builder.row()
                .timestamp(batch.creationTime)
-               .add("version", MessagingService.current_version)
+               .add("version", storageVersion)
                .appendAll("mutations", mutations);
 
         builder.buildAsMutation().apply(writeOptions);
