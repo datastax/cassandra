@@ -36,10 +36,10 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.commitlog.CommitLogSegment;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.virtual.VirtualMutation;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
@@ -146,7 +146,7 @@ final class BatchUpdatesCollector implements UpdatesCollector
             {
                 IMutation mutation = builder.build();
                 mutation.validateIndexedColumns(state);
-                mutation.validateSize(MessagingService.current_version, CommitLogSegment.ENTRY_OVERHEAD_SIZE);
+                mutation.validateSize(StorageCompatibilityMode.current().storageMessagingVersion(), CommitLogSegment.ENTRY_OVERHEAD_SIZE);
                 ms.add(mutation);
             }
         }

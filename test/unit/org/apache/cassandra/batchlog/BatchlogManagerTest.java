@@ -51,6 +51,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -378,5 +379,37 @@ public class BatchlogManagerTest
 
         // Replay should be cancelled as there are no peers in the ring.
         assertEquals(1, BatchlogManager.instance.countAllBatches() - initialAllBatches);
+    }
+
+    @Test
+    public void testBatchlogUsesStorageCompatibleVersion()
+    {
+        // Verify that batches are stored with the storage-compatible messaging version
+        TableMetadata cfm = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1).metadata();
+        long timestamp = currentTimeMillis();
+        TimeUUID uuid = nextTimeUUID();
+
+        List<Mutation> mutations = new ArrayList<>();
+        mutations.add(new RowUpdateBuilder(cfm, FBUtilities.timestampMicros(), ByteBufferUtil.bytes(0))
+                      .clustering("name0")
+                      .add("val", "val0")
+                      .build());
+
+        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations));
+
+        // Query the stored batch to verify the version
+        String query = String.format("SELECT version FROM %s.%s WHERE id = ?",
+                                     SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES);
+        UntypedResultSet results = executeInternal(query, uuid);
+        assertFalse("Batch should be stored", results.isEmpty());
+
+        int storedVersion = results.one().getInt("version");
+        int expectedVersion = StorageCompatibilityMode.current().storageMessagingVersion();
+
+        assertEquals("Batch should be stored with storage-compatible messaging version",
+                     expectedVersion, storedVersion);
+
+        // Clean up
+        BatchlogManager.remove(uuid);
     }
 }
