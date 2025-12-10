@@ -220,6 +220,11 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
             super(firstPrefixByte, prefix, tail);
         }
 
+        DeletionAware(DeletionAware<T, D> copyFrom, Direction direction)
+        {
+            this(copyFrom.nextPrefixByte, copyFrom.duplicateSource(), copyFrom.source.tailCursor(direction));
+        }
+
         @Override
         public RangeCursor<D> deletionBranchCursor(Direction direction)
         {
@@ -235,8 +240,44 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
                 return source.tailCursor(direction);
             else
             {
-                return new DeletionAware<>(nextPrefixByte, duplicateSource(), source.tailCursor(direction));
+                return new DeletionAware<>(this, direction);
             }
+        }
+    }
+
+
+    static class DeletionAwareSeparately<T, D extends RangeState<D>>
+    extends DeletionAware<T, D>
+    {
+        final RangeCursor<D> deletionBranch;
+
+        DeletionAwareSeparately(ByteComparable prefix, DeletionAwareCursor<T, D> contentBranch, RangeCursor<D> deletionBranch)
+        {
+            super(prefix, contentBranch);
+            this.deletionBranch = deletionBranch != null ? new PrefixedCursor.Range<>(prefix, deletionBranch) : null;
+        }
+
+        DeletionAwareSeparately(DeletionAwareSeparately<T, D> copyFrom, Direction direction)
+        {
+            super(copyFrom, direction);
+            this.deletionBranch = copyFrom.deletionBranch; // no need to take tailCursor as we do that when we return it
+        }
+
+        @Override
+        public RangeCursor<D> deletionBranchCursor(Direction direction)
+        {
+            return Cursor.isRootPosition(encodedPosition()) && deletionBranch != null
+                   ? deletionBranch.tailCursor(direction)
+                   : null;
+        }
+
+        @Override
+        public DeletionAwareCursor<T, D> tailCursor(Direction direction)
+        {
+            if (Cursor.isRootPosition(encodedPosition()))
+                return new DeletionAwareSeparately<>(this, direction);
+            else
+                return super.tailCursor(direction);
         }
     }
 }

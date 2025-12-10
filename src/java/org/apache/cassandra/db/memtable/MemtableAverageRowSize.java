@@ -48,7 +48,7 @@ class MemtableAverageRowSize
             long count = 0;
 
             @Override
-            public void accept(Object o)
+            public void content(Object o)
             {
                 if (o instanceof IDataSize)
                 {

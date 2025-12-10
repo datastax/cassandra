@@ -554,29 +554,15 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
              if (sstableVersion.hasUIntDeletionTime())
                  return row;
 
-             LivenessInfo livenessInfo = row.primaryKeyLivenessInfo();
-             if (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() >= 0)
-             {
-                 livenessInfo = livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp(), livenessInfo.localExpirationTime(), false);
-             }
-
-             return row.transformAndFilter(livenessInfo, row.deletion(), cd -> {
-                 if (cd.column().isSimple())
-                 {
-                     Cell<?> cell = (Cell<?>)cd;
-                     return cell.isExpiring() && cell.localDeletionTime() >= 0
-                            ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp(), cell.localDeletionTime())
-                            : cell;
-                 }
-                 else
-                 {
-                     ComplexColumnData complexData = (ComplexColumnData)cd;
-                     return complexData.transformAndFilter(cell -> cell.isExpiring() && cell.localDeletionTime() >= 0
-                                                                   ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp(), cell.localDeletionTime())
-                                                                   : cell);
-                 }
-             }).clone(HeapCloner.instance);
+             return row.transformAndFilter(livenessInfo -> (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() >= 0)
+                                                           ? livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp(), livenessInfo.localExpirationTime(), false)
+                                                           : livenessInfo,
+                                           cell -> cell.isExpiring() && cell.localDeletionTime() >= 0
+                                                   ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp(), cell.localDeletionTime())
+                                                   : cell)
+                       .clone(HeapCloner.instance);
          }
+
 
          private boolean hasOverflowedLocalExpirationTimeRow(Row next)
          {
@@ -692,26 +678,13 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
         private Unfiltered fixNegativeLocalExpirationTime(Row row)
         {
-            LivenessInfo livenessInfo = row.primaryKeyLivenessInfo();
-            if (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() == Cell.INVALID_DELETION_TIME)
-                livenessInfo = livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp() + 1, AbstractCell.MAX_DELETION_TIME_2038_LEGACY_CAP);
-
-            return row.transformAndFilter(livenessInfo, row.deletion(), cd -> {
-                if (cd.column().isSimple())
-                {
-                    Cell cell = (Cell) cd;
-                    return cell.isExpiring() && cell.localDeletionTime() == Cell.INVALID_DELETION_TIME
-                           ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp() + 1, AbstractCell.MAX_DELETION_TIME_2038_LEGACY_CAP)
-                           : cell;
-                }
-                else
-                {
-                    ComplexColumnData complexData = (ComplexColumnData) cd;
-                    return complexData.transformAndFilter(cell -> cell.isExpiring() && cell.localDeletionTime() == Cell.INVALID_DELETION_TIME
-                                                                  ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp() + 1, AbstractCell.MAX_DELETION_TIME_2038_LEGACY_CAP)
-                                                                  : cell);
-                }
-            }).clone(HeapCloner.instance);
+            return row.transformAndFilter(livenessInfo -> (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() < 0)
+                                                          ? livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp() + 1, AbstractCell.MAX_DELETION_TIME)
+                                                          : livenessInfo,
+                                          cell -> cell.isExpiring() && cell.localDeletionTime() < 0
+                                                  ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp() + 1, AbstractCell.MAX_DELETION_TIME)
+                                                  : cell)
+                      .clone(HeapCloner.instance);
         }
     }
 

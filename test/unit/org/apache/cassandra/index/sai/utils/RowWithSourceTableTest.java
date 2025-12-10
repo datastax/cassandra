@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Digest;
-import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ListType;
@@ -233,8 +232,8 @@ public class RowWithSourceTableTest {
     @Test
     public void testColumnData()
     {
-        var columnDataCollection = rowWithSourceTable.columnData();
-        assertEquals(2, columnDataCollection.size());
+        var columnDataCollection = rowWithSourceTable;
+        assertEquals(2, columnDataCollection.columnCount());
         var iter = columnDataCollection.iterator();
         while (iter.hasNext())
         {
@@ -262,47 +261,15 @@ public class RowWithSourceTableTest {
     }
 
     @Test
-    public void testCellsInLegacyOrder()
-    {
-        var cells = originalRow.cellsInLegacyOrder(tableMetadata, false).iterator();
-        var wrappedCells = rowWithSourceTable.cellsInLegacyOrder(tableMetadata, false).iterator();
-        while (cells.hasNext())
-        {
-            var cell = cells.next();
-            var wrappedCell = wrappedCells.next();
-            assertTrue(wrappedCell instanceof CellWithSourceTable);
-            assertSame(source, ((CellWithSourceTable<?>)wrappedCell).sourceTable());
-            assertSame(cell.value(), wrappedCell.value());
-        }
-        assertFalse(wrappedCells.hasNext());
-    }
-
-    @Test
     public void testHasComplexDeletion()
     {
         assertFalse(rowWithSourceTable.hasComplexDeletion());
     }
 
     @Test
-    public void testHasComplex()
-    {
-        assertTrue(rowWithSourceTable.hasComplex());
-    }
-
-    @Test
     public void testHasDeletion()
     {
         assertFalse(rowWithSourceTable.hasDeletion(1000));
-    }
-
-    @Test
-    public void testSearchIterator()
-    {
-        var iterator = rowWithSourceTable.searchIterator();
-        var columnData = iterator.next(column);
-        assertTrue(columnData instanceof CellWithSourceTable);
-        assertSame(source, ((CellWithSourceTable<?>)columnData).sourceTable());
-        assertNull(iterator.next(column));
     }
 
     @Test
@@ -320,14 +287,8 @@ public class RowWithSourceTableTest {
     @Test
     public void testTransformAndFilter()
     {
-        assertSame(rowWithSourceTable, rowWithSourceTable.transformAndFilter(LivenessInfo.EMPTY, Row.Deletion.LIVE, c -> c));
-    }
-
-    @Test
-    public void testTransformAndFilterWithFunction() 
-    {
-        assertNull(rowWithSourceTable.transformAndFilter(c -> null));
-        assertSame(rowWithSourceTable, rowWithSourceTable.transformAndFilter(c -> c));
+        assertNull(rowWithSourceTable.transformAndFilter(li -> li, c -> null));
+        assertSame(rowWithSourceTable, rowWithSourceTable.transformAndFilter(li -> li, c -> c));
     }
 
     @Test

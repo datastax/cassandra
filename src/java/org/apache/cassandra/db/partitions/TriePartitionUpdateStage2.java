@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Predicates;
 import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
@@ -39,6 +40,7 @@ import org.apache.cassandra.db.MutableDeletionInfo;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
@@ -165,7 +167,7 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
      */
     public static TriePartitionUpdateStage2 singleRowUpdate(TableMetadata metadata, DecoratedKey key, Row row)
     {
-        EncodingStats stats = EncodingStats.Collector.forRow(row);
+        EncodingStats stats = row.isEmpty() ? EncodingStats.NO_STATS : EncodingStats.Collector.forRow(row);
         InMemoryTrie<Object> trie = newTrie(DeletionInfo.LIVE);
 
         RegularAndStaticColumns columns;
@@ -294,7 +296,7 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
                     mdi.updateAllTimestamp(newTimestamp - 1);
                     return mdi;
                 }
-            }, x -> false);
+            }, Predicates.alwaysFalse());
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -404,13 +406,21 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
         return marks;
     }
 
-    private static void addMarksForRow(Row row, List<CounterMark> marks)
+    private void addMarksForRow(Row row, List<CounterMark> marks)
     {
         for (Cell<?> cell : row.cells())
         {
             if (cell.isCounterCell())
-                marks.add(new CounterMark(row, cell.column(), cell.path()));
+                marks.add(new CounterMark(this, row, cell.column(), cell.path()));
         }
+    }
+
+    @Override
+    public void setCounterMarkValue(CounterMark mark, ByteBuffer value)
+    {
+        // Please read the warning in BTreeRow.setValue before using this method.
+        BTreeRow row = (BTreeRow) mark.row();
+        row.setValue(mark.column(), mark.path(), value);
     }
 
     @Override

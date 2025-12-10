@@ -89,7 +89,8 @@ public class NativeCell extends AbstractCell<ByteBuffer>
         long size = offHeapSizeWithoutPath(value.remaining());
 
         assert value.order() == ByteOrder.BIG_ENDIAN;
-        assert column.isComplex() == (path != null);
+        // Trie-backed rows store path-less cells.
+        // assert column.isComplex() == (path != null);
         if (path != null)
         {
             assert path.size() == 1 : String.format("Expected path size to be 1 but was not; %s", path);
@@ -184,6 +185,12 @@ public class NativeCell extends AbstractCell<ByteBuffer>
     public long unsharedHeapSize()
     {
         return EMPTY_SIZE;
+    }
+
+    @Override
+    public Cell<?> withPath(CellPath path)
+    {
+        return new BufferCell(column, timestamp(), ttl(), localDeletionTime(), value(), path);
     }
 
     @Override

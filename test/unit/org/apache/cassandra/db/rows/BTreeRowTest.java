@@ -86,16 +86,30 @@ public class BTreeRowTest
     }
 
     @Test
+    public void testRowMinTimespampFromDeletionShadowable()
+    {
+        int v1CellTimestamp = 1000;
+        int v2CellTimestamp = 500;
+        int primaryKeyTimestamp = 100;
+        int deletionTimestamp = 50;
+        BTreeRow.Builder builder = row(3, cell(v1Metadata, 1, v1CellTimestamp), cell(v2Metadata, 1, v2CellTimestamp));
+        builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(primaryKeyTimestamp, FBUtilities.nowInSeconds()));
+        builder.addRowDeletion(new Row.Deletion(DeletionTime.build(deletionTimestamp, FBUtilities.nowInSeconds()), true));
+        Row row = builder.build();
+        assertEquals(primaryKeyTimestamp, row.minTimestamp());
+    }
+
+    @Test
     public void testRowMinTimespampFromDeletion()
     {
         int v1CellTimestamp = 1000;
         int v2CellTimestamp = 500;
         int primaryKeyTimestamp = 100;
-        int localDeletionTime = 50;
+        int deletionTimestamp = 50;
         BTreeRow.Builder builder = row(3, cell(v1Metadata, 1, v1CellTimestamp), cell(v2Metadata, 1, v2CellTimestamp));
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(primaryKeyTimestamp, FBUtilities.nowInSeconds()));
-        builder.addRowDeletion(new Row.Deletion(DeletionTime.build(localDeletionTime, FBUtilities.nowInSeconds()), true));
+        builder.addRowDeletion(new Row.Deletion(DeletionTime.build(deletionTimestamp, FBUtilities.nowInSeconds()), false));
         Row row = builder.build();
-        assertEquals(primaryKeyTimestamp, row.minTimestamp());
+        assertEquals(deletionTimestamp, row.minTimestamp());
     }
 }
