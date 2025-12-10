@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -384,31 +385,12 @@ public class PagingState
         public static RowMark create(TableMetadata metadata, Row row, ProtocolVersion protocolVersion)
         {
             ByteBuffer mark;
-            if (protocolVersion.isSmallerOrEqualTo(ProtocolVersion.V3))
-            {
-                // We need to be backward compatible with 2.1/2.2 nodes paging states. Which means we have to send
-                // the full cellname of the "last" cell in the row we get (since that's how 2.1/2.2 nodes will start after
-                // that last row if they get that paging state).
-                Iterator<Cell<?>> cells = row.cellsInLegacyOrder(metadata, true).iterator();
-                if (!cells.hasNext())
-                {
-                    // If the last returned row has no cell, this means in 2.1/2.2 terms that we stopped on the row
-                    // marker.  Note that this shouldn't happen if the table is COMPACT STORAGE tables.
-                    assert !metadata.isCompactTable();
-                    mark = encodeCellName(metadata, row.clustering(), EMPTY_BYTE_BUFFER, null);
-                }
-                else
-                {
-                    Cell<?> cell = cells.next();
-                    mark = encodeCellName(metadata, row.clustering(), cell.column().name.bytes, cell.column().isComplex() ? cell.path().get(0) : null);
-                }
-            }
-            else
-            {
-                // We froze the serialization version to 3.0 as we need to make sure this this doesn't change
+            Preconditions.checkArgument(!protocolVersion.isSmallerOrEqualTo(ProtocolVersion.V3),
+                                        "Protocol version %s no longer supported.",
+                                        protocolVersion);
+            // We froze the serialization version to 3.0 as we need to make sure this this doesn't change
                 //  It got bumped to 4.0 when 3.0 got dropped, knowing it didn't change
-                mark = Clustering.serializer.serialize(row.clustering(), MessagingService.VERSION_40, makeClusteringTypes(metadata));
-            }
+            mark = Clustering.serializer.serialize(row.clustering(), MessagingService.VERSION_40, makeClusteringTypes(metadata));
             return new RowMark(mark, protocolVersion);
         }
 

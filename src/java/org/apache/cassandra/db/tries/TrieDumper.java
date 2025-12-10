@@ -107,7 +107,7 @@ abstract class TrieDumper<T> implements Cursor.Walker<T, String>
     }
 
     static class DeletionAware<T, D extends RangeState<D>> extends Plain<T>
-    implements DeletionAwareTrie.DeletionAwareWalker<T, D, String>
+    implements DeletionAwareCursor.DeletionAwareWalker<T, D, String>
     {
         final Function<D, String> rangeToString;
 

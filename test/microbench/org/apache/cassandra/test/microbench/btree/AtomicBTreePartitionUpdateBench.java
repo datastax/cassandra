@@ -54,12 +54,12 @@ import org.apache.cassandra.db.partitions.AtomicBTreePartition;
 import org.apache.cassandra.db.partitions.BTreePartitionData;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.BTreeComplexColumn;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.ColumnData;
-import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
@@ -285,7 +285,7 @@ public class AtomicBTreePartitionUpdateBench
             int mapCount = selectSortAndTransform(complexBuffer, complexPaths, columns[0].cellPathComparator(), complexCell);
             try (BulkIterator<ColumnData> iter = BulkIterator.of(complexBuffer))
             {
-                columnBuffer[0] = ComplexColumnData.unsafeConstruct(columns[0], BTree.build(iter, mapCount, UpdateFunction.noOp()), DeletionTime.LIVE);
+                columnBuffer[0] = BTreeComplexColumn.unsafeConstruct(columns[0], BTree.build(iter, mapCount, UpdateFunction.noOp()), DeletionTime.LIVE);
             }
             return bufferToRow(clusterings[0]);
         }
