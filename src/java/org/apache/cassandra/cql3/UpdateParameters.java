@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 
 import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -103,13 +104,13 @@ public class UpdateParameters
         if (clustering == Clustering.STATIC_CLUSTERING)
         {
             if (staticBuilder == null)
-                staticBuilder = BTreeRow.unsortedBuilder();
+                staticBuilder = PartitionUpdate.rowBuilder(metadata, true, false);
             builder = staticBuilder;
         }
         else
         {
             if (regularBuilder == null)
-                regularBuilder = BTreeRow.unsortedBuilder();
+                regularBuilder = PartitionUpdate.rowBuilder(metadata, false, false);
             builder = regularBuilder;
         }
 

@@ -30,7 +30,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -55,7 +54,6 @@ import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryBaseTrie;
 import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
-import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.TrieEntriesWalker;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.db.tries.TrieTailsIterator;
@@ -98,7 +96,7 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
 
     /// Force copy checker (see [InMemoryTrie#apply]) ensuring all modifications apply atomically and consistently to
     /// the whole partition.
-    public static final Predicate<InMemoryBaseTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY =
+    public static final Predicate<InMemoryBaseTrie.NodeFeatures<?>> FORCE_COPY_PARTITION_BOUNDARY =
         features -> TrieBackedPartitionStage3.isPartitionBoundary(features.content());
 
     /// Set to true when the memtable requests a switch (e.g. for trie size limit being reached) to ensure only one
@@ -192,7 +190,7 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
     /// `commitLogSegmentPosition` should only be null if this is a secondary index, in which case it is *expected* to
     /// be null.
     @Override
-    public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    public long performPut(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
     {
         DecoratedKey key = update.partitionKey();
         MemtableShard shard = shards[boundaries.getShardForKey(key)];
@@ -257,14 +255,6 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
     public int getShardCount()
     {
         return shards.length;
-    }
-
-    @Override
-    public long getEstimatedAverageRowSize()
-    {
-        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
-            estimatedAverageRowSize = new MemtableAverageRowSize(this, mergedTrie.contentOnlyTrie());
-        return estimatedAverageRowSize.rowSize;
     }
 
     /// Returns the minimum timestamp if one available, otherwise `NO_MIN_TIMESTAMP`.
@@ -584,9 +574,9 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
         @VisibleForTesting
         final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> data;
 
-        RegularAndStaticColumns columns;
+        volatile RegularAndStaticColumns columns;
 
-        EncodingStats stats;
+        volatile EncodingStats stats;
 
         @Unmetered  // total pool size should not be included in memtable's deep size
         private final MemtableAllocator allocator;
@@ -614,7 +604,7 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
 
         public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
         {
-            TriePartitionUpdaterStage3 updater = new TriePartitionUpdaterStage3(allocator.cloner(opGroup), indexer, update.partitionLevelDeletion(), metadata.get(), this);
+            TriePartitionUpdaterStage3 updater = new TriePartitionUpdaterStage3(data, allocator.cloner(opGroup), indexer, metadata.get(), this);
             boolean locked = writeLock.tryLock();
             if (locked)
             {
@@ -629,46 +619,38 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
             }
             try
             {
+                indexer.start();
+                // Add the initial trie size on the first operation. This technically isn't correct (other shards
+                // do take their memory share even if they are empty) but doing it during construction may cause
+                // the allocator to block while we are trying to flush a memtable and become a deadlock.
+                long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
+                long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
                 try
                 {
-                    indexer.start();
-                    // Add the initial trie size on the first operation. This technically isn't correct (other shards
-                    // do take their memory share even if they are empty) but doing it during construction may cause
-                    // the allocator to block while we are trying to flush a memtable and become a deadlock.
-                    long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
-                    long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
-                    try
-                    {
-                        data.apply(TriePartitionUpdateStage3.asMergableTrie(update),
-                                   updater,
-                                   updater::mergeMarkers,
-                                   updater::applyIncomingMarker,
-                                   updater::applyExistingMarkerToIncomingRow,
-                                   true,
-                                   FORCE_COPY_PARTITION_BOUNDARY);
-                    }
-                    catch (TrieSpaceExhaustedException e)
-                    {
-                        // This should never really happen as a flush would be triggered long before this limit is reached.
-                        throw new AssertionError(e);
-                    }
+                    updater.apply(TriePartitionUpdateStage3.asMergableTrie(update));
+                }
+                catch (TrieSpaceExhaustedException e)
+                {
+                    // This should never really happen as a flush would be triggered long before this limit is reached.
+                    throw new AssertionError(e);
+                }
+                finally
+                {
                     allocator.offHeap().adjust(data.usedSizeOffHeap() - offHeap, opGroup);
                     allocator.onHeap().adjust((data.usedSizeOnHeap() - onHeap) + updater.heapSize, opGroup);
                     partitionCount += updater.partitionsAdded;
                 }
-                finally
-                {
-                    indexer.commit();
-                    updateMinTimestamp(update.stats().minTimestamp);
-                    updateLiveDataSize(updater.dataSize);
-                    updateCurrentOperations(update.operationCount());
-
-                    columns = columns.mergeTo(update.columns());
-                    stats = stats.mergeWith(update.stats());
-                }
             }
             finally
             {
+                indexer.commit();
+                updateMinTimestamp(update.stats().minTimestamp);
+                updateLiveDataSize(updater.dataSize);
+                updateCurrentOperations(update.operationCount());
+
+                columns = columns.mergeTo(update.columns());
+                stats = stats.mergeWith(update.stats());
+
                 writeLock.unlock();
             }
             return updater.colUpdateTimeDelta;
@@ -732,7 +714,7 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
         }
     }
 
-    static class PartitionIterator extends TrieTailsIterator.DeletionAware<Object, TrieTombstoneMarker, TrieBackedPartitionStage3>
+    static class PartitionIterator extends TrieTailsIterator.DeletionAwareWithoutCoveringDeletions<Object, TrieTombstoneMarker, TrieBackedPartitionStage3>
     {
         final TableMetadata metadata;
         final EnsureOnHeap ensureOnHeap;

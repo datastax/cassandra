@@ -53,7 +53,6 @@ import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryTrie;
@@ -76,8 +75,6 @@ import org.apache.cassandra.utils.memory.Cloner;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
-
-import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
 
 /// Previous TrieMemtable implementation, provided for two reasons:
 ///
@@ -279,22 +276,6 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     public int getShardCount()
     {
         return shards.length;
-    }
-
-    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
-    {
-        int total = 0;
-        for (MemtableUnfilteredPartitionIterator iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
-        {
-            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
-            {
-                Unfiltered uRow = it.next();
-                if (uRow.isRow())
-                    total++;
-            }
-        }
-
-        return total;
     }
 
     @Override
@@ -518,9 +499,9 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         @VisibleForTesting
         final InMemoryTrie<BTreePartitionData> data;
 
-        RegularAndStaticColumns columns;
+        volatile RegularAndStaticColumns columns;
 
-        EncodingStats stats;
+        volatile EncodingStats stats;
 
         private final MemtableAllocator allocator;
 
@@ -563,42 +544,40 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
             }
             try
             {
+                // Add the initial trie size on the first operation. This technically isn't correct (other shards
+                // do take their memory share even if they are empty) but doing it during construction may cause
+                // the allocator to block while we are trying to flush a memtable and become a deadlock.
+                long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
+                long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
+                // Use the fast recursive put if we know the key is small enough to not cause a stack overflow.
                 try
                 {
-                    // Add the initial trie size on the first operation. This technically isn't correct (other shards
-                    // do take their memory share even if they are empty) but doing it during construction may cause
-                    // the allocator to block while we are trying to flush a memtable and become a deadlock.
-                    long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
-                    long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
-                    // Use the fast recursive put if we know the key is small enough to not cause a stack overflow.
-                    try
-                    {
-                        data.putSingleton(key,
-                                          BTreePartitionUpdate.asBTreeUpdate(update),
-                                          updater::mergePartitions,
-                                          key.getKeyLength() < MAX_RECURSIVE_KEY_LENGTH);
-                    }
-                    catch (TrieSpaceExhaustedException e)
-                    {
-                        // This should never really happen as a flush would be triggered long before this limit is reached.
-                        throw Throwables.propagate(e);
-                    }
+                    data.putSingleton(key,
+                                      BTreePartitionUpdate.asBTreeUpdate(update),
+                                      updater::mergePartitions,
+                                      key.getKeyLength() < MAX_RECURSIVE_KEY_LENGTH);
+                }
+                catch (TrieSpaceExhaustedException e)
+                {
+                    // This should never really happen as a flush would be triggered long before this limit is reached.
+                    throw Throwables.propagate(e);
+                }
+                finally
+                {
                     allocator.offHeap().adjust(data.usedSizeOffHeap() - offHeap, opGroup);
                     allocator.onHeap().adjust(data.usedSizeOnHeap() - onHeap, opGroup);
                     partitionCount += updater.partitionsAdded;
                 }
-                finally
-                {
-                    updateMinTimestamp(update.stats().minTimestamp);
-                    updateLiveDataSize(updater.dataSize);
-                    updateCurrentOperations(update.operationCount());
-
-                    columns = columns.mergeTo(update.columns());
-                    stats = stats.mergeWith(update.stats());
-                }
             }
             finally
             {
+                updateMinTimestamp(update.stats().minTimestamp);
+                updateLiveDataSize(updater.dataSize);
+                updateCurrentOperations(update.operationCount());
+
+                columns = columns.mergeTo(update.columns());
+                stats = stats.mergeWith(update.stats());
+
                 writeLock.unlock();
             }
             return updater.colUpdateTimeDelta;

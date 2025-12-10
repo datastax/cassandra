@@ -38,8 +38,11 @@ import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TrieBackedPartitionStage2;
 import org.apache.cassandra.db.partitions.TrieBackedPartitionStage3;
+import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -61,17 +64,19 @@ public class PartitionImplementationTest
 {
     enum Implementation
     {
-        BTREE(ImmutableBTreePartition::create, false),
-        TRIE_STAGE_2(TrieBackedPartitionStage2::fromIterator, false),
-        TRIE_STAGE_3(TrieBackedPartitionStage3::fromIterator, true),
-        TRIE(TrieBackedPartition::fromIterator, true);
+        BTREE(ImmutableBTreePartition::create, BTreePartitionUpdate.FACTORY, false),
+        TRIE_STAGE_2(TrieBackedPartitionStage2::fromIterator, BTreePartitionUpdate.FACTORY, false),
+        TRIE_STAGE_3(TrieBackedPartitionStage3::fromIterator, BTreePartitionUpdate.FACTORY, true),
+        TRIE(TrieBackedPartition::fromIterator, TriePartitionUpdate.FACTORY, true);
 
         final Function<UnfilteredRowIterator, Partition> creator;
+        final PartitionUpdate.Factory factory;
         final boolean filterInvalidEndThanStart;
 
-        Implementation(Function<UnfilteredRowIterator, Partition> creator, boolean filterInvalidEndThanStart)
+        Implementation(Function<UnfilteredRowIterator, Partition> creator, PartitionUpdate.Factory factory, boolean filterInvalidEndThanStart)
         {
             this.creator = creator;
+            this.factory = factory;
             this.filterInvalidEndThanStart = filterInvalidEndThanStart;
         }
     }
@@ -157,7 +162,7 @@ public class PartitionImplementationTest
     Row makeRow(Clustering<?> clustering, String colValue)
     {
         ColumnMetadata defCol = metadata.getColumn(new ColumnIdentifier("col", true));
-        Row.Builder row = BTreeRow.unsortedBuilder();
+        Row.Builder row = implementation.factory.rowBuilder(metadata.regularAndStaticColumns().columns(clustering == Clustering.STATIC_CLUSTERING), false);
         row.newRow(clustering);
         row.addCell(BufferCell.live(defCol, TIMESTAMP, ByteBufferUtil.bytes(colValue)));
         return row.build();
@@ -166,7 +171,7 @@ public class PartitionImplementationTest
     Row makeStaticRow()
     {
         ColumnMetadata defCol = metadata.getColumn(new ColumnIdentifier("static_col", true));
-        Row.Builder row = BTreeRow.unsortedBuilder();
+        Row.Builder row = implementation.factory.rowBuilder(metadata.staticColumns(), false);
         row.newRow(Clustering.STATIC_CLUSTERING);
         row.addCell(BufferCell.live(defCol, TIMESTAMP, ByteBufferUtil.bytes("static value")));
         return row.build();

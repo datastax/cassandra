@@ -19,14 +19,12 @@
 package org.apache.cassandra.db.memtable;
 
 import org.apache.cassandra.db.DataRange;
-import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.tries.BaseTrie;
-import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 class MemtableAverageRowSize
 {
@@ -34,36 +32,6 @@ class MemtableAverageRowSize
 
     public final long rowSize;
     public final long operations;
-
-    public MemtableAverageRowSize(Memtable memtable, Trie<?> trie)
-    {
-        // If this is a trie-based memtable, get the row sizes from the trie elements. This achieves two things:
-        // - makes sure the size used is the size reflected in the memtable's dataSize
-        //   (which e.g. excludes clustering keys)
-        // - avoids the conversion to Row, which has non-trivial cost
-
-        class SizeCalculator implements BaseTrie.ValueConsumer<Object>
-        {
-            long totalSize = 0;
-            long count = 0;
-
-            @Override
-            public void accept(Object o)
-            {
-                if (o instanceof IDataSize)
-                {
-                    totalSize += ((IDataSize) o).dataSize();
-                    ++count;
-                }
-            }
-        }
-
-        SizeCalculator sizeCalculator = new SizeCalculator();
-        trie.forEachValue(sizeCalculator);
-
-        this.rowSize = sizeCalculator.count > 0 ? sizeCalculator.totalSize / sizeCalculator.count : 0;
-        this.operations = memtable.operationCount();
-    }
 
     public MemtableAverageRowSize(Memtable memtable)
     {
@@ -73,25 +41,28 @@ class MemtableAverageRowSize
         long rowCount = 0;
         long totalSize = 0;
 
-        try (var partitionsIter = memtable.partitionIterator(columnFilter, range, SSTableReadsListener.NOOP_LISTENER))
+        try (OpOrder.Group protectData = memtable.readOrdering().start())
         {
-            while (partitionsIter.hasNext() && rowCount < MAX_ROWS)
+            try (var partitionsIter = memtable.partitionIterator(columnFilter, range, SSTableReadsListener.NOOP_LISTENER))
             {
-                UnfilteredRowIterator rowsIter = partitionsIter.next();
-                while (rowsIter.hasNext() && rowCount < MAX_ROWS)
+                while (partitionsIter.hasNext() && rowCount < MAX_ROWS)
                 {
-                    Unfiltered uRow = rowsIter.next();
-                    if (uRow.isRow())
+                    UnfilteredRowIterator rowsIter = partitionsIter.next();
+                    while (rowsIter.hasNext() && rowCount < MAX_ROWS)
                     {
-                        rowCount++;
-                        totalSize += ((Row) uRow).dataSize();
+                        Unfiltered uRow = rowsIter.next();
+                        if (uRow.isRow())
+                        {
+                            rowCount++;
+                            totalSize += ((Row) uRow).dataSize();
+                        }
                     }
                 }
             }
+            this.operations = memtable.operationCount();
+            this.rowSize = (rowCount > 0)
+                           ? totalSize / rowCount
+                           : 0;
         }
-        this.operations = memtable.operationCount();
-        this.rowSize = (rowCount > 0)
-                       ? totalSize / rowCount
-                       : 0;
     }
 }
