@@ -55,8 +55,8 @@ public class MonitoringTask
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 5L, TimeUnit.MINUTES);
 
     @VisibleForTesting
-    public static MonitoringTask instance = make(Math.max(0, CassandraRelevantProperties.SLOW_QUERY_LOG_MONITORING_REPORT_INTERVAL_IN_MS.getInt()),
-                                                 CassandraRelevantProperties.SLOW_QUERY_LOG_MONITORING_MAX_OPERATIONS.getInt());
+    public static MonitoringTask instance = make(Math.max(0, CassandraRelevantProperties.MONITORING_REPORT_INTERVAL_MS.getInt()),
+                                                 CassandraRelevantProperties.MONITORING_MAX_OPERATIONS.getInt());
 
     private final ScheduledFuture<?> reportingTask;
     private final OperationsQueue failedOperationsQueue;
