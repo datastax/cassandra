@@ -44,6 +44,7 @@ import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.utils.JsonUtils;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
@@ -96,7 +97,19 @@ public class CommitLogDescriptor
 
     public CommitLogDescriptor(long id, ParameterizedClass compression, EncryptionContext encryptionContext)
     {
-        this(CURRENT_VERSION, id, compression, encryptionContext);
+        this(currentStorageVersion(), id, compression, encryptionContext);
+    }
+
+    /**
+     * Returns the commit log version to use for new segments, respecting storage compatibility mode.
+     * When compatibility mode is set (e.g., CC_4), this ensures commit logs are written in a format
+     * that older versions can read.
+     *
+     * @return the commit log version appropriate for the current storage compatibility mode
+     */
+    public static int currentStorageVersion()
+    {
+        return currentVersion(StorageCompatibilityMode.current().storageMessagingVersion());
     }
 
     public static void writeHeader(ByteBuffer out, CommitLogDescriptor descriptor)
