@@ -391,7 +391,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             }
         }
 
-        boolean advanceToMutationPosition(int depth, int transition, boolean isOnReturnPath, int forcedCopyDepth)
+        boolean advanceToMutationPosition(int depth, int transition, boolean isOnReturnPath, int forcedCopyDepth, Predicate<? super S> danglingMetadataCleaner)
         throws TrieSpaceExhaustedException
         {
             while (currentDepth >= Math.max(depth, 1))
@@ -400,7 +400,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                     return true;
 
                 // There are no more children. Ascend to the parent state to continue walk.
-                attachAndMoveToParentState(forcedCopyDepth);
+                attachAndMoveToParentState(forcedCopyDepth, danglingMetadataCleaner);
             }
 
             if (depth <= 0) // Either exhausted or the root's return path position.
@@ -464,18 +464,18 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         }
 
         @Override
-        protected int applyContent(boolean forcedCopy) throws TrieSpaceExhaustedException
+        protected int applyContent(boolean forcedCopy, Predicate<? super S> danglingMetadataCleaner) throws TrieSpaceExhaustedException
         {
             int ascentPathContentId = getAscentPathContentId();
-            return applyAscentPathContent(ascentPathContentId, forcedCopy);
+            return applyAscentPathContent(ascentPathContentId, forcedCopy, danglingMetadataCleaner);
         }
 
         /// After a node's children are processed, this is called to ascend from it. This means applying the collected
         /// content to the compiled `updatedPostContentNode` and creating a mapping in the parent to it (or updating if
         /// one already exists).
-        void attachAndMoveToParentStateWithAscentPathContent(int ascentPathContentId, int forcedCopyDepth) throws TrieSpaceExhaustedException
+        void attachAndMoveToParentStateWithAscentPathContent(int ascentPathContentId, int forcedCopyDepth, Predicate<? super S> danglingMetadataCleaner) throws TrieSpaceExhaustedException
         {
-            attachBranchAndMoveToParentState(applyAscentPathContent(ascentPathContentId, currentDepth >= forcedCopyDepth),
+            attachBranchAndMoveToParentState(applyAscentPathContent(ascentPathContentId, currentDepth >= forcedCopyDepth, danglingMetadataCleaner),
                                              forcedCopyDepth);
         }
 
@@ -493,13 +493,27 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             }
         }
 
-        protected int applyAscentPathContent(int ascentPathContentId, boolean forcedCopy) throws TrieSpaceExhaustedException
+        protected int applyAscentPathContent(int ascentPathContentId, boolean forcedCopy, Predicate<? super S> danglingMetadataCleaner) throws TrieSpaceExhaustedException
         {
             if (ascentPathContentId == NONE)
-                return super.applyContent(forcedCopy);
+                return super.applyContent(forcedCopy, danglingMetadataCleaner);
 
             int descentPathContentId = descentPathContentId();
             final int updatedPostContentNode = updatedPostContentNode();
+            if (isNull(updatedPostContentNode))
+            {
+                if (!isNull(ascentPathContentId) && danglingMetadataCleaner.test(trie.getContent(ascentPathContentId)))
+                {
+                    trie.releaseContent(ascentPathContentId);
+                    return super.applyContent(forcedCopy, danglingMetadataCleaner);
+                }
+                if (!isNull(descentPathContentId) && danglingMetadataCleaner.test(trie.getContent(descentPathContentId)))
+                {
+                    trie.releaseContent(descentPathContentId);
+                    descentPathContentId = NONE;
+                }
+            }
+
             final int existingPreContentNode = existingFullNode();
             final int existingPostContentNode = existingPostContentNode();
 
@@ -537,24 +551,24 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
     }
 
-    static class Mutation<S extends RangeState<S>, U extends RangeState<U>> extends InMemoryBaseTrie.Mutation<S, U, RangeCursor<U>, ApplyState<S>>
+    /// Range trie mutation functionality. Provides functionality used both by range trie and deletion-aware mutators.
+    static class MutatorStatic<S extends RangeState<S>, U extends RangeState<U>>
+    extends InMemoryBaseTrie.Mutator<S, U, RangeCursor<U>, ApplyState<S>>
     {
-        Mutation(UpsertTransformerWithKeyProducer<S, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy, RangeCursor<U> source, ApplyState<S> state)
+        MutatorStatic(ApplyState<S> applyState,
+                      UpsertTransformer<S, U> transformer,
+                      Predicate<NodeFeatures<U>> needsForcedCopy,
+                      Predicate<? super S> danglingMetadataCleaner)
         {
-            this(transformer, needsForcedCopy, source, state, Integer.MAX_VALUE);
-        }
-
-        Mutation(UpsertTransformerWithKeyProducer<S, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy, RangeCursor<U> source, ApplyState<S> state, int forcedCopyDepth)
-        {
-            super(transformer, needsForcedCopy, source, state);
-            this.forcedCopyDepth = forcedCopyDepth;
+            super(transformer, needsForcedCopy, danglingMetadataCleaner, applyState);
         }
 
         @Override
-        void apply() throws TrieSpaceExhaustedException
+        MutatorStatic<S, U> apply() throws TrieSpaceExhaustedException
         {
             applyRanges();
             assert state.currentDepth == 0 || state.currentDepth == -1 : "Unexpected change to applyState. Concurrent trie modification?";
+            return this;
         }
 
         @Override
@@ -571,7 +585,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         int completeBranch() throws TrieSpaceExhaustedException
         {
             if (state.currentDepth == 0)
-                return state.applyContent(state.currentDepth >= forcedCopyDepth);
+                return state.applyContent(state.currentDepth >= forcedCopyDepth, danglingMetadataCleaner);
             else if (state.currentDepth == -1) // root already prepared because of return-path update to the root node
                 return state.existingFullNodeAtDepth(0);
             else
@@ -580,7 +594,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
         void applyContent(S existingState, U mutationState) throws TrieSpaceExhaustedException
         {
-            S combined = transformer.apply(existingState, mutationState, state);
+            S combined = transformer.apply(existingState, mutationState);
             S existing = existingState;
             if (combined != null && !combined.isBoundary())
                 combined = null;
@@ -590,7 +604,6 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                 state.setDescentPathContent(combined, // can be null
                                             state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
         }
-
 
         void applyRanges() throws TrieSpaceExhaustedException
         {
@@ -617,7 +630,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                 position = mutationCursor.advance();
                 depth = Cursor.depth(position);
                 // Advance according to the mutation cursor. This will apply point content and complete anything already modified.
-                if (!state.advanceToMutationPosition(depth, Cursor.incomingTransition(position), Cursor.isOnReturnPath(position), forcedCopyDepth))
+                if (!state.advanceToMutationPosition(depth, Cursor.incomingTransition(position), Cursor.isOnReturnPath(position), forcedCopyDepth, danglingMetadataCleaner))
                     break;
                 assert depth == state.currentDepth : "Unexpected change to applyState. Concurrent trie modification?";
             }
@@ -625,7 +638,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
         private void ascendWithUpdatedReturnPathContent(int existingContentId, S existingState, U content, int depth) throws TrieSpaceExhaustedException
         {
-            S combined = transformer.apply(existingState, content, state);
+            S combined = transformer.apply(existingState, content);
             S existing = existingState;
             if (combined != null && !combined.isBoundary())
                 combined = null;
@@ -637,7 +650,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                                                     true,
                                                     forcedCopyDepth >= depth)
                              : existingContentId;
-            state.attachAndMoveToParentStateWithAscentPathContent(combinedId, forcedCopyDepth);
+            state.attachAndMoveToParentStateWithAscentPathContent(combinedId, forcedCopyDepth, danglingMetadataCleaner);
         }
 
         void applyDeletionRange(S existingCoveringState, long position)
@@ -717,7 +730,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                                                                forcedCopyDepth);
                         }
                         else
-                            state.attachAndMoveToParentState(forcedCopyDepth);
+                            state.attachAndMoveToParentState(forcedCopyDepth, danglingMetadataCleaner);
                         break;
                     }
                     default:
@@ -745,41 +758,49 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         }
     }
 
-
-    /// Modify this trie to apply the mutation given in the form of a range trie. Any content in the mutation will be
-    /// resolved with the given function before being placed in this trie (even if there's no pre-existing content in
-    /// this trie). For any range that the new mutation introduces, the transformer function will be applied to all
-    /// existing content that falls in the range; this may result in the deletion of existing boundaries or their
-    /// modification.
-    /// @param mutation the mutation to be applied, given in the form of a range trie. Note that its content can be of
-    /// type different than the element type for this memtable trie.
-    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
-    /// value, as well as to pre-existing content that falls under a range in the mutation.
-    /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
-    /// concurrent readers. Note that this only applies to separate ranges in the mutation. Whenever a mutation range is
-    /// applied, the covered content is copied to ensure that consumer cannot see unclosed ranges due to intermediate
-    /// state. See [NodeFeatures] for more details.
-    public <U extends RangeState<U>> void apply(RangeTrie<U> mutation,
-                                                final UpsertTransformerWithKeyProducer<S, U> transformer,
-                                                Predicate<NodeFeatures<U>> needsForcedCopy)
-    throws TrieSpaceExhaustedException
+    /// Range trie mutator, binding the trie with merge configuration (i.e. transformer and predicates).
+    /// Can be used to apply multiple modifications to the trie using [#apply(RangeTrie)].
+    public class Mutator<U extends RangeState<U>> extends MutatorStatic<S, U>
     {
-        try
+        /// See [InMemoryTrie#mutator(UpsertTransformerWithKeyProducer, Predicate, Predicate)] for the meaning of the
+        /// parameters.
+        Mutator(UpsertTransformer<S, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy, Predicate<? super S> danglingMetadataCleaner)
         {
-            Mutation<S, U> m = new Mutation<>(transformer,
-                                              needsForcedCopy,
-                                              mutation.cursor(Direction.FORWARD),
-                                              applyState.start());
-            m.apply();
-            m.complete();
-            completeMutation();
+            super(applyState, transformer, needsForcedCopy, danglingMetadataCleaner);
         }
-        catch (Throwable t)
+
+        /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
+        /// with the given function before being placed in this trie (even if there's no pre-existing content in this trie).
+        /// @param mutation the mutation to be applied, given in the form of a trie. Note that its content can be of type
+        /// different than the element type for this memtable trie.
+        public void apply(RangeTrie<U> mutation) throws TrieSpaceExhaustedException
         {
-            abortMutation();
-            throw t;
+            try
+            {
+                start(mutation.cursor(Direction.FORWARD)).apply().complete();
+                completeMutation();
+            }
+            catch (Throwable t)
+            {
+                abortMutation();
+                throw t;
+            }
         }
     }
+
+
+    /// Creates a trie mutator that can be used to apply multiple modifications to the trie.
+    ///
+    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value. Applied even if there's no pre-existing value in the memtable trie.
+    /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
+    /// concurrent readers. See NodeFeatures for details.
+    public <U extends RangeState<U>> Mutator<U> mutator(final UpsertTransformer<S, U> transformer,
+                                                        Predicate<NodeFeatures<U>> needsForcedCopy)
+    {
+        return new Mutator<>(transformer, needsForcedCopy, Predicates.alwaysFalse());
+    }
+
 
     /// Modify this trie to apply the mutation given in the form of a range trie. Any content in the mutation will be
     /// resolved with the given function before being placed in this trie (even if there's no pre-existing content in
@@ -799,6 +820,6 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                                                 Predicate<NodeFeatures<U>> needsForcedCopy)
     throws TrieSpaceExhaustedException
     {
-        apply(mutation, (UpsertTransformerWithKeyProducer<S, U>) transformer, needsForcedCopy);
+        mutator(transformer, needsForcedCopy).apply(mutation);
     }
 }

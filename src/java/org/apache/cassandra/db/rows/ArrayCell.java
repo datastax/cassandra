@@ -106,6 +106,12 @@ public class ArrayCell extends AbstractCell<byte[]>
     }
 
     @Override
+    public Cell<?> withPath(CellPath path)
+    {
+        return new ArrayCell(column, timestamp, ttl, localDeletionTimeUnsignedInteger, value, path);
+    }
+
+    @Override
     public Cell<?> clone(ByteBufferCloner cloner)
     {
         if (value.length == 0 && path == null)
