@@ -59,6 +59,7 @@ import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.JsonUtils;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
@@ -134,12 +135,24 @@ final class HintsDescriptor
 
     HintsDescriptor(UUID hostId, long timestamp, ImmutableMap<String, Object> parameters)
     {
-        this(hostId, CURRENT_VERSION, timestamp, parameters);
+        this(hostId, currentStorageVersion(), timestamp, parameters);
     }
 
     HintsDescriptor(UUID hostId, long timestamp)
     {
-        this(hostId, CURRENT_VERSION, timestamp, ImmutableMap.<String, Object>of());
+        this(hostId, currentStorageVersion(), timestamp, ImmutableMap.<String, Object>of());
+    }
+
+    /**
+     * Returns the hints version to use for new hints files, respecting storage compatibility mode.
+     * When compatibility mode is set (e.g., CC_4), this ensures hints are written in a format
+     * that older versions can read.
+     *
+     * @return the hints version appropriate for the current storage compatibility mode
+     */
+    static int currentStorageVersion()
+    {
+        return StorageCompatibilityMode.current().storageMessagingVersion();
     }
 
     @SuppressWarnings("unchecked")
