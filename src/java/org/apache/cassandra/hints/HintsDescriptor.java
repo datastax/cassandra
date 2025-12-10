@@ -152,7 +152,40 @@ final class HintsDescriptor
      */
     static int currentStorageVersion()
     {
-        return StorageCompatibilityMode.current().storageMessagingVersion();
+        return hintsVersionFromMessagingVersion(StorageCompatibilityMode.current().storageMessagingVersion());
+    }
+
+    /**
+     * Translates a messaging version to the corresponding hints file version.
+     * This is necessary because hints versions have their own numbering scheme
+     * (1, 2, 3 for OSS versions 3.0, 4.0, 5.0) that differs from messaging versions.
+     *
+     * @param messagingVersion the messaging protocol version
+     * @return the hints file version corresponding to the messaging version
+     */
+    @VisibleForTesting
+    static int hintsVersionFromMessagingVersion(int messagingVersion)
+    {
+        switch (messagingVersion)
+        {
+            case MessagingService.VERSION_30:
+            case MessagingService.VERSION_3014:
+                return VERSION_30;
+            case MessagingService.VERSION_40:
+                return VERSION_40;
+            case MessagingService.VERSION_50:
+                return VERSION_50;
+            case MessagingService.VERSION_DS_10:
+                return VERSION_DS_10;
+            case MessagingService.VERSION_DS_11:
+                return VERSION_DS_11;
+            case MessagingService.VERSION_DS_12:
+                return VERSION_DS_12;
+            case MessagingService.VERSION_DS_20:
+                return VERSION_DS_20;
+            default:
+                throw new IllegalStateException("Unknown messaging version " + messagingVersion);
+        }
     }
 
     @SuppressWarnings("unchecked")
