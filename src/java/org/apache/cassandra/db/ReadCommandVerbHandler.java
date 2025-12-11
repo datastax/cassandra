@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -123,7 +124,10 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         }
         catch (RejectException e)
         {
-            if (!command.isTrackingWarnings())
+            // TombstoneOverwhelmingException should always be propagated as a failure,
+            // even when tracking warnings, as it indicates a guardrail violation that
+            // must be reported to the client
+            if (!command.isTrackingWarnings() || e instanceof TombstoneOverwhelmingException)
                 throw e;
 
             // make sure to log as the exception is swallowed
