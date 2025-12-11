@@ -18,6 +18,12 @@
 
 package org.apache.cassandra.index.sai.disk.v2;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.Arrays;
+import javax.annotation.concurrent.NotThreadSafe;
+import javax.annotation.concurrent.ThreadSafe;
+
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
@@ -27,8 +33,8 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
-import org.apache.cassandra.index.sai.disk.v2.keystore.KeyLookupMeta;
 import org.apache.cassandra.index.sai.disk.v2.keystore.KeyLookup;
+import org.apache.cassandra.index.sai.disk.v2.keystore.KeyLookupMeta;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableId;
@@ -36,14 +42,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
-
-import javax.annotation.concurrent.NotThreadSafe;
-import javax.annotation.concurrent.ThreadSafe;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.util.Arrays;
 
 /**
  * An extension of the {@link SkinnyPrimaryKeyMap} for wide tables (those with clustering columns).
@@ -72,7 +71,6 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         public Factory(IndexComponents.ForRead perSSTableComponents, RowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
             super(perSSTableComponents, primaryKeyFactory, sstable);
-
 
             try
             {
@@ -136,7 +134,8 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
                               SSTableId<?> sstableId,
                               boolean hasStaticColumns)
     {
-        super(tokenArray, partitionArray, partitionKeyCursor, partitioner, primaryKeyFactory, clusteringComparator, sstableId, hasStaticColumns);
+        super(tokenArray, partitionArray, partitionKeyCursor, partitioner, primaryKeyFactory, clusteringComparator,
+              sstableId, hasStaticColumns);
 
 //        this.clusteringComparator = clusteringComparator;
         this.clusteringKeyCursor = clusteringKeyCursor;

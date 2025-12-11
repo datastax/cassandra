@@ -307,7 +307,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         FileUtils.closeQuietly(Arrays.asList(partitionKeyCursor, tokenArray, partitionArray));
     }
 
-    // Look for token collision by if the ajacent token in the token array matches the
+    // Look for token collision by if the adjacent token in the token array matches the
     // current token. If we find a collision, we need to compare the partition key instead.
     protected long tokenCollisionDetection(PrimaryKey primaryKey, long rowId)
     {
