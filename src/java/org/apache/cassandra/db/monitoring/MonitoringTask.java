@@ -318,6 +318,9 @@ public class MonitoringTask
          * this is set lazily as it takes time to build the query CQL */
         private String name;
 
+        /** Any specific execution info of the slowest operation among the aggregated operations. */
+        protected Monitorable.ExecutionInfo slowestOperationExecutionInfo;
+
         Operation(Monitorable operation, long nowNanos)
         {
             this.operation = operation;
@@ -325,6 +328,7 @@ public class MonitoringTask
             totalTimeNanos = nowNanos - operation.creationTimeNanos();
             minTime = totalTimeNanos;
             maxTime = totalTimeNanos;
+            slowestOperationExecutionInfo = operation.executionInfo();
         }
 
         public String name()
@@ -334,17 +338,24 @@ public class MonitoringTask
             return name;
         }
 
-        void add(Operation operation)
+        private void add(Operation operation)
         {
             numTimesReported++;
             totalTimeNanos += operation.totalTimeNanos;
+
+            if (operation.maxTime > maxTime)
+                slowestOperationExecutionInfo = operation.executionInfo();
+
             maxTime = Math.max(maxTime, operation.maxTime);
             minTime = Math.min(minTime, operation.minTime);
         }
 
         public abstract String getLogMessage();
 
-        protected abstract Monitorable.ExecutionInfo executionInfo();
+        protected Monitorable.ExecutionInfo executionInfo()
+        {
+            return slowestOperationExecutionInfo;
+        }
     }
 
     /**
@@ -360,26 +371,22 @@ public class MonitoringTask
         public String getLogMessage()
         {
             if (numTimesReported == 1)
-                return String.format("<%s>, total time %d msec, timeout %d %s",
+                return String.format("<%s>, total time %d msec, timeout %d %s%s",
                                      name(),
                                      NANOSECONDS.toMillis(totalTimeNanos),
                                      NANOSECONDS.toMillis(operation.timeoutNanos()),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     operation.isCrossNode() ? "msec/cross-node" : "msec",
+                                     slowestOperationExecutionInfo.toLogString(true));
             else
-                return String.format("<%s> timed out %d times, avg/min/max %d/%d/%d msec, timeout %d %s",
+                return String.format("<%s> timed out %d times, avg/min/max %d/%d/%d msec, timeout %d %s%s",
                                      name(),
                                      numTimesReported,
                                      NANOSECONDS.toMillis(totalTimeNanos / numTimesReported),
                                      NANOSECONDS.toMillis(minTime),
                                      NANOSECONDS.toMillis(maxTime),
                                      NANOSECONDS.toMillis(operation.timeoutNanos()),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
-        }
-
-        @Override
-        protected Monitorable.ExecutionInfo executionInfo()
-        {
-            return Monitorable.ExecutionInfo.EMPTY;
+                                     operation.isCrossNode() ? "msec/cross-node" : "msec",
+                                     slowestOperationExecutionInfo.toLogString(false));
         }
     }
 
@@ -389,14 +396,10 @@ public class MonitoringTask
     @VisibleForTesting
     public final static class SlowOperation extends Operation
     {
-        /** Any specific execution info of the slowest operation among the aggregated operations. */
-        private Monitorable.ExecutionInfo slowestOperationExecutionInfo;
-
         @VisibleForTesting
         public SlowOperation(Monitorable operation, long slowAtNanos)
         {
             super(operation, slowAtNanos);
-            slowestOperationExecutionInfo = operation.executionInfo();
         }
 
         public String getLogMessage()
@@ -418,21 +421,6 @@ public class MonitoringTask
                                      NANOSECONDS.toMillis(operation.slowTimeoutNanos()),
                                      operation.isCrossNode() ? "msec/cross-node" : "msec",
                                      slowestOperationExecutionInfo.toLogString(false));
-        }
-
-        @Override
-        protected Monitorable.ExecutionInfo executionInfo()
-        {
-            return slowestOperationExecutionInfo;
-        }
-
-        @Override
-        void add(Operation operation)
-        {
-            if (operation.maxTime > maxTime)
-                slowestOperationExecutionInfo = operation.executionInfo();
-
-            super.add(operation);
         }
     }
 }
