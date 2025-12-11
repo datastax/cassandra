@@ -18,6 +18,7 @@ Merged from 4.0:
  * Add new concurrent_merkle_tree_requests config property to prevent OOM during multi-range and/or multi-table repairs (CASSANDRA-19336)
 
 4.1
+ * Optionally skip exception logging on invalid legacy protocol magic exception (CASSANDRA-19483)
  * Add plugin support for CQLSH (CASSANDRA-16456)
  * Request-Based Native Transport Rate-Limiting (CASSANDRA-16663)
  * Add information whether sstables are dropped to SchemaChangeListener (CASSANDRA-17582)
