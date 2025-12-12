@@ -69,7 +69,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 
     private class RowAwarePrimaryKey implements PrimaryKey
     {
-        private Token token;
+        private final Token token;
         private DecoratedKey partitionKey;
         private Clustering clustering;
         private Supplier<PrimaryKey> primaryKeySupplier;
@@ -149,7 +149,6 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             // and clustering for the lookup
             loadDeferred();
 
-            ByteSource tokenComparable = token.asComparableBytes(version);
             ByteSource keyComparable = ByteSource.of(partitionKey.getKey(), version);
 
             // It is important that the ClusteringComparator.asBytesComparable method is used
@@ -162,9 +161,9 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 
             // prefix doesn't include null components
             if (isPrefix && clusteringComparable == null)
-                return ByteSource.withTerminator(terminator, tokenComparable, keyComparable);
+                return ByteSource.withTerminator(terminator, keyComparable);
             else
-                return ByteSource.withTerminator(terminator, tokenComparable, keyComparable, clusteringComparable);
+                return ByteSource.withTerminator(terminator, keyComparable, clusteringComparable);
         }
 
         @Override
