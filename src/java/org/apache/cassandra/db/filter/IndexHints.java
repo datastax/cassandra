@@ -32,7 +32,6 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.TypeSizes;
@@ -62,8 +61,7 @@ public class IndexHints
     public static final String WRONG_KEYSPACE_ERROR = "Index %s is not in the same keyspace as the queried table.";
     public static final String MISSING_INDEX_ERROR = "Table %s doesn't have an index named %s";
     public static final String NON_INCLUDABLE_INDEXES_ERROR = "It's not possible to use all the specified included indexes with this query.";
-    // The limit is determined by maxIncludedOrExcludedIndexCount() which uses the guardrail or 128 by default
-    public static final String TOO_MANY_INDEXES_ERROR = "Exceeded the maximum number of included/excluded indexes. Found ";
+    public static final String TOO_MANY_INDEXES_ERROR = format("Cannot have more than %d included/excluded indexes, found ", Short.MAX_VALUE);
 
     public static final IndexHints NONE = new IndexHints(Collections.emptySet(), Collections.emptySet())
     {
@@ -386,10 +384,10 @@ public class IndexHints
                                           TableMetadata table,
                                           IndexRegistry indexRegistry)
     {
-        if (included != null && included.size() > maxIncludedOrExcludedIndexCount())
+        if (included != null && included.size() > Short.MAX_VALUE)
             throw new InvalidRequestException(TOO_MANY_INDEXES_ERROR + included.size());
 
-        if (excluded != null && excluded.size() > maxIncludedOrExcludedIndexCount())
+        if (excluded != null && excluded.size() > Short.MAX_VALUE)
             throw new InvalidRequestException(TOO_MANY_INDEXES_ERROR + excluded.size());
 
         IndexHints hints = IndexHints.create(fetchIndexes(included, table, indexRegistry),
@@ -413,14 +411,6 @@ public class IndexHints
             throw new InvalidRequestException("Index hints are not supported in clusters below DS 12.");
 
         return hints;
-    }
-
-    private static int maxIncludedOrExcludedIndexCount()
-    {
-        int guardrail = DatabaseDescriptor.getGuardrailsConfig().getSecondaryIndexesPerTableFailThreshold();
-
-        // If no guardrail is configured, use a value that safely fits in a single byte for serialization:
-        return guardrail > 0 ? guardrail : 128;
     }
 
     private static Set<IndexMetadata> fetchIndexes(Set<QualifiedName> indexNames, TableMetadata table, IndexRegistry indexRegistry)
@@ -598,7 +588,7 @@ public class IndexHints
                 return;
 
             int n = indexes.size();
-            assert n <= maxIncludedOrExcludedIndexCount() : TOO_MANY_INDEXES_ERROR + n;
+            assert n < Short.MAX_VALUE : TOO_MANY_INDEXES_ERROR + n;
 
             out.writeVInt32(n);
             for (IndexMetadata index : indexes)
