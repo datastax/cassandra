@@ -22,9 +22,11 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.List;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Throwables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,12 +46,14 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.OutboundConnectionSettings.Framing;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.streaming.async.StreamingInboundHandler;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.memory.BufferPools;
 
 import static java.lang.Math.max;
@@ -67,6 +71,8 @@ import static org.apache.cassandra.net.SocketFactory.newSslHandler;
 public class InboundConnectionInitiator
 {
     private static final Logger logger = LoggerFactory.getLogger(InboundConnectionInitiator.class);
+
+    private static final NoSpamLogger noSpam5m = NoSpamLogger.getLogger(logger, 5, TimeUnit.MINUTES);
 
     private static class Initializer extends ChannelInitializer<SocketChannel>
     {
@@ -412,7 +418,11 @@ public class InboundConnectionInitiator
 
         private void exceptionCaught(Channel channel, Throwable cause)
         {
-            logger.error("Failed to properly handshake with peer {}. Closing the channel.", channel.remoteAddress(), cause);
+            if (cause != null && Throwables.getRootCause(cause) instanceof Message.InvalidLegacyProtocolMagic && DatabaseDescriptor.getInvalidLegacyProtocolMagicNoSpamEnabled())
+                noSpam5m.warn("Failed to properly handshake with peer {}. Closing the channel. Invalid legacy protocol magic.", ((InetSocketAddress) channel.remoteAddress()).getHostName());
+            else
+                logger.error("Failed to properly handshake with peer {}. Closing the channel.", channel.remoteAddress(), cause);
+
             try
             {
                 failHandshake(channel);

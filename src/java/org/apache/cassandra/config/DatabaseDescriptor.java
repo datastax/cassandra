@@ -3789,4 +3789,9 @@ public class DatabaseDescriptor
     {
         conf.native_transport_timeout_in_ms = timeUnit.toMillis(timeout);
     }
+
+    public static boolean getInvalidLegacyProtocolMagicNoSpamEnabled()
+    {
+        return conf.invalid_legacy_protocol_magic_no_spam_enabled;
+    }
 }
