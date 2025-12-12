@@ -67,7 +67,7 @@ public class OrderingFilterRangeIterator<T> implements Iterator<T>, AutoCloseabl
             nextKeys.add(input.next());
         }
         while (nextKeys.size() < chunkSize && input.hasNext());
-        context.addRowsFiltered(nextKeys.size());
+        context.addPartitionsFetched(nextKeys.size());
         return nextRangeFunction.apply(nextKeys);
     }
 
