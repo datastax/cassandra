@@ -3707,4 +3707,9 @@ public class DatabaseDescriptor
         Preconditions.checkArgument(factor <= StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR, "ANN brute force expense factor must be at most " + StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR);
         conf.sai_options.ann_brute_force_factor = factor;
     }
+
+    public static boolean getInvalidLegacyProtocolMagicNoSpamEnabled()
+    {
+        return conf.invalid_legacy_protocol_magic_no_spam_enabled;
+    }
 }

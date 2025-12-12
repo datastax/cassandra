@@ -635,6 +635,7 @@ public class Config
     }
 
     public volatile int consecutive_message_errors_threshold = 1;
+    public volatile boolean invalid_legacy_protocol_magic_no_spam_enabled = false;
 
     /**
      * Default compaction configuration, used if a table does not specify any.
