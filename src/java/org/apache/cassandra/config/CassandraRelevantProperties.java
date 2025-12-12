@@ -384,19 +384,19 @@ public enum CassandraRelevantProperties
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
     /** Defines the interval for reporting any operations that have timed out.  */
-    SLOW_QUERY_LOG_MONITORING_REPORT_INTERVAL_IN_MS("cassandra.monitoring_report_interval_ms", "5000"),
+    MONITORING_REPORT_INTERVAL_MS("cassandra.monitoring_report_interval_ms", "5000"),
 
     /**
      * Defines the maximum number of unique timed out queries that will be reported in the logs.
      * Use a negative number to remove any limit.
      */
-    SLOW_QUERY_LOG_MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
+    MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
 
     /**
      * Whether to log detailed execution info when logging slow non-SAI queries.
-     * For SAI queries, see {@link #SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED}.
+     * For SAI queries, see {@link #SAI_MONITORING_EXECUTION_INFO_ENABLED}.
      */
-    SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.monitoring_execution_info_enabled", "true"),
+    MONITORING_EXECUTION_INFO_ENABLED("cassandra.monitoring_execution_info_enabled", "true"),
 
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
@@ -425,9 +425,9 @@ public enum CassandraRelevantProperties
     /**
      * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
      * This execution info includes the query metrics and the query plan of the slow queries.
-     * For non-SAI queries, see {@link #SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED}.
+     * For non-SAI queries, see {@link #MONITORING_EXECUTION_INFO_ENABLED}.
      */
-    SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
+    SAI_MONITORING_EXECUTION_INFO_ENABLED("cassandra.sai.monitoring_execution_info_enabled", "true"),
 
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),

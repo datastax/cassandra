@@ -52,7 +52,7 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
      */
     public static Supplier<Monitorable.ExecutionInfo> supplier(QueryContext context, Plan plan)
     {
-        if (!CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.getBoolean())
+        if (!CassandraRelevantProperties.SAI_MONITORING_EXECUTION_INFO_ENABLED.getBoolean())
             return Monitorable.ExecutionInfo.EMPTY_SUPPLIER;
 
         String planAsString = toLogString(plan);
