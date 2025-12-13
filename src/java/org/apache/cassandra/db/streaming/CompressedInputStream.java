@@ -24,6 +24,7 @@ import java.util.Iterator;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.DoubleSupplier;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
 
@@ -110,8 +111,11 @@ public class CompressedInputStream extends RebufferingInputStream implements Aut
     @Override
     protected void reBuffer() throws IOException
     {
-        if (uncompressedChunkPosition < 0)
-            throw new IllegalStateException("position(long position) wasn't called first");
+        Preconditions.checkState(!buffer.hasRemaining(), "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
+        Preconditions.checkState(uncompressedChunkPosition >= 0, "position(long position) wasn't called first");
+
+        if (!compressedChunks.hasNext())
+            return; // EOF, but we cannot signal it with throwing EOFException here because of the contract of reBuffer()
 
         /*
          * reBuffer() will only be called if a partition range spanning multiple (adjacent) compressed chunks
@@ -120,6 +124,8 @@ public class CompressedInputStream extends RebufferingInputStream implements Aut
          */
         loadNextChunk();
         uncompressedChunkPosition += compressionParams.chunkLength();
+
+        assert buffer.hasRemaining() || !compressedChunks.hasNext() : "Buffer should have remaining bytes or be at EOF";
     }
 
     /**
