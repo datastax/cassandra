@@ -21,6 +21,8 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import javax.annotation.concurrent.NotThreadSafe;
+
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
@@ -49,6 +51,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         return new PartitionAwarePrimaryKey(partitionKey.getToken(), partitionKey, null);
     }
 
+    @NotThreadSafe
     private static class PartitionAwarePrimaryKey implements PrimaryKey
     {
         private final Token token;
@@ -67,7 +70,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         {
             if (primaryKeySupplier != null)
             {
-                assert partitionKey == null : "By definition cannot be otherwise";
+                assert partitionKey == null : "While applying existing primaryKeySupplier to load deferred primaryKey the partition key was unexpectedly already set";
                 this.partitionKey = primaryKeySupplier.get().partitionKey();
                 primaryKeySupplier = null;
                 assert this.token.equals(this.partitionKey.getToken()) : "Deferred primary key must contain the same token";
@@ -169,9 +172,9 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int compareTo(PrimaryKey o)
         {
-            if (partitionKey == null || o.isTokenOnly())
+            if (o.isTokenOnly())
                 return token().compareTo(o.token());
-            return partitionKey.compareTo(o.partitionKey());
+            return partitionKey().compareTo(o.partitionKey());
         }
 
         @Override

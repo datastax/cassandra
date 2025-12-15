@@ -113,7 +113,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         {
             if (primaryKeySupplier != null )
             {
-                assert partitionKey == null : "By definition cannot be otherwise";
+                assert partitionKey == null : "While applying existing primaryKeySupplier to load deferred primaryKey the partition key was unexpectedly already set";
                 PrimaryKey deferredPrimaryKey = primaryKeySupplier.get();
                 this.partitionKey = deferredPrimaryKey.partitionKey();
                 this.clustering = deferredPrimaryKey.clustering();

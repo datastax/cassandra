@@ -24,9 +24,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable.Version;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
-public class TokenOnlyPrimaryKey implements PrimaryKey
+public final class TokenOnlyPrimaryKey implements PrimaryKey
 {
-    protected final Token token;
+    private final Token token;
 
     public TokenOnlyPrimaryKey(Token token)
     {
@@ -64,12 +64,14 @@ public class TokenOnlyPrimaryKey implements PrimaryKey
     }
 
     @Override
-    public ByteSource asComparableBytesMinPrefix(Version version) {
+    public ByteSource asComparableBytesMinPrefix(Version version)
+    {
         return asComparableBytes(ByteSource.LT_NEXT_COMPONENT, version, true);
     }
 
     @Override
-    public ByteSource asComparableBytesMaxPrefix(Version version) {
+    public ByteSource asComparableBytesMaxPrefix(Version version)
+    {
         return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, true);
     }
 
@@ -92,8 +94,8 @@ public class TokenOnlyPrimaryKey implements PrimaryKey
     @Override
     public long ramBytesUsed()
     {
-        // Object header + 4 references (token, partitionKey, clustering, primaryKeySupplier) + implicit outer reference + token size
-        return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 5L * RamUsageEstimator.NUM_BYTES_OBJECT_REF + token.getHeapSize();
+        // Object header + 1 reference (token) + implicit outer reference + token size
+        return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + RamUsageEstimator.NUM_BYTES_OBJECT_REF + token.getHeapSize();
     }
 
     @Override
@@ -125,6 +127,6 @@ public class TokenOnlyPrimaryKey implements PrimaryKey
     @Override
     public String toString()
     {
-        return String.format("PrimaryKey: { token: %s }", token());
+        return String.format("TokenOnlyPrimaryKey: { token: %s }", token());
     }
 }
