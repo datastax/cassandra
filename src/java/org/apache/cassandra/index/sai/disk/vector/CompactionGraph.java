@@ -123,6 +123,7 @@ public class CompactionGraph implements Closeable, Accountable
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
 
     private static boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
+    private static boolean PARALLEL_ENCODING_WRITING = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL.getBoolean();
 
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
@@ -249,6 +250,7 @@ public class CompactionGraph implements Closeable, Accountable
     {
         var feature = nvq != null ? new NVQ(nvq) : new InlineVectors(dimension);
         var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
+                            .withParallelWrites(PARALLEL_ENCODING_WRITING)
                             .withStartOffset(termsOffset)
                             .with(feature)
                             .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
