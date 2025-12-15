@@ -43,6 +43,12 @@ import static org.apache.cassandra.net.MessageFlag.CALL_BACK_ON_FAILURE;
  */
 public abstract class RepairMessage
 {
+    /**
+     * If true, we will always consider remote nodes to support repair message timeouts,
+     * and fail the repair if a response is not received on time.
+     * Default: false, to preserve backward compatibility.
+     */
+    private static final boolean ALWAYS_CONSIDER_TIMEOUTS_SUPPORTED = Boolean.parseBoolean(System.getProperty("cassandra.repair.always_consider_timeouts_supported", "false"));
     private static final CassandraVersion SUPPORTS_TIMEOUTS = new CassandraVersion("4.0.7-SNAPSHOT");
     private static final Logger logger = LoggerFactory.getLogger(RepairMessage.class);
     public final RepairJobDesc desc;
@@ -90,6 +96,14 @@ public abstract class RepairMessage
 
     private static boolean supportsTimeouts(InetAddressAndPort from, UUID parentSessionId)
     {
+        /*
+         * In CNDB, repair services won't be added to the Nodes.peers() map, so there's no clear way
+         * to check the version of the remove peer. This is the reason why a system property is introduced
+         * to skip the version check, in case it's known that the deployed C* version supports repair message
+         * timeouts.
+         */
+        if (ALWAYS_CONSIDER_TIMEOUTS_SUPPORTED)
+            return true;
         CassandraVersion remoteVersion = Nodes.peers().map(from, NodeInfo::getReleaseVersion, () -> null);
         if (remoteVersion != null && remoteVersion.compareTo(SUPPORTS_TIMEOUTS, true) >= 0)
             return true;
