@@ -175,10 +175,10 @@ public class LegacyOnDiskFormatTest
         List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext, sstableContext);
 
         BKDReader bkdReader = new BKDReader(intContext,
-        components.get(IndexComponentType.KD_TREE).createFileHandle(),
-        metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE),
-        components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(),
-        metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE_POSTING_LISTS));
+                                            components.get(IndexComponentType.KD_TREE).createFileHandle(),
+                                            metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE),
+                                            components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(),
+                                            metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE_POSTING_LISTS));
 
         Expression expression = new Expression(intContext).add(Operator.LT, Int32Type.instance.decompose(10));
         BKDReader.IntersectVisitor query = bkdQueryFrom(expression, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
@@ -203,12 +203,12 @@ public class LegacyOnDiskFormatTest
 
         ByteComparable.Version byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
         TermsReader termsReader = new TermsReader(textContext,
-        components.get(IndexComponentType.TERMS_DATA).createFileHandle(),
-        byteComparableVersion,
-        components.get(IndexComponentType.POSTING_LISTS).createFileHandle(),
-        root,
-        footerPointer,
-        Version.AA); // These tests are for AA, so no need to parameterize
+                                                  components.get(IndexComponentType.TERMS_DATA).createFileHandle(),
+                                                  byteComparableVersion,
+                                                  components.get(IndexComponentType.POSTING_LISTS).createFileHandle(),
+                                                  root,
+                                                  footerPointer,
+                                                  Version.AA); // These tests are for AA, so no need to parameterize
         Expression expression = new Expression(textContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));
         ByteComparable term = ByteComparable.preencoded(byteComparableVersion, expression.lower.value.encoded);
 
