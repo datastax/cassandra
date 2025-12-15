@@ -28,6 +28,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import de.huxhorn.sulky.ulid.ULID;
@@ -109,10 +110,16 @@ public final class ULIDBasedSSTableId implements SSTableId<ULIDBasedSSTableId>
     {
         private static final Pattern PATTERN = Pattern.compile("[0-9a-z]{26}", Pattern.CASE_INSENSITIVE);
 
-        public static final Builder instance = new Builder();
+        public static final Builder instance = new Builder(new ULID());
 
-        private static final ULID ulid = new ULID();
+        private final ULID ulid;
         private static final AtomicReference<ULID.Value> prevRef = new AtomicReference<>();
+
+        @VisibleForTesting
+        Builder(ULID ulid)
+        {
+            this.ulid = ulid;
+        }
 
         /**
          * Creates a new ULID based identifiers generator.
@@ -139,7 +146,7 @@ public final class ULIDBasedSSTableId implements SSTableId<ULIDBasedSSTableId>
                     {
                         newVal = ulid.nextValue();
                     }
-                } while (newVal != null && !prevRef.compareAndSet(prevVal, newVal));
+                } while (newVal == null || !prevRef.compareAndSet(prevVal, newVal));
                 return new ULIDBasedSSTableId(newVal);
             };
         }
