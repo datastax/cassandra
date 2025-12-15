@@ -153,7 +153,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
 
         // Comparison should be based solely on tokens
         assertThat(tokenOnlyKey1.compareTo(tokenOnlyKey2)).isLessThan(0);
-        assertThat(tokenOnlyKey1.compareTo(tokenOnlyKey2)).isGreaterThan(0);
+        assertThat(tokenOnlyKey2.compareTo(tokenOnlyKey1)).isGreaterThan(0);
 
         // They should not be equal
         assertNotEquals(tokenOnlyKey1, tokenOnlyKey2);

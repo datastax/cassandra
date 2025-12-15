@@ -159,8 +159,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
          * <p>
          * This implementation uses a two-tier comparison strategy:
          * <ul>
-         *   <li>If this partition key is null (deferred/lazy loading) or the given primary key is token only,
-         *       compares by token only</li>
+         *   <li>If the given primary key is token only, compares by token only</li>
          *   <li>If both partition keys are available, performs full partition key comparison</li>
          * </ul>
          * Note: This comparison is partition-aware only and does not consider clustering keys.

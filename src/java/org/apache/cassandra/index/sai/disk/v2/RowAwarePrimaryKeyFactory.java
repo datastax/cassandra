@@ -111,7 +111,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public PrimaryKey loadDeferred()
         {
-            if (primaryKeySupplier != null )
+            if (primaryKeySupplier != null)
             {
                 assert partitionKey == null : "While applying existing primaryKeySupplier to load deferred primaryKey the partition key was unexpectedly already set";
                 PrimaryKey deferredPrimaryKey = primaryKeySupplier.get();
