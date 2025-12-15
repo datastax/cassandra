@@ -249,10 +249,10 @@ public class CompactionGraph implements Closeable, Accountable
     {
         var feature = nvq != null ? new NVQ(nvq) : new InlineVectors(dimension);
         var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
-               .withStartOffset(termsOffset)
-               .with(feature)
-               .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
-               .withMapper(ordinalMapper);
+                            .withStartOffset(termsOffset)
+                            .with(feature)
+                            .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
+                            .withMapper(ordinalMapper);
         if (ENABLE_FUSED && compressor instanceof ProductQuantization && context.version().onDiskFormat().jvectorFileFormatVersion() >= 6)
             writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
         return writerBuilder.build();
