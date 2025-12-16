@@ -24,6 +24,9 @@ import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -248,6 +251,7 @@ class HandshakeProtocol
     {
         /** The messaging version sent by the receiving peer (int). */
         private static final int MAX_LENGTH = 12;
+        private static Logger logger = LoggerFactory.getLogger(Accept.class);
 
         final int useMessagingVersion;
         final int maxMessagingVersion;
@@ -281,6 +285,11 @@ class HandshakeProtocol
 
         static Accept maybeDecode(ByteBuf in, int handshakeMessagingVersion) throws InvalidCrc
         {
+            return maybeDecode(in, handshakeMessagingVersion, null);
+        }
+
+        static Accept maybeDecode(ByteBuf in, int handshakeMessagingVersion, InetAddressAndPort address) throws InvalidCrc
+        {
             int readerIndex = in.readerIndex();
             if (in.readableBytes() < 4)
                 return null;
@@ -290,6 +299,7 @@ class HandshakeProtocol
             // if the other node is DSE 6.x then force version to 3014
             // 256 is a magic number used in DSE 6.x's `ProtocolVersion`, DSE messaging versions are bit-shifted 8 left
             // https://github.com/riptano/bdp/blob/6.8.58-rel/dse-db/src/java/org/apache/cassandra/net/ProtocolVersion.java#L41-L42
+            logger.debug("The proposed maxMessagingVersion={} for {}", maxMessagingVersion, address);
             if (256 <= maxMessagingVersion && !MessagingService.current_version_override)
                 return new Accept(useMessagingVersion, VERSION_3014);
 

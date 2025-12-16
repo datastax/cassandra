@@ -263,7 +263,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         {
             try
             {
-                Accept msg = Accept.maybeDecode(in, requestMessagingVersion);
+                Accept msg = Accept.maybeDecode(in, requestMessagingVersion, settings.connectTo);
                 if (msg == null)
                     return;
 
@@ -350,6 +350,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                         AsyncChannelPromise.writeAndFlush(ctx, message.encode());
                     }
                 }
+
+                logger.debug("Result for {} is {}", settings.connectTo, result.outcome);
 
                 ChannelPipeline pipeline = ctx.pipeline();
                 if (result.isSuccess())
