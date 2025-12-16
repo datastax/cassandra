@@ -1203,7 +1203,7 @@ public class OutboundConnection
                 int knownMessagingVersion = messagingVersion();
                 if (knownMessagingVersion != messagingVersion)
                 {
-                    logger.trace("Endpoint version changed from {} to {} since connection initialized, updating.",
+                    logger.debug("Endpoint version changed from {} to {} since connection initialized, updating.",
                                  messagingVersion, knownMessagingVersion);
                     messagingVersion = knownMessagingVersion;
                 }
@@ -1213,6 +1213,7 @@ public class OutboundConnection
                     messagingVersion = settings.acceptVersions.max;
 
                 // ensure we connect to the correct SSL port
+                logger.debug("Connecting to the node with negotiated messagingVersion={}", messagingVersion);
                 settings = settings.withLegacyPortIfNecessary(messagingVersion);
 
                 initiateMessaging(eventLoop, type, settings, messagingVersion, result)
