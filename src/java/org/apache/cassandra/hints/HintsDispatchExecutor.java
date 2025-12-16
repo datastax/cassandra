@@ -36,6 +36,7 @@ import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 import org.apache.cassandra.utils.concurrent.Future;
 
@@ -292,7 +293,12 @@ final class HintsDispatchExecutor
                 return false;
             }
 
-            try (HintsDispatcher dispatcher = HintsDispatcher.create(file, rateLimiter, address, descriptor.hostId, optVersion.get(), shouldAbort))
+            // Use the minimum of peer's messaging version and storage compatibility mode's version.
+            // This ensures hints written with the storage-compatible version can be dispatched using the
+            // encoded path without deserialization, as long as the peer supports that version.
+            int dispatchVersion = Math.min(optVersion.get(), StorageCompatibilityMode.current().storageMessagingVersion());
+
+            try (HintsDispatcher dispatcher = HintsDispatcher.create(file, rateLimiter, address, descriptor.hostId, dispatchVersion, shouldAbort))
             {
                 if (offset != null)
                     dispatcher.seek(offset);
