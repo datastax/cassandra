@@ -310,6 +310,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                     assert type.isMessaging();
 
                     // pre40 handshake responses only (can be a post40 node)
+                    logger.debug("peerMessagingVersion {} requestMessagingVersion {} settings.acceptVersions.max {} settings.acceptVersions.min {}",
+                                 peerMessagingVersion, requestMessagingVersion, settings.acceptVersions.max, settings.acceptVersions.min);
                     if (peerMessagingVersion == requestMessagingVersion
                         || peerMessagingVersion > settings.acceptVersions.max) // this clause is for impersonating 3.0 node in testing only
                     {
