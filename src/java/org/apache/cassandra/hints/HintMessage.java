@@ -110,10 +110,11 @@ public final class HintMessage implements SerializableHintMessage
             {
                 Encoded message = (Encoded) obj;
 
-                if (version != message.version)
-                    throw new IllegalArgumentException("serializedSize() called with non-matching version " + version +
-                                                       " for message with version " + message.version);
-
+                // UUID serialization is version-independent, VInt encoding is version-independent,
+                // and hint bytes are written verbatim. The size is the same regardless of the version
+                // passed, so we don't need to check for version mismatch here. This allows encoded
+                // hints written at the storage compatibility version to be dispatched correctly
+                // even when the peer is at a different (newer) messaging version.
                 long size = UUIDSerializer.serializer.serializedSize(message.hostId, version);
                 size += TypeSizes.sizeofUnsignedVInt(message.hint.remaining());
                 size += message.hint.remaining();
@@ -147,9 +148,11 @@ public final class HintMessage implements SerializableHintMessage
             {
                 Encoded message = (Encoded) obj;
 
-                if (version != message.version)
-                    throw new IllegalArgumentException("serialize() called with non-matching version " + version);
-
+                // UUID serialization and VInt encoding are version-independent, and hint bytes are
+                // written verbatim (already encoded at message.version). This allows encoded hints
+                // written at the storage compatibility version to be dispatched correctly even when
+                // the peer is at a different (newer) messaging version. The receiver will deserialize
+                // the hint bytes using the appropriate version based on the hint file descriptor.
                 UUIDSerializer.serializer.serialize(message.hostId, out, version);
                 out.writeUnsignedVInt32(message.hint.remaining());
                 out.write(message.hint);
