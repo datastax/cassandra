@@ -1158,8 +1158,8 @@ public class OutboundConnection
                         break;
 
                     case RETRY:
-                        if (logger.isTraceEnabled())
-                            logger.trace("{} incorrect legacy peer version predicted; reconnecting", id());
+                        if (logger.isDebugEnabled())
+                            logger.debug("{} incorrect legacy peer version predicted; reconnecting", id());
 
                         // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
                         messagingVersion = result.retry().withMessagingVersion;
