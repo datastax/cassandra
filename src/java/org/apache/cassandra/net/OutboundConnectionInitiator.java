@@ -127,8 +127,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
 
     private Future<Result<SuccessType>> initiate(EventLoop eventLoop)
     {
-        if (logger.isTraceEnabled())
-                logger.trace("creating outbound bootstrap to {}, requestVersion: {}", settings, requestMessagingVersion);
+        if (logger.isDebugEnabled())
+                logger.debug("creating outbound bootstrap to {}, requestVersion: {}", settings, requestMessagingVersion);
 
         if (!settings.authenticate())
         {
@@ -231,7 +231,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         public void channelActive(final ChannelHandlerContext ctx)
         {
             Initiate msg = new Initiate(requestMessagingVersion, settings.acceptVersions, type, settings.framing, settings.from);
-            logger.trace("starting handshake with peer {}, msg = {}", settings.connectToId(), msg);
+            logger.debug("starting handshake with peer {}, msg = {}", settings.connectToId(), msg);
             AsyncChannelPromise.writeAndFlush(ctx, msg.encode(),
                   future -> { if (!future.isSuccess()) exceptionCaught(ctx, future.cause()); });
 
@@ -269,7 +269,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
 
                 int useMessagingVersion = msg.useMessagingVersion;
                 int peerMessagingVersion = msg.maxMessagingVersion;
-                logger.trace("received second handshake message from peer {}, msg = {}", settings.connectTo, msg);
+                logger.debug("received second handshake message from peer {}, msg = {}", settings.connectTo, msg);
 
                 FrameEncoder frameEncoder = null;
                 Result<SuccessType> result;
