@@ -138,10 +138,12 @@ public class EncryptionOptions
     {
         ensureConfigNotApplied();
 
+        logger.debug("applyConfig enabled {}", enabled);
         isEnabled = this.enabled != null && enabled;
 
         if (optional != null)
         {
+            logger.debug("applyConfig optional {}", optional);
             isOptional = optional;
         }
         // If someone is asking for an _insecure_ connection and not explicitly telling us to refuse
@@ -149,6 +151,7 @@ public class EncryptionOptions
         // to transition to encrypted connections in the future.
         else if (new File(keystore).exists())
         {
+            logger.debug("applyConfig !isEnabled {}", !isEnabled);
             isOptional = !isEnabled;
         }
         else
@@ -204,6 +207,7 @@ public class EncryptionOptions
     public Boolean isOptional()
     {
         ensureConfigApplied();
+        logger.debug("Returning isOptional {}", isOptional);
         return isOptional;
     }
 
@@ -528,6 +532,7 @@ public class EncryptionOptions
             // regardless of the optional flag, if the internode encryption is set to rack or dc
             // it must be optional so that unencrypted connections within the rack or dc can be established.
             isOptional = super.isOptional || internode_encryption == InternodeEncryption.rack || internode_encryption == InternodeEncryption.dc;
+            logger.debug("isOptional in the end is equal to {}", isOptional);
 
             return this;
         }

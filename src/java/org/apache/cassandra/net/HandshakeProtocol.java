@@ -24,6 +24,9 @@ import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -91,6 +94,7 @@ class HandshakeProtocol
      */
     static class Initiate
     {
+        private static final Logger logger = LoggerFactory.getLogger(Initiate.class);
         /** Contains the PROTOCOL_MAGIC (int) and the flags (int). */
         private static final int MIN_LENGTH = 8;
         private static final int MAX_LENGTH = 12 + InetAddressAndPort.Serializer.MAXIMUM_SIZE;
@@ -128,10 +132,14 @@ class HandshakeProtocol
 
             if ((requestMessagingVersion < VERSION_40 || acceptVersions.max < VERSION_40) &&
                 !(requestMessagingVersion == 255 && acceptVersions.acceptsDse()))
+            {
+                logger.debug("Returning flags as {}", flags);
                 return flags; // for testing, permit serializing as though we are pre40
+            }
 
             flags |= (acceptVersions.min << 16);
             flags |= (acceptVersions.max << 24);
+            logger.debug("Encoded flags is {}", flags);
             return flags;
         }
 
@@ -141,7 +149,7 @@ class HandshakeProtocol
             try (DataOutputBufferFixed out = new DataOutputBufferFixed(buffer))
             {
                 out.writeInt(Message.PROTOCOL_MAGIC);
-                out.writeInt(encodeFlags());
+                out.writeInt(encodeFlags());    //flags
 
                 if (requestMessagingVersion >= VERSION_40 && acceptVersions.max >= VERSION_40)
                 {
@@ -168,6 +176,7 @@ class HandshakeProtocol
             {
                 validateLegacyProtocolMagic(in.readInt());
                 int flags = in.readInt();
+                logger.debug("Flags is {}", flags);
 
                 int requestedMessagingVersion = getBits(flags, 8, 8);
                 int minMessagingVersion = getBits(flags, 16, 8);
@@ -194,11 +203,12 @@ class HandshakeProtocol
                 }
 
                 buf.skipBytes(nio.position() - start);
-                return new Initiate(requestedMessagingVersion,
-                                    minMessagingVersion == 0 && maxMessagingVersion == 0
-                                        ? null : new AcceptVersions(minMessagingVersion, maxMessagingVersion),
-                                    type, framing, from);
-
+                Initiate initiate = new Initiate(requestedMessagingVersion,
+                                                 minMessagingVersion == 0 && maxMessagingVersion == 0
+                                                 ? null : new AcceptVersions(minMessagingVersion, maxMessagingVersion),
+                                                 type, framing, from);
+                logger.debug("Received Initiate message {}", initiate);
+                return initiate;
             }
             catch (EOFException e)
             {
@@ -248,6 +258,7 @@ class HandshakeProtocol
     {
         /** The messaging version sent by the receiving peer (int). */
         private static final int MAX_LENGTH = 12;
+        private static Logger logger = LoggerFactory.getLogger(Accept.class);
 
         final int useMessagingVersion;
         final int maxMessagingVersion;
@@ -281,6 +292,11 @@ class HandshakeProtocol
 
         static Accept maybeDecode(ByteBuf in, int handshakeMessagingVersion) throws InvalidCrc
         {
+            return maybeDecode(in, handshakeMessagingVersion, null);
+        }
+
+        static Accept maybeDecode(ByteBuf in, int handshakeMessagingVersion, InetAddressAndPort address) throws InvalidCrc
+        {
             int readerIndex = in.readerIndex();
             if (in.readableBytes() < 4)
                 return null;
@@ -290,6 +306,7 @@ class HandshakeProtocol
             // if the other node is DSE 6.x then force version to 3014
             // 256 is a magic number used in DSE 6.x's `ProtocolVersion`, DSE messaging versions are bit-shifted 8 left
             // https://github.com/riptano/bdp/blob/6.8.58-rel/dse-db/src/java/org/apache/cassandra/net/ProtocolVersion.java#L41-L42
+            logger.debug("The proposed maxMessagingVersion={} for {}", maxMessagingVersion, address);
             if (256 <= maxMessagingVersion && !MessagingService.current_version_override)
                 return new Accept(useMessagingVersion, VERSION_3014);
 
@@ -310,7 +327,9 @@ class HandshakeProtocol
             if (read != computed)
                 throw new InvalidCrc(read, computed);
 
-            return new Accept(useMessagingVersion, maxMessagingVersion);
+            Accept m = new Accept(useMessagingVersion, maxMessagingVersion);
+            logger.debug("Received Accept {}", m);
+            return m;
         }
 
         @VisibleForTesting
@@ -342,6 +361,7 @@ class HandshakeProtocol
      */
     static class ConfirmOutboundPre40
     {
+        private static final Logger logger = LoggerFactory.getLogger(ConfirmOutboundPre40.class);
         private static final int MAX_LENGTH = 4 + InetAddressAndPort.Serializer.MAXIMUM_SIZE;
 
         final int maxMessagingVersion;
@@ -355,6 +375,7 @@ class HandshakeProtocol
 
         ByteBuf encode()
         {
+            logger.debug("Sending ConfirmOutboundPre40 {}", this);
             ByteBuffer buffer = BufferPools.forNetworking().get(MAX_LENGTH, BufferType.OFF_HEAP);
             try (DataOutputBufferFixed out = new DataOutputBufferFixed(buffer))
             {
@@ -381,7 +402,9 @@ class HandshakeProtocol
                 int version = input.readInt();
                 InetAddressAndPort address = inetAddressAndPortSerializer.deserialize(input, version);
                 in.skipBytes(nio.position() - start);
-                return new ConfirmOutboundPre40(version, address);
+                ConfirmOutboundPre40 m = new ConfirmOutboundPre40(version, address);
+                logger.debug("Received ConfirmOutboundPre40 {}", m);
+                return m;
             }
             catch (EOFException e)
             {

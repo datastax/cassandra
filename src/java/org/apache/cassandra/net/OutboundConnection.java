@@ -1118,6 +1118,7 @@ public class OutboundConnection
 
                         MessagingSuccess success = result.success();
                         messagingVersion = success.messagingVersion;
+                        logger.debug("Handshake completed for {} the messagingVersion={}", template.to, messagingVersion);
                         settings.endpointToVersion.set(settings.to, messagingVersion);
                         debug.onConnect(success.messagingVersion, settings);
                         state.disconnected().maintenance.cancel(false);
@@ -1157,8 +1158,8 @@ public class OutboundConnection
                         break;
 
                     case RETRY:
-                        if (logger.isTraceEnabled())
-                            logger.trace("{} incorrect legacy peer version predicted; reconnecting", id());
+                        if (logger.isDebugEnabled())
+                            logger.debug("{} incorrect legacy peer version predicted; reconnecting", id());
 
                         // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
                         messagingVersion = result.retry().withMessagingVersion;
@@ -1203,7 +1204,7 @@ public class OutboundConnection
                 int knownMessagingVersion = messagingVersion();
                 if (knownMessagingVersion != messagingVersion)
                 {
-                    logger.trace("Endpoint version changed from {} to {} since connection initialized, updating.",
+                    logger.debug("Endpoint version changed from {} to {} since connection initialized, updating.",
                                  messagingVersion, knownMessagingVersion);
                     messagingVersion = knownMessagingVersion;
                 }
@@ -1213,6 +1214,7 @@ public class OutboundConnection
                     messagingVersion = settings.acceptVersions.max;
 
                 // ensure we connect to the correct SSL port
+                logger.debug("Connecting to the node {} with negotiated messagingVersion={}", template.to, messagingVersion);
                 settings = settings.withLegacyPortIfNecessary(messagingVersion);
 
                 initiateMessaging(eventLoop, type, settings, messagingVersion, result)

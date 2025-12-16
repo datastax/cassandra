@@ -256,7 +256,7 @@ public class InboundConnectionInitiator
             if (initiate == null)
                 return;
 
-            logger.trace("Received handshake initiation message from peer {}, message = {}", ctx.channel().remoteAddress(), initiate);
+            logger.debug("Received handshake initiation message from peer {}, message = {}", ctx.channel().remoteAddress(), initiate);
 
             if (isEncryptionRequired(initiate.from) && !isChannelEncrypted(ctx))
             {
@@ -267,7 +267,7 @@ public class InboundConnectionInitiator
 
             if (initiate.acceptVersions != null)
             {
-                logger.trace("Connection version {} (min {}) from {}", initiate.acceptVersions.max, initiate.acceptVersions.min, initiate.from);
+                logger.debug("Connection version {} (min {}) from {}", initiate.acceptVersions.max, initiate.acceptVersions.min, initiate.from);
 
                 final AcceptVersions accept;
 
@@ -298,6 +298,7 @@ public class InboundConnectionInitiator
                     assert initiate.type.isMessaging();
 
                     // Second message to DSE is sent with version 10 (oss 3.0)
+                    logger.debug("Sending back Accept.respondPre40 with {} to {}", settings.acceptMessaging.min, ctx.channel().remoteAddress());
                     ByteBuf response = HandshakeProtocol.Accept.respondPre40(settings.acceptMessaging.min, ctx.alloc());
                     AsyncChannelPromise.writeAndFlush(ctx, response,
                                                       (ChannelFutureListener) future -> {
@@ -307,8 +308,10 @@ public class InboundConnectionInitiator
                 }
                 else
                 {
+
                     int useMessagingVersion = max(accept.min, min(accept.max, initiate.acceptVersions.max));
                     ByteBuf flush = new HandshakeProtocol.Accept(useMessagingVersion, accept.max).encode(ctx.alloc());
+                    logger.debug("Sending back Accept with useMessagingVersion {} and accept.max {} to {}", useMessagingVersion, accept.max, ctx.channel().remoteAddress());
                     AsyncChannelPromise.writeAndFlush(ctx, flush, (ChannelFutureListener) future -> {
                         if (!future.isSuccess())
                             exceptionCaught(future.channel(), future.cause());
@@ -335,7 +338,7 @@ public class InboundConnectionInitiator
                        (version >= settings.acceptMessaging.min && settings.acceptMessaging.acceptsDse())
                         : String.format("failed assert: (%s < 12 && %1$s >= %s) || (%1$s >= %2$s && %s)", version, settings.acceptMessaging.min, settings.acceptMessaging.acceptsDse());
 
-                logger.trace("Connection version {} from {}", version, ctx.channel().remoteAddress());
+                logger.debug("Connection version {} from {}", version, ctx.channel().remoteAddress());
 
                 if (initiate.type.isStreaming())
                 {
@@ -406,7 +409,7 @@ public class InboundConnectionInitiator
             if (confirmOutboundPre40 == null)
                 return;
 
-            logger.trace("Received third handshake message from peer {}, message = {}", ctx.channel().remoteAddress(), confirmOutboundPre40);
+            logger.debug("Received third handshake message from peer {}, message = {}", ctx.channel().remoteAddress(), confirmOutboundPre40);
             setupMessagingPipeline(confirmOutboundPre40.from, initiate.requestMessagingVersion, confirmOutboundPre40.maxMessagingVersion, ctx.pipeline());
         }
 
@@ -544,7 +547,7 @@ public class InboundConnectionInitiator
         SslContext sslContext = SSLFactory.getOrCreateSslContext(encryptionOptions, buildTrustStore, SSLFactory.SocketType.SERVER);
         InetSocketAddress peer = encryptionOptions.require_endpoint_verification ? (InetSocketAddress) channel.remoteAddress() : null;
         SslHandler sslHandler = newSslHandler(channel, sslContext, peer);
-        logger.trace("{} inbound netty SslContext: context={}, engine={}", description, sslContext.getClass().getName(), sslHandler.engine().getClass().getName());
+        logger.debug("{} inbound netty SslContext: context={}, engine={}", description, sslContext.getClass().getName(), sslHandler.engine().getClass().getName());
         return sslHandler;
     }
 
