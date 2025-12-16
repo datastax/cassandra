@@ -256,6 +256,8 @@ public class EndpointState
 
 class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
 {
+    private static final Logger logger = LoggerFactory.getLogger(EndpointStateSerializer.class);
+
     public void serialize(EndpointState epState, DataOutputPlus out, int version) throws IOException
     {
         /* serialize the HeartBeatState */
@@ -318,9 +320,11 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
     {
         assert version < MessagingService.VERSION_40 && !MessagingService.current_version_override;
         VersionedValue vv = state.getValue();
+        logger.debug("Loading key {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
         switch (state.getKey())
         {
             case INTERNAL_ADDRESS_AND_PORT:
+                logger.debug("INTERNAL_ADDRESS_AND_PORT, version {} vv.value {}", version, vv.value);
                 return Map.of(
                         ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[0], vv.version),
                         ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
@@ -353,6 +357,7 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
             for (Map.Entry<ApplicationState, VersionedValue> state : states.entrySet())
             {
                 VersionedValue vv = state.getValue();
+                logger.debug("Saving key {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
                 switch (state.getKey().ordinal())
                 {
                     case 15: // NATIVE_TRANSPORT_PORT --> NATIVE_ADDRESS_AND_PORT
