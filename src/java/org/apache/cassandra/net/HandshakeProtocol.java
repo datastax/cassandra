@@ -24,6 +24,9 @@ import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -91,6 +94,7 @@ class HandshakeProtocol
      */
     static class Initiate
     {
+        private static final Logger logger = LoggerFactory.getLogger(Initiate.class);
         /** Contains the PROTOCOL_MAGIC (int) and the flags (int). */
         private static final int MIN_LENGTH = 8;
         private static final int MAX_LENGTH = 12 + InetAddressAndPort.Serializer.MAXIMUM_SIZE;
@@ -194,11 +198,13 @@ class HandshakeProtocol
                 }
 
                 buf.skipBytes(nio.position() - start);
-                return new Initiate(requestedMessagingVersion,
-                                    minMessagingVersion == 0 && maxMessagingVersion == 0
-                                        ? null : new AcceptVersions(minMessagingVersion, maxMessagingVersion),
-                                    type, framing, from);
-
+                Initiate message = new Initiate(requestedMessagingVersion,
+                                                minMessagingVersion == 0 && maxMessagingVersion == 0
+                                                    ? null : new AcceptVersions(minMessagingVersion, maxMessagingVersion),
+                                                type, framing, from);
+                if (logger.isTraceEnabled())
+                    logger.trace("Received Initiate {}", message);
+                return message;
             }
             catch (EOFException e)
             {
@@ -246,6 +252,7 @@ class HandshakeProtocol
      */
     static class Accept
     {
+        private static final Logger logger = LoggerFactory.getLogger(Accept.class);
         /** The messaging version sent by the receiving peer (int). */
         private static final int MAX_LENGTH = 12;
 
@@ -310,7 +317,10 @@ class HandshakeProtocol
             if (read != computed)
                 throw new InvalidCrc(read, computed);
 
-            return new Accept(useMessagingVersion, maxMessagingVersion);
+            Accept message = new Accept(useMessagingVersion, maxMessagingVersion);
+            if (logger.isTraceEnabled())
+                logger.trace("Received Accept {}", message);
+            return message;
         }
 
         @VisibleForTesting
@@ -342,6 +352,7 @@ class HandshakeProtocol
      */
     static class ConfirmOutboundPre40
     {
+        private static final Logger logger = LoggerFactory.getLogger(ConfirmOutboundPre40.class);
         private static final int MAX_LENGTH = 4 + InetAddressAndPort.Serializer.MAXIMUM_SIZE;
 
         final int maxMessagingVersion;
@@ -355,6 +366,8 @@ class HandshakeProtocol
 
         ByteBuf encode()
         {
+            if (logger.isTraceEnabled())
+                logger.trace("Sending ConfirmOutboundPre40 {}", this);
             ByteBuffer buffer = BufferPools.forNetworking().get(MAX_LENGTH, BufferType.OFF_HEAP);
             try (DataOutputBufferFixed out = new DataOutputBufferFixed(buffer))
             {
@@ -381,7 +394,10 @@ class HandshakeProtocol
                 int version = input.readInt();
                 InetAddressAndPort address = inetAddressAndPortSerializer.deserialize(input, version);
                 in.skipBytes(nio.position() - start);
-                return new ConfirmOutboundPre40(version, address);
+                ConfirmOutboundPre40 message = new ConfirmOutboundPre40(version, address);
+                if (logger.isTraceEnabled())
+                    logger.trace("Received ConfirmOutboundPre40 {}", message);
+                return message;
             }
             catch (EOFException e)
             {
