@@ -1118,7 +1118,7 @@ public class OutboundConnection
 
                         MessagingSuccess success = result.success();
                         messagingVersion = success.messagingVersion;
-                        logger.debug("Handshake completed the messagingVersion={}", messagingVersion);
+                        logger.debug("Handshake completed for {} the messagingVersion={}", template.to, messagingVersion);
                         settings.endpointToVersion.set(settings.to, messagingVersion);
                         debug.onConnect(success.messagingVersion, settings);
                         state.disconnected().maintenance.cancel(false);
@@ -1214,7 +1214,7 @@ public class OutboundConnection
                     messagingVersion = settings.acceptVersions.max;
 
                 // ensure we connect to the correct SSL port
-                logger.debug("Connecting to the node with negotiated messagingVersion={}", messagingVersion);
+                logger.debug("Connecting to the node {} with negotiated messagingVersion={}", template.to, messagingVersion);
                 settings = settings.withLegacyPortIfNecessary(messagingVersion);
 
                 initiateMessaging(eventLoop, type, settings, messagingVersion, result)
