@@ -1118,6 +1118,7 @@ public class OutboundConnection
 
                         MessagingSuccess success = result.success();
                         messagingVersion = success.messagingVersion;
+                        logger.debug("Handshake completed the messagingVersion={}", messagingVersion);
                         settings.endpointToVersion.set(settings.to, messagingVersion);
                         debug.onConnect(success.messagingVersion, settings);
                         state.disconnected().maintenance.cancel(false);
