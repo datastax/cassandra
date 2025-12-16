@@ -249,7 +249,8 @@ public class CompactionGraph implements Closeable, Accountable
     private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper, NVQuantization nvq) throws IOException
     {
         var feature = nvq != null ? new NVQ(nvq) : new InlineVectors(dimension);
-        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
+        // TODO is this hack to use a local path safe?
+        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toJavaIOFile().toPath())
                             .withParallelWrites(PARALLEL_ENCODING_WRITING)
                             .withStartOffset(termsOffset)
                             .with(feature)
