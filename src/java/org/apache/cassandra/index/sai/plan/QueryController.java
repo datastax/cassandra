@@ -404,8 +404,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         queryContext.recordQueryPlan(origPlan, plan);
         updateIndexMetricsQueriesCount(plan);
 
-        if (logger.isTraceEnabled())
-            logger.trace("Query execution plan:\n" + plan.toRedactedStringRecursive());
+        //if (logger.isTraceEnabled())
+        logger.debug("Query execution plan:\n" + plan.toRedactedStringRecursive());
 
         if (Tracing.isTracing())
         {
