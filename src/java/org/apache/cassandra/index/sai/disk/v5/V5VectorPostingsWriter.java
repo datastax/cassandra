@@ -37,6 +37,8 @@ import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.util.FixedBitSet;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
+import net.openhft.chronicle.bytes.Bytes;
+import net.openhft.chronicle.bytes.BytesStore;
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
@@ -112,7 +114,7 @@ public class V5VectorPostingsWriter<T>
      * vectors to disk as they are added to the graph, so there is no opportunity to reorder the way there is
      * in a Memtable index.
      */
-    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, Map<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
+    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, Map<BytesStore<?,?>, BytesStore<?,?>> postingsMap)
     {
         assert !postingsMap.isEmpty(); // flush+compact should skip writing an index component in this case
 
@@ -132,19 +134,17 @@ public class V5VectorPostingsWriter<T>
             int maxOldOrdinal = Integer.MIN_VALUE;
             int maxRow = Integer.MIN_VALUE;
             var extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
-            for (var entry : postingsMap.entrySet())
+            for (var postingsBytes : postingsMap.values())
             {
-                var postings = entry.getValue();
-                int ordinal = postings.getOrdinal();
+                int ordinal = postingsBytes.readInt(0);
 
                 maxOldOrdinal = Math.max(maxOldOrdinal, ordinal);
-                var rowIds = postings.getRowIds();
-                assert ordinal == rowIds.getInt(0); // synthetic ordinals not allowed in ONE_TO_MANY
-                for (int i = 0; i < rowIds.size(); i++)
+                assert ordinal == postingsBytes.readInt(4); // synthetic ordinals not allowed in ONE_TO_MANY
+                for (long pos = 4; pos < postingsBytes.length(); pos += 4)
                 {
-                    int rowId = rowIds.getInt(i);
+                    int rowId = postingsBytes.readInt(pos);
                     maxRow = Math.max(maxRow, rowId);
-                    if (i > 0)
+                    if (pos > 4)
                         extraOrdinals.put(rowId, ordinal);
                 }
             }
@@ -159,12 +159,12 @@ public class V5VectorPostingsWriter<T>
         }
 
         assert structure == Structure.ZERO_OR_ONE_TO_MANY : structure;
-        return createGenericIdentityMapping(postingsMap);
+        return createGenericIdentityMappingBytesStore(postingsMap);
     }
 
     public long writePostings(SequentialWriter writer,
                               RandomAccessVectorValues vectorValues,
-                              Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
+                              Map<BytesStore<?,?>, BytesStore<?,?>> postingsMap) throws IOException
     {
         var structure = remappedPostings.structure;
 
@@ -268,7 +268,7 @@ public class V5VectorPostingsWriter<T>
     // VSTODO add missing row information to remapping so we don't have to go through the vectorValues again
     public void writeGenericOrdinalToRowIdMapping(SequentialWriter writer,
                                                   RandomAccessVectorValues vectorValues,
-                                                  Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
+                                                  Map<BytesStore<?,?>, BytesStore<?,?>> postingsMap) throws IOException
     {
         long ordToRowOffset = writer.getOnDiskFilePointer();
 
@@ -289,8 +289,11 @@ public class V5VectorPostingsWriter<T>
             }
             else
             {
-                var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
-                postingListSize = rowIds.size();
+                var vec = vectorValues.getVector(originalOrdinal);
+                var key = Bytes.allocateDirect(vec.length() * 4L);
+                for (int j = 0; j < vec.length(); j++)
+                    key.writeFloat(vec.get(j));
+                postingListSize = postingsMap.get(key).length() / 4 - 1;
             }
             nextOffset += 4 + (postingListSize * 4L); // 4 bytes for size and 4 bytes for each integer in the list
         }
@@ -305,17 +308,22 @@ public class V5VectorPostingsWriter<T>
                 writer.writeInt(0);
                 continue;
             }
-            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
-            writer.writeInt(rowIds.size());
-            for (int r = 0; r < rowIds.size(); r++)
-                writer.writeInt(rowIds.getInt(r));
+            var vec = vectorValues.getVector(originalOrdinal);
+            var key = Bytes.allocateDirect(vec.length() * 4L);
+            for (int j = 0; j < vec.length(); j++)
+                key.writeFloat(vec.get(j));
+            var rowIdsBytes = postingsMap.get(key);
+            var rowIdsCount = rowIdsBytes.length() / 4 - 1;
+            writer.writeInt(rowIdsCount);
+            for (long pos = 4; pos < rowIdsBytes.length(); pos += 4)
+                writer.writeInt(rowIdsBytes.readInt(pos));
         }
         assert writer.position() == nextOffset;
     }
 
     public void writeGenericRowIdMapping(SequentialWriter writer,
                                          RandomAccessVectorValues vectorValues,
-                                         Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
+                                         Map<BytesStore<?,?>, BytesStore<?,?>> postingsMap) throws IOException
     {
         long startOffset = writer.position();
 
@@ -327,10 +335,14 @@ public class V5VectorPostingsWriter<T>
             if (ord == OrdinalMapper.OMITTED)
                 continue;
 
-            var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
-            for (int r = 0; r < rowIds.size(); r++)
+            var vec = vectorValues.getVector(ord);
+            var key = Bytes.allocateDirect(vec.length() * 4L);
+            for (int j = 0; j < vec.length(); j++)
+                key.writeFloat(vec.get(j));
+            var rowIdsBytes = postingsMap.get(key);
+            for (long pos = 4; pos < rowIdsBytes.length(); pos += 4)
             {
-                var rowId = rowIds.getInt(r);
+                var rowId = rowIdsBytes.readInt(pos);
                 rowIdToOrdinalMap.put(rowId, i);
                 maxRowId = max(maxRowId, rowId);
             }
@@ -478,6 +490,27 @@ public class V5VectorPostingsWriter<T>
         var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
         for (var entry : postingsMap.entrySet())
             presentOrdinals.set(entry.getValue().getOrdinal());
+        return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
+                                    maxOldOrdinal,
+                                    maxRow,
+                                    null,
+                                    null,
+                                    new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
+    }
+
+    public static <T> RemappedPostings createGenericIdentityMappingBytesStore(Map<BytesStore<?,?>, BytesStore<?,?>> postingsMap)
+    {
+        var maxOldOrdinal = postingsMap.values().stream().mapToInt(b -> b.readInt(0)).max().orElseThrow();
+        int maxRow = postingsMap.values().stream().mapToInt(b -> {
+            int max =  Integer.MIN_VALUE;
+            for (int i = 4; i <= b.length() * 4; i += 4) {
+                max = Math.max(max, b.readInt(i));
+            }
+            return max;
+        }).max().orElseThrow();
+        var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
+        for (var value : postingsMap.values())
+            presentOrdinals.set(value.readInt(0));
         return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
                                     maxOldOrdinal,
                                     maxRow,

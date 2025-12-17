@@ -27,8 +27,12 @@ import com.google.common.base.Preconditions;
 
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import net.openhft.chronicle.bytes.Bytes;
+import net.openhft.chronicle.bytes.RandomDataInput;
+import net.openhft.chronicle.bytes.RandomDataOutput;
+import net.openhft.chronicle.hash.Data;
 import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
+import net.openhft.chronicle.hash.serialization.DataAccess;
 import org.agrona.collections.IntArrayList;
 
 public class VectorPostings<T>

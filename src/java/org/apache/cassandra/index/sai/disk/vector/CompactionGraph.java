@@ -65,12 +65,17 @@ import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
+import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import net.openhft.chronicle.bytes.Bytes;
+import net.openhft.chronicle.bytes.BytesStore;
+import net.openhft.chronicle.bytes.internal.NativeBytesStore;
+import net.openhft.chronicle.bytes.ref.ByteableIntArrayValues;
+import net.openhft.chronicle.core.values.IntArrayValues;
 import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
 import net.openhft.chronicle.map.ChronicleMap;
@@ -127,7 +132,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
-    private final ChronicleMap<VectorFloat<?>, CompactionVectorPostings> postingsMap;
+    private final ChronicleMap<BytesStore<?,?>, BytesStore<?,?>> postingsMap;
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext context;
     private final boolean unitVectors;
@@ -192,11 +197,8 @@ public class CompactionGraph implements Closeable, Accountable
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
         Component tmpComponent = new Component(Component.Type.CUSTOM, "chronicle" + UUID.randomUUID() + Descriptor.TMP_EXT);
         postingsFile = dd.tmpFileFor(tmpComponent);
-        postingsMap = ChronicleMapBuilder.of((Class<VectorFloat<?>>) (Class) VectorFloat.class, (Class<CompactionVectorPostings>) (Class) CompactionVectorPostings.class)
-                                         .averageKeySize(dimension * Float.BYTES)
-                                         .averageValueSize(VectorPostings.emptyBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF + 2 * Integer.BYTES)
-                                         .keyMarshaller(new VectorFloatMarshaller())
-                                         .valueMarshaller(new VectorPostings.Marshaller())
+        postingsMap = ChronicleMapBuilder.of((Class<BytesStore<?, ?>>) (Class<?>) BytesStore.class,
+                                             (Class<BytesStore<?, ?>>) (Class<?>) BytesStore.class)
                                          .entries(postingsEntriesAllocated)
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
@@ -278,7 +280,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     public boolean isEmpty()
     {
-        return postingsMap.values().stream().allMatch(VectorPostings::isEmpty);
+        return postingsMap.values().stream().allMatch(BytesStore::isEmpty);
     }
 
     /**
@@ -309,14 +311,19 @@ public class CompactionGraph implements Closeable, Accountable
         lastRowId = segmentRowId;
 
         var bytesUsed = 0L;
-        var postings = postingsMap.get(vector);
-        if (postings == null)
+        Bytes.allocateElasticDirect();
+        var vecBytes = Bytes.allocateDirect((long) dimension * Float.BYTES);
+        for (int i = 0; i < dimension; i++)
+            vecBytes.writeFloat(vector.get(i));
+
+        var postings = postingsMap.acquireUsing(vecBytes, Bytes.elasticByteBuffer(8));
+        if (postings.isEmpty())
         {
             // add a new entry
             // this all runs on the same compaction thread, so we don't need to worry about concurrency
             int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
-            postings = new CompactionVectorPostings(ordinal, segmentRowId);
-            postingsMap.put(vector, postings);
+            postings.writeInt(0, ordinal);
+            postings.writeInt(Integer.BYTES, segmentRowId);
 
             // fine-tune the PQ if we've collected enough vectors
             if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
@@ -326,9 +333,12 @@ public class CompactionGraph implements Closeable, Accountable
                 var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
                 var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
                 postingsMap.forEach((v, p) -> {
-                    var vectorClone = v.copy();
-                    trainingVectors.add(vectorClone);
-                    vectorsByOrdinal.put(p.getOrdinal(), vectorClone);
+                    var arr = new float[dimension];
+                    for (int i = 0; i < dimension; i++)
+                        arr[i] = v.readFloat((long) i * Float.BYTES);
+                    var vec = vts.createFloatVector(arr);
+                    trainingVectors.add(vec);
+                    vectorsByOrdinal.put(p.readInt(0), vec);
                 });
 
                 // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
@@ -382,17 +392,17 @@ public class CompactionGraph implements Closeable, Accountable
                 compressedVectors.setZero(compressedVectors.count());
             compressedVectors.encodeAndSet(ordinal, vector);
 
-            bytesUsed += postings.ramBytesUsed();
+//            bytesUsed += postings.ramBytesUsed();
             return new InsertionResult(bytesUsed, ordinal, vector);
         }
 
         // postings list already exists, just add the new key
         if (postingsStructure == Structure.ONE_TO_ONE)
             postingsStructure = Structure.ONE_TO_MANY;
-        var newPosting = postings.add(segmentRowId);
-        assert newPosting;
-        bytesUsed += postings.bytesPerPosting();
-        postingsMap.put(vector, postings); // re-serialize to disk
+        postings.writeInt(postings.length() / 4, segmentRowId);
+//        assert newPosting;
+//        bytesUsed += postings.bytesPerPosting();
+//        postingsMap.put(vector, postings); // re-serialize to disk
 
         return new InsertionResult(bytesUsed);
     }
@@ -426,7 +436,7 @@ public class CompactionGraph implements Closeable, Accountable
         if (logger.isDebugEnabled())
         {
             logger.debug("Writing graph with {} rows and {} distinct vectors",
-                         postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
+                         postingsMap.values().stream().mapToInt(b -> (b.length() / 4) - 1).sum(), builder.getGraph().size());
             logger.debug("Estimated size is {} + {}", compressedVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
         }
 
