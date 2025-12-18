@@ -34,6 +34,9 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Streams;
 import com.google.common.util.concurrent.Runnables;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
@@ -55,6 +58,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeLazyIterator;
 import org.apache.cassandra.index.sai.memory.MemoryIndex.PkWithFrequency;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
@@ -74,6 +78,8 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class TrieMemtableIndex extends AbstractMemtableIndex
 {
+    private static final Logger logger = LoggerFactory.getLogger(TrieMemtableIndex.class);
+
     private final ShardBoundaries boundaries;
     private final MemoryIndex[] rangeIndexes;
     private final IndexContext indexContext;
@@ -104,6 +110,8 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         }
         this.sensorContext = Context.from(indexContext);
         this.requestTracker = RequestTracker.instance;
+
+        logger.debug("Creating TrieMemtableIndex for index {} with shard count: {}", indexContext.getIndexName(), boundaries.shardCount());
     }
 
     @Override

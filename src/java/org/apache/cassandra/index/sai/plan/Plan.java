@@ -2152,6 +2152,17 @@ abstract public class Plan
             this.avgBytesPerRow = avgBytesPerRow;
             this.sstables = sstables;
         }
+
+        @Override
+        public String toString()
+        {
+            return "Plan.TableMetrics {" +
+                   "rows: " + rows +
+                   ", avgCellsPerRow: " + avgCellsPerRow +
+                   ", avgBytesPerRow: " + avgBytesPerRow +
+                   ", sstables: " + sstables +
+                   '}';
+        }
     }
 
     /**

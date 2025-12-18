@@ -189,6 +189,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
+        logger.debug("Creating Plan.Factory for table " + cfs.getTableName() + ": " + tableMetrics);
         this.planFactory = new Plan.Factory(cfs.metadata.keyspace, tableMetrics, this, command.rowFilter().indexHints);
     }
 
