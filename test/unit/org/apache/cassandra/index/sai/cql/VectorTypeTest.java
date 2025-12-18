@@ -36,11 +36,13 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.vector.AutoResumingNodeScoreIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.inject.ActionBuilder;
 import org.apache.cassandra.inject.Expression;
+import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.service.ClientState;
@@ -1073,5 +1075,67 @@ public class VectorTypeTest extends VectorTester.Versioned
             assertRowCount(execute("SELECT pk FROM %s ORDER BY val1 ANN OF ? LIMIT 10", randomVectorBoxed(128)), 10);
             assertRowCount(execute("SELECT pk FROM %s ORDER BY val2 ANN OF ? LIMIT 10", randomVectorBoxed(128)), 10);
         });
+    }
+
+    @Test
+    public void testRowIdIteratorClosedOnHasNextFailure() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+
+        // Track if the rowIdIterator's close method is called
+        Injections.Counter closeCounter = Injections.newCounter("rowIdIteratorCloseCounter")
+                                                    .add(InvokePointBuilder.newInvokePoint()
+                                                                           .onClass(AutoResumingNodeScoreIterator.class)
+                                                                           .onMethod("close"))
+                                                    .build();
+
+        // Inject failure at hasNext in toMetaSortedIterator
+        Injection hasNextFailure = Injections.newCustom("fail_on_hasNext")
+                                             .add(InvokePointBuilder.newInvokePoint()
+                                                                    .onClass(AutoResumingNodeScoreIterator.class)
+                                                                    .onMethod("computeNext")
+                                                                    .atEntry())
+                                             .add(ActionBuilder.newActionBuilder()
+                                                               .actions()
+                                                               .doThrow(RuntimeException.class, Expression.quote("Injected hasNext failure!")))
+                                             .build();
+
+        try
+        {
+            Injections.inject(closeCounter);
+            Injections.inject(hasNextFailure);
+
+            // Insert data
+            execute("INSERT INTO %s (pk, vec) VALUES (1, [1.0, 1.0])");
+            execute("INSERT INTO %s (pk, vec) VALUES (2, [2.0, 2.0])");
+            flush();
+
+            // Reset counter before the test
+            closeCounter.reset();
+
+            // Enable the failure injection
+            hasNextFailure.enable();
+
+            // Execute query that will trigger toMetaSortedIterator and fail at hasNext
+            assertThatThrownBy(() -> executeInternal("SELECT pk FROM %s ORDER BY vec ANN OF [1.5, 1.5] LIMIT 2"))
+                    .hasMessageContaining("Injected hasNext failure!");
+
+            // Verify that close was called on the rowIdIterator despite the failure
+            // The close should be called in the catch block of toMetaSortedIterator (line 198)
+            assertThat(closeCounter.get()).as("rowIdIterator should be closed when hasNext fails")
+                                          .isGreaterThan(0);
+
+            // Remove failure and confirm we can still query
+            hasNextFailure.disable();
+
+            // Confrm subsequent queries succeed because we close the iterator and release the graph searcher
+            execute("SELECT pk FROM %s ORDER BY vec ANN OF [1.5, 1.5] LIMIT 2");
+        }
+        finally
+        {
+            hasNextFailure.disable();
+            closeCounter.disable();
+        }
     }
 }
