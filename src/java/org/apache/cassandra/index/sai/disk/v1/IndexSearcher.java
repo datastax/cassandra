@@ -171,24 +171,32 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
 
     protected CloseableIterator<PrimaryKeyWithSortKey> toMetaSortedIterator(CloseableIterator<? extends RowIdWithMeta> rowIdIterator, QueryContext queryContext) throws IOException
     {
-        if (rowIdIterator == null || !rowIdIterator.hasNext())
+        try
+        {
+            if (rowIdIterator == null || !rowIdIterator.hasNext())
+            {
+                FileUtils.closeQuietly(rowIdIterator);
+                return CloseableIterator.emptyIterator();
+            }
+
+            IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
+                                                                            metadata.maxKey,
+                                                                            metadata.minSSTableRowId,
+                                                                            metadata.maxSSTableRowId,
+                                                                            metadata.segmentRowIdOffset,
+                                                                            queryContext,
+                                                                            null);
+            var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+            return new RowIdToPrimaryKeyWithSortKeyIterator(indexContext,
+                                                            pkm.getSSTableId(),
+                                                            rowIdIterator,
+                                                            pkm,
+                                                            searcherContext);
+        }
+        catch (Throwable t)
         {
             FileUtils.closeQuietly(rowIdIterator);
-            return CloseableIterator.emptyIterator();
+            throw t;
         }
-
-        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
-                                                                        metadata.maxKey,
-                                                                        metadata.minSSTableRowId,
-                                                                        metadata.maxSSTableRowId,
-                                                                        metadata.segmentRowIdOffset,
-                                                                        queryContext,
-                                                                        null);
-        var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
-        return new RowIdToPrimaryKeyWithSortKeyIterator(indexContext,
-                                                        pkm.getSSTableId(),
-                                                        rowIdIterator,
-                                                        pkm,
-                                                        searcherContext);
     }
 }
