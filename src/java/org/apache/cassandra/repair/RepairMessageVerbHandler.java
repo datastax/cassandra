@@ -177,8 +177,8 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
             }
             else if (message.verb() == CLEANUP_MSG)
             {
-                logger.debug("cleaning up repair");
                 CleanupMessage cleanup = (CleanupMessage) message.payload;
+                logger.debug("Cleaning up parent repair session {}", cleanup.parentRepairSession);
                 ActiveRepairService.instance.removeParentRepairSession(cleanup.parentRepairSession);
                 MessagingService.instance().send(message.emptyResponse(), message.from());
             }
