@@ -78,6 +78,27 @@ public class QueryView implements AutoCloseable
     }
 
     /**
+     * Returns the total count of operations in all memtables in this view
+     */
+    private long getTotalMemtableOperations()
+    {
+        long operations = 0;
+        for (Memtable memtable : viewFragment.memtables)
+        {
+            operations += memtable.getOperations();
+        }
+        return operations;
+    }
+
+    /**
+     * Returns the total count of indexed rows in all memtable indexes in this view
+     */
+    private long getTotalMemtableIndexesRows()
+    {
+        return memtableIndexes.stream().mapToLong(MemtableIndex::getRowCount).sum();
+    }
+
+    /**
      * Build a query specific view of the memtables, sstables, and indexes for a query.
      * For use with SAI ordered queries to ensure that the view is consistent over the lifetime of the query,
      * which is particularly important for validation of a cell's source memtable/sstable.
@@ -203,7 +224,7 @@ public class QueryView implements AutoCloseable
     @Override
     public String toString()
     {
-        return String.format("QueryView {sstables: %d, memtables: %d, total rows: %d}",
-                             sstableIndexes.size(), memtableIndexes.size(), getTotalSStableRows());
+        return String.format("QueryView {sstables: %d, memtables: %d, total sstable rows: %d, total memtable ops: %d, total memtable index rows: %d}",
+                             sstableIndexes.size(), memtableIndexes.size(), getTotalSStableRows(), getTotalMemtableOperations(), getTotalMemtableIndexesRows());
     }
 }
