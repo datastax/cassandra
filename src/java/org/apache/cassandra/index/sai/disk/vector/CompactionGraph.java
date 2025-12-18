@@ -134,6 +134,7 @@ public class CompactionGraph implements Closeable, Accountable
     private Structure postingsStructure;
     private final long termsOffset;
     private int lastRowId = -1;
+    private int rowsAdded = 0;
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
@@ -268,7 +269,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     public boolean isEmpty()
     {
-        return postingsMap.values().stream().allMatch(VectorPostings::isEmpty);
+        return rowsAdded == 0;
     }
 
     /**
@@ -297,6 +298,7 @@ public class CompactionGraph implements Closeable, Accountable
         if (segmentRowId != lastRowId + 1)
             postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
         lastRowId = segmentRowId;
+        rowsAdded++;
 
         var bytesUsed = 0L;
         var postings = postingsMap.get(vector);
@@ -415,8 +417,7 @@ public class CompactionGraph implements Closeable, Accountable
                                                                                         postingsMap.keySet().size(), builder.getGraph().size());
         if (logger.isDebugEnabled())
         {
-            logger.debug("Writing graph with {} rows and {} distinct vectors",
-                         postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
+            logger.debug("Writing graph with {} rows and {} distinct vectors", rowsAdded, builder.getGraph().size());
             logger.debug("Estimated size is {} + {}", compressedVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
         }
 
