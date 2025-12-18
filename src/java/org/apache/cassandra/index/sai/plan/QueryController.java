@@ -475,8 +475,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     QueryView getQueryView(IndexContext context) throws QueryView.Builder.MissingIndexException
     {
-        return queryViews.computeIfAbsent(context,
+        var qv = queryViews.computeIfAbsent(context,
                                           c -> new QueryView.Builder(c, mergeRange).build());
+        logger.debug("Query view for index {}: {}", context.getIndexName(), qv);
+        return qv;
     }
 
     private float avgCellsPerRow()

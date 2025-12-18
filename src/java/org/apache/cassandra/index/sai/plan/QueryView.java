@@ -199,4 +199,11 @@ public class QueryView implements AutoCloseable
             return range.left.compareTo(sstable.last) <= 0 && (range.right.isMinimum() || sstable.first.compareTo(range.right) <= 0);
         }
     }
+
+    @Override
+    public String toString()
+    {
+        return String.format("QueryView {sstables: %d, memtables: %d, total rows: %d}",
+                             sstableIndexes.size(), memtableIndexes.size(), getTotalSStableRows());
+    }
 }
