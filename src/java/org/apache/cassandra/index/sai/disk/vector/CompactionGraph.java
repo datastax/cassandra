@@ -184,8 +184,7 @@ public class CompactionGraph implements Closeable, Accountable
         this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings(context.version()) || !allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
-        Component tmpComponent = new Component(Component.Type.CUSTOM, "chronicle" + Descriptor.TMP_EXT);
-        postingsFile = dd.fileFor(tmpComponent);
+        postingsFile = perIndexComponents.tmpFileFor("postings_chonicle_map");
         postingsMap = ChronicleMapBuilder.of((Class<VectorFloat<?>>) (Class) VectorFloat.class, (Class<CompactionVectorPostings>) (Class) CompactionVectorPostings.class)
                                          .averageKeySize(dimension * Float.BYTES)
                                          .averageValueSize(VectorPostings.emptyBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF + 2 * Integer.BYTES)
@@ -195,8 +194,7 @@ public class CompactionGraph implements Closeable, Accountable
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         // Formatted so that the full resolution vector is written at the ordinal * vector dimension offset
-        Component vectorsByOrdinalComponent = new Component(Component.Type.CUSTOM, "vectors_by_ordinal");
-        vectorsByOrdinalTmpFile = dd.tmpFileFor(vectorsByOrdinalComponent);
+        vectorsByOrdinalTmpFile = perIndexComponents.tmpFileFor("vectors_by_ordinal");
         vectorsByOrdinalBufferedWriter = new BufferedRandomAccessWriter(vectorsByOrdinalTmpFile.toPath());
 
         // VSTODO add LVQ
