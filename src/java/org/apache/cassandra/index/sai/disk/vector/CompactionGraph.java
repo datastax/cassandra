@@ -136,6 +136,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final long termsOffset;
     private int lastRowId = -1;
     private int rowsAdded = 0;
+    private int maxOrdinal = 0; // Inclusive
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
@@ -309,6 +310,7 @@ public class CompactionGraph implements Closeable, Accountable
             // add a new entry
             // this all runs on the same compaction thread, so we don't need to worry about concurrency
             int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
+            maxOrdinal = ordinal; // always increasing
             postings = new CompactionVectorPostings(ordinal, segmentRowId);
             postingsMap.put(vector, postings);
 
@@ -452,6 +454,8 @@ public class CompactionGraph implements Closeable, Accountable
                 }
                 var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
                                                                       builder.getGraph().size(),
+                                                                      lastRowId,
+                                                                      maxOrdinal,
                                                                       postingsMap);
                 ordinalMapper.set(rp.ordinalMapper);
                 try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
@@ -554,7 +558,7 @@ public class CompactionGraph implements Closeable, Accountable
         return builder.getGraph().size() >= postingsEntriesAllocated;
     }
 
-    private static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {
+    public static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {
 
         private final int dimension;
 

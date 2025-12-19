@@ -197,7 +197,7 @@ public class VectorPostings<T>
         }
     }
 
-    static class Marshaller implements BytesReader<CompactionVectorPostings>, BytesWriter<CompactionVectorPostings>
+    public static class Marshaller implements BytesReader<CompactionVectorPostings>, BytesWriter<CompactionVectorPostings>
     {
         @Override
         public void write(Bytes out, CompactionVectorPostings postings) {
