@@ -71,6 +71,7 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import net.openhft.chronicle.bytes.Bytes;
 import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
+import net.openhft.chronicle.hash.serialization.SizeMarshaller;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
 import org.agrona.collections.Int2ObjectHashMap;
@@ -189,8 +190,9 @@ public class CompactionGraph implements Closeable, Accountable
         postingsFile = dd.fileFor(tmpComponent);
         postingsMap = ChronicleMapBuilder.of((Class<VectorFloat<?>>) (Class) VectorFloat.class, (Class<CompactionVectorPostings>) (Class) CompactionVectorPostings.class)
                                          .averageKeySize(dimension * Float.BYTES)
+                                         .keySizeMarshaller(SizeMarshaller.constant((long) dimension * Float.BYTES))
                                          .averageValueSize(VectorPostings.emptyBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF + 2 * Integer.BYTES)
-                                         .keyMarshaller(new VectorFloatMarshaller())
+                                         .keyMarshaller(new VectorFloatMarshaller(dimension))
                                          .valueMarshaller(new VectorPostings.Marshaller())
                                          .entries(postingsEntriesAllocated)
                                          .createPersistedTo(postingsFile.toJavaIOFile());
@@ -553,9 +555,16 @@ public class CompactionGraph implements Closeable, Accountable
     }
 
     private static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {
+
+        private final int dimension;
+
+        public VectorFloatMarshaller(int dimension)
+        {
+            this.dimension = dimension;
+        }
+
         @Override
         public void write(Bytes out, VectorFloat<?> vector) {
-            out.writeInt(vector.length());
             for (int i = 0; i < vector.length(); i++) {
                 out.writeFloat(vector.get(i));
             }
@@ -563,16 +572,15 @@ public class CompactionGraph implements Closeable, Accountable
 
         @Override
         public VectorFloat<?> read(Bytes in, VectorFloat<?> using) {
-            int length = in.readInt();
             if (using == null) {
-                float[] data = new float[length];
-                for (int i = 0; i < length; i++) {
+                float[] data = new float[dimension];
+                for (int i = 0; i < dimension; i++) {
                     data[i] = in.readFloat();
                 }
                 return vts.createFloatVector(data);
             }
 
-            for (int i = 0; i < length; i++) {
+            for (int i = 0; i < dimension; i++) {
                 using.set(i, in.readFloat());
             }
             return using;
