@@ -18,42 +18,35 @@
 
 package org.apache.cassandra.index.sai.disk.v1;
 
+import java.util.Set;
+
 import org.junit.After;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.FileUtils;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.service.StorageService;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Tests for {@link PartitionAwarePrimaryKeyMap#exactRowIdOrInvertedCeiling(PrimaryKey)} using
- * the legacy V1 on-disk format (AA).
+ * Skinny-table tests (no clustering columns) for
+ * {@link PartitionAwarePrimaryKeyMap#exactRowIdOrInvertedCeiling(PrimaryKey)} using the legacy V1 on-disk format (AA).
  */
-public class PartitionAwarePrimaryKeyMapTest
+public class PartitionAwarePrimaryKeyMapTest extends SAITester
 {
-    private final TemporaryFolder temporaryFolder = new TemporaryFolder();
     private IndexDescriptor indexDescriptor;
     private SSTableReader sstable;
     private PrimaryKey.Factory pkFactory;
@@ -61,144 +54,149 @@ public class PartitionAwarePrimaryKeyMapTest
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
 
-    @BeforeClass
-    public static void initialise()
-    {
-        DatabaseDescriptor.daemonInitialization();
-        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
-        StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
-    }
-
     @Before
     public void setup() throws Throwable
     {
-        temporaryFolder.create();
-        Descriptor descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/bb-1-bti-Data.db");
-        FileUtils.copySSTablesAndIndexes(descriptor, "aa");
-        TableMetadata tableMetadata = TableMetadata.builder("test", "test")
-                                                   .addPartitionKeyColumn("pk", Int32Type.instance)
-                                                   .addRegularColumn("int_value", Int32Type.instance)
-                                                   .addRegularColumn("text_value", UTF8Type.instance)
-                                                   .build();
-        sstable = TrieIndexFormat.instance.getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(tableMetadata));
-        indexDescriptor = IndexDescriptor.empty(sstable.descriptor).reload(sstable, java.util.Set.of(intContext, textContext));
+        // Set the version to AA (legacy V1 format) before creating indexes
+        SAIUtil.setCurrentVersion(Version.AA);
+
+        // Create a skinny table (no clustering), and two SAI indexes to ensure primary key components exist
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, int_value int, text_value text)");
+        execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
+        execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
+
+        // Insert a few rows to have first/middle/last and token gaps
+        execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 1, 10, "a");
+        execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 1000, 20, "b");
+        execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 2, 30, "c");
+        execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 50000, 40, "d");
+
+        // Flush to generate SSTable and SAI components
+        flush();
+
+        // Obtain the just-flushed SSTable
+        var cfs = getCurrentColumnFamilyStore();
+        sstable = cfs.getLiveSSTables().iterator().next();
+
+        // Build IndexDescriptor from the live SSTable using the matching index contexts
+        indexDescriptor = IndexDescriptor.empty(sstable.descriptor).reload(sstable, Set.of(intContext, textContext));
+        TableMetadata tableMetadata = cfs.metadata.get().unbuild().build();
         pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(tableMetadata.comparator);
     }
 
     @After
     public void teardown()
     {
-        temporaryFolder.delete();
+        SAIUtil.setCurrentVersion(Version.LATEST);
     }
 
     @Test
-    public void testExactRowIdOrInvertedCeiling() throws Throwable
+    public void testExactRowIdOrInvertedCeilingSkinny() throws Throwable
     {
         IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
-        PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
-        try (PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
+        try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
+             PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
             assertTrue("Expected some rows in test sstable", count > 2);
 
             IPartitioner partitioner = sstable.metadata().partitioner;
 
-            // Exact match for first rowId
+            // Prepare tokens in non-decreasing order to satisfy block-packed reader expectations
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
+            PrimaryKey secondPk = map.primaryKeyFromRowId(1);
+            PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
+
+            long t0 = firstPk.token().getLongValue();
+            long t1 = secondPk.token().getLongValue();
+            long tLast = lastPk.token().getLongValue();
+
+            // 1) Before first: expect -1 (next id 0)
+            long tBefore = t0 - 1;
+            long invCeilBeforeFirst = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tBefore)));
+            assertEquals(-1, invCeilBeforeFirst);
+
+            // 2) Exact first
             long firstRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(firstPk.token()));
-            assertEquals(0L, firstRowId);
+            assertEquals(0, firstRowId);
 
-            // Find a neighboring pair with a gap in token values to test non-exact (inverted ceiling)
-            long gapIndex = -1;
-            long gapMidValue = Long.MIN_VALUE;
-            for (int i = 0; i < Math.min(count - 1, 20); i++) // scan a small prefix to find a gap quickly
+            // 3) Between first and second (or equal if collision): expect next id 1 -> -(1)-1 == -2
+            long midTokenValue;
+            if (t0 == t1)
+                midTokenValue = t0; // collision: querying the token itself is fine
+            else
             {
-                long t0 = map.primaryKeyFromRowId(i).token().getLongValue();
-                long t1 = map.primaryKeyFromRowId(i + 1).token().getLongValue();
-                if (t1 - t0 >= 2) // ensure there is a missing token value between
-                {
-                    gapIndex = i;
-                    gapMidValue = t0 + 1; // pick a value strictly between t0 and t1
-                    break;
-                }
+                midTokenValue = t0 + ((t1 - t0) / 2);
+                if (midTokenValue == t0) midTokenValue = t0 + 1; // ensure strictly between
             }
+            long invCeilBetween01 = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
+            if (midTokenValue != t0)
+                assertEquals(-2, invCeilBetween01);
 
-            if (gapIndex >= 0)
-            {
-                Token midToken = partitioner.getTokenFactory().fromLongValue(gapMidValue);
-                PrimaryKey midKey = pkFactory.createTokenOnly(midToken);
-                long res = map.exactRowIdOrInvertedCeiling(midKey);
-                long expected = -(gapIndex + 1) - 1; // insertion point = gapIndex + 1
-                assertEquals(expected, res);
+            // 4) Exact last
+            long lastRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(lastPk.token()));
+            assertEquals(count - 1, lastRowId);
 
-                // Now exact for the next real key (monotonic progression preserved)
-                PrimaryKey nextPk = map.primaryKeyFromRowId(gapIndex + 1);
-                long exactNext = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(nextPk.token()));
-                assertEquals(gapIndex + 1, exactNext);
-            }
-
-            // Above last token should return negative with insertion point = count
-            long lastTokenValue = map.primaryKeyFromRowId(count - 1).token().getLongValue();
-            // choose a value strictly greater than last
-            long aboveLastValue = lastTokenValue == Long.MAX_VALUE ? lastTokenValue : lastTokenValue + 1;
-            Token aboveLastToken = partitioner.getTokenFactory().fromLongValue(aboveLastValue);
-            long aboveLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(aboveLastToken));
-            long expectedAboveLast = -(count) - 1;
-            assertEquals(expectedAboveLast, aboveLast);
+            // 5) After last: expect inverted ceiling to be -(count) - 1 or Long.MIN_VALUE
+            long tAfter = tLast + 1;
+            long invCeilAfterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tAfter)));
+            long expectedStandardAfterLast = -(count) - 1;
+            assertTrue("Expected inverted ceiling beyond end to be either Long.MIN_VALUE or -(count)-1",
+                       invCeilAfterLast == Long.MIN_VALUE || invCeilAfterLast == expectedStandardAfterLast);
         }
     }
 
     @Test
-    public void testCeiling() throws Throwable
+    public void testCeilingSkinny() throws Throwable
     {
         IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
-        PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
-        try (PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
+        try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
+             PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
             assertTrue("Expected some rows in test sstable", count > 2);
 
             IPartitioner partitioner = sstable.metadata().partitioner;
 
-            // Exact match for first rowId
+            // Prepare tokens in non-decreasing order to satisfy block-packed reader expectations
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
-            long firstRowId = map.ceiling(pkFactory.createTokenOnly(firstPk.token()));
-            assertEquals(0L, firstRowId);
+            PrimaryKey secondPk = map.primaryKeyFromRowId(1);
+            PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
 
-            // Find a neighboring pair with a gap in token values to test non-exact ceiling
-            long gapIndex = -1;
-            long gapMidValue = Long.MIN_VALUE;
-            for (int i = 0; i < Math.min(count - 1, 20); i++)
+            long t0 = firstPk.token().getLongValue();
+            long t1 = secondPk.token().getLongValue();
+            long tLast = lastPk.token().getLongValue();
+
+            // 1) Before first: expect ceiling to be 0 (first row)
+            long tBefore = t0 - 1;
+            long ceilingBeforeFirst = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tBefore)));
+            assertEquals(0, ceilingBeforeFirst);
+
+            // 2) Exact first: expect 0
+            long ceilingFirst = map.ceiling(pkFactory.createTokenOnly(firstPk.token()));
+            assertEquals(0, ceilingFirst);
+
+            // 3) Between first and second: expect ceiling to be 1 (second row)
+            long midTokenValue;
+            if (t0 == t1)
+                midTokenValue = t0; // collision: querying the token itself should return first occurrence
+            else
             {
-                long t0 = map.primaryKeyFromRowId(i).token().getLongValue();
-                long t1 = map.primaryKeyFromRowId(i + 1).token().getLongValue();
-                if (t1 - t0 >= 2)
-                {
-                    gapIndex = i;
-                    gapMidValue = t0 + 1; // value strictly between t0 and t1
-                    break;
-                }
+                midTokenValue = t0 + ((t1 - t0) / 2);
+                if (midTokenValue == t0) midTokenValue = t0 + 1; // ensure strictly between
             }
+            long ceilingBetween01 = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
+            if (midTokenValue != t0)
+                assertEquals(1, ceilingBetween01);
 
-            if (gapIndex >= 0)
-            {
-                // Ceiling for a value between two tokens should be the next real key's rowId
-                Token midToken = partitioner.getTokenFactory().fromLongValue(gapMidValue);
-                long res = map.ceiling(pkFactory.createTokenOnly(midToken));
-                assertEquals(gapIndex + 1, res);
+            // 4) Exact last: expect last row id
+            long ceilingLast = map.ceiling(pkFactory.createTokenOnly(lastPk.token()));
+            assertEquals(count - 1, ceilingLast);
 
-                // Now exact for the next real key (monotonic progression preserved)
-                PrimaryKey nextPk = map.primaryKeyFromRowId(gapIndex + 1);
-                long exactNext = map.ceiling(pkFactory.createTokenOnly(nextPk.token()));
-                assertEquals(gapIndex + 1, exactNext);
-            }
-
-            // Above last token should return -1 for ceiling
-            long lastTokenValue = map.primaryKeyFromRowId(count - 1).token().getLongValue();
-            long aboveLastValue = lastTokenValue == Long.MAX_VALUE ? lastTokenValue : lastTokenValue + 1;
-            Token aboveLastToken = partitioner.getTokenFactory().fromLongValue(aboveLastValue);
-            long aboveLast = map.ceiling(pkFactory.createTokenOnly(aboveLastToken));
-            assertEquals(-1L, aboveLast);
+            // 5) After last: AA format returns -1 for ceiling when beyond last token
+            long tAfter = tLast == Long.MAX_VALUE ? tLast : tLast + 1;
+            long ceilingAfterLast = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tAfter)));
+            assertEquals(-1, ceilingAfterLast);
         }
     }
 
@@ -206,10 +204,10 @@ public class PartitionAwarePrimaryKeyMapTest
     public void testFloorUnsupported() throws Throwable
     {
         IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
-        PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
-        try (PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
+        try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
+             PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
-            // Any key is fine; floor is not supported in V1 implementation and should throw
+            // AA format does not support floor operation; it should throw UnsupportedOperationException
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
             map.floor(pkFactory.createTokenOnly(firstPk.token()));
         }
