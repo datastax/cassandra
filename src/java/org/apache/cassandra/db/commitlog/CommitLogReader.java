@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.commitlog;
 
+import java.io.IOError;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.io.*;
@@ -118,6 +119,19 @@ public class CommitLogReader
             {
                 // let recover deal with it
                 filtered.add(file);
+            }
+            catch (IOError e)
+            {
+                // Only handle file-not-found errors gracefully; let other IOErrors propagate
+                // as they may indicate corruption or serious I/O issues
+                if (e.getCause() instanceof java.nio.file.NoSuchFileException)
+                {
+                    filtered.add(file);
+                }
+                else
+                {
+                    throw e;
+                }
             }
         }
 
