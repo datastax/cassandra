@@ -29,7 +29,6 @@ import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
-import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
@@ -75,7 +74,7 @@ public interface OnDiskFormat
      *
      * @return the index feature set
      */
-    IndexFeatureSet indexFeatureSet();
+    public IndexFeatureSet indexFeatureSet();
 
     /**
      * Returns the {@link PrimaryKey.Factory} for the on-disk format
@@ -83,7 +82,7 @@ public interface OnDiskFormat
      * @param comparator
      * @return the primary key factory
      */
-    PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator);
+    public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator);
 
     /**
      * Returns a {@link PrimaryKeyMap.Factory} for the SSTable
@@ -94,10 +93,10 @@ public interface OnDiskFormat
      * @return a {@link PrimaryKeyMap.Factory} for the SSTable
      * @throws IOException
      */
-    PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException;
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException;
 
     /**
-     * Create a new {@link SearchableIndex} for an on-disk index. This is held by the {@link SSTableIndex}
+     * Create a new {@link SearchableIndex} for an on-disk index. This is held by the {@SSTableIndex}
      * and shared between queries.
      *
      * @param sstableContext The {@link SSTableContext} holding the per-SSTable information for the index
@@ -105,7 +104,7 @@ public interface OnDiskFormat
      *                           also link to the underlying {@link IndexContext} for the index).
      * @return the created {@link SearchableIndex}.
      */
-    SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents);
+    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents);
 
     IndexSearcher newIndexSearcher(SSTableContext sstableContext,
                                    IndexContext indexContext,
@@ -119,7 +118,7 @@ public interface OnDiskFormat
      * @return The {@link PerSSTableWriter} to write the per-SSTable on-disk components
      * @throws IOException
      */
-    PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException;
+    public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException;
 
     /**
      * Create a new writer for the per-index on-disk components of an index. The {@link LifecycleNewTracker}
@@ -134,10 +133,10 @@ public interface OnDiskFormat
      * @param keyCount
      * @return The {@link PerIndexWriter} that will write the per-index on-disk components
      */
-    PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
-                                     IndexDescriptor indexDescriptor,
-                                     LifecycleNewTracker tracker,
-                                     RowMapping rowMapping, long keyCount);
+    public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
+                                            IndexDescriptor indexDescriptor,
+                                            LifecycleNewTracker tracker,
+                                            RowMapping rowMapping, long keyCount);
 
     /**
      * Validate the provided on-disk components (that must be for this version).
@@ -156,7 +155,7 @@ public interface OnDiskFormat
      *
      * @return The set of {@link IndexComponentType} for the per-SSTable index
      */
-    Set<IndexComponentType> perSSTableComponentTypes();
+    public Set<IndexComponentType> perSSTableComponentTypes();
 
     /**
      * Returns the set of {@link IndexComponentType} for the per-index part of an index.
@@ -166,12 +165,12 @@ public interface OnDiskFormat
      * @param indexContext The {@link IndexContext} for the index
      * @return The set of {@link IndexComponentType} for the per-index index
      */
-    default Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
+    default public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
     {
         return perIndexComponentTypes(indexContext.getValidator());
     }
 
-    Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator);
+    public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator);
 
     /**
      * Return the number of open per-SSTable files that can be open during a query.
@@ -180,7 +179,7 @@ public interface OnDiskFormat
      *
      * @return The number of open per-SSTable files
      */
-    int openFilesPerSSTable();
+    public int openFilesPerSSTable();
 
     /**
      * Return the number of open per-index files that can be open during a query.
@@ -190,7 +189,7 @@ public interface OnDiskFormat
      * @param indexContext The {@link IndexContext} for the index
      * @return The number of open per-index files
      */
-    int openFilesPerIndex(IndexContext indexContext);
+    public int openFilesPerIndex(IndexContext indexContext);
 
     /**
      * Return the {@link ByteOrder} for the given {@link IndexComponentType} and {@link IndexContext}.
@@ -199,7 +198,7 @@ public interface OnDiskFormat
      * @param context   - The {@link IndexContext} for the index
      * @return The {@link ByteOrder} for the file associated with the {@link IndexComponentType}
      */
-    ByteOrder byteOrderFor(IndexComponentType component, IndexContext context);
+    public ByteOrder byteOrderFor(IndexComponentType component, IndexContext context);
 
     /**
      * Encode the given {@link ByteBuffer} into a {@link ByteComparable} object based on the provided {@link AbstractType}

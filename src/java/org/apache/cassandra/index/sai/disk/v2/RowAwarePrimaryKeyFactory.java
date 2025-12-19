@@ -75,7 +75,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 
     private class RowAwarePrimaryKey implements PrimaryKey
     {
-        private final Token token;
+        private Token token;
         private DecoratedKey partitionKey;
         private Clustering clustering;
         private Supplier<PrimaryKey> primaryKeySupplier;

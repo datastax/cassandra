@@ -109,8 +109,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
             IKeyFetcher keyFetcher = null;
             try
             {
-                rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
-                rowIdToOffset = new LongArray.DeferredLongArray(offsetReaderFactory::open);
+                rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
+                rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
                 keyFetcher = sstable.openKeyFetcher(false);
 
                 return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId);

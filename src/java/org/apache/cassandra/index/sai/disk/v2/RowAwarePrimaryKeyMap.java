@@ -117,10 +117,11 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         @Override
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
         {
-            final LongArray rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
+            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
             try
             {
                 return new RowAwarePrimaryKeyMap(rowIdToToken,
+                                                 sortedTermsReader,
                                                  sortedTermsReader.openCursor(),
                                                  partitioner,
                                                  primaryKeyFactory,
@@ -148,6 +149,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     private final LongArray rowIdToToken;
+    private final SortedTermsReader sortedTermsReader;
     private final SortedTermsReader.Cursor cursor;
     private final IPartitioner partitioner;
     private final RowAwarePrimaryKeyFactory primaryKeyFactory;
@@ -156,6 +158,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     private final boolean hasStaticColumns;
 
     private RowAwarePrimaryKeyMap(LongArray rowIdToToken,
+                                  SortedTermsReader sortedTermsReader,
                                   SortedTermsReader.Cursor cursor,
                                   IPartitioner partitioner,
                                   RowAwarePrimaryKeyFactory primaryKeyFactory,
@@ -164,6 +167,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                   boolean hasStaticColumns)
     {
         this.rowIdToToken = rowIdToToken;
+        this.sortedTermsReader = sortedTermsReader;
         this.cursor = cursor;
         this.partitioner = partitioner;
         this.primaryKeyFactory = primaryKeyFactory;
@@ -231,10 +235,10 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         if (clusteringComparator.size() == 0)
             return skinnyExactRowIdOrInvertedCeiling(key);
 
-        long pointId = cursor.getExactPointId(key::asComparableBytes);
+        long pointId = cursor.getExactPointId(v -> key.asComparableBytes(v));
         if (pointId >= 0)
             return pointId;
-        long ceiling = cursor.ceiling(key::asComparableBytesMinPrefix);
+        long ceiling = cursor.ceiling(v -> key.asComparableBytesMinPrefix(v));
         // Use min value since -(Long.MIN_VALUE) - 1 == Long.MAX_VALUE.
         return ceiling < 0 ? Long.MIN_VALUE : -ceiling - 1;
     }

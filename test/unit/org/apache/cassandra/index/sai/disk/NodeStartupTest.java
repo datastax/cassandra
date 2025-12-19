@@ -176,7 +176,7 @@ public class NodeStartupTest extends SAITester
         PER_SSTABLE_INCOMPLETE,
         PER_COLUMN_INCOMPLETE,
         PER_SSTABLE_CORRUPT,
-        PER_COLUMN_CORRUPT
+        PER_COLUMN_CORRUPT;
     }
 
     enum StartupTaskRunOrder
@@ -349,13 +349,13 @@ public class NodeStartupTest extends SAITester
         }
     }
 
-    private boolean isGroupIndexComplete()
+    private boolean isGroupIndexComplete() throws Exception
     {
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
         return cfs.getLiveSSTables().stream().allMatch(sstable -> loadDescriptor(sstable, cfs).perSSTableComponents().isComplete());
     }
 
-    private boolean isColumnIndexComplete()
+    private boolean isColumnIndexComplete() throws Exception
     {
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
         return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.isIndexBuildCompleteOnDisk(sstable, indexContext));

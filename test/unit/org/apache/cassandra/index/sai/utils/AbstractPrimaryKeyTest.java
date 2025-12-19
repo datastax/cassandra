@@ -116,8 +116,8 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
 
     void assertByteComparison(PrimaryKey a, PrimaryKey b, int expected)
     {
-        assertEquals(expected, ByteComparable.compare(a::asComparableBytes,
-                                                      b::asComparableBytes,
+        assertEquals(expected, ByteComparable.compare(v -> a.asComparableBytes(v),
+                                                      v -> b.asComparableBytes(v),
                                                       TypeUtil.BYTE_COMPARABLE_VERSION));
     }
 
@@ -135,7 +135,7 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
         }
         else
         {
-            assertEquals(0, a.compareTo(b));
+            assertTrue(a.compareTo(b) == 0);
             assertEquals(a, b);
         }
     }
