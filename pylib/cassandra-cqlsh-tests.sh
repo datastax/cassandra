@@ -59,6 +59,9 @@ fi
 set -e # enable immediate exit if venv setup fails
 virtualenv --python=python2 venv
 source venv/bin/activate
+# install pip for python2 like this, if it is not already installed
+# curl -sS https://bootstrap.pypa.io/pip/2.7/get-pip.py | python2
+pip install 'pip<21' 'setuptools<45' 'wheel<0.35' 'pbr<6'
 pip install -r ${CASSANDRA_DIR}/pylib/requirements.txt
 pip freeze
 
