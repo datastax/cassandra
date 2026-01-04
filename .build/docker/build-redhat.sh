@@ -36,5 +36,5 @@ echo
 #
 # Creates the redhat package
 
-$(dirname "$0")/_docker_run.sh almalinux-build.docker docker/_build-redhat.sh "${java_version}" ${rpm_dist}
+$(dirname -- "$0")/_docker_run.sh almalinux-build.docker docker/_build-redhat.sh "${java_version}" ${rpm_dist}
 exit $?
