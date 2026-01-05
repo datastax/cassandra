@@ -306,7 +306,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             // Rerankless search, so we go straight to the NodeQueueRowIdIterator.
             var iter = segmentOrdinalPairs.mapToSegmentRowIdScoreIterator(scoreFunction);
             approximateScores.pushMany(iter, segmentOrdinalPairs.size());
-            return new NodeQueueRowIdIterator(approximateScores, graph.usesNVQ());
+            return new NodeQueueRowIdIterator(approximateScores, true);
         }
 
         // Store the index of the (rowId, ordinal) pair from the segmentOrdinalPairs in the NodeQueue so that we can

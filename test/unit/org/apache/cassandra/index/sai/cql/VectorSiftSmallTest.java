@@ -129,6 +129,52 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
                   recallWithoutPruning >= recallWithPruning);
     }
 
+    // Note: test only fails when scores are sent from replica to coordinator.
+    @Test
+    public void testRerankKZeroOrderMatchesFullPrecisionSimilarity() throws Throwable
+    {
+        var baseVectors = readFvecs(String.format("test/data/%s/%s_base.fvecs", DATASET, DATASET));
+        var queryVectors = readFvecs(String.format("test/data/%s/%s_query.fvecs", DATASET, DATASET));
+
+        // Create table and index
+        createTable();
+        createIndex();
+
+        // Flush because in memory index uses FP vectors, therefore ignoring rerank_k = 0
+        insertVectors(baseVectors, 0);
+        flush();
+
+        // Test with a subset of query vectors to keep test runtime reasonable, but query with a high limit to
+        // increase probability for incorrect ordering
+        int numQueriesToTest = 10;
+        int limit = 100;
+
+        for (int queryIdx = 0; queryIdx < numQueriesToTest; queryIdx++)
+        {
+            float[] queryVector = queryVectors.get(queryIdx);
+            String queryVectorAsString = Arrays.toString(queryVector);
+
+            // Execute query with rerank_k = 0 and get the similarity scores computed by the coordinator
+            String query = String.format("SELECT pk, similarity_euclidean(val, %s) as similarity FROM %%s ORDER BY val ANN OF %s LIMIT %d WITH ann_options = {'rerank_k': 0}",
+                                        queryVectorAsString, queryVectorAsString, limit);
+            UntypedResultSet result = execute(query);
+
+            // Verify that results are in descending order of similarity score
+            // (Euclidean similarity is 1.0 / (1.0 + distance²), so higher score = more similar)
+            float lastSimilarity = Float.MAX_VALUE;
+            assertEquals(limit, result.size());
+            for (UntypedResultSet.Row row : result)
+            {
+                float similarity = row.getFloat("similarity");
+                assertTrue(String.format("Query %d: Similarity scores should be in descending order (higher score = more similar). " +
+                                       "Previous: %.10f, Current: %.10f",
+                                       queryIdx, lastSimilarity, similarity),
+                          similarity <= lastSimilarity);
+                lastSimilarity = similarity;
+            }
+        }
+    }
+
     @Test
     public void testCompaction() throws Throwable
     {
