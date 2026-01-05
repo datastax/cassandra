@@ -26,7 +26,6 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
@@ -190,8 +189,8 @@ public class CompactionGraph implements Closeable, Accountable
         this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings(context.version()) || !allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
-        Component tmpComponent = new Component(Component.Type.CUSTOM, "chronicle" + UUID.randomUUID() + Descriptor.TMP_EXT);
-        postingsFile = dd.tmpFileFor(tmpComponent);
+        Component tmpComponent = new Component(Component.Type.CUSTOM, "chronicle" + Descriptor.TMP_EXT);
+        postingsFile = dd.fileFor(tmpComponent);
         postingsMap = ChronicleMapBuilder.of((Class<VectorFloat<?>>) (Class) VectorFloat.class, (Class<CompactionVectorPostings>) (Class) CompactionVectorPostings.class)
                                          .averageKeySize(dimension * Float.BYTES)
                                          .averageValueSize(VectorPostings.emptyBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF + 2 * Integer.BYTES)
@@ -201,7 +200,7 @@ public class CompactionGraph implements Closeable, Accountable
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         // Formatted so that the full resolution vector is written at the ordinal * vector dimension offset
-        Component vectorsByOrdinalComponent = new Component(Component.Type.CUSTOM, "vectors_by_ordinal" + UUID.randomUUID() + Descriptor.TMP_EXT);
+        Component vectorsByOrdinalComponent = new Component(Component.Type.CUSTOM, "vectors_by_ordinal");
         vectorsByOrdinalTmpFile = dd.tmpFileFor(vectorsByOrdinalComponent);
         vectorsByOrdinalBufferedWriter = new BufferedRandomAccessWriter(vectorsByOrdinalTmpFile.toPath());
 
