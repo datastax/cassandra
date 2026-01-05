@@ -391,7 +391,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             return DoubleType.instance.compose(data.get(column));
         }
 
-        public double getFloat(String column)
+        public float getFloat(String column)
         {
             return FloatType.instance.compose(data.get(column));
         }
