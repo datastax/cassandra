@@ -392,6 +392,12 @@ public enum CassandraRelevantProperties
      */
     SLOW_QUERY_LOG_MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
 
+    /**
+     * Whether to log detailed execution info when logging slow non-SAI queries.
+     * For SAI queries, see {@link #SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED}.
+     */
+    SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.monitoring_execution_info_enabled", "true"),
+
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
 
@@ -419,6 +425,7 @@ public enum CassandraRelevantProperties
     /**
      * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
      * This execution info includes the query metrics and the query plan of the slow queries.
+     * For non-SAI queries, see {@link #SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED}.
      */
     SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
 
@@ -514,10 +521,6 @@ public enum CassandraRelevantProperties
     // that the version configured here, then immutable components will _not_ be used even if the previous flag is set
     // to `true`. You can set this to `aa` to enable immutable components on every version.
     IMMUTABLE_SAI_COMPONENTS_MIN_VERSION("cassandra.sai.immutable_components.min_version", "ca"),
-
-    // Enables parallel index read.
-    USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
-    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
 
     // The quantile used by the dynamic endpoint snitch to compute the score for a replica.
     DYNAMIC_ENDPOINT_SNITCH_QUANTILE("cassandra.dynamic_endpoint_snitch_quantile", "0.5"),

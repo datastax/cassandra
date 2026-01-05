@@ -270,18 +270,19 @@ public class CassandraDiskAnn
                           limit, rerankK, isRerankless, usePruning, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
             columnQueryMetrics.onSearchResult(result, elapsed, false);
             context.addAnnGraphSearchLatency(elapsed);
+            boolean isScoreApproximate = usesNVQ || isRerankless;
             if (threshold > 0)
             {
                 // Threshold based searches are comprehensive and do not need to resume the search.
                 graphAccessManager.release();
                 nodesVisitedConsumer.accept(result.getVisitedCount());
                 var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
-                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView(), usesNVQ);
+                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView(), isScoreApproximate);
             }
             else
             {
                 var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context, columnQueryMetrics, nodesVisitedConsumer, limit, rerankK, false, source.toString());
-                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView(), usesNVQ);
+                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView(), isScoreApproximate);
             }
         }
         catch (Throwable t)

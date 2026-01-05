@@ -335,7 +335,7 @@ abstract public class VectorCompactionTest extends VectorTester
             assertEquals(10, r.size());
             for (var row : r)
             {
-                float similarity = (float) row.getFloat("similarity");
+                float similarity = row.getFloat("similarity");
                 assertTrue(similarity <= lastSimilarity);
                 lastSimilarity = similarity;
             }
