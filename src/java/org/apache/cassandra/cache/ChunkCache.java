@@ -297,12 +297,12 @@ public class ChunkCache
         synchronousCache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> (x.readerId & mask) == fileId));
     }
 
-    static class Key
+    static class Key implements Comparable<Key>
     {
         final long readerId;
         final long position;
 
-        private Key(long readerId, long position)
+        Key(long readerId, long position)
         {
             super();
             this.position = position;
@@ -312,11 +312,15 @@ public class ChunkCache
         @Override
         public int hashCode()
         {
-            final int prime = 31;
-            int result = 1;
-            result = prime * result + Long.hashCode(readerId);
-            result = prime * result + Long.hashCode(position);
-            return result;
+            // Mix readerId and position into a single long using a large prime multiplier
+            // This constant is a mixing constant derived from the Golden Ratio
+            long mixed = (Long.rotateLeft(readerId, 16) + Long.rotateLeft(position, 16)) * 0x9E3779B97F4A7C15L;
+
+            // Spread the bits (XOR-shift) to ensure high bits affect low bits
+            mixed ^= (mixed >>> 32);
+            mixed ^= (mixed >>> 16);
+
+            return (int) mixed;
         }
 
         @Override
@@ -324,12 +328,23 @@ public class ChunkCache
         {
             if (this == obj)
                 return true;
-            if (obj == null)
+            if (obj == null || getClass() != obj.getClass())
                 return false;
 
             Key other = (Key) obj;
             return (position == other.position)
                    && readerId == other.readerId;
+        }
+
+        @Override
+        public int compareTo(Key other) {
+            // Compare readerId first
+            int cmp = Long.compare(this.readerId, other.readerId);
+            if (cmp != 0) {
+                return cmp;
+            }
+            // Then compare position
+            return Long.compare(this.position, other.position);
         }
     }
 
