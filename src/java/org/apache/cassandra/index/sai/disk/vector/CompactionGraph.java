@@ -24,7 +24,6 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -304,93 +303,106 @@ public class CompactionGraph implements Closeable, Accountable
         rowsAdded++;
 
         var bytesUsed = 0L;
-        var postings = postingsMap.get(vector);
-        if (postings == null)
+        // QueryContext allows us to avoid re-serializing the vector. Closing the queryContext releases the lock.
+        // Note that a normal put operation follows this flow, so the overhead of acquiring the lock is required.
+        try (var postingsQueryContext = postingsMap.queryContext(vector))
         {
-            // add a new entry
-            // this all runs on the same compaction thread, so we don't need to worry about concurrency
-            int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
-            maxOrdinal = ordinal; // always increasing
-            postings = new CompactionVectorPostings(ordinal, segmentRowId);
-            postingsMap.put(vector, postings);
-
-            // fine-tune the PQ if we've collected enough vectors
-            if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
+            //noinspection LockAcquiredButNotSafelyReleased
+            postingsQueryContext.writeLock().lock();
+            var absentEntry = postingsQueryContext.absentEntry();
+            if (absentEntry != null)
             {
-                // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
-                // and (2) a map of vectors keyed by ordinal
-                var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
-                var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
-                postingsMap.forEach((v, p) -> {
-                    var vectorClone = v.copy();
-                    trainingVectors.add(vectorClone);
-                    vectorsByOrdinal.put(p.getOrdinal(), vectorClone);
-                });
+                // add a new entry
+                // this all runs on the same compaction thread, so we don't need to worry about concurrency
+                int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
+                maxOrdinal = ordinal; // always increasing
+                var postings = new CompactionVectorPostings(ordinal, segmentRowId);
+                var data = postingsQueryContext.wrapValueAsData(postings);
+                absentEntry.doInsert(data);
 
-                // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
-                trainingLock.writeLock().lock();
-                try
+                // fine-tune the PQ if we've collected enough vectors
+                if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
                 {
-                    // Fine tune the pq codebook
-                    compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
-                    trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
+                    // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
+                    // and (2) a map of vectors keyed by ordinal
+                    var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
+                    var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
+                    postingsMap.forEach((v, p) -> {
+                        var vectorClone = v.copy();
+                        trainingVectors.add(vectorClone);
+                        vectorsByOrdinal.put(p.getOrdinal(), vectorClone);
+                    });
 
-                    // re-encode the vectors added so far
-                    int encodedVectorCount = compressedVectors.count();
-                    compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
-                    compactionFjp.submit(() -> {
-                        IntStream.range(0, encodedVectorCount)
-                                 .parallel()
-                                 .forEach(i -> {
-                                     var v = vectorsByOrdinal.get(i);
-                                     if (v == null)
-                                         compressedVectors.setZero(i);
-                                     else
-                                         compressedVectors.encodeAndSet(i, v);
-                                 });
-                    }).join();
+                    // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
+                    trainingLock.writeLock().lock();
+                    try
+                    {
+                        // Fine tune the pq codebook
+                        compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
+                        trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
 
-                    // Keep the existing edges but recompute their scores
-                    builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
+                        // re-encode the vectors added so far
+                        int encodedVectorCount = compressedVectors.count();
+                        compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
+                        compactionFjp.submit(() -> {
+                            IntStream.range(0, encodedVectorCount)
+                                     .parallel()
+                                     .forEach(i -> {
+                                         var v = vectorsByOrdinal.get(i);
+                                         if (v == null)
+                                             compressedVectors.setZero(i);
+                                         else
+                                             compressedVectors.encodeAndSet(i, v);
+                                     });
+                        }).join();
+
+                        // Keep the existing edges but recompute their scores
+                        builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
+                    }
+                    finally
+                    {
+                        trainingLock.writeLock().unlock();
+                    }
+                    pqFinetuned = true;
                 }
-                finally
-                {
-                    trainingLock.writeLock().unlock();
-                }
-                pqFinetuned = true;
+
+                // Update the global mean, if we're tracking it (which is currently only done when we will write using NVQ)
+                if (globalMean != null)
+                    VectorUtil.addInPlace(globalMean, vector);
+
+                // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
+                // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
+                // with the posting list logic.
+                long targetPosition = ordinal * Float.BYTES * (long) dimension;
+                assert vectorsByOrdinalBufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + vectorsByOrdinalBufferedWriter.position() + " > targetPosition=" + targetPosition;
+                vectorsByOrdinalBufferedWriter.seek(targetPosition);
+                for (int i = 0; i < dimension; i++)
+                    vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
+
+                // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
+                while (compressedVectors.count() < ordinal)
+                    compressedVectors.setZero(compressedVectors.count());
+                compressedVectors.encodeAndSet(ordinal, vector);
+
+                bytesUsed += postings.ramBytesUsed();
+                return new InsertionResult(bytesUsed, ordinal, vector);
             }
 
-            // Update the global mean, if we're tracking it (which is currently only done when we will write using NVQ)
-            if (globalMean != null)
-                VectorUtil.addInPlace(globalMean, vector);
+            // postings list already exists, just add the new key
+            if (postingsStructure == Structure.ONE_TO_ONE)
+                postingsStructure = Structure.ONE_TO_MANY;
 
-            // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
-            // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
-            // with the posting list logic.
-            long targetPosition = ordinal * Float.BYTES * (long) dimension;
-            assert vectorsByOrdinalBufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + vectorsByOrdinalBufferedWriter.position() + " > targetPosition=" + targetPosition;
-            vectorsByOrdinalBufferedWriter.seek(targetPosition);
-            for (int i = 0; i < dimension; i++)
-                vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
+            var postingsEntry = postingsQueryContext.entry();
+            assert postingsEntry != null;
+            var postings = postingsEntry.value().get();
+            var newPosting = postings.add(segmentRowId);
+            assert newPosting;
+            bytesUsed += postings.bytesPerPosting();
+            var updatedPostings = postingsQueryContext.wrapValueAsData(postings);
+            postingsEntry.doReplaceValue(updatedPostings); // re-serialize value to disk
 
-            // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
-            while (compressedVectors.count() < ordinal)
-                compressedVectors.setZero(compressedVectors.count());
-            compressedVectors.encodeAndSet(ordinal, vector);
-
-            bytesUsed += postings.ramBytesUsed();
-            return new InsertionResult(bytesUsed, ordinal, vector);
+            return new InsertionResult(bytesUsed);
         }
-
-        // postings list already exists, just add the new key
-        if (postingsStructure == Structure.ONE_TO_ONE)
-            postingsStructure = Structure.ONE_TO_MANY;
-        var newPosting = postings.add(segmentRowId);
-        assert newPosting;
-        bytesUsed += postings.bytesPerPosting();
-        postingsMap.put(vector, postings); // re-serialize to disk
-
-        return new InsertionResult(bytesUsed);
     }
 
     public long addGraphNode(InsertionResult result)
