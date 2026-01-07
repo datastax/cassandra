@@ -17,19 +17,20 @@
  */
 package org.apache.cassandra.db.tries;
 
-import java.util.function.Function;
-
 import org.agrona.DirectBuffer;
 
 /// Simple utility class for dumping the structure of a trie to string.
-abstract class TrieDumper<T> implements Cursor.Walker<T, String>
+///
+/// This version is in the form of abstract classes so that the implementation of the conversion to string can access
+/// the key bytes and store additional information.
+public abstract class TrieDumperWithPath<T> extends TriePathReconstructor implements Cursor.Walker<T, String>
 {
     protected final StringBuilder b;
     int needsIndent = -1;
     int currentLength = 0;
     int depthAdjustment = 0;
 
-    TrieDumper()
+    TrieDumperWithPath()
     {
         this.b = new StringBuilder();
     }
@@ -43,6 +44,7 @@ abstract class TrieDumper<T> implements Cursor.Walker<T, String>
     public void resetPathLength(int newLength)
     {
         currentLength = newLength + depthAdjustment;
+        super.resetPathLength(currentLength);
         endLineAndSetIndent(currentLength);
     }
 
@@ -60,6 +62,7 @@ abstract class TrieDumper<T> implements Cursor.Walker<T, String>
     @Override
     public void addPathByte(int nextByte)
     {
+        super.addPathByte(nextByte);
         maybeIndent();
         ++currentLength;
         b.append(String.format("%02x", nextByte));
@@ -68,6 +71,7 @@ abstract class TrieDumper<T> implements Cursor.Walker<T, String>
     @Override
     public void addPathBytes(DirectBuffer buffer, int pos, int count)
     {
+        super.addPathBytes(buffer, pos, count);
         maybeIndent();
         for (int i = 0; i < count; ++i)
             b.append(String.format("%02x", buffer.getByte(pos + i) & 0xFF));
@@ -77,6 +81,7 @@ abstract class TrieDumper<T> implements Cursor.Walker<T, String>
     @Override
     public void onReturnPath()
     {
+        super.onReturnPath();
         maybeIndent();
         b.append('↑');
     }
@@ -87,42 +92,31 @@ abstract class TrieDumper<T> implements Cursor.Walker<T, String>
         return b.toString();
     }
 
-    static class Plain<T> extends TrieDumper<T>
+    public static abstract class Plain<T> extends TrieDumperWithPath<T>
     {
-        protected final Function<T, String> contentToString;
-
-        public Plain(Function<T, String> contentToString)
-        {
-            super();
-            this.contentToString = contentToString;
-        }
+        /// Convert the given content to string. This method can make use of [#keyBytes] and [#keyPos].
+        public abstract String contentToString(T content);
 
         @Override
         public void content(T content)
         {
             b.append(" -> ");
-            b.append(contentToString.apply(content));
+            b.append(contentToString(content));
             endLineAndSetIndent(currentLength);
         }
     }
 
-    static class DeletionAware<T, D extends RangeState<D>> extends Plain<T>
+    public static abstract class DeletionAware<T, D extends RangeState<D>> extends Plain<T>
     implements DeletionAwareCursor.DeletionAwareWalker<T, D, String>
     {
-        final Function<D, String> rangeToString;
-
-        public DeletionAware(Function<T, String> contentToString,
-                             Function<D, String> rangeToString)
-        {
-            super(contentToString);
-            this.rangeToString = rangeToString;
-        }
+        /// Convert the given deletion marker to string. This method can make use of [#keyBytes] and [#keyPos].
+        public abstract String deletionToString(D deletionMarker);
 
         @Override
         public void deletionMarker(D content)
         {
             b.append(" -> ");
-            b.append(rangeToString.apply(content));
+            b.append(deletionToString(content));
             endLineAndSetIndent(currentLength);
         }
 

@@ -107,7 +107,7 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
 
     void skipPreparedNextIf(Predicate<V> shouldSkipPreparedNext)
     {
-        if (gotNext && shouldSkipPreparedNext.test(next))
+        if (gotNext && next != null && shouldSkipPreparedNext.test(next))
         {
             gotNext = false;
             next = null;
