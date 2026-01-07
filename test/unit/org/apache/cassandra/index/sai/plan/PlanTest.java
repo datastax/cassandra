@@ -36,6 +36,7 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.LongIterator;
@@ -67,6 +68,7 @@ public class PlanTest
     {
         Orderer orderer = Mockito.mock(Orderer.class);
         Mockito.when(orderer.isANN()).thenReturn(true);
+        Mockito.when(orderer.toString()).thenReturn("ORDER BY v ANN OF [...]");
         return orderer;
     }
 
@@ -567,6 +569,7 @@ public class PlanTest
                               " └─ Filter pred1 < %s AND pred2 < %<s AND pred4 < %<s (sel: 1.000000000) (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
                               "     └─ Fetch (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
                               "         └─ KeysSort (keys: 3.0, cost/key: 3792.4, cost: 44171.3..55548.4)\n" +
+                              "            ORDER BY v ANN OF [...]\n" +
                               "             └─ Union (keys: 1999.0, cost/key: 14.8, cost: 13500.0..43001.3)\n" +
                               "                 ├─ Intersection (keys: 1000.0, cost/key: 29.4, cost: 9000.0..38401.3)\n" +
                               "                 │   ├─ NumericIndexScan of pred2_idx (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 0.1, cost: 4500.0..4700.0)\n" +
