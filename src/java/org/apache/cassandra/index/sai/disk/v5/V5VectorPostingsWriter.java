@@ -132,17 +132,7 @@ public class V5VectorPostingsWriter<T>
             // compute extraOrdinals from the postingsMap
             var extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
             postingsMap.forEachEntry(entry -> {
-                long offset = entry.value().offset();
-                var postings = entry.value().bytes();
-                int ordinal = postings.readInt(offset);
-                int size = postings.readInt(offset + 4);
-                int firstRowId = postings.readInt(offset + 8);
-
-                assert ordinal == firstRowId : ordinal + " != " + firstRowId; // synthetic ordinals not allowed in ONE_TO_MANY
-                for (int i = 1; i < size; i++)
-                {
-                    extraOrdinals.put(postings.readInt(offset + 8 + (4L * i)), ordinal);
-                }
+                VectorPostings.CompactionVectorPostings.Marshaller.recordExtraOrdinals(entry, extraOrdinals);
             });
 
             var skippedOrdinals = extraOrdinals.keySet();
@@ -485,14 +475,13 @@ public class V5VectorPostingsWriter<T>
     /**
      * return an exhaustive zero-to-many mapping with no renumbering
      */
-    public static <T> RemappedPostings createGenericIdentityMapping(ChronicleMap<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap, int maxRowId, int maxOldOrdinal)
+    public static <T> RemappedPostings createGenericIdentityMapping(ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, int maxRowId, int maxOldOrdinal)
     {
         var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
 
         // Iterate the whole map using the low level API that avoids deserialization penalties.
         postingsMap.forEachEntry(entry -> {
-            long offset = entry.value().offset();
-            presentOrdinals.set(entry.value().bytes().readInt(offset));
+            presentOrdinals.set(VectorPostings.CompactionVectorPostings.Marshaller.extractOrdinal(entry));
         });
 
         return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,

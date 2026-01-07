@@ -327,10 +327,11 @@ public class CompactionGraph implements Closeable, Accountable
                     // and (2) a map of vectors keyed by ordinal
                     var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
                     var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
-                    postingsMap.forEach((v, p) -> {
-                        var vectorClone = v.copy();
+                    postingsMap.forEachEntry(entry -> {
+                        // TODO can we skip this copy?
+                        var vectorClone = entry.key().get().copy();
                         trainingVectors.add(vectorClone);
-                        vectorsByOrdinal.put(p.getOrdinal(), vectorClone);
+                        vectorsByOrdinal.put(VectorPostings.Marshaller.extractOrdinal(entry), vectorClone);
                     });
 
                     // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook

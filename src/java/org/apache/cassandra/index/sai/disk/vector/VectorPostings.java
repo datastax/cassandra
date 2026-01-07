@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
 import com.google.common.base.Preconditions;
@@ -29,6 +28,8 @@ import io.github.jbellis.jvector.util.RamUsageEstimator;
 import net.openhft.chronicle.bytes.Bytes;
 import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
+import net.openhft.chronicle.map.MapEntry;
+import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.IntArrayList;
 
 public class VectorPostings<T>
@@ -227,6 +228,38 @@ public class VectorPostings<T>
                 cvp = new CompactionVectorPostings(ordinal, postingsList);
             }
             return cvp;
+        }
+
+        /**
+         * Optimized method to extract the ordinal from the provided entry. Avoids unnecessary deserialization of
+         * the value.
+         * @param entry map entry to use when extracting the value's ordinal
+         * @return an ordinal
+         */
+        public static int extractOrdinal(MapEntry<?, CompactionVectorPostings> entry) {
+            long offset = entry.value().offset();
+            return entry.value().bytes().readInt(offset);
+        }
+
+        /**
+         * Optimized method to extract the ordinal and row ids from the posting list, then insert the extras into
+         * the provided extraOrdinals map. The first row id must be the same as the ordinal. Avoids unnecessary
+         * allocations by iteratively reading integers from the entry's bytes.
+         * @param entry the entry from which to extract the ordinal and row ids
+         * @param extraOrdinals the map to add the row id to ordinal mapping
+         */
+        public static void recordExtraOrdinals(MapEntry<?, CompactionVectorPostings> entry, Int2IntHashMap extraOrdinals) {
+            long offset = entry.value().offset();
+            var postings = entry.value().bytes();
+            int ordinal = postings.readInt(offset);
+            int size = postings.readInt(offset + 4);
+            int firstRowId = postings.readInt(offset + 8);
+
+            assert ordinal == firstRowId : ordinal + " != " + firstRowId; // synthetic ordinals not allowed in ONE_TO_MANY
+            for (int i = 1; i < size; i++)
+            {
+                extraOrdinals.put(postings.readInt(offset + 8 + (4L * i)), ordinal);
+            }
         }
     }
 }
