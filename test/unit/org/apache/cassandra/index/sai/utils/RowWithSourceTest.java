@@ -30,6 +30,7 @@ import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.rows.ArrayCell;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
@@ -308,8 +309,18 @@ public class RowWithSourceTest {
     @Test
     public void testTransformAndFilter()
     {
-        assertNull(rowWithSource.transformAndFilter(li -> li, c -> null));
-        assertSame(rowWithSource, rowWithSource.transformAndFilter(li -> li, c -> c));
+        assertNull(rowWithSource.transformAndFilter(li -> li, RowWithSourceTest::toNull));
+        assertSame(rowWithSource, rowWithSource.transformAndFilter(li -> li, RowWithSourceTest::unchanged));
+    }
+
+    private static <C extends CellData<?, C>> C toNull(C c)
+    {
+        return null;
+    }
+
+    private static <C extends CellData<?, C>> C unchanged(C c)
+    {
+        return c;
     }
 
     @Test

@@ -43,17 +43,19 @@ import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.Cells;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
-import org.apache.cassandra.db.rows.NativeCell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.TrieBackedComplexColumn;
 import org.apache.cassandra.db.rows.TrieBackedRow;
+import org.apache.cassandra.db.memtable.TrieCellData;
 import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.tries.CellReuseTest;
 import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
@@ -67,8 +69,10 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
+import org.apache.cassandra.utils.memory.MemtableBufferAllocator;
 import org.apache.cassandra.utils.memory.MemtableCleaner;
 import org.apache.cassandra.utils.memory.MemtablePool;
+import org.apache.cassandra.utils.memory.NativeAllocator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -324,8 +328,16 @@ public class TrieBackedPartitionMemtableAccountingTest
         try
         {
             // Prepare a partition to receive updates
+            TrieMemtable.CellDataBufferManager cellDataBufferManager;
+            if (allocator instanceof NativeAllocator)
+                cellDataBufferManager = new TrieMemtable.NativeBufferManager((NativeAllocator) allocator);
+            else
+                cellDataBufferManager = new TrieMemtable.SlabBufferManager((MemtableBufferAllocator) allocator,
+                                                                           opOrder,
+                                                                           bufferTypeFor(allocationType).onHeapSizeWithoutData());
             InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie =
-               InMemoryDeletionAwareTrie.longLived(TrieBackedPartition.BYTE_COMPARABLE_VERSION, bufferTypeFor(allocationType), opOrder);
+               InMemoryDeletionAwareTrie.longLived(TrieBackedPartition.BYTE_COMPARABLE_VERSION, bufferTypeFor(allocationType), opOrder,
+                                                   new TrieMemtable.TrieSerializer(cellDataBufferManager, null));
             TriePartitionUpdater updater = new TriePartitionUpdater(null, trie);
             trie.putRecursive(ByteComparable.EMPTY, new TrieMemtable.PartitionData(null), (x, y) -> y);
             TrieBackedPartition partition = new TrieBackedPartition(partitionKey,
@@ -360,11 +372,19 @@ public class TrieBackedPartitionMemtableAccountingTest
                 assertThat(allocator.offHeap().owns()).isGreaterThanOrEqualTo(0L);
                 return updateUnreleasable;
             }).sum();
+            CellReuseTest.verifyFreeCellsMatchUnreachable(trie);
 
             // Now recreate the partition to see if there's a leak in the accounting
 
+            if (recreatedAllocator instanceof NativeAllocator)
+                cellDataBufferManager = new TrieMemtable.NativeBufferManager((NativeAllocator) recreatedAllocator);
+            else
+                cellDataBufferManager = new TrieMemtable.SlabBufferManager((MemtableBufferAllocator) recreatedAllocator,
+                                                                           opOrder,
+                                                                           bufferTypeFor(allocationType).onHeapSizeWithoutData());
             InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> recreatedTrie =
-                InMemoryDeletionAwareTrie.longLived(TrieBackedPartition.BYTE_COMPARABLE_VERSION, bufferTypeFor(allocationType), opOrder);
+            InMemoryDeletionAwareTrie.longLived(TrieBackedPartition.BYTE_COMPARABLE_VERSION, bufferTypeFor(allocationType), opOrder,
+                                                new TrieMemtable.TrieSerializer(cellDataBufferManager, null));
             TriePartitionUpdater recreatedUpdater = new TriePartitionUpdater(null, recreatedTrie);
             recreatedTrie.putRecursive(ByteComparable.EMPTY, new TrieMemtable.PartitionData(null), (x, y) -> y);
             try (UnfilteredRowIterator iter = partition.unfilteredIterator())
@@ -374,6 +394,7 @@ public class TrieBackedPartitionMemtableAccountingTest
                 OpOrder.Group writeOp = opOrder.getCurrent();
                 TrieMemtable.mergeUpdate(recreatedTrie, recreatedAllocator, TriePartitionUpdate.asTrieUpdate(update).trie, indexer, writeOp, recreatedUpdater);
             }
+            CellReuseTest.verifyFreeCellsMatchUnreachable(recreatedTrie);
 
             // It is possible that the two tries have different structure (e.g. non-embedded prefixes, split nodes
             // instead of sparse etc.). Allow this, but make sure the difference is small.
@@ -459,10 +480,8 @@ public class TrieBackedPartitionMemtableAccountingTest
         return size;
     }
 
-    private static long sizeOf(Cell cell)
+    private static long sizeOf(CellData<?, ?> cell)
     {
-        if (cell instanceof NativeCell)
-            return ((NativeCell) cell).offHeapSize();
-        return cell.valueSize(); // path is in trie
+        return TrieCellData.offTrieSize(cell);
     }
 }

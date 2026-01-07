@@ -214,6 +214,18 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
      */
     public Row filter(ColumnFilter filter, DeletionTime activeDeletion, boolean setActiveDeletionToRow, TableMetadata metadata);
 
+
+    /// Interface used for cell transformations. Because we don't know the type of cell data that the row uses (it can
+    /// be a full [Cell] including path and column, or just [CellData]), the given function must convert the type the
+    /// row uses to the same type.
+    ///
+    /// This interface unfortunately cannot be given as a lambda, but we can use method references e.g.
+    /// `CellData::markCounterLocalToBeCleared`.
+    public interface CellTransformer
+    {
+        <C extends CellData<?, C>> C apply(C cellOrCellData);
+    }
+
     /**
      * Requires that {@code function} returns either {@code null} or {@code Cell} for the same cell.
      *
@@ -222,7 +234,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
      *   2) doesn't include any {@code null} results of {@code cellFunction}
      *   3) has its {@code LivenessInfo} mapped through the given {@code infoFunction}
      */
-    public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> infoFunction, Function<Cell<?>, Cell<?>> cellFunction);
+    public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> infoFunction, CellTransformer cellFunction);
 
     public Row clone(Cloner cloner);
 
@@ -328,7 +340,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
      * @param onReconcile Function to apply on the result of individual cell merges.
      * @return The merged row.
      */
-    public Row mergeWith(Row update, ColumnData.PostReconciliationFunction onReconcile);
+    public Row mergeWith(Row update);
 
     /**
      * A row deletion/tombstone.

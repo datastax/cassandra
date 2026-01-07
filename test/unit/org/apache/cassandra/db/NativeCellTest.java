@@ -128,7 +128,7 @@ public class NativeCellTest extends CQLTester
     {
         long timestamp = rand.nextLong();
         int ttl = rand.nextInt();
-        long localDeletionTime = ThreadLocalRandom.current().nextLong(Cell.getVersionedMaxDeletiontionTime() + 1);
+        long localDeletionTime = ThreadLocalRandom.current().nextLong(CellData.getVersionedMaxDeletiontionTime() + 1);
         byte[] value = new byte[rand.nextInt(sanesize(expdecay()))];
         rand.nextBytes(value);
         CellPath path = null;

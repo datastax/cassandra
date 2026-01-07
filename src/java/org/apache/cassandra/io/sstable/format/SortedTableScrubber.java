@@ -51,6 +51,7 @@ import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.AbstractCell;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
@@ -554,13 +555,23 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
              if (sstableVersion.hasUIntDeletionTime())
                  return row;
 
-             return row.transformAndFilter(livenessInfo -> (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() >= 0)
-                                                           ? livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp(), livenessInfo.localExpirationTime(), false)
-                                                           : livenessInfo,
-                                           cell -> cell.isExpiring() && cell.localDeletionTime() >= 0
-                                                   ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp(), cell.localDeletionTime())
-                                                   : cell)
+             return row.transformAndFilter(RowMergingSSTableIterator::rebuildTimestampsForOverflowedLivenessInfo,
+                                           RowMergingSSTableIterator::rebuildTimestampsForOverflowedCells)
                        .clone(HeapCloner.instance);
+         }
+
+        private static LivenessInfo rebuildTimestampsForOverflowedLivenessInfo(LivenessInfo livenessInfo)
+        {
+            return (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() >= 0)
+                   ? livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp(), livenessInfo.localExpirationTime(), false)
+                   : livenessInfo;
+        }
+
+        private static <C extends CellData<?, C>> C rebuildTimestampsForOverflowedCells(C cell)
+         {
+             return cell.isExpiring() && cell.localDeletionTime() >= 0
+                    ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp(), cell.localDeletionTime())
+                    : cell;
          }
 
 
@@ -618,6 +629,20 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             this.iterator = iterator;
             this.outputHandler = outputHandler;
             this.negativeLocalExpirationTimeMetrics = negativeLocalDeletionInfoMetrics;
+        }
+
+        private static <C extends CellData<?, C>> C fixCellExpirationTime(C cell)
+        {
+            return cell.isExpiring() && cell.localDeletionTime() < 0
+                   ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp() + 1, AbstractCell.MAX_DELETION_TIME)
+                   : cell;
+        }
+
+        private static LivenessInfo fixLivenessInfoExpirationTime(LivenessInfo livenessInfo)
+        {
+            return (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() < 0)
+                   ? livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp() + 1, AbstractCell.MAX_DELETION_TIME)
+                   : livenessInfo;
         }
 
         @Override
@@ -678,12 +703,8 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
         private Unfiltered fixNegativeLocalExpirationTime(Row row)
         {
-            return row.transformAndFilter(livenessInfo -> (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() < 0)
-                                                          ? livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp() + 1, AbstractCell.MAX_DELETION_TIME)
-                                                          : livenessInfo,
-                                          cell -> cell.isExpiring() && cell.localDeletionTime() < 0
-                                                  ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp() + 1, AbstractCell.MAX_DELETION_TIME)
-                                                  : cell)
+            return row.transformAndFilter(FixNegativeLocalDeletionTimeIterator::fixLivenessInfoExpirationTime,
+                                          FixNegativeLocalDeletionTimeIterator::fixCellExpirationTime)
                       .clone(HeapCloner.instance);
         }
     }
