@@ -322,7 +322,7 @@ public class SimpleQueryTest extends CQLTester
             expected[N + t2] = row("key", 2, t2, "someSemiLargeTextForValue_2_" + t2);
         }
 
-        assertRows(execute("SELECT * FROM %s"), expected);
+        assertRows(execute("SELECT * FROM %s"), true, expected);
     }
 
 

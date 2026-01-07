@@ -46,10 +46,13 @@ If a cell is part of a complex column, it also needs the cell path by which it i
 complex column (e.g. the map key). When a cell is deleted (which can happen both because it was explicitly
 deleted or because its ttl expired), its value is removed and the cell becomes a tombstone.
 
-As of the current implementation, `TrieMemtable` uses the legacy `Cell` object directly, with one difference:
-if a cell is part of a complex column, we don't store the cell path inside the object. If a cell is deleted 
-(which is a rare occurence for cells in a memtable), we still use a `Cell` and store it on the live part of
-the trie[^1].
+`TrieMemtable` uses trie memory to store cell data, which is represented by a `TrieCellData` object (the actual
+byte content of which will be described in [the next section](#data-storage)); to be turned into a `Cell`, `CellData` needs
+to be combined with its column definition and, if the column is complex, a cell path. Both of these can
+be obtained from last part of the path used to reach the cell's position in the memtable trie (see below).
+
+If a cell is deleted (which is a rare occurence for cells in a memtable), we still store it as a
+`TrieCellData` (rather than a tombstone) on the live part of the trie[^1].
 
 [^1]: The main reason for this is the fact that cells can become deleted without any change other than time
 elapsed, and we will always have the possibility of deleted cells being present in the live branches.
@@ -59,8 +62,8 @@ compaction.
 
 ### Complex column
 
-Complex columns are collections of cells with cell paths. We map this to tries where the `Cell` objects
-without cell path are stored in a trie map with the cell paths as keys. When we need to return a cell
+Complex columns are collections of cells with cell paths. We map this to tries where the `TrieCellData`
+objects are stored in a trie map with the cell paths as keys. When we need to return a cell
 from these containers to a legacy consumer, we combine the `Cell` object with the path used to reach
 it. To make it easier to list the columns contained in a row, we mark the root of a complex column with
 a special `COMPLEX_COLUMN_MARKER`, a singleton object that contains no data.
@@ -83,13 +86,25 @@ INSERT INTO %s (..., purchases) values (..., {"d79012af-8b34-4fb4-9799-6c0d29ca4
                                               "830b82ce-a7f2-4939-9ea1-46b9d3714848" : 168.01})
 ```
 ```
--> COMPLEX_COLUMN_MARKER
 *** Start deletion branch
--> LIVE -> deletedAt=345[COLUMN]
+ -> LIVE -> deletedAt=345[COLUMN]
 ↑ -> deletedAt=345[COLUMN] -> LIVE
 *** End deletion branch
-404830b82cea7f29399ea146b9d371484838 -> [purchases[?]=168.01 ts=346]
-  4d79012af8b34fb497996c0d29ca4e2f38 -> [purchases[?]=88.67 ts=346]
+ -> COMPLEX_COLUMN_MARKER
+404830b82cea7f29399ea146b9d371484838 -> [?=40650051eb851eb8 ts=346]
+  4d79012af8b34fb497996c0d29ca4e2f38 -> [?=40562ae147ae147b ts=346]
+```
+The above is what we store in the trie. For clarity, we can also dump the trie in a way which combines
+the `TrieCellData` with its path and column definitions to be able to see the column names, map keys and
+interpreted values:
+```
+*** Start deletion branch
+ -> LIVE -> deletedAt=345[COLUMN]
+↑ -> deletedAt=345[COLUMN] -> LIVE
+*** End deletion branch
+ -> COMPLEX_COLUMN_MARKER
+404830b82cea7f29399ea146b9d371484838 -> [purchases[830b82ce-a7f2-4939-9ea1-46b9d3714848]=168.01 ts=346]
+  4d79012af8b34fb497996c0d29ca4e2f38 -> [purchases[d79012af-8b34-4fb4-9799-6c0d29ca4e2f]=88.67 ts=346]
 ```
 When we insert a value (rather than update) in a complex column, Cassandra always creates a tombstone with
 a smaller timestamp. Here we see this as a deletion branch which starts a deletion before the root of the
@@ -140,17 +155,17 @@ INSERT INTO %s (..., total, purchases) values (..., 256.68, {"d79012af-8b34-4fb4
 ```
 is the following:
 ```
--> [ts=346]
+ -> [ts=346]
 *** Start deletion branch
--> Level ROW
+ -> Level ROW
 01 -> LIVE -> deletedAt=345[COLUMN]
 01↑ -> deletedAt=345[COLUMN] -> LIVE
 ↑ -> Level ROW
 *** End deletion branch
-00 -> [total=256.68 ts=346]
+00 -> [?=40700ae147ae147b ts=346]
 01 -> COMPLEX_COLUMN_MARKER
-  404830b82cea7f29399ea146b9d371484838 -> [purchases[?]=168.01 ts=346]
-    4d79012af8b34fb497996c0d29ca4e2f38 -> [purchases[?]=88.67 ts=346]
+  404830b82cea7f29399ea146b9d371484838 -> [?=40650051eb851eb8 ts=346]
+    4d79012af8b34fb497996c0d29ca4e2f38 -> [?=40562ae147ae147b ts=346]
 ```
 
 This trie contains row level markers in both the live (liveness info `[ts=346]`) and deletion
@@ -235,7 +250,7 @@ DELETE FROM %s WHERE ... AND date <= '2026-01-31' AND date >= '2026-01-01'
 ```
 
 ```
--> partition with 1 rows and 8 tombstones
+ -> partition with 1 rows and 8 tombstones
 *** Start deletion branch
 4080004fe620 -> LIVE -> deletedAt=412[RANGE]
       500460 -> deletedAt=412[RANGE] -> LIVE
@@ -247,9 +262,9 @@ DELETE FROM %s WHERE ... AND date <= '2026-01-31' AND date >= '2026-01-01'
           38↑ -> Level ROW
 *** End deletion branch
 408000501038 -> [ts=367]
-            00 -> [total=324.83 ts=367]
+            00 -> [?=40744d47ae147ae1 ts=367]
             01 -> COMPLEX_COLUMN_MARKER
-              40482b4ce57d6a047087471c2aa4fc596138 -> [purchases[?]=324.83 ts=367]
+              40482b4ce57d6a047087471c2aa4fc596138 -> [?=40744d47ae147ae1 ts=367]
 ```
 
 The trie here has a partition marker with some collected statistics ("partition with ...") 
@@ -298,9 +313,9 @@ For example, the tail given for the `408000501038` row is
 01↑ -> deletedAt=366[COLUMN] -> LIVE
 ↑ -> Level ROW
 *** End deletion branch
-00 -> [total=324.83 ts=367]
+00 -> [?=40744d47ae147ae1 ts=367]
 01 -> COMPLEX_COLUMN_MARKER
-  40482b4ce57d6a047087471c2aa4fc596138 -> [purchases[?]=324.83 ts=367]
+  40482b4ce57d6a047087471c2aa4fc596138 -> [?=40744d47ae147ae1 ts=367]
 ```
 
 ### Memtable
@@ -335,14 +350,14 @@ The trie below
                                           38↑ -> Level ROW
                                 *** End deletion branch
                                 408000500e38 -> [ts=346]
-                                            00 -> [total=256.68 ts=346]
+                                            00 -> [?=40700ae147ae147b ts=346]
                                             01 -> COMPLEX_COLUMN_MARKER
-                                              404830b82cea7f29399ea146b9d371484838 -> [purchases[?]=168.01 ts=346]
-                                                4d79012af8b34fb497996c0d29ca4e2f38 -> [purchases[?]=88.67 ts=346]
+                                              404830b82cea7f29399ea146b9d371484838 -> [?=40650051eb851eb8 ts=346]
+                                                4d79012af8b34fb497996c0d29ca4e2f38 -> [?=40562ae147ae147b ts=346]
                                         1138 -> [ts=385]
-                                            00 -> [total=99.23 ts=385]
+                                            00 -> [?=4058ceb851eb851f ts=385]
                                             01 -> COMPLEX_COLUMN_MARKER
-                                              404dab4819dc6f5c05b5754a057d78c99a38 -> [purchases[?]=99.23 ts=385]
+                                              404dab4819dc6f5c05b5754a057d78c99a38 -> [?=4058ceb851eb851f ts=385]
   ca8e7ee71a25ce664049424d0038 -> partition with 1 rows and 4 tombstones
                               *** Start deletion branch
                               408000500f38 -> Level ROW
@@ -351,10 +366,10 @@ The trie below
                                         38↑ -> Level ROW
                               *** End deletion branch
                               408000500f38 -> [ts=352]
-                                          00 -> [total=542.79 ts=352]
+                                          00 -> [?=4080f651eb851eb8 ts=352]
                                           01 -> COMPLEX_COLUMN_MARKER
-                                            40435441ee93ac90d098e89c75b414addb38 -> [purchases[?]=420.66999999999996 ts=352]
-                                                edf143aa8d178f86b4d83a72a7517038 -> [purchases[?]=122.12 ts=352]
+                                            40435441ee93ac90d098e89c75b414addb38 -> [?=407a4ab851eb851e ts=352]
+                                                edf143aa8d178f86b4d83a72a7517038 -> [?=405e87ae147ae148 ts=352]
   cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 8 tombstones
                                   *** Start deletion branch
                                   4080004fe620 -> LIVE -> deletedAt=412[RANGE]
@@ -367,9 +382,9 @@ The trie below
                                             38↑ -> Level ROW
                                   *** End deletion branch
                                   408000501038 -> [ts=367]
-                                              00 -> [total=324.83 ts=367]
+                                              00 -> [?=40744d47ae147ae1 ts=367]
                                               01 -> COMPLEX_COLUMN_MARKER
-                                                40482b4ce57d6a047087471c2aa4fc596138 -> [purchases[?]=324.83 ts=367]
+                                                40482b4ce57d6a047087471c2aa4fc596138 -> [?=40744d47ae147ae1 ts=367]
 ```
 is constructed by running the code in `TrieMemtableDocTrieMakerTest.java` and represents the full trie for a small
 table with three partitions. The leading part of this trie is the decorated partition key, composed of a token
@@ -392,6 +407,192 @@ recognizing these partition markers to view it as:
 and we use the tail trie and the path used to reach the point to form a `TrieBackedPartition`. E.g. the example
 trie in the previous section is given as the tail for the key `40cd0a37fd8f053c6c404170706c650038`, which is
 translated to the partition key "Apple".
+
+Here is another representation of the trie above, where we have combined the cells, rows and partitions with their
+type definitions and keys to make it easier to see what the content is describing:
+```
+40a9e72bd32b9f1ba24041434d450038 -> partition with 2 rows and 4 tombstones at ACME
+                                *** Start deletion branch
+                                408000500e38 -> Level ROW
+                                            01 -> LIVE -> deletedAt=345[COLUMN]
+                                            01↑ -> deletedAt=345[COLUMN] -> LIVE
+                                          38↑ -> Level ROW
+                                *** End deletion branch
+                                408000500e38 -> [ts=346] at date=2026-02-10
+                                            00 -> [total=256.68 ts=346]
+                                            01 -> COMPLEX_COLUMN_MARKER
+                                              404830b82cea7f29399ea146b9d371484838 -> [purchases[830b82ce-a7f2-4939-9ea1-46b9d3714848]=168.01 ts=346]
+                                                4d79012af8b34fb497996c0d29ca4e2f38 -> [purchases[d79012af-8b34-4fb4-9799-6c0d29ca4e2f]=88.67 ts=346]
+                                        1138 -> [ts=385] at date=2026-02-13
+                                            00 -> [total=99.23 ts=385]
+                                            01 -> COMPLEX_COLUMN_MARKER
+                                              404dab4819dc6f5c05b5754a057d78c99a38 -> [purchases[dab4819d-c6f5-4c05-b575-4a057d78c99a]=99.23 ts=385]
+  ca8e7ee71a25ce664049424d0038 -> partition with 1 rows and 4 tombstones at IBM
+                              *** Start deletion branch
+                              408000500f38 -> Level ROW
+                                          01 -> LIVE -> deletedAt=351[COLUMN]
+                                          01↑ -> deletedAt=351[COLUMN] -> LIVE
+                                        38↑ -> Level ROW
+                              *** End deletion branch
+                              408000500f38 -> [ts=352] at date=2026-02-11
+                                          00 -> [total=542.79 ts=352]
+                                          01 -> COMPLEX_COLUMN_MARKER
+                                            40435441ee93ac90d098e89c75b414addb38 -> [purchases[35441ee9-3ac9-40d0-98e8-9c75b414addb]=420.66999999999996 ts=352]
+                                                edf143aa8d178f86b4d83a72a7517038 -> [purchases[3edf143a-a8d1-478f-86b4-d83a72a75170]=122.12 ts=352]
+  cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 8 tombstones at Apple
+                                  *** Start deletion branch
+                                  4080004fe620 -> LIVE -> deletedAt=412[RANGE]
+                                        500460 -> deletedAt=412[RANGE] -> LIVE
+                                          0d38 -> Level ROW + LIVE -> deletedAt=329[ROW]
+                                            38↑ -> Level ROW + deletedAt=329[ROW] -> LIVE
+                                          1038 -> Level ROW
+                                              01 -> LIVE -> deletedAt=366[COLUMN]
+                                              01↑ -> deletedAt=366[COLUMN] -> LIVE
+                                            38↑ -> Level ROW
+                                  *** End deletion branch
+                                  408000501038 -> [ts=367] at date=2026-02-12
+                                              00 -> [total=324.83 ts=367]
+                                              01 -> COMPLEX_COLUMN_MARKER
+                                                40482b4ce57d6a047087471c2aa4fc596138 -> [purchases[82b4ce57-d6a0-4470-8747-1c2aa4fc5961]=324.83 ts=367]
+```
+
+## Data storage
+
+The content of the tries in the current version of the trie memtables is stored as bytes in trie cells and
+converted to the various content objects when it is requested by a consumer. To accompish this, `TrieMemtable`
+constructs its in-memory trie with a `ContentSerializer` that can write and read content from 32-byte trie
+cells.
+
+We also have three types of markers that may appear multiple times and carry no additional information. For
+these (`LivenessInfo.EMPTY`, `TrieTombstoneMarker.Level.ROW` and `COMPLEX_COLUMN_MARKER`) we use special
+content ids that use no trie cells.
+
+The tables below describe how the data is stored with an example for each.
+
+### TrieCellData.Embedded for cells with values up to 16 bytes in length
+
+Cell data that has values up to 16 bytes in length is stored by setting `offsetBits` to the length of the
+value and then filling the cell with:
+
+| bytes | content                      | example           | example decoding   |
+|-------|------------------------------|-------------------|--------------------|
+| 0-15  | value                        | 40744d47 ae147ae1 | 324.83             |
+| 16-19 | ttl                          | 00000000          | NO_TTL             |
+| 20-23 | unsigned local deletion time | FFFFFFFF          | NO_EXPIRATION_TIME |
+| 24-31 | timestamp                    | 00000000 0000016F | 367                |
+
+The example, with `offsetBits == 8`, encodes the cell data `[?=40744d47ae147ae1 ts=367]` for the cell 
+`[total=324.83 ts=367]` from above.
+
+### TrieCellData.EmbeddedNoTTL for cells with values between 17 and 24 bytes in length with no TTL
+
+If a cell is not expiring or expired/deleted, it has empty TTL and local deletion/expiration time.
+In this case we can use 8 extra bytes for value:
+
+| bytes | content                     | example                                                                         | example decoding        |
+|-------|-----------------------------|---------------------------------------------------------------------------------|-------------------------|
+| 0-23  | value                       | 53 61 6D 70 6C 65 20 74<br/>65 78 74 20 6F 66 20 32<br/>35 20 62 79 74 65 73 00 | Sample text of 23 bytes |
+| 24-31 | timestamp                   | 00000000 00000160                                                               | 352                     |
+
+The example, with `offsetBits == 23`, encodes cell data `[?=53616D706C652074657874206F66203233206279746573 ts=352]` 
+containing an ASCII string.
+
+### TrieCellData.Counter for counter cells up to 15 bytes in length
+
+For counters that can be embedded (usually with empty value), we use `offsetBits == 0x19` and store the value
+length in the cell.
+
+| bytes | content                      | example           | example decoding   |
+|-------|------------------------------|-------------------|--------------------|
+| 0-14  | value                        |                   |                    |
+| 15    | value length                 | 00                | empty value        |
+| 16-19 | ttl                          | 00000000          | NO_TTL             |
+| 20-23 | unsigned local deletion time | FFFFFFFF          | NO_EXPIRATION_TIME |
+| 24-31 | timestamp                    | 00000000 0000016D | 365                |
+
+
+### TrieCellData.External for cells with values that can't be fitted in the available trie bytes
+
+Externally-stored value of cells use `offsetBits == 0x1A` and the following content:
+
+| bytes | content                      | example           | example decoding         |
+|-------|------------------------------|-------------------|--------------------------|
+| 0     | is counter                   | 00                | non-counter              |
+| 1-3   | _unused_                     |                   |                          |
+| 4-7   | value length                 | 20                | 32 bytes                 |
+| 8-15  | external value handle        | 12345678 90ABCDEF | address in direct memory |
+| 16-19 | ttl                          | 00000000          | NO_TTL                   |
+| 20-23 | unsigned local deletion time | FFFFFFFF          | NO_EXPIRATION_TIME       |
+| 24-31 | timestamp                    | 00000000 0000016C | 364                      |
+
+The example encodes a cell with timestamp 364, no expiration, and a 32-byte value stored in direct memory.
+
+### LivenessInfo
+
+We use `offsetBits == 0x1B` for liveness info.
+
+| bytes | content                      | example           | example decoding   |
+|-------|------------------------------|-------------------|--------------------|
+| 0-15  | _unused_                     |                   |                    |
+| 16-19 | ttl                          | 00000000          | NO_TTL             |
+| 20-23 | unsigned local deletion time | FFFFFFFF          | NO_EXPIRATION_TIME |
+| 24-31 | timestamp                    | 00000000 0000016D | 365                |
+
+The example encodes the `[ts=367]` liveness info object from above.
+
+### TrieTombstoneMarker
+
+Tombstone markers use two offset bit values, depending on whether they are to be presented before (`0x1C`)
+or after (`0x1D`) the child branch.
+
+| bytes | content                   | example           | example decoding                   |
+|-------|---------------------------|-------------------|------------------------------------|
+| 0     | has row level marker      | 00                | no row level marker                |
+| 13-15 | _unused_                  |                   |                                    |  
+| 3     | right tombstone kind      | 01                | COLUMN (kind ordinal = 1)          |
+| 4-7   | right local deletion time | 69CFB5AF          | 1775220143                         |
+| 8-15  | right timestamp           | 00000000 00000159 | 345 (right deletion timestamp)     |
+| 16-18 | _unused_                  |                   |                                    |  
+| 19    | left tombstone kind       | FF                | not present                        |
+| 20-23 | left local deletion time  |                   |                                    |
+| 24-31 | left timestamp            |                   |                                    |
+
+The example, with `offsetBits == 0x1C`, encodes `LIVE -> deletedAt=345, localDeletion=1775220143[COLUMN]`, a
+tombstone boundary that starts a column deletion with timestamp 345.
+
+### PartitionData
+
+For partition data we use `offsetBits = 0x1E`.
+
+| bytes | content             | example  | example decoding                    |
+|-------|---------------------|----------|-------------------------------------|
+| 0-4   | row count           | 00000001 | 1 row (including static)            |
+| 4-7   | tombstone count     | 00000008 | 8 tombstones                        |
+| 8-31  | _unused_            |          |                                     |
+
+The example encodes partition metadata for a partition with 1 row and 8 tombstones, as seen in the
+"Apple" partition example above.
+
+The `PartitionData` object encapsulates this and stores the buffer and pointer. The mutation code uses this
+to modify the values in the buffer directly when a row/tombstone is added to the partition or removed.
+
+### External buffer storage for large values
+
+If a cell value can fit within the 15 bytes in the `TrieCellData` block, it is directly stored there.
+
+Values that don't fit are stored according to the memtable allocation mode. When the allocation mode is
+`offheap_objects`, the allocator hands out memory addresses from a direct memory slab. The memtable
+will in this case directly store the memory address in the `TrieCellData` serialization, and wrap it
+in a direct buffer when requested. This is the most efficient mode of operation of the memtable where
+all content and metadata is stored in off-heap memory; the on-heap presence of a memtable is constant
+and somewhere on the order of 100 KiB.
+
+In the other allocation modes, the allocator returns byte buffers which we must store as Java objects.
+To do this, the memtable defers to the in-memory tries' `ContentManagerPojo` that maintains lists of java
+objects and maps them into integer handles. To store, we ask the allocator for a buffer, fill it in, give
+it to the content manager and save the id it returns in the handle field. To read, we get the id from
+the handle field and ask the manager for the buffer. In this mode of operation every large cell has 
+additional on-heap presence in the form of one byte buffer and a list entry for it.
 
 ## Other key points
 
@@ -471,18 +672,18 @@ marker would also force the path leading to it to be retained, inflating the siz
 complicating later walks that have to pass over it.
 
 To avoid this problem and make sure that we delete markers that no longer serve any purpose, the in-memory
-trie mutation code accepts a `danglingMetadataCleaner` argument that is used to check if a trie content/metadata
-entry makes sense when it has no substructure. The checker is called every time the mutation code notices
+trie uses a `shouldPreserveWithoutChildren` predicate that is used to check if a trie content/metadata
+entry makes sense when it has no substructure. This checker is called every time the mutation code notices
 that it is building a leaf node, and drops the content (and with it the whole leaf and path leading to it)
-if the checker returns `true`. By passing a suitable cleaner, recognizing `LivenessInfo.EMPTY` and
-`COMPLEX_COLUMN_MARKER` in data branches and `Level ROW` in deletion ones, the trie memtable makes sure that
-unproductive markers are dropped without affecting things like cells or non-empty liveness info that are 
-meaningful without substructure.
+if the predicate returns `false`. By using a suitable predicate, recognizing `LivenessInfo.EMPTY`,
+`COMPLEX_COLUMN_MARKER` and `Level ROW`, the trie memtable makes sure that unproductive markers are dropped
+without affecting things like cells or non-empty liveness info that are meaningful without substructure.
 
 Note that when data in the trie and paths are deleted, the trie will drop and reuse the trie cells that stored
-them, but cannot do anything about non-trie memory. This means, for example, that cell objects stored in on- or
-off-heap slab buffers cannot be released. This fact is a feature of Cassandra memtables that is not changed by
-the current trie memtable implementation.
+them, but cannot do anything about non-trie memory. This means, for example, that, while we can fully release
+deletion markers, liveness info and cells with values of 15 bytes or fewer, large cell values stored in
+on- or off-heap slab buffers cannot be released. This fact is a feature of Cassandra memtables that is not
+fully resolved by the current trie memtable implementation.
 
 #### Example
 
@@ -528,9 +729,9 @@ partition it will see something similar to:
                                   *** End deletion branch
                                   -> TO APPLY: LIVE -> deletedAt=513[PARTITION]
                                   408000501038 -> [ts=367]
-                                              00 -> [total=324.83 ts=367]
+                                              00 -> [?=40744d47ae147ae1 ts=367]
                                               01 -> COMPLEX_COLUMN_MARKER
-                                                40482b4ce57d6a047087471c2aa4fc596138 -> [purchases[?]=324.83 ts=367]
+                                                40482b4ce57d6a047087471c2aa4fc596138 -> [?=40744d47ae147ae1 ts=367]
                                   ↑ -> TO APPLY: deletedAt=513[PARTITION] -> LIVE
 ```
 
@@ -550,8 +751,8 @@ resulting in:
                                               01 -> COMPLEX_COLUMN_MARKER
 ```
 As part of the process of modifying the in-memory trie, the mutation code recognizes that the `COMPLEX_COLUMN_MARKER`
-and the `Level ROW` markers have no children and call the dangling metadata cleaner. As that returns true, the marker
-and the path leading to them is removed.
+and the `Level ROW` markers have no children and call the `shouldPreserveWithoutChildren` predicate. As that returns
+false, the marker and the path leading to them is removed.
 ```
 40cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 2 tombstones
                                   *** Start deletion branch
@@ -560,8 +761,8 @@ and the path leading to them is removed.
                                   *** End deletion branch
                                   408000501038 -> [ts=EMPTY]
 ```
-Now `[ts=EMPTY]` (i.e. `LivenessInfo.EMPTY`) has no children and has the dangling metadata cleaner called, which
-tells the trie code to remove it and the path leading to it, resulting in the final
+Now `[ts=EMPTY]` (i.e. `LivenessInfo.EMPTY`) has no children and has the `shouldPreserveWithoutChildren` predicate
+called, which tells the trie code to remove it and the path leading to it, resulting in the final
 ```
 40cd0a37fd8f053c6c404170706c650038 -> partition with 0 rows and 2 tombstones
                                   *** Start deletion branch

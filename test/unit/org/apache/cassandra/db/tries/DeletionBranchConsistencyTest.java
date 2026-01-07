@@ -211,8 +211,8 @@ extends ConsistencyTestBase<ConsistencyTestBase.TestStateMetadata,
                     Predicate<InMemoryBaseTrie.NodeFeatures<TestStateMetadata>> forcedCopyChecker)
     {
         System.out.format("DeletionAware Reuse %s %s on-heap %,d (+%,d) off-heap %,d\n",
-                          trie.cellAllocator.getClass().getSimpleName(),
-                          trie.bufferType,
+                          ((BufferManagerMultibuf) trie.bufferManager).cellAllocator.getClass().getSimpleName(),
+                          trie.bufferManager.bufferType(),
                           trie.usedSizeOnHeap(),
                           trie.unusedReservedOnHeapMemory(),
                           trie.usedSizeOffHeap());

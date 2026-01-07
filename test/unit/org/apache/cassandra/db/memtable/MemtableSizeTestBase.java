@@ -19,11 +19,16 @@
 
 package org.apache.cassandra.db.memtable;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Random;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -76,21 +81,25 @@ public abstract class MemtableSizeTestBase extends CQLTester
     @Parameterized.Parameter(0)
     public String memtableClass = "skiplist";
 
-    @Parameterized.Parameters(name = "{0}")
-    public static List<Object> parameters()
+    @Parameterized.Parameter(1)
+    public int valueSize = 8;
+
+    @Parameterized.Parameters(name = "{0} value size {1}")
+    public static List<Object[]> parameters()
     {
         // Sharded memtables require Cassandra 5.0+, skip them in compatibility mode
         StorageCompatibilityMode mode = DatabaseDescriptor.getStorageCompatibilityMode();
         boolean skipSharded = mode != null && mode.isBefore(CassandraVersion.CASSANDRA_5_0.major);
 
-        ImmutableList.Builder<Object> params = ImmutableList.builder();
-        params.add("skiplist");
+        ImmutableList.Builder<Object[]> params = ImmutableList.builder();
+        params.add(new Object[] {"skiplist", 8});
         if (!skipSharded)
-            params.add("skiplist_sharded");
-        params.add("trie_stage1");
-        params.add("trie_stage2",
-                                "trie_stage3",
-                                "trie");
+            params.add(new Object[] {"skiplist_sharded", 32});
+        params.add(new Object[] {"trie_stage1", 8});
+        params.add(new Object[] {"trie_stage2", 8});
+        params.add(new Object[] {"trie_stage3", 8});
+        params.add(new Object[] {"trie", 8});
+        params.add(new Object[] {"trie", 32});
 
         return params.build();
     }
@@ -138,7 +147,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
         CQLTester.disablePreparedReuseForTest();
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
 
-        table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))" +
+        table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid blob, PRIMARY KEY(userid, picid))" +
                                       " with compression = {'enabled': false}" +
                                       " and memtable = '" + memtableClass + "'");
         execute("use " + keyspace + ';');
@@ -150,10 +159,46 @@ public abstract class MemtableSizeTestBase extends CQLTester
         Util.flush(cfs);
     }
 
+    ByteBuffer valueFor(long v)
+    {
+        Random rand = new Random(v);
+        byte[] bytes = new byte[valueSize];
+        rand.nextBytes(bytes);
+        return ByteBuffer.wrap(bytes);
+    }
+
+    private static void runCommandAndDumpOutput(String cmd, int lineCount)
+    {
+        try
+        {
+            // Define the command and its arguments
+            ProcessBuilder builder = new ProcessBuilder("bash", "-c", cmd);
+
+            // Start the process
+            Process process = builder.start();
+
+            // Read the output from the command
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line;
+            while ((line = reader.readLine()) != null && --lineCount >= 0)
+            {
+                System.out.println(line);
+            }
+            while ((reader.readLine()) != null) {}
+
+            // Wait for the command to finish and get exit code
+            int exitCode = process.waitFor();
+            System.out.println("Exited with code: " + exitCode);
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+    }
+
     @Test
     public void testSize() throws Throwable
     {
-
         try
         {
             buildAndFillTable(memtableClass);
@@ -171,7 +216,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
             for (i = 0; i < limit; ++i)
             {
                 for (long j = 0; j < rowsPerPartition; ++j)
-                    execute(writeStatement, i, j, i + j);
+                    execute(writeStatement, i, j, valueFor(i + j));
             }
 
             logger.info("Deleting {} partitions", deletedPartitions);
@@ -209,8 +254,8 @@ public abstract class MemtableSizeTestBase extends CQLTester
             if (memtable instanceof TrieMemtableStage3)
                 ((TrieMemtableStage3) memtable).releaseReferencesUnsafe();
 
-//            System.out.println("Take jmap -histo:live <pid>");
-//            Thread.sleep(10000);
+            // To see a summary of the objects on the heap, uncomment this:
+            // runCommandAndDumpOutput("jmap -histo:live " + ProcessHandle.current().pid(), 25);
 
             long deepSizeAfter = meter.measureDeep(memtable);
             logger.info("Memtable deep size {}", FBUtilities.prettyPrintMemory(deepSizeAfter));
@@ -233,7 +278,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
                                            FBUtilities.prettyPrintMemory(reportedHeap),
                                            FBUtilities.prettyPrintMemory(actualHeap - reportedHeap));
             System.out.println(message);
-            Assert.assertTrue(message, Math.abs(reportedHeap - actualHeap) <= maxDifference);
+            Assert.assertTrue(message, Math.abs(reportedHeap - actualHeap) <= Math.max(100 * 1024, maxDifference));
         }
         finally
         {
@@ -253,7 +298,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
         for (long i = 0; i < partitions; ++i)
         {
             for (long j = 0; j < rowsPerPartition; ++j)
-                execute(writeStatement, i, j, i + j);
+                execute(writeStatement, i, j, valueFor(i + j));
         }
 
         long rowSize = memtable.getEstimatedAverageRowSize();

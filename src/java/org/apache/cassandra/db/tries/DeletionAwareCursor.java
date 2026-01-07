@@ -87,15 +87,15 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
 
         while (true)
         {
+            T content = content();   // handle content on the root node
+            if (content != null)
+                walker.content(content);
             RangeCursor<D> deletionBranch = deletionBranchCursor(direction());
             if (deletionBranch != null && walker.enterDeletionsBranch())
             {
                 processDeletionBranch(walker, deletionBranch);
                 walker.exitDeletionsBranch();
             }
-            T content = content();   // handle content on the root node
-            if (content != null)
-                walker.content(content);
 
             long prevPosition = currentPosition;
             currentPosition = advanceMultiple(walker);
