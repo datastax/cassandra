@@ -35,13 +35,51 @@ The main features of its implementation are:
 ## Memory layout
 
 One of the main design drivers of the memtable trie is the desire to avoid on-heap storage and Java object management.
-The trie thus implements its own memory management for the structure of the trie (content is, at this time, still given
-as Java objects in a content array). The structure resides in one `UnsafeBuffer` (which can be on or off heap as
-desired) and is broken up in 32-byte "cells", which are the unit of allocation, update and reuse.
+The trie thus implements its own memory management for the structure of the trie. The structure resides in one 
+`UnsafeBuffer` (which can be on or off heap as desired) and is broken up in 32-byte "cells", which are the unit of 
+allocation, update and reuse.
 
 Like all tries, `InMemoryTrie` is built from nodes and has a root pointer. The nodes reside in cells, but there is no
 1:1 correspondence between nodes and cells - some node types pack multiple in one cell, while other types require
 multiple cells.
+
+### Content storage
+
+In-memory tries support two approaches for storing content/payload data:
+
+#### `ContentManagerPojo` - Object array storage
+
+This default approach stores content as Java objects in a separate content array. Leaf nodes reference values by 
+storing the array index as a negative pointer value (where masking away the sign and flags gives the index in the
+array). This approach is simple but keeps content on-heap as Java objects, which can lead to garbage collection
+pressure for large tries.
+
+#### `ContentManagerBytes` - Direct buffer storage
+
+The alternative stores content directly in the trie's buffer cells, using the same 32-byte cells that store the 
+trie structure. This eliminates the need for a separate content array and allows content to be stored off-heap 
+alongside the trie structure.
+
+`ContentManagerBytes` relies on a `ContentSerializer` interface to handle encoding and decoding of content. The 
+serializer defines:
+- How to serialize content into a 32-byte cell, returning a `offsetBits`, a 5-bit offset which is combined with
+  the cell base to form the leaf pointer/id.
+- How to deserialize content from a 32-byte cell and the pointer's `offsetBits`
+- Which values should be treated as "special" (encoded without using cells, using `offsetBits == 0x1F`)
+
+The `offsetBits` are to be used to help determine the type of content, and they also may be used to store e.g.
+length and flags that could otherwise take up a byte in the cell. 
+
+**Special values**: Some content types appear frequently and carry no additional data (e.g. markers, empty values). 
+These can be encoded as special values and mapped directly to singleton objects without allocating trie cells. The 
+`ContentSerializer` determines which values qualify as special via the `idIfSpecial()` method.
+
+**Large values**: When content doesn't fit in 32 bytes, the serializer can use its own external storage mechanism 
+(e.g. slab buffers) and store only a handle/pointer in the trie cell. The serializer is responsible for managing 
+this external storage and releasing it when content is removed.
+
+This approach can be used to drastically reduce or completely eliminate the per-item on-heap presence of a trie,
+improving overall garbage collection efficiency.
 
 ### Pointers and node types
 

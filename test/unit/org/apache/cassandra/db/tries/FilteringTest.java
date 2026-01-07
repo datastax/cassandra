@@ -152,12 +152,17 @@ public class FilteringTest
                 survivors.put(en.getKey(), en.getValue());
         }
 
-        InMemoryTrie<T> copy = InMemoryTrie.shortLivedOrdered(VERSION);
+        // set up in-memory trie with dangling non-clazz clean-up
+        InMemoryTrie<T> copy = new InMemoryTrie<>(VERSION,
+                                                  BufferType.ON_HEAP,
+                                                  InMemoryBaseTrie.ExpectedLifetime.SHORT,
+                                                  null,
+                                                  true,
+                                                  clazz::isInstance);
         try
         {
             copy.mutator((x, y) -> y,
-                         (Predicate<InMemoryBaseTrie.NodeFeatures<T>>) x -> false,
-                         Predicates.not(clazz::isInstance))
+                         (Predicate<InMemoryBaseTrie.NodeFeatures<T>>) x -> false)
                 .apply(trie);
         }
         catch (TrieSpaceExhaustedException e)
