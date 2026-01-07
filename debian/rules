@@ -24,6 +24,7 @@ include /usr/share/quilt/quilt.make
 
 ANT = /usr/bin/ant
 VERSION = $(shell dpkg-parsechangelog | sed -ne 's/^Version: \([^-|~|+]*\).*/\1/p')
+PROJECT_NAME = $(shell sed -n 's/.*<project[^>]*name="\([^"]*\)".*/\1/p' build.xml | head -1)
 BUILD_DIR ?= "build"
 
 clean: unpatch
@@ -56,7 +57,7 @@ install: build
 	dh_install
 
 	# Copy in the jar and symlink to something stable
-	dh_install $(BUILD_DIR)/apache-cassandra-$(VERSION).jar \
+	dh_install $(BUILD_DIR)/$(PROJECT_NAME)-$(VERSION).jar \
 		usr/share/cassandra
 
 	# Copy stress jars
@@ -67,8 +68,8 @@ install: build
 	dh_install $(BUILD_DIR)/tools/lib/fqltool.jar \
 		usr/share/cassandra
 
-	dh_link usr/share/cassandra/apache-cassandra-$(VERSION).jar \
-		usr/share/cassandra/apache-cassandra.jar
+	dh_link usr/share/cassandra/$(PROJECT_NAME)-$(VERSION).jar \
+		usr/share/cassandra/$(PROJECT_NAME).jar
 
 	cd debian/cassandra/etc/sysctl.d && mv cassandra-sysctl.conf cassandra.conf
 
