@@ -18,7 +18,10 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.List;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
@@ -66,5 +69,27 @@ public class RangeUtil
         cmp = keyRange.left.compareTo(maxKeyBound);
         // if left bound is bigger than maxKeyBound, no intersection
         return (keyRange.isStartInclusive() || cmp != 0) && cmp <= 0;
+    }
+
+
+    public static double getRingFraction(AbstractBounds<PartitionPosition> keyRange)
+    {
+        return keyRange.left.getToken().size(keyRange.right.getToken().nextValidToken());
+    }
+
+    public static double getRingFraction(DataRange dataRange)
+    {
+        return getRingFraction(dataRange.keyRange());
+    }
+
+    public static double getRingFraction(List<DataRange> dataRanges)
+    {
+        double fraction = 0.0;
+        for (DataRange range : dataRanges)
+        {
+            fraction += getRingFraction(range);
+        }
+        fraction = Math.min(1.0, fraction);  // rounding errors could cause exceeding 1.0
+        return fraction;
     }
 }

@@ -234,7 +234,7 @@ public class Segment implements Closeable
         return proportionalLimit;
     }
 
-    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCount(Expression predicate)
     {
         return metadata.estimateNumRowsMatching(predicate);
     }
