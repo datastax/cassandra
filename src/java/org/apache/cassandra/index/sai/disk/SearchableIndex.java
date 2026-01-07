@@ -88,5 +88,5 @@ public interface SearchableIndex extends Closeable
 
     void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
 
-    long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange);
+    long estimateMatchingRowsCount(Expression predicate);
 }
