@@ -84,18 +84,7 @@ public interface MemtableIndex extends MemtableOrdering
      * @param keyRange   the key range to search within
      * @return an approximate number of the matching rows
      */
-    long estimateMatchingRowsCountUsingFirstShard(Expression expression, AbstractBounds<PartitionPosition> keyRange);
-
-    /**
-     * Estimates the number of rows that would be returned by this index given the predicate.
-     * It estimates from all relevant shards individually.
-     * Note that this is not a guarantee of the number of rows that will actually be returned.
-     *
-     * @param expression predicate to match
-     * @param keyRange   the key range to search within
-     * @return an estimated number of the matching rows
-     */
-    long estimateMatchingRowsCountUsingAllShards(Expression expression, AbstractBounds<PartitionPosition> keyRange);
+    long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 
     Iterator<Pair<ByteComparable.Preencoded, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max);
 

@@ -405,7 +405,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCount(Expression expression)
     {
         switch (expression.getOp())
         {
