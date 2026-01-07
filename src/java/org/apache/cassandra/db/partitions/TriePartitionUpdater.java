@@ -24,13 +24,14 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.Cells;
 import org.apache.cassandra.db.rows.TrieBackedRow;
+import org.apache.cassandra.db.memtable.TrieCellData;
 import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
-import org.apache.cassandra.utils.memory.Cloner;
 
 import static org.apache.cassandra.db.memtable.TrieMemtable.PartitionData;
 
@@ -41,14 +42,12 @@ public class TriePartitionUpdater
     private final TrieMemtable.MemtableShard owner;
     protected final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>.Mutator<Object, TrieTombstoneMarker> mutator;
 
-    private Cloner cloner;
-    /// Holds a reference to the current partition's statistics, used to update them when merging data.
-    private PartitionData currentPartition;
-
     public long dataSize;
-    public long heapSize;
     public long colUpdateTimeDelta;
     public int partitionsAdded;
+
+    /// Holds a reference to the current partition's statistics, used to update them when merging data.
+    protected PartitionData currentPartition;
 
     public TriePartitionUpdater(TrieMemtable.MemtableShard owner,
                                 InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> data)
@@ -60,19 +59,15 @@ public class TriePartitionUpdater
                                     this::applyExistingMarkerToIncomingRow,
                                     true,
                                     TrieMemtable.FORCE_COPY_PARTITION_BOUNDARY,
-                                    x -> { throw new AssertionError("Force copy should already be in effect for all range tries"); },
-                                    TrieBackedRow::isDroppableMarker,
-                                    TrieBackedRow::isDroppableMarker);
+                                    x -> { throw new AssertionError("Force copy should already be in effect for all range tries"); });
     }
 
     /// Merge the given update into the data trie.
-    public void mergeUpdate(Cloner cloner, DeletionAwareTrie<Object, TrieTombstoneMarker> update) throws TrieSpaceExhaustedException
+    public void mergeUpdate(DeletionAwareTrie<Object, TrieTombstoneMarker> update) throws TrieSpaceExhaustedException
     {
-        this.cloner = cloner;
         this.currentPartition = null;
         this.partitionsAdded = 0;
         this.dataSize = 0;
-        this.heapSize = 0;
         this.colUpdateTimeDelta = Long.MAX_VALUE;
 
         mutator.apply(update);
@@ -82,8 +77,8 @@ public class TriePartitionUpdater
     Object mergeData(@Nullable Object existing, Object update)
     {
         // Most common case first
-        if (update instanceof Cell)
-            return applyCell((Cell<?>) existing, (Cell<?>) update);
+        if (update instanceof CellData)
+            return applyCell((TrieCellData) existing, (CellData<?, ?>) update);
         else if (update == TrieBackedRow.COMPLEX_COLUMN_MARKER)
             return update;
         else if (update instanceof LivenessInfo)
@@ -102,13 +97,11 @@ public class TriePartitionUpdater
         if (existing == null)
         {
             currentPartition.markAddedTombstones(1);
-            this.heapSize += update.unsharedHeapSize();
             return update;
         }
         else
         {
             TrieTombstoneMarker merged = update.mergeWith(existing);
-            this.heapSize += (merged != null ? merged.unsharedHeapSize() : 0) - existing.unsharedHeapSize();
             return merged;
         }
     }
@@ -121,8 +114,8 @@ public class TriePartitionUpdater
             return existingContent;
 
         // Most common case first
-        if (existingContent instanceof Cell)
-            return applyCellDeletion((Cell<?>) existingContent, deletion);
+        if (existingContent instanceof CellData)
+            return applyCellDeletion((CellData<?, ?>) existingContent, deletion);
         else if (existingContent == TrieBackedRow.COMPLEX_COLUMN_MARKER)
             return existingContent;
         else if (existingContent instanceof LivenessInfo)
@@ -133,12 +126,11 @@ public class TriePartitionUpdater
             throw new AssertionError("Unexpected content in trie " + existingContent + " for deletion " + updateMarker);
     }
 
-    private Cell<?> applyCellDeletion(Cell<?> existingContent, DeletionTime deletion)
+    private CellData<?, ?> applyCellDeletion(CellData<?, ?> existingContent, DeletionTime deletion)
     {
         if (!deletion.deletes(existingContent))
             return existingContent;
-        heapSize -= existingContent.unsharedHeapSizeExcludingData();
-        dataSize -= existingContent.dataSize();
+        dataSize -= existingContent.valueSize();
         return null;
     }
 
@@ -152,7 +144,6 @@ public class TriePartitionUpdater
     {
         if (deletion.deletes(existing))
         {
-            this.heapSize -= existing.unsharedHeapSize();
             return LivenessInfo.EMPTY;
             // TODO: and also do currentPartition.markInsertedRows(-1) in that case?
             // TODO: Does strict row liveness apply here? How do we drop tail trie if it does?
@@ -190,7 +181,6 @@ public class TriePartitionUpdater
         if (existing == null)
         {
             this.dataSize += insert.dataSize();
-            this.heapSize += insert.unsharedHeapSize();
             currentPartition.markInsertedRows(1);  // null pointer here means a problem in applyDeletion
             return insert;
         }
@@ -198,36 +188,28 @@ public class TriePartitionUpdater
         {
             LivenessInfo reconciled = LivenessInfo.merge(existing, insert);
             if (reconciled != existing)
-            {
                 this.dataSize += reconciled.dataSize() - existing.dataSize();
-                this.heapSize += reconciled.unsharedHeapSize() - existing.unsharedHeapSize();
-            }
+
             return reconciled;
         }
     }
 
-    Cell<?> applyCell(@Nullable Cell<?> existing, Cell<?> update)
+    CellData<?, ?> applyCell(@Nullable TrieCellData existing, CellData<?, ?> update)
     {
         if (existing == null)
         {
-            if (cloner != null)
-                update = cloner.clone(update);
-            this.dataSize += update.dataSize();
-            this.heapSize += update.unsharedHeapSizeExcludingData();
+            this.dataSize += update.valueSize();
             return update;
         }
         else
         {
-            Cell<?> reconciled = Cells.reconcile(existing, update);
+            CellData<?, ?> reconciled = Cells.<CellData>reconcile(existing, update);
             if (reconciled != existing)
             {
                 long timeDelta = Math.abs(reconciled.timestamp() - existing.timestamp());
                 if (timeDelta < colUpdateTimeDelta)
                     colUpdateTimeDelta = timeDelta;
-                if (cloner != null)
-                    reconciled = cloner.clone(reconciled);
-                this.dataSize += reconciled.dataSize() - existing.dataSize();
-                this.heapSize += reconciled.unsharedHeapSizeExcludingData() - existing.unsharedHeapSizeExcludingData();
+                this.dataSize += reconciled.valueSize() - existing.valueSize();
             }
             return reconciled;
         }
@@ -243,9 +225,7 @@ public class TriePartitionUpdater
     {
         if (existing == null)
         {
-            // Note: Always on-heap, regardless of cloner
             PartitionData newRef = new PartitionData(owner);
-            this.heapSize += newRef.unsharedHeapSize();
             ++this.partitionsAdded;
             return currentPartition = newRef;
         }

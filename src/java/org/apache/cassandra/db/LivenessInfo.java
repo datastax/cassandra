@@ -21,6 +21,7 @@ import java.util.Objects;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ObjectSizes;
 
@@ -375,7 +376,7 @@ public class LivenessInfo implements IMeasurableMemory
             // As of 5.0, local expiration times are encoded as unsigned integers on disk, so we can do the
             // same thing here to populate the digest. This supports extended TTLs, but also maintains digest
             // compatibility with previous versions, avoiding false digest mismatches during upgrades.
-            digest.updateWithInt(Cell.deletionTimeLongToUnsignedInteger(localExpirationTime));
+            digest.updateWithInt(CellData.deletionTimeLongToUnsignedInteger(localExpirationTime));
             digest.updateWithInt(ttl);
         }
 

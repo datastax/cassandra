@@ -212,7 +212,7 @@ public class RowWithSource implements Row
     }
 
     @Override
-    public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> infoFunction, Function<Cell<?>, Cell<?>> function)
+    public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> infoFunction, CellTransformer function)
     {
         return maybeWrapRow(row.transformAndFilter(infoFunction, function));
     }
@@ -332,10 +332,9 @@ public class RowWithSource implements Row
     }
 
     @Override
-    public Row mergeWith(Row updateAsRow,
-                         ColumnData.PostReconciliationFunction reconcileF)
+    public Row mergeWith(Row updateAsRow)
     {
-        return maybeWrapRow(row.mergeWith(updateAsRow, reconcileF));
+        return maybeWrapRow(row.mergeWith(updateAsRow));
     }
 
     @Override
@@ -351,7 +350,7 @@ public class RowWithSource implements Row
         if (c instanceof Cell<?>)
             return new CellWithSource<>((Cell<?>) c, source);
         if (c instanceof ComplexColumnData)
-            return ((ComplexColumnData) c).transform(c1 -> new CellWithSource<>(c1, source));
+            return new ComplexColumnWithSource((ComplexColumnData) c, source);
         throw new IllegalStateException("Unexpected ColumnData type: " + c.getClass().getName());
     }
 
