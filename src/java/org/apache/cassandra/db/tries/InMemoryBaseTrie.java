@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.tries;
 
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Predicate;
@@ -26,15 +25,11 @@ import javax.annotation.Nonnull;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
-import org.agrona.concurrent.UnsafeBuffer;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.compress.BufferType;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.github.jamm.MemoryLayoutSpecification;
 
 import static org.github.jamm.MemoryMeterStrategy.MEMORY_LAYOUT;
 
@@ -44,60 +39,30 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 {
     // See the trie format description in InMemoryReadTrie.
 
-    /// Trie size limit. This is not enforced, but users must check from time to time that it is not exceeded (using
-    /// [#reachedAllocatedSizeThreshold()]) and start switching to a new trie if it is.
-    /// This must be done to avoid tries growing beyond their hard 2GB size limit (due to the 32-bit pointers).
-    @VisibleForTesting
-    static final int ALLOCATED_SIZE_THRESHOLD;
-
-    static
-    {
-        // Default threshold + 10% == 2 GB. This should give the owner enough time to react to the
-        // {@link #reachedAllocatedSizeThreshold()} signal and switch this trie out before it fills up.
-        int limitInMB = CassandraRelevantProperties.MEMTABLE_TRIE_SIZE_LIMIT.getInt(2048 * 10 / 11);
-        if (limitInMB < 1 || limitInMB > 2047)
-            throw new AssertionError(CassandraRelevantProperties.MEMTABLE_TRIE_SIZE_LIMIT.getKey() +
-                                     " must be within 1 and 2047");
-        ALLOCATED_SIZE_THRESHOLD = 1024 * 1024 * limitInMB;
-    }
-
-    private int allocatedPos = 0;
-    private int contentCount = 0;
-
-    final BufferType bufferType;    // on or off heap
-    final MemoryAllocationStrategy cellAllocator;
-    final MemoryAllocationStrategy objectAllocator;
-
     // constants for space calculations
-    private static final long REFERENCE_ARRAY_ON_HEAP_SIZE = ObjectSizes.measureDeep(new AtomicReferenceArray<>(0));
+    static final long REFERENCE_ARRAY_ON_HEAP_SIZE = ObjectSizes.measureDeep(new AtomicReferenceArray<>(0));
 
-    enum ExpectedLifetime
+    public enum ExpectedLifetime
     {
         SHORT, LONG
     }
 
     InMemoryBaseTrie(ByteComparable.Version byteComparableVersion, boolean presentContentOnDescentPath, BufferType bufferType, ExpectedLifetime lifetime, OpOrder opOrder)
     {
-        super(byteComparableVersion,
-              presentContentOnDescentPath,
-              new UnsafeBuffer[31 - BUF_START_SHIFT],  // last one is 1G for a total of ~2G bytes
-              new AtomicReferenceArray[29 - CONTENTS_START_SHIFT],  // takes at least 4 bytes to write pointer to one content -> 4 times smaller than buffers
-              NONE);
-        this.bufferType = bufferType;
+        this(byteComparableVersion, presentContentOnDescentPath, null, bufferType, lifetime, opOrder);
+    }
 
-        switch (lifetime)
-        {
-            case SHORT:
-                cellAllocator = new MemoryAllocationStrategy.NoReuseStrategy(this::allocateNewCell);
-                objectAllocator = new MemoryAllocationStrategy.NoReuseStrategy(this::allocateNewObject);
-                break;
-            case LONG:
-                cellAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(this::allocateNewCell, opOrder);
-                objectAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(this::allocateNewObject, opOrder);
-                break;
-            default:
-                throw new AssertionError();
-        }
+    InMemoryBaseTrie(ByteComparable.Version byteComparableVersion, boolean presentContentOnDescentPath, Predicate<T> shouldPreserveWithoutChildren, BufferType bufferType, ExpectedLifetime lifetime, OpOrder opOrder)
+    {
+        this(byteComparableVersion,
+             presentContentOnDescentPath,
+             new BufferManagerMultibuf(bufferType, lifetime, opOrder),  // last one is 1G for a total of ~2G bytes
+             new ContentManagerPojo<>(shouldPreserveWithoutChildren, lifetime, opOrder));  // takes at least 4 bytes to write pointer to one content -> 4 times smaller than buffers
+    }
+
+    InMemoryBaseTrie(ByteComparable.Version byteComparableVersion, boolean presentContentOnDescentPath, BufferManager bufferManager, ContentManager<T> contentManager)
+    {
+        super(byteComparableVersion, presentContentOnDescentPath, bufferManager, contentManager, NONE);
     }
 
     // Buffer, content list and cell management
@@ -127,70 +92,22 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         getBuffer(pos).putByte(inBufferOffset(pos), value);
     }
 
-    /// Allocate a new cell in the data buffers. This is called by the memory allocation strategy when it runs out of
-    /// free cells to reuse.
-    private int allocateNewCell() throws TrieSpaceExhaustedException
-    {
-        // Note: If this method is modified, please run InMemoryTrieTest.testOver1GSize to verify it acts correctly
-        // close to the 2G limit.
-        int v = allocatedPos;
-        if (inBufferOffset(v) == 0)
-        {
-            int leadBit = getBufferIdx(v, BUF_START_SHIFT, BUF_START_SIZE);
-            if (leadBit + BUF_START_SHIFT == 31)
-                throw new TrieSpaceExhaustedException();
-
-            ByteBuffer newBuffer = bufferType.allocate(BUF_START_SIZE << leadBit);
-            buffers[leadBit] = new UnsafeBuffer(newBuffer);
-            // Note: Since we are not moving existing data to a new buffer, we are okay with no happens-before enforcing
-            // writes. Any reader that sees a pointer in the new buffer may only do so after reading the volatile write
-            // that attached the new path.
-        }
-
-        allocatedPos += CELL_SIZE;
-        return v;
-    }
-
-    /// Allocate a cell to use for storing data. This uses the memory allocation strategy to reuse cells if any are
-    /// available, or to allocate new cells using [#allocateNewCell]. Because some node types rely on cells being
-    /// filled with 0 as initial state, any cell we get through the allocator must also be cleaned.
     private int allocateCell() throws TrieSpaceExhaustedException
     {
-        int cell = cellAllocator.allocate();
-        getBuffer(cell).setMemory(inBufferOffset(cell), CELL_SIZE, (byte) 0);
-        return cell;
+        return bufferManager.allocateCell();
     }
 
     protected void recycleCell(int cell)
     {
-        cellAllocator.recycle(cell & -CELL_SIZE);
+        bufferManager.recycleCell(cell);
     }
 
     /// Creates a copy of a given cell and marks the original for recycling. Used when a mutation needs to force-copy
     /// paths to ensure earlier states are still available for concurrent readers.
     protected int copyCell(int cell) throws TrieSpaceExhaustedException
     {
-        int copy = cellAllocator.allocate();
-        getBuffer(copy).putBytes(inBufferOffset(copy), getBuffer(cell), inBufferOffset(cell & -CELL_SIZE), CELL_SIZE);
-        recycleCell(cell);
-        return copy | (cell & (CELL_SIZE - 1));
+        return bufferManager.copyCell(cell);
     }
-
-    /// Allocate a new position in the object array. Used by the memory allocation strategy to allocate a content spot
-    /// when it runs out of recycled positions.
-    private int allocateNewObject()
-    {
-        int index = contentCount++;
-        int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        AtomicReferenceArray<T> array = contentArrays[leadBit];
-        if (array == null)
-        {
-            assert inBufferOffset(index, leadBit, CONTENTS_START_SIZE) == 0 : "Error in content arrays configuration.";
-            contentArrays[leadBit] = new AtomicReferenceArray<>(CONTENTS_START_SIZE << leadBit);
-        }
-        return index;
-    }
-
 
     /// Add a new content value.
     ///
@@ -200,50 +117,36 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     {
         if (value == null)
             return NONE;
-
-        int index = objectAllocator.allocate();
-        int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        int ofs = inBufferOffset(index, leadBit, CONTENTS_START_SIZE);
-        AtomicReferenceArray<T> array = contentArrays[leadBit];
-        // no need for a volatile set here; at this point the item is not referenced
-        // by any node in the trie, and a volatile set will be made to reference it.
-        array.setPlain(ofs, value);
-        return formContentId(index, contentAfterBranch);
-    }
-
-    private int formContentId(int index, boolean contentAfterBranch)
-    {
-        return index | (1 << 31) | (contentAfterBranch ? CONTENT_AFTER_BRANCH : 0);
+        int id = contentManager.addContent(value, contentAfterBranch);
+        assert isLeaf(id);
+        return id;
     }
 
     /// Change the content associated with a given content id.
     ///
     /// @param id encoded content id, where `id & CONTENT_INDEX_MASK` is the position in the content array
     /// @param value new content value to store
-    protected void setContent(int id, T value)
+    /// @return the id to use for the modified content; an attempt will be made to make this the same as id, but not
+    ///         all content managers will be able to freely modify the data for a given id.
+    protected int setContent(int id, T value) throws TrieSpaceExhaustedException
     {
-        int leadBit = getBufferIdx(id & CONTENT_INDEX_MASK, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        int ofs = inBufferOffset(id & CONTENT_INDEX_MASK, leadBit, CONTENTS_START_SIZE);
-        AtomicReferenceArray<T> array = contentArrays[leadBit];
-        array.set(ofs, value);
+        return contentManager.setContent(id, value);
     }
 
     protected void releaseContent(int id)
     {
-        objectAllocator.recycle(id & CONTENT_INDEX_MASK);
+        contentManager.releaseContent(id);
+    }
+
+    protected boolean shouldPreserveWithoutChildren(int id)
+    {
+        return contentManager.shouldPreserveWithoutChildren(id);
     }
 
     /// Called to clean up all buffers when the trie is known to no longer be needed.
     public void discardBuffers()
     {
-        if (bufferType == BufferType.ON_HEAP)
-            return; // no cleaning needed
-
-        for (UnsafeBuffer b : buffers)
-        {
-            if (b != null)
-                FileUtils.clean(b.byteBuffer());
-        }
+        bufferManager.discardBuffers();
     }
 
     private int copyIfOriginal(int node, int originalNode) throws TrieSpaceExhaustedException
@@ -1071,17 +974,17 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
 
         /// Advance to the given depth and transition. Returns false if the depth signals mutation cursor is exhausted.
-        boolean advanceTo(int depth, int transition, int forcedCopyDepth, Predicate<? super T> danglingMetadataCleaner) throws TrieSpaceExhaustedException
+        boolean advanceTo(int depth, int transition, int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
-            return advanceTo(depth, transition, forcedCopyDepth, 0, danglingMetadataCleaner);
+            return advanceTo(depth, transition, forcedCopyDepth, 0);
         }
         /// Advance to the given depth and transition. Returns false if the depth signals mutation cursor is exhausted.
-        boolean advanceTo(int depth, int transition, int forcedCopyDepth, int ascendLimit, Predicate<? super T> danglingMetadataCleaner) throws TrieSpaceExhaustedException
+        boolean advanceTo(int depth, int transition, int forcedCopyDepth, int ascendLimit) throws TrieSpaceExhaustedException
         {
             while (currentDepth >= Math.max(ascendLimit + 1, depth))
             {
                 // There are no more children. Ascend to the parent state to continue walk.
-                attachAndMoveToParentState(forcedCopyDepth, danglingMetadataCleaner);
+                attachAndMoveToParentState(forcedCopyDepth);
             }
             if (depth <= ascendLimit)
                 return false;
@@ -1101,8 +1004,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                                         int limitTransition,
                                         boolean limitIsOnReturnPath,
                                         int forcedCopyDepth,
-                                        int ascendLimit,
-                                        Predicate<? super T> danglingMetadataCleaner)
+                                        int ascendLimit)
         throws TrieSpaceExhaustedException
         {
             assert limitDepth >= ascendLimit;
@@ -1125,12 +1027,12 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                     (limitDepth == ascendLimit || transitionAtDepth(currentDepth - 1) == limitTransition))
                     return false;
 
-                attachAndMoveToParentState(forcedCopyDepth, danglingMetadataCleaner);
+                attachAndMoveToParentState(forcedCopyDepth);
             }
         }
 
         /// Advance to the next existing position in the trie.
-        boolean advanceToNextExisting(int forcedCopyDepth, int ascendLimit, Predicate<? super T> danglingMetadataCleaner)
+        boolean advanceToNextExisting(int forcedCopyDepth, int ascendLimit)
         throws TrieSpaceExhaustedException
         {
             while (true)
@@ -1146,7 +1048,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 if (currentDepth <= ascendLimit)
                     return false;
 
-                attachAndMoveToParentState(forcedCopyDepth, danglingMetadataCleaner);
+                attachAndMoveToParentState(forcedCopyDepth);
             }
         }
 
@@ -1170,7 +1072,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             int existingPostContentNode;
             if (isLeaf(existingFullNode))
             {
-                existingContentId = (existingFullNode & CONTENT_AFTER_BRANCH) == 0 ? existingFullNode : NONE;
+                existingContentId = trie.shouldPresentAfterBranch(existingFullNode) ? NONE : existingFullNode;
                 existingPostContentNode = NONE;
             }
             else if (offset(existingFullNode) == PREFIX_OFFSET)
@@ -1219,8 +1121,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             }
             else
             {
-                trie.setContent(existingContentId, newContent);
-                return existingContentId;
+                return trie.setContent(existingContentId, newContent);
             }
         }
 
@@ -1243,7 +1144,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
         /// Apply the collected content to a node. If there is content to add, converts `NONE` to a leaf node, and adds
         /// or updates a prefix for all others.
-        protected int applyContent(boolean forcedCopy, Predicate<? super T> danglingMetadataCleaner)
+        protected int applyContent(boolean forcedCopy)
         throws TrieSpaceExhaustedException
         {
             // Note: the old content id itself is already released by setContent. Here we must release any standalone
@@ -1258,7 +1159,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             {
                 // This node has no children. If the content is metadata that has no meaning if no children exist,
                 // remove it.
-                if (!isNull(contentId) && danglingMetadataCleaner.test(trie.getContent(contentId)))
+                if (!isNull(contentId) && !trie.shouldPreserveWithoutChildren(contentId))
                 {
                     trie.releaseContent(contentId);
                     contentId = NONE;
@@ -1344,9 +1245,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// After a node's children are processed, this is called to ascend from it. This means applying the collected
         /// content to the compiled `updatedPostContentNode` and creating a mapping in the parent to it (or updating if
         /// one already exists).
-        void attachAndMoveToParentState(int forcedCopyDepth, Predicate<? super T> danglingMetadataCleaner) throws TrieSpaceExhaustedException
+        void attachAndMoveToParentState(int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
-            attachBranchAndMoveToParentState(applyContent(currentDepth >= forcedCopyDepth, danglingMetadataCleaner), forcedCopyDepth);
+            attachBranchAndMoveToParentState(applyContent(currentDepth >= forcedCopyDepth), forcedCopyDepth);
         }
 
         void attachBranchAndMoveToParentState(int updatedFullNode, int forcedCopyDepth) throws TrieSpaceExhaustedException {
@@ -1359,9 +1260,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
 
         /// Ascend and update the root at the end of processing.
-        void attachAndUpdateRoot(int forcedCopyDepth, Predicate<? super T> danglingMetadataCleaner) throws TrieSpaceExhaustedException
+        void attachAndUpdateRoot(int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
-            attachRoot(applyContent(0 >= forcedCopyDepth, danglingMetadataCleaner), forcedCopyDepth);
+            attachRoot(applyContent(0 >= forcedCopyDepth), forcedCopyDepth);
         }
 
         void attachRoot(int updatedFullNode, int ignoredForcedCopyDepth)
@@ -1488,7 +1389,6 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     {
         final UpsertTransformer<T, U> transformer;
         final Predicate<NodeFeatures<U>> needsForcedCopy;
-        final Predicate<? super T> danglingMetadataCleaner;
         final A state;
 
         C mutationCursor;
@@ -1496,12 +1396,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
         Mutator(UpsertTransformer<T, U> transformer,
                 Predicate<NodeFeatures<U>> needsForcedCopy,
-                Predicate<? super T> danglingMetadataCleaner,
                 A state)
         {
             this.transformer = transformer;
             this.needsForcedCopy = needsForcedCopy;
-            this.danglingMetadataCleaner = danglingMetadataCleaner;
             this.state = state;
         }
 
@@ -1533,7 +1431,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 long position = mutationCursor.advance();
                 assert !Cursor.isOnReturnPath(position) : "Return path in forward direction can only be used in range tries.";
                 depth = Cursor.depth(position);
-                if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth, danglingMetadataCleaner))
+                if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
                     break;
                 assert state.currentDepth == depth : "Unexpected change to applyState. Concurrent trie modification?";
             }
@@ -1547,8 +1445,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 T existingContent = state.getDescentPathContent();
                 T combinedContent = transformer.apply(existingContent, content);
                 if (combinedContent != existingContent)
-                state.setDescentPathContent(combinedContent, // can be null
-                                            state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
+                    state.setDescentPathContent(combinedContent, // can be null
+                                                state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
             }
         }
 
@@ -1556,7 +1454,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         void complete() throws TrieSpaceExhaustedException
         {
             assert state.currentDepth == 0 : "Unexpected change to applyState. Concurrent trie modification?";
-            state.attachAndUpdateRoot(forcedCopyDepth, danglingMetadataCleaner);
+            state.attachAndUpdateRoot(forcedCopyDepth);
         }
 
         @Override
@@ -1701,7 +1599,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         {
             int contentId = node;
 
-            if (contentAfterBranch == ((contentId & CONTENT_AFTER_BRANCH) != 0))
+            if (contentAfterBranch == shouldPresentAfterBranch(node))
             {
                 T existingContent = getContent(contentId);
                 T newContent = transformer.apply(existingContent, value);
@@ -1710,8 +1608,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                     return contentId;
                 if (newContent != null)
                 {
-                    setContent(contentId, newContent);
-                    return contentId;
+                    return setContent(contentId, newContent);
                 }
                 else
                 {
@@ -1746,7 +1643,11 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             if (newContent != null)
             {
                 if (!isNull(contentId))
-                    setContent(contentId, newContent);
+                {
+                    int newId = setContent(contentId, newContent);
+                    if (newId != contentId)
+                        putIntVolatile(node + contentOffset, newId);
+                }
                 else
                     putIntVolatile(node + contentOffset, addContent(newContent, contentAfterBranch));
                 return node;
@@ -1787,14 +1688,14 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
     void completeMutation()
     {
-        cellAllocator.completeMutation();
-        objectAllocator.completeMutation();
+        bufferManager.completeMutation();
+        contentManager.completeMutation();
     }
 
     void abortMutation()
     {
-        cellAllocator.abortMutation();
-        objectAllocator.abortMutation();
+        bufferManager.abortMutation();
+        contentManager.abortMutation();
     }
 
     /// Returns true if the allocation threshold has been reached. To be called by the the writing thread (ideally, just
@@ -1804,25 +1705,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// the trie will fail altogether when the size grows beyond 2G - 256 bytes.
     public boolean reachedAllocatedSizeThreshold()
     {
-        return allocatedPos >= ALLOCATED_SIZE_THRESHOLD;
+        return bufferManager.reachedAllocatedSizeThreshold();
     }
 
-    /// For tests only! Advance the allocation pointer (and allocate space) by this much to test behaviour close to
-    /// full.
-    @VisibleForTesting
-    int advanceAllocatedPos(int wantedPos) throws TrieSpaceExhaustedException
-    {
-        while (allocatedPos < wantedPos)
-            allocateCell();
-        return allocatedPos;
-    }
-
-    /// For tests only! Returns the current allocation position.
-    @VisibleForTesting
-    int getAllocatedPos()
-    {
-        return allocatedPos;
-    }
+    protected abstract long emptySizeOnHeap();
 
     /// Returns the off heap size of the memtable trie itself, not counting any space taken by referenced content, or
     /// any space that has been allocated but is not currently in use (e.g. recycled cells or preallocated buffer).
@@ -1832,10 +1718,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// possible to flush out before making these large allocations.
     public long usedSizeOffHeap()
     {
-        return bufferType == BufferType.ON_HEAP ? 0 : usedBufferSpace();
+        return contentManager.usedSizeOffHeap() + bufferManager.usedSizeOffHeap();
     }
-
-    protected abstract long emptySizeOnHeap();
 
     /// Returns the on heap size of the memtable trie itself, not counting any space taken by referenced content, or
     /// any space that has been allocated but is not currently in use (e.g. recycled cells or preallocated buffer).
@@ -1846,22 +1730,14 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     public long usedSizeOnHeap()
     {
         return emptySizeOnHeap() +
-               usedObjectSpace() +
-               REFERENCE_ARRAY_ON_HEAP_SIZE * getBufferIdx(contentCount, CONTENTS_START_SHIFT, CONTENTS_START_SIZE) +
-               (bufferType == BufferType.ON_HEAP ? usedBufferSpace() : 0) +
-               REFERENCE_ARRAY_ON_HEAP_SIZE * getBufferIdx(allocatedPos, BUF_START_SHIFT, BUF_START_SIZE);
+               contentManager.usedSizeOnHeap() +
+               bufferManager.usedSizeOnHeap();
     }
 
     @VisibleForTesting
     public long usedBufferSpace()
     {
-        return allocatedPos - cellAllocator.indexCountInPipeline() * CELL_SIZE;
-    }
-
-    @VisibleForTesting
-    long usedObjectSpace()
-    {
-        return (contentCount - objectAllocator.indexCountInPipeline()) * MEMORY_LAYOUT.getReferenceSize();
+        return bufferManager.usedBufferSpace();
     }
 
     /// Returns the amount of memory that has been allocated for various buffers but isn't currently in use.
@@ -1869,25 +1745,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     @VisibleForTesting
     public long unusedReservedOnHeapMemory()
     {
-        long bufferOverhead = 0;
-        if (bufferType == BufferType.ON_HEAP)
-        {
-            int pos = this.allocatedPos;
-            UnsafeBuffer buffer = getBuffer(pos);
-            if (buffer != null)
-                bufferOverhead = buffer.capacity() - inBufferOffset(pos);
-            bufferOverhead += cellAllocator.indexCountInPipeline() * CELL_SIZE;
-        }
-
-        int index = contentCount;
-        int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        int ofs = inBufferOffset(index, leadBit, CONTENTS_START_SIZE);
-        AtomicReferenceArray<T> contentArray = contentArrays[leadBit];
-        long contentOverhead = ((contentArray != null ? contentArray.length() : 0) - ofs);
-        contentOverhead += objectAllocator.indexCountInPipeline();
-        contentOverhead *= MEMORY_LAYOUT.getReferenceSize();
-
-        return bufferOverhead + contentOverhead;
+        return bufferManager.unusedReservedOnHeapMemory() + contentManager.unusedReservedOnHeapMemory();
     }
 
     /// Release all recycled content references, including the ones waiting in still incomplete recycling lists.
@@ -1898,13 +1756,12 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     @VisibleForTesting
     public void releaseReferencesUnsafe()
     {
-        for (int idx : objectAllocator.indexesInPipeline())
-            setContent(formContentId(idx, false), null);
+        contentManager.releaseReferencesUnsafe();
     }
 
     /// Returns the number of values in the trie
     public int valuesCount()
     {
-        return contentCount;
+        return contentManager.valuesCount();
     }
 }

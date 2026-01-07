@@ -24,6 +24,7 @@ import com.google.common.base.Objects;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -70,7 +71,7 @@ public class DeletionTime implements Comparable<DeletionTime>, IMeasurableMemory
 
     protected DeletionTime(long markedForDeleteAt, long localDeletionTime)
     {
-        this(markedForDeleteAt, Cell.deletionTimeLongToUnsignedInteger(localDeletionTime));
+        this(markedForDeleteAt, CellData.deletionTimeLongToUnsignedInteger(localDeletionTime));
     }
 
     private DeletionTime(long markedForDeleteAt, int localDeletionTimeUnsignedInteger)
@@ -95,7 +96,7 @@ public class DeletionTime implements Comparable<DeletionTime>, IMeasurableMemory
      */
     public long localDeletionTime()
     {
-        return Cell.deletionTimeUnsignedIntegerToLong(localDeletionTimeUnsignedInteger);
+        return CellData.deletionTimeUnsignedIntegerToLong(localDeletionTimeUnsignedInteger);
     }
 
     /**
@@ -170,7 +171,7 @@ public class DeletionTime implements Comparable<DeletionTime>, IMeasurableMemory
         return deletes(info.timestamp());
     }
 
-    public boolean deletes(Cell<?> cell)
+    public boolean deletes(CellData<?, ?> cell)
     {
         return deletes(cell.timestamp());
     }
