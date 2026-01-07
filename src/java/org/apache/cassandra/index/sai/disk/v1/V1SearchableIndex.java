@@ -289,12 +289,12 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCount(Expression predicate)
     {
         long rowCount = 0;
         for (Segment segment: segments)
         {
-            long c = segment.estimateMatchingRowsCount(predicate, keyRange);
+            long c = segment.estimateMatchingRowsCount(predicate);
             assert c >= 0 : "Estimated row count must not be negative: " + c + " (predicate: " + predicate + ')';
             rowCount += c;
         }

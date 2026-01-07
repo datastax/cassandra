@@ -129,7 +129,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCount(Expression predicate)
     {
         return 0;
     }
