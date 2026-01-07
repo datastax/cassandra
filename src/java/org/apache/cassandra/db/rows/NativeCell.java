@@ -74,7 +74,7 @@ public class NativeCell extends AbstractCell<ByteBuffer>
                       ByteBuffer value,
                       CellPath path)
     {
-        this(allocator, writeOp, column, timestamp, ttl, deletionTimeLongToUnsignedInteger(localDeletionTime), value, path);
+        this(allocator, writeOp, column, timestamp, ttl, CellData.deletionTimeLongToUnsignedInteger(localDeletionTime), value, path);
     }
 
     public NativeCell(NativeAllocator allocator,

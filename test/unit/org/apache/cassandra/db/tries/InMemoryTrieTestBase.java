@@ -39,8 +39,8 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
@@ -275,7 +275,7 @@ public abstract class InMemoryTrieTestBase
                             .mapToInt(src1 -> ByteComparable.length(src1, VERSION))
                             .sum();
         long ts = ObjectSizes.measureDeep(content);
-        long onh = ObjectSizes.measureDeep(trie.contentArrays);
+        long onh = ObjectSizes.measureDeep(((ContentManagerPojo<?>) trie.contentManager).contentArrays);
         System.out.format("Trie size on heap %,d off heap %,d measured %,d keys %,d treemap %,d\n",
                           trie.usedSizeOnHeap(), trie.usedSizeOffHeap(), onh, keysize, ts);
         System.out.format("per entry on heap %.2f off heap %.2f measured %.2f keys %.2f treemap %.2f\n",
@@ -401,10 +401,10 @@ public abstract class InMemoryTrieTestBase
                 assertEquals(test, trie.get(mapping.apply(test)));
         }
         assertTrue(trie.isEmpty());
-        if (trie.cellAllocator instanceof MemoryAllocationStrategy.OpOrderReuseStrategy)
+        if (((BufferManagerMultibuf) trie.bufferManager).cellAllocator instanceof MemoryAllocationStrategy.OpOrderReuseStrategy)
         {
-            assertEquals(0L, trie.usedBufferSpace());
-            assertEquals(0L, trie.usedObjectSpace());
+            assertEquals(0L, trie.bufferManager.usedBufferSpace());
+            assertEquals(0L, ((ContentManagerPojo<?>) trie.contentManager).usedObjectSpace());
         }
     }
 

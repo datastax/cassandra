@@ -41,9 +41,10 @@ public class ObjectSizes
                                                                                 Guess.UNSAFE)
                                                                   .build();
 
-    private static final long HEAP_BUFFER_SHALLOW_SIZE = measure(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+    public static final long HEAP_BUFFER_SHALLOW_SIZE = measure(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+
     private static final long DIRECT_BUFFER_SHALLOW_SIZE = measure(ByteBuffer.allocateDirect(0));
-    private static final long DIRECT_BUFFER_DEEP_SIZE = measureDeep(ByteBuffer.allocateDirect(0));
+    public static final long DIRECT_BUFFER_DEEP_SIZE = measureDeep(ByteBuffer.allocateDirect(0));
 
     public static final long IPV6_SOCKET_ADDRESS_SIZE = ObjectSizes.measureDeep(new InetSocketAddress(getIpvAddress(16), 42));
 
@@ -146,7 +147,7 @@ public class ObjectSizes
      *   <ul>
      *       <li>That slabs are always created using: {@code buffer.duplicate().position(start).limit(end)} and not through slice</li>
      *       <li>That the input buffers are not read-only buffers</li>
-     *       <li>That the direct buffers that are not slab are not duplicates</li>  
+     *       <li>That the direct buffers that are not slab are not duplicates</li>
      *   </ul>
      *  Non-respect of those assumptions can lead to an invalid value being returned.
      * @param buffer the buffer to measure
@@ -181,9 +182,9 @@ public class ObjectSizes
      *   <ul>
      *       <li>That slabs are always created using: {@code buffer.duplicate().position(start).limit(end)} and not through slice</li>
      *       <li>That the input buffers are not read-only buffers</li>
-     *       <li>That the direct buffers that are not slab are not duplicates</li>  
+     *       <li>That the direct buffers that are not slab are not duplicates</li>
      *   </ul>
-     *  Non-respect of those assumptions can lead to an invalid value being returned. T 
+     *  Non-respect of those assumptions can lead to an invalid value being returned. T
      * @param buffer the buffer to measure
      * @return the heap memory used by the specified byte buffer excluding the data..
      */

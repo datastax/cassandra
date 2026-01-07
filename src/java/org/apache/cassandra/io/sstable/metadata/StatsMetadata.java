@@ -40,6 +40,7 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.sstable.format.Version;
@@ -450,8 +451,8 @@ public class StatsMetadata extends MetadataComponent
             out.writeLong(component.maxTimestamp);
             if (version.hasUIntDeletionTime())
             {
-                out.writeInt(Cell.deletionTimeLongToUnsignedInteger(component.minLocalDeletionTime));
-                out.writeInt(Cell.deletionTimeLongToUnsignedInteger(component.maxLocalDeletionTime));
+                out.writeInt(CellData.deletionTimeLongToUnsignedInteger(component.minLocalDeletionTime));
+                out.writeInt(CellData.deletionTimeLongToUnsignedInteger(component.maxLocalDeletionTime));
             }
             else
             {
@@ -627,8 +628,8 @@ public class StatsMetadata extends MetadataComponent
             long maxLocalDeletionTime;
             if (version.hasUIntDeletionTime())
             {
-                minLocalDeletionTime = Cell.deletionTimeUnsignedIntegerToLong(in.readInt());
-                maxLocalDeletionTime = Cell.deletionTimeUnsignedIntegerToLong(in.readInt());
+                minLocalDeletionTime = CellData.deletionTimeUnsignedIntegerToLong(in.readInt());
+                maxLocalDeletionTime = CellData.deletionTimeUnsignedIntegerToLong(in.readInt());
             }
             else
             {
