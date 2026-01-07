@@ -67,6 +67,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     @Rule
     public ExpectedException exception = ExpectedException.none();
 
+
     @Test
     public void testSameIndexNameAcrossKeyspaces()
     {
@@ -518,23 +519,31 @@ public class QueryMetricsTest extends AbstractMetricsTest
         rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 1");
         assertEquals(numRowsPerPartition, rows.size());
 
-        // hybrid query, postfiltering (goes to the general, hybrid and range query metrics)
+        // hybrid query doing filtering after the sorted index scan (goes to the general, hybrid and range query metrics)
         rows = execute("SELECT k, c FROM %s WHERE n = 1 ORDER BY v ANN OF [1, 1] LIMIT 1000");
         assertEquals(numRows, rows.size());
 
-        // hybrid query, single partition (goes to the general, hybrid and range query metrics)
+        // hybrid query doing filtering after the sorted index scan, single partition (goes to the general, hybrid and range query metrics)
         rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 1 ORDER BY v ANN OF [1, 1] LIMIT 1000");
         assertEquals(numRowsPerPartition, rows.size());
 
+        // hybrid query doing search first (goes to the general, hybrid and range query metrics)
+        rows = execute("SELECT k, c FROM %s WHERE n = 2 ORDER BY v ANN OF [1, 1] LIMIT 1000");
+        assertEquals(0, rows.size());
+
+        // hybrid query doing search first, single partition (goes to the general, hybrid and range query metrics)
+        rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 2 ORDER BY v ANN OF [1, 1] LIMIT 1000");
+        assertEquals(0, rows.size());
+
         // Verify metrics for total queries completed.
         String name = "TotalQueriesCompleted";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 6);
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 8);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 2);
 
         // Verify counters for total keys fetched.
         name = "TotalKeysFetched";
@@ -621,9 +630,9 @@ public class QueryMetricsTest extends AbstractMetricsTest
         // We have no support for forcing the different order of operations in the query engine, so we cannot
         // directly test sort-then-filter queries.
         name = "SortThenFilterQueriesCompleted";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 0);
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 1);
 
         // Verify counters for filter-then-sort hybrid queries.
         name = "FilterThenSortQueriesCompleted";
@@ -643,13 +652,13 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
     private void verifyHistogramCount(String name, boolean hasPerQueryKindMetrics)
     {
-        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 6);
+        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 8);
         waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_SP_FILTER_QUERY_METRIC_TYPE), 1);
         waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_FILTER_QUERY_METRIC_TYPE), 1);
         waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_SP_TOPK_QUERY_METRIC_TYPE), 1);
         waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_SP_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_SP_HYBRID_QUERY_METRIC_TYPE), 2);
+        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_HYBRID_QUERY_METRIC_TYPE), 2);
     }
 
     private ObjectName objectName(String name, String type)

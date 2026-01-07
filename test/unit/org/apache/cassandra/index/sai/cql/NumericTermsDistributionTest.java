@@ -230,10 +230,9 @@ public class NumericTermsDistributionTest extends SAITester
                                    .values();
         var expression = buildExpression(index, op, value);
         var memoryCount = 0L;
-        var wholeRange = DataRange.allData(index.getIndexContext().getPartitioner()).keyRange();
         for (var memtableIndex : memtableIndexes)
             for (var memoryIndex : ((TrieMemtableIndex) memtableIndex).getRangeIndexes())
-                memoryCount += memoryIndex.estimateMatchingRowsCount(expression, wholeRange);
+                memoryCount += memoryIndex.estimateMatchingRowsCount(expression);
 
         assertEstimateCorrect(expectedCount, roundingValue, uncertainty, memoryCount);
     }
@@ -246,11 +245,10 @@ public class NumericTermsDistributionTest extends SAITester
     private void assertSSTableEstimateCount(StorageAttachedIndex index, Operator op, String value, long expectedCount, long roundingValue, long uncertainty)
     {
         var expression = buildExpression(index, op, value);
-        var wholeRange = DataRange.allData(index.getIndexContext().getPartitioner()).keyRange();
         var view = index.getIndexContext().getView();
         var onDiskCount = 0L;
         for (var sstableIndex : view.getIndexes())
-            onDiskCount += sstableIndex.estimateMatchingRowsCount(expression, wholeRange);
+            onDiskCount += sstableIndex.estimateMatchingRowsCount(expression);
 
         assertEstimateCorrect(expectedCount, roundingValue, uncertainty, onDiskCount);
     }

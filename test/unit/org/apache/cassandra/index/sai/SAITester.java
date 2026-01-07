@@ -60,6 +60,7 @@ import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.ReadFailureException;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -80,6 +81,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
@@ -93,6 +95,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
@@ -1092,33 +1095,51 @@ public class SAITester extends CQLTester
         List<String> warnings = ClientWarn.instance.getWarnings();
         ClientWarn.instance.resetWarnings();
 
-        // Then get the indexes used by the plan
-        Set<String> plannedIndexes = plannedIndexes(query);
-        return new PlanSelectionAssertion(plannedIndexes, warnings);
-    }
-
-    private Set<String> plannedIndexes(String query)
-    {
         ReadCommand command = parseReadCommand(query);
         Index.QueryPlan queryPlan = command.indexQueryPlan();
         if (queryPlan == null)
-            return Collections.emptySet();
+            return new PlanSelectionAssertion(null, warnings);
 
         StorageAttachedIndexQueryPlan saiQueryPlan = (StorageAttachedIndexQueryPlan) queryPlan;
         Assertions.assertThat(saiQueryPlan).isNotNull();
+
         StorageAttachedIndexSearcher searcher = saiQueryPlan.searcherFor(command);
-        return searcher.plannedIndexes();
+        try
+        {
+            return new PlanSelectionAssertion(searcher.buildPlan(), warnings);
+        }
+        finally
+        {
+            searcher.abort();
+        }
     }
 
     protected static class PlanSelectionAssertion
     {
+        private final double expectedRows;
         private final Set<String> selectedIndexes;
         private final List<String> warnings;
 
-        public PlanSelectionAssertion(Set<String> selectedIndexes, @Nullable List<String> warnings)
+        public PlanSelectionAssertion(@Nullable Plan.RowsIteration plan, @Nullable List<String> warnings)
         {
-            this.selectedIndexes = selectedIndexes;
+            this.expectedRows = plan != null ? plan.expectedRows() : -1.0;
+            this.selectedIndexes = plan != null ? plannedIndexes(plan) : Set.of();
             this.warnings = warnings;
+        }
+
+        private Set<String> plannedIndexes(Plan plan)
+        {
+            Set<String> indexes = new HashSet<>();
+            plan.visitIndexesRecursive(i -> indexes.add(i.getIndexName()));
+            return indexes;
+        }
+
+        public PlanSelectionAssertion hasEstimatedRowsCountBetween(double minRows, double maxRows)
+        {
+            Assertions.assertThat(expectedRows)
+                      .as("Expected rows to be between %s and %s, but got: %s", minRows, maxRows, expectedRows)
+                      .isBetween(minRows, maxRows);
+            return this;
         }
 
         public PlanSelectionAssertion uses(String... indexes)
