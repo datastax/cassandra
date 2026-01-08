@@ -592,7 +592,7 @@ public enum CassandraRelevantProperties
     MMAPPED_MAX_SEGMENT_SIZE_IN_MB("cassandra.mmapped_max_segment_size"),
     /**
      * Whether to log detailed execution info when logging slow non-SAI queries.
-     * For SAI queries, see {@link #SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED}.
+     * For SAI queries, see {@link #SAI_MONITORING_EXECUTION_INFO_ENABLED}.
      */
     MONITORING_EXECUTION_INFO_ENABLED("cassandra.monitoring_execution_info_enabled", "true"),
     /** Defines the maximum number of unique timed out queries that will be reported in the logs. Use a negative number to remove any limit. */
@@ -769,6 +769,14 @@ public enum CassandraRelevantProperties
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "8"),
     SAI_MAX_STRING_TERM_SIZE("cassandra.sai.max_string_term_size_kb", "8"),
     SAI_MAX_VECTOR_TERM_SIZE("cassandra.sai.max_vector_term_size_kb", "16"),
+
+    /**
+     * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
+     * This execution info includes the query metrics and the query plan of the slow queries.
+     * For non-SAI queries, see {@link #MONITORING_EXECUTION_INFO_ENABLED}.
+     */
+    SAI_MONITORING_EXECUTION_INFO_ENABLED("cassandra.sai.monitoring_execution_info_enabled", "true"),
+
     // Use non-positive value to disable it. Period in millis to trigger a flush for SAI non-vector memtable index.
     SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.non_vector_flush_period_in_millis", "-1"),
     // Use non-positive value to disable it. When num of rows in SAI non-vector memtable index reaches the threshold, it triggers flush
@@ -794,13 +802,6 @@ public enum CassandraRelevantProperties
 
     SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
     SAI_REDUCE_TOPK_ACROSS_SSTABLES("cassandra.sai.reduce_topk_across_sstables", "true"),
-
-    /**
-     * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
-     * This execution info includes the query metrics and the query plan of the slow queries.
-     * For non-SAI queries, see {@link #MONITORING_EXECUTION_INFO_ENABLED}.
-     */
-    SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
 
     /**
      * Whether to enable SAI table state metrics such as disk usage, queryable index count, and index build progress.
