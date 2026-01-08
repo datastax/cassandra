@@ -28,7 +28,8 @@ public class TableStateMetrics extends AbstractMetrics
 {
     public static final String TABLE_STATE_METRIC_TYPE = "TableStateMetrics";
 
-    private final Gauge diskUsageBytes;
+    // Visible for CNDB
+    public final Gauge diskUsageBytes;
     private final Gauge diskUsagePercentageOfBaseTable;
     private final Gauge totalIndexCount;
     private final Gauge totalIndexBuildsInProgress;
