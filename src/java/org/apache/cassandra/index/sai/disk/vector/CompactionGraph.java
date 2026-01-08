@@ -45,6 +45,7 @@ import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
@@ -75,6 +76,7 @@ import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -118,6 +120,9 @@ public class CompactionGraph implements Closeable, Accountable
 
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
+
+    private static boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
+    private static boolean PARALLEL_ENCODING_WRITING = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL.getBoolean();
 
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
@@ -241,12 +246,16 @@ public class CompactionGraph implements Closeable, Accountable
     private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper, NVQuantization nvq) throws IOException
     {
         var feature = nvq != null ? new NVQ(nvq) : new InlineVectors(dimension);
-        return new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
-               .withStartOffset(termsOffset)
-               .with(feature)
-               .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
-               .withMapper(ordinalMapper)
-               .build();
+        // TODO is this hack to use a local path safe?
+        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toJavaIOFile().toPath())
+                            .withParallelWrites(PARALLEL_ENCODING_WRITING)
+                            .withStartOffset(termsOffset)
+                            .with(feature)
+                            .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
+                            .withMapper(ordinalMapper);
+        if (ENABLE_FUSED && compressor instanceof ProductQuantization && context.version().onDiskFormat().jvectorFileFormatVersion() >= 6)
+            writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
+        return writerBuilder.build();
     }
 
     @Override
@@ -435,13 +444,17 @@ public class CompactionGraph implements Closeable, Accountable
             var ordinalMapper = new AtomicReference<OrdinalMapper>();
             long postingsOffset = postingsOutput.getFilePointer();
             var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
+
             var postingsFuture = es.submit(() -> {
                 // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
                 // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
                 // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
                 // if a row with null vector in sstable A gets updated with a vector in sstable B)
+                // If there are too many holes, we leave the mapping on the disk.
                 if (postingsStructure == Structure.ONE_TO_MANY
-                    && (!V5OnDiskFormat.writeV5VectorPostings(version) || useSyntheticOrdinals))
+                    && (!V5OnDiskFormat.writeV5VectorPostings(version)
+                        || useSyntheticOrdinals
+                        || V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED < (double) lastRowId / postingsMap.size()))
                 {
                     postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
                 }
@@ -463,7 +476,6 @@ public class CompactionGraph implements Closeable, Accountable
             long postingsLength = postingsEnd - postingsOffset;
             es.shutdown();
 
-            // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();
 
             // Null if we not using nvq
@@ -489,7 +501,18 @@ public class CompactionGraph implements Closeable, Accountable
                             return new InlineVectors.State(threadLocalReaders.get().getVector(ordinal));
                         });
                     }
-                    writer.write(supplier);
+                    if (writer.getFeatureSet().contains(FeatureId.FUSED_PQ))
+                    {
+                        try (var view = builder.getGraph().getView())
+                        {
+                            supplier.put(FeatureId.FUSED_PQ, ordinal -> new FusedPQ.State(view, (PQVectors) compressedVectors, ordinal));
+                            writer.write(supplier);
+                        }
+                    }
+                    else
+                    {
+                        writer.write(supplier);
+                    }
                 }
                 catch (Exception e)
                 {
