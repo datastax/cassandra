@@ -179,7 +179,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 {
                     if (isStopRequested())
                     {
-                        logger.debug(indexDescriptor.logMessage("Index build has been stopped"));
+                        logger.debug(indexDescriptor.logMessage("Index build has been stopped. Reason: {}"), trigger());
                         throw new CompactionInterruptedException(getProgress(), trigger());
                     }
 
@@ -250,12 +250,12 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             {
                 if (isInitialBuild && trigger() != TRUNCATE)
                 {
-                    logger.error(logMessage("Stop requested while building initial indexes {} on SSTable {}."), indexes, sstable.descriptor);
+                    logger.error(logMessage("Stop requested while building initial indexes {} on SSTable {}. {}"), indexes, sstable.descriptor, t.getMessage());
                     throw Throwables.unchecked(t);
                 }
                 else
                 {
-                    logger.info(logMessage("Stop requested while building indexes {} on SSTable {}."), indexes, sstable.descriptor);
+                    logger.info(logMessage("Stop requested while building indexes {} on SSTable {}. {}"), indexes, sstable.descriptor, t.getMessage());
                     return true;
                 }
             }
