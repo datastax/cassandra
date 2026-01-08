@@ -189,6 +189,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
+        logger.debug("Creating Plan.Factory for table " + cfs.getTableName() + ": " + tableMetrics);
         this.planFactory = new Plan.Factory(cfs.metadata.keyspace, tableMetrics, this, command.rowFilter().indexHints);
     }
 
@@ -372,12 +373,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private void updateIndexMetricsQueriesCount(Plan plan)
     {
         HashSet<IndexContext> queriedIndexesContexts = new HashSet<>();
-        plan.forEach(node -> {
-            IndexContext indexContext = node.getIndexContext();
-            if (indexContext != null)
-                queriedIndexesContexts.add(indexContext);
-            return Plan.ControlFlow.Continue;
-        });
+        plan.visitIndexesRecursive(queriedIndexesContexts::add);
         queriedIndexesContexts.forEach(indexContext -> indexContext.getIndexMetrics()
                 .ifPresent(m -> m.queriesCount.inc()));
     }
@@ -399,23 +395,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // in which predicates it leaves in the plan and the probability of accidentally removing a good branch
         // here is even lower.
         int intersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
-        Plan plan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
+        Plan.RowsIteration origPlan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
+        Plan.RowsIteration plan = origPlan;
 
         if (QUERY_OPT_LEVEL > 0)
-            plan = plan.optimize();
+            plan = origPlan.optimize();
 
         plan = plan.limitIntersectedClauses(intersectionClauseLimit);
-
-        if (plan.contains(node -> node instanceof Plan.Filter)
-            && plan.contains(node -> node instanceof Plan.IndexScan && ((Plan.IndexScan) node).ordering != null))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
-        if (plan.contains(node -> node instanceof Plan.KeysSort))
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
-
+        queryContext.recordQueryPlan(origPlan, plan);
         updateIndexMetricsQueriesCount(plan);
 
-        if (logger.isTraceEnabled())
-            logger.trace("Query execution plan:\n" + plan.toRedactedStringRecursive());
+        //if (logger.isTraceEnabled())
+        logger.debug("Query execution plan:\n" + plan.toRedactedStringRecursive());
 
         if (Tracing.isTracing())
         {
@@ -485,8 +476,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     QueryView getQueryView(IndexContext context) throws QueryView.Builder.MissingIndexException
     {
-        return queryViews.computeIfAbsent(context,
+        var qv = queryViews.computeIfAbsent(context,
                                           c -> new QueryView.Builder(c, mergeRange).build());
+        logger.debug("Query view for index {}: {}", context.getIndexName(), qv);
+        return qv;
     }
 
     private float avgCellsPerRow()
