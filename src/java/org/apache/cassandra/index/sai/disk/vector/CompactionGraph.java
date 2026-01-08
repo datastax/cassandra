@@ -137,6 +137,10 @@ public class CompactionGraph implements Closeable, Accountable
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
+    private int postingsCount = 0;
+
+    // Used to force flush on next add
+    private boolean requiresFlush = false;
 
     // protects the fine-tuning changes (done in maybeAddVector) from addGraphNode threads
     // (and creates happens-before events so we don't need to mark the other fields volatile)
@@ -266,7 +270,8 @@ public class CompactionGraph implements Closeable, Accountable
 
     public boolean isEmpty()
     {
-        return postingsMap.values().stream().allMatch(VectorPostings::isEmpty);
+        // This relies on the fact that compaction never has vectors pointing to empty postings lists.
+        return postingsMap.isEmpty();
     }
 
     /**
@@ -290,6 +295,9 @@ public class CompactionGraph implements Closeable, Accountable
                 logger.trace("Ignoring invalid vector during commitlog replay: {}", (Object) e);
             return new InsertionResult(0);
         }
+
+        // At this point, we'll add the posting, so it's safe to count it.
+        postingsCount++;
 
         // if we don't see sequential rowids, it means the skipped row(s) have null vectors
         if (segmentRowId != lastRowId + 1)
@@ -380,7 +388,7 @@ public class CompactionGraph implements Closeable, Accountable
         var newPosting = postings.add(segmentRowId);
         assert newPosting;
         bytesUsed += postings.bytesPerPosting();
-        postingsMap.put(vector, postings); // re-serialize to disk
+        requiresFlush = safePut(postingsMap, vector, postings); // re-serialize to disk
 
         return new InsertionResult(bytesUsed);
     }
@@ -413,8 +421,7 @@ public class CompactionGraph implements Closeable, Accountable
                                                                                         postingsMap.keySet().size(), builder.getGraph().size());
         if (logger.isDebugEnabled())
         {
-            logger.debug("Writing graph with {} rows and {} distinct vectors",
-                         postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
+            logger.debug("Writing graph with {} rows and {} distinct vectors", postingsCount, builder.getGraph().size());
             logger.debug("Estimated size is {} + {}", compressedVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
         }
 
@@ -546,7 +553,27 @@ public class CompactionGraph implements Closeable, Accountable
 
     public boolean requiresFlush()
     {
-        return builder.getGraph().size() >= postingsEntriesAllocated;
+        return builder.getGraph().size() >= postingsEntriesAllocated || requiresFlush;
+    }
+
+    static <T> boolean safePut(ChronicleMap<T, CompactionVectorPostings> map, T key, CompactionVectorPostings value)
+    {
+        try
+        {
+            map.put(key, value);
+            return false;
+        }
+        catch (IllegalArgumentException e)
+        {
+            logger.debug("Error serializing postings to disk, will reattempt with compression. Vector {} had {} postings",
+                         key, value.size(), e);
+            // This is an extreme edge case where there are many duplicate vectors. This naive approach
+            // means that we might have a smaller vector graph than desired, but at least we will not
+            // fail to build the index.
+            value.setShouldCompress(true);
+            map.put(key, value);
+            return true;
+        }
     }
 
     private static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {
