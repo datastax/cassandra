@@ -87,7 +87,7 @@ public class ReadCommandExecutionInfoBench extends CQLTester
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-        CassandraRelevantProperties.SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(enabled);
+        CassandraRelevantProperties.MONITORING_EXECUTION_INFO_ENABLED.setBoolean(enabled);
         CQLTester.setUpClass();
         CQLTester.prepareServer();
         beforeTest();
