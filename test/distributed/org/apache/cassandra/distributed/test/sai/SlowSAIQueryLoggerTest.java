@@ -337,7 +337,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             node.runOnInstance(() -> BB.queryDelay.updateAndGet(x -> x / 4)); // restore the query delay
 
             // disable execution info logging and verify they are not logged
-            CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(false);
+            CassandraRelevantProperties.SAI_MONITORING_EXECUTION_INFO_ENABLED.setBoolean(false);
             mark = node.logs().mark();
             coordinator.execute(numericQuery, ConsistencyLevel.ONE);
             coordinator.execute(textQuery, ConsistencyLevel.ONE);
@@ -345,7 +345,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node, "4 operations were slow");
             assertLogsDoNotContainSAIExecutionInfo(mark, node);
-            CassandraRelevantProperties.SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(true);
+            CassandraRelevantProperties.SAI_MONITORING_EXECUTION_INFO_ENABLED.setBoolean(true);
 
             // test with a legacy index, there should be no SAI execution info
             cluster.schemaChange(withKeyspace("CREATE INDEX legacy_idx ON %s.t (l)"));
