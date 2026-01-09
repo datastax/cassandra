@@ -30,7 +30,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Queue;
-import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
@@ -122,33 +121,20 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         return queryContext;
     }
 
+    /**
+     * Builds a Plan and stops. Leaves the controller in aborted state, and the Plan cannot be used to
+     * execute the query as all its iterators will be closed. This is only useful for testing purposes.
+     */
     @VisibleForTesting
-    public final Set<String> plannedIndexes()
+    public Plan.RowsIteration buildPlan()
     {
-        try
-        {
-            Plan plan = controller.buildPlan();
-            Set<String> indexes = new HashSet<>();
-            plan.forEach(node -> {
-                if (node instanceof Plan.IndexScan)
-                {
-                    Plan.IndexScan indexScan = (Plan.IndexScan) node;
-                    indexes.add(indexScan.getIndexName());
-                }
-                if (node instanceof Plan.ScoredIndexScan)
-                {
-                    Plan.ScoredIndexScan indexScan = (Plan.ScoredIndexScan) node;
-                    indexes.add(indexScan.getIndexName());
-                }
-                return Plan.ControlFlow.Continue;
-            });
-            return indexes;
-        }
-        finally
-        {
-            // we need to call this to clean up the resources opened by the plan
-            controller.abort();
-        }
+        return (Plan.RowsIteration) controller.buildPlan();
+    }
+
+    @VisibleForTesting
+    public void abort()
+    {
+        controller.abort();
     }
 
     @Override

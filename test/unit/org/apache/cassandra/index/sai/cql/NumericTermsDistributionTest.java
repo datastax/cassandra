@@ -230,10 +230,9 @@ public class NumericTermsDistributionTest extends SAITester
                                    .values();
         var expression = buildExpression(index, op, value);
         var memoryCount = 0L;
-        var wholeRange = DataRange.allData(index.getIndexContext().getPartitioner()).keyRange();
         for (var memtableIndex : memtableIndexes)
             for (var memoryIndex : ((TrieMemtableIndex) memtableIndex).getRangeIndexes())
-                memoryCount += memoryIndex.estimateMatchingRowsCount(expression, wholeRange);
+                memoryCount += memoryIndex.estimateMatchingRowsCount(expression);
 
         assertEstimateCorrect(expectedCount, roundingValue, uncertainty, memoryCount);
     }

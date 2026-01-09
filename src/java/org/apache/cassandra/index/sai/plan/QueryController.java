@@ -372,14 +372,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private void updateIndexMetricsQueriesCount(Plan plan)
     {
         HashSet<IndexContext> queriedIndexesContexts = new HashSet<>();
-        plan.forEach(node -> {
-            IndexContext indexContext = node.getIndexContext();
-            if (indexContext != null)
-                queriedIndexesContexts.add(indexContext);
-            return Plan.ControlFlow.Continue;
-        });
-        queriedIndexesContexts.forEach(indexContext -> indexContext.getIndexMetrics()
-                .ifPresent(m -> m.queriesCount.inc()));
+        plan.visitIndexesRecursive(queriedIndexesContexts::add);
+        queriedIndexesContexts.forEach(indexContext ->
+                                       indexContext.getIndexMetrics()
+                                                   .ifPresent(m -> m.queriesCount.inc()));
     }
 
     Plan buildPlan()
@@ -549,7 +545,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             Plan.KeysIteration left = buildHalfRangeFromInequality(predicate, Operator.LT);
             Plan.KeysIteration right = buildHalfRangeFromInequality(predicate, Operator.GT);
-            return planFactory.union(new ArrayList<>(Arrays.asList(left, right)));
+            return planFactory.union(new ArrayList<>(Arrays.asList(left, right)), true);
         }
     }
 
@@ -720,7 +716,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     orderer.bm25stats.add(index.getRowCount(),
                                           index.getApproximateTermCount(),
                                           termAndExpressions,
-                                          termExpression -> index.estimateMatchingRowsCountUsingAllShards(termExpression, mergeRange));
+                                          termExpression -> index.estimateMatchingRowsCount(termExpression, mergeRange));
                 for (SSTableIndex index : view.sstableIndexes)
                     orderer.bm25stats.add(index.getRowCount(),
                                           index.getApproximateTermCount(),
@@ -979,7 +975,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         long rowCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
-            rowCount += index.estimateMatchingRowsCountUsingFirstShard(predicate, mergeRange);
+            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
 
         for (SSTableIndex index : queryView.sstableIndexes)
             rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
