@@ -72,19 +72,18 @@ public class RowAwarePrimaryKeyMapSkinnyTest extends SAITester
 
         // Build IndexDescriptor from the live SSTable using the matching index contexts
         indexDescriptor = IndexDescriptor.empty(sstable.descriptor).reload(sstable, Set.of(intContext, textContext));
-        TableMetadata tableMetadata = cfs.metadata.get().unbuild().build();
+        TableMetadata tableMetadata = cfs.metadata.get();
         pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(tableMetadata.comparator);
     }
 
     @Test
-    public void testExactRowIdOrInvertedCeilingSkinny() throws Throwable
+    public void testExactRowIdOrInvertedCeiling() throws Throwable
     {
         IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
-            assertTrue("Expected some rows in test sstable", count > 2);
 
             IPartitioner partitioner = sstable.metadata().partitioner;
 
@@ -98,49 +97,38 @@ public class RowAwarePrimaryKeyMapSkinnyTest extends SAITester
             long tLast = lastPk.token().getLongValue();
 
             // 1) Before first: expect -1 (next id 0)
-            long tBefore = t0 - 1;
-            long invCeilBeforeFirst = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tBefore)));
+            long invCeilBeforeFirst = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
             assertEquals(-1, invCeilBeforeFirst);
 
             // 2) Exact first
             long firstRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(firstPk.token()));
             assertEquals(0, firstRowId);
 
-            // 3) Between first and second (or equal if collision): expect next id 1 -> -(1)-1 == -2
-            long midTokenValue;
-            if (t0 == t1)
-                midTokenValue = t0; // collision: querying the token itself is fine
-            else
-            {
-                midTokenValue = t0 + ((t1 - t0) / 2);
-                if (midTokenValue == t0) midTokenValue = t0 + 1; // ensure strictly between
-            }
+            // 3) Between first and second (or equal if collision): expect next id 1 -> -1-1 == -2
+            long midTokenValue = t0 + ((t1 - t0) / 2);
             long invCeilBetween01 = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
-            if (midTokenValue != t0)
-                assertEquals(-2, invCeilBetween01);
+            assertEquals(-2, invCeilBetween01);
 
             // 4) Exact last
             long lastRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(lastPk.token()));
             assertEquals(count - 1, lastRowId);
 
-            // 5) After last: expect inverted ceiling to be -(count) - 1 or Long.MIN_VALUE
+            // 5) After last: expect inverted ceiling to be -count - 1 or Long.MIN_VALUE
             long tAfter = tLast + 1;
             long invCeilAfterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tAfter)));
-            long expectedStandardAfterLast = -(count) - 1;
-            assertTrue("Expected inverted ceiling beyond end to be either Long.MIN_VALUE or -(count)-1",
-                       invCeilAfterLast == Long.MIN_VALUE || invCeilAfterLast == expectedStandardAfterLast);
+            long expectedStandardAfterLast = -count - 1;
+            assertEquals("Expected inverted ceiling beyond end to be either Long.MIN_VALUE or -(count)-1", invCeilAfterLast, expectedStandardAfterLast);
         }
     }
 
     @Test
-    public void testCeilingSkinny() throws Throwable
+    public void testCeiling() throws Throwable
     {
         IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
-            assertTrue("Expected some rows in test sstable", count > 2);
 
             IPartitioner partitioner = sstable.metadata().partitioner;
 
@@ -154,8 +142,7 @@ public class RowAwarePrimaryKeyMapSkinnyTest extends SAITester
             long tLast = lastPk.token().getLongValue();
 
             // 1) Before first: expect ceiling to be 0 (first row)
-            long tBefore = t0 - 1;
-            long ceilingBeforeFirst = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tBefore)));
+            long ceilingBeforeFirst = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
             assertEquals(0, ceilingBeforeFirst);
 
             // 2) Exact first: expect 0
@@ -163,25 +150,16 @@ public class RowAwarePrimaryKeyMapSkinnyTest extends SAITester
             assertEquals(0, ceilingFirst);
 
             // 3) Between first and second: expect ceiling to be 1 (second row)
-            long midTokenValue;
-            if (t0 == t1)
-                midTokenValue = t0; // collision: querying the token itself should return first occurrence
-            else
-            {
-                midTokenValue = t0 + ((t1 - t0) / 2);
-                if (midTokenValue == t0) midTokenValue = t0 + 1; // ensure strictly between
-            }
+            long midTokenValue = t0 + ((t1 - t0) / 2);
             long ceilingBetween01 = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
-            if (midTokenValue != t0)
-                assertEquals(1, ceilingBetween01);
+            assertEquals(1, ceilingBetween01);
 
             // 4) Exact last: expect last row id
             long ceilingLast = map.ceiling(pkFactory.createTokenOnly(lastPk.token()));
             assertEquals(count - 1, ceilingLast);
 
             // 5) After last: expect count (ceiling wraps around to count when beyond last)
-            long tAfter = tLast == Long.MAX_VALUE ? tLast : tLast + 1;
-            long ceilingAfterLast = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tAfter)));
+            long ceilingAfterLast = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
             // When token is after the last, skinnyExactRowIdOrInvertedCeiling returns -(count)-1,
             // and ceiling converts it back to count
             assertEquals(count, ceilingAfterLast);
@@ -196,7 +174,6 @@ public class RowAwarePrimaryKeyMapSkinnyTest extends SAITester
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
-            assertTrue("Expected some rows in test sstable", count > 2);
 
             IPartitioner partitioner = sstable.metadata().partitioner;
 
@@ -210,8 +187,7 @@ public class RowAwarePrimaryKeyMapSkinnyTest extends SAITester
             long tLast = lastPk.token().getLongValue();
 
             // 1) Before first: expect negative value (no floor exists)
-            long tBefore = t0 - 1;
-            long floorBeforeFirst = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tBefore)));
+            long floorBeforeFirst = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
             assertTrue("Expected negative value for floor before first", floorBeforeFirst < 0);
 
             // 2) Exact first: expect 0
@@ -219,25 +195,16 @@ public class RowAwarePrimaryKeyMapSkinnyTest extends SAITester
             assertEquals(0, floorFirst);
 
             // 3) Between first and second: expect floor to be 0 (first row)
-            long midTokenValue;
-            if (t0 == t1)
-                midTokenValue = t0; // collision: querying the token itself should return last occurrence
-            else
-            {
-                midTokenValue = t0 + ((t1 - t0) / 2);
-                if (midTokenValue == t0) midTokenValue = t0 + 1; // ensure strictly between
-            }
+            long midTokenValue = t0 + ((t1 - t0) / 2);
             long floorBetween01 = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
-            if (midTokenValue != t0)
-                assertEquals(0, floorBetween01);
+            assertEquals(0, floorBetween01);
 
             // 4) Exact last: expect last row id
             long floorLast = map.floor(pkFactory.createTokenOnly(lastPk.token()));
             assertEquals(count - 1, floorLast);
 
             // 5) After last: expect last row id (floor is the last row)
-            long tAfter = tLast + 1;
-            long floorAfterLast = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tAfter)));
+            long floorAfterLast = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
             assertEquals(count - 1, floorAfterLast);
         }
     }
