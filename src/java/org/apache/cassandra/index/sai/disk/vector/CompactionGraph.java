@@ -45,7 +45,6 @@ import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
-import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.NVQ;
@@ -68,6 +67,7 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import net.openhft.chronicle.bytes.Bytes;
+import net.openhft.chronicle.hash.Data;
 import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
 import net.openhft.chronicle.hash.serialization.SizeMarshaller;
@@ -316,8 +316,8 @@ public class CompactionGraph implements Closeable, Accountable
                 // this all runs on the same compaction thread, so we don't need to worry about concurrency
                 int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
                 maxOrdinal = ordinal; // always increasing
-                var postings = new CompactionVectorPostings(ordinal, segmentRowId);
-                var data = postingsQueryContext.wrapValueAsData(postings);
+                CompactionVectorPostings postings = new CompactionVectorPostings(ordinal, segmentRowId);
+                Data<CompactionVectorPostings> data = postingsQueryContext.wrapValueAsData(postings);
                 absentEntry.doInsert(data);
 
                 // fine-tune the PQ if we've collected enough vectors
@@ -328,7 +328,10 @@ public class CompactionGraph implements Closeable, Accountable
                     var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
                     var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
                     postingsMap.forEachEntry(entry -> {
-                        // TODO can we skip this copy?
+                        // We copy here to be extra safe because at the time of writing, I couldn't find definitive
+                        // proof that forEachEntry doesn't reuse the float[] backing the instance. Since this is only
+                        // ever called for MAX_PQ_TRAINING_SET_SIZE vectors at a time, the cost is essentially fixed
+                        // and is unlikely to contribute much to compaction duration.
                         var vectorClone = entry.key().get().copy();
                         trainingVectors.add(vectorClone);
                         vectorsByOrdinal.put(VectorPostings.Marshaller.extractOrdinal(entry), vectorClone);
@@ -399,7 +402,7 @@ public class CompactionGraph implements Closeable, Accountable
             var newPosting = postings.add(segmentRowId);
             assert newPosting;
             bytesUsed += postings.bytesPerPosting();
-            var updatedPostings = postingsQueryContext.wrapValueAsData(postings);
+            Data<CompactionVectorPostings> updatedPostings = postingsQueryContext.wrapValueAsData(postings);
             postingsEntry.doReplaceValue(updatedPostings); // re-serialize value to disk
 
             return new InsertionResult(bytesUsed);
