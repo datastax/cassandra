@@ -49,7 +49,7 @@ import static org.junit.Assert.assertTrue;
  * <p>
  * This test generates fresh SSTables and SAI components at runtime via SAITester.
  */
-public class RowAwarePrimaryKeyMapWideTest extends SAITester
+public class RowAwareWidePrimaryKeyMapTest extends SAITester
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
