@@ -40,7 +40,7 @@ import static org.junit.Assert.assertTrue;
  * Skinny-table tests (no clustering columns) for
  * {@link RowAwarePrimaryKeyMap#exactRowIdOrInvertedCeiling(PrimaryKey)} using the row-aware on-disk format.
  */
-public class RowAwarePrimaryKeyMapSkinnyTest extends SAITester
+public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
