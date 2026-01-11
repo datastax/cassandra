@@ -38,16 +38,15 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Skinny-table tests (no clustering columns) for
- * {@link RowAwarePrimaryKeyMap#exactRowIdOrInvertedCeiling(PrimaryKey)} using the row-aware on-disk format (BB).
+ * {@link RowAwarePrimaryKeyMap#exactRowIdOrInvertedCeiling(PrimaryKey)} using the row-aware on-disk format.
  */
 public class RowAwarePrimaryKeyMapSkinnyTest extends SAITester
 {
+    private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
+    private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
     private IndexDescriptor indexDescriptor;
     private SSTableReader sstable;
     private PrimaryKey.Factory pkFactory;
-
-    private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
-    private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
 
     @Before
     public void setup() throws Throwable

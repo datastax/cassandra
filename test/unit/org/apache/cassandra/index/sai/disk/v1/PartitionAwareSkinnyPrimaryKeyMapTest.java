@@ -38,7 +38,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 /**
  * Skinny-table tests (no clustering columns) for
@@ -46,12 +45,11 @@ import static org.junit.Assert.assertTrue;
  */
 public class PartitionAwareSkinnyPrimaryKeyMapTest extends SAITester
 {
+    private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
+    private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
     private IndexDescriptor indexDescriptor;
     private SSTableReader sstable;
     private PrimaryKey.Factory pkFactory;
-
-    private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
-    private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
 
     @Before
     public void setup() throws Throwable
