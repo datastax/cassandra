@@ -38,7 +38,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 /**
  * Wide-table tests (with clustering columns) for
@@ -46,12 +45,33 @@ import static org.junit.Assert.assertTrue;
  */
 public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
 {
+    private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
+    private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
     private IndexDescriptor indexDescriptor;
     private SSTableReader sstable;
     private PrimaryKey.Factory pkFactory;
 
-    private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
-    private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
+    private static long getNextTokenRowId(long count, PrimaryKeyMap map, PrimaryKey pk)
+    {
+        long i = 0;
+        while (map.primaryKeyFromRowId(i).token().equals(pk.token()))
+        {
+            assert i < count;
+            i++;
+        }
+        return i;
+    }
+
+    private static long getExpectedLastTokenFirstRowId(long count, PrimaryKeyMap map, PrimaryKey lastPk)
+    {
+        long i = 0;
+        while (!map.primaryKeyFromRowId(i).token().equals(lastPk.token()))
+        {
+            assert i < count;
+            i++;
+        }
+        return i;
+    }
 
     @Before
     public void setup() throws Throwable
@@ -73,10 +93,10 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
         // Partition 1000: multiple rows
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1000, 1, 20, "d");
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1000, 2, 21, "e");
-        
+
         // Partition 2: single row
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 2, 1, 30, "f");
-        
+
         // Partition 50000: multiple rows
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 50000, 1, 40, "g");
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 50000, 2, 41, "h");
@@ -116,7 +136,7 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
             // In wide partitions, V1 format only distinguishes by token, not clustering
             final PrimaryKey firstPk = map.primaryKeyFromRowId(0);
             final PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
-            
+
             // A row with next token than the first
             long secondTokenRowId = getNextTokenRowId(count, map, firstPk);
             PrimaryKey secondTokenPk = map.primaryKeyFromRowId(secondTokenRowId);
@@ -211,27 +231,5 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
             map.floor(pkFactory.createTokenOnly(firstPk.token()));
         }
-    }
-
-    private static long getNextTokenRowId(long count, PrimaryKeyMap map, PrimaryKey pk)
-    {
-        long i = 0;
-        while (map.primaryKeyFromRowId(i).token().equals(pk.token()))
-        {
-            assert i < count;
-            i++;
-        }
-        return i;
-    }
-
-    private static long getExpectedLastTokenFirstRowId(long count, PrimaryKeyMap map, PrimaryKey lastPk)
-    {
-        long i = 0;
-        while (! map.primaryKeyFromRowId(i).token().equals(lastPk.token()))
-        {
-            assert i < count;
-            i++;
-        }
-        return i;
     }
 }
