@@ -25,6 +25,7 @@ import org.junit.rules.ExpectedException;
 
 import com.datastax.driver.core.ResultSet;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_TABLE_STATE_METRICS_ENABLED;
 import static org.apache.cassandra.index.sai.metrics.TableStateMetrics.TABLE_STATE_METRIC_TYPE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -49,9 +50,9 @@ public class StateMetricsTest extends AbstractMetricsTest
         createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace, table));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
 
-        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
 
-        ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 0");
+        ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + '.' + table + " WHERE v1 = 0");
         assertEquals(1, rows.all().size());
         assertEquals(1L, getTableStateMetrics(keyspace, table, "TotalIndexCount"));
 
@@ -75,14 +76,14 @@ public class StateMetricsTest extends AbstractMetricsTest
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index+"_v1", keyspace, table, "v1"));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index+"_v2", keyspace, table, "v2"));
 
-        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
-        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('1', 1, '1')");
-        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('2', 2, '2')");
-        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('3', 3, '3')");
+        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('1', 1, '1')");
+        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('2', 2, '2')");
+        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('3', 3, '3')");
 
         flush(keyspace, table);
 
-        ResultSet rows = executeNet("SELECT id1, v1, v2 FROM " + keyspace + "." + table + " WHERE v1 >= 0");
+        ResultSet rows = executeNet("SELECT id1, v1, v2 FROM " + keyspace + '.' + table + " WHERE v1 >= 0");
 
         int actualRows = rows.all().size();
         assertEquals(4, actualRows);
@@ -97,5 +98,56 @@ public class StateMetricsTest extends AbstractMetricsTest
     private int getTableStateMetrics(String keyspace, String table, String metricsName)
     {
         return (int) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, TABLE_STATE_METRIC_TYPE));
+    }
+
+    @Test
+    public void testTableStateMetricsEnabledAndDisabled()
+    {
+        testTableStateMetrics(true);
+        testTableStateMetrics(false);
+    }
+
+    private void testTableStateMetrics(boolean metricsEnabled)
+    {
+        SAI_TABLE_STATE_METRICS_ENABLED.setBoolean(metricsEnabled);
+
+        try
+        {
+            String table = "test_table_state_metrics_" + (metricsEnabled ? "enabled" : "disabled");
+            String index = "test_index_" + (metricsEnabled ? "enabled" : "disabled");
+
+            String keyspace = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
+            createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace, table));
+            createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
+
+            // Test all TableStateMetrics Gauge metrics
+            assertTableStateMetricExistsIfEnabled(metricsEnabled, "TotalIndexCount", keyspace, table);
+            assertTableStateMetricExistsIfEnabled(metricsEnabled, "TotalQueryableIndexCount", keyspace, table);
+            assertTableStateMetricExistsIfEnabled(metricsEnabled, "TotalIndexBuildsInProgress", keyspace, table);
+            assertTableStateMetricExistsIfEnabled(metricsEnabled, "DiskUsedBytes", keyspace, table);
+            assertTableStateMetricExistsIfEnabled(metricsEnabled, "DiskPercentageOfBaseTable", keyspace, table);
+
+            // Test indexing operations to ensure null stateMetrics is handled gracefully
+            execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
+            execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('1', 1, '1')");
+            execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('2', 2, '2')");
+
+            // Verify metrics still behave correctly after operations
+            assertTableStateMetricExistsIfEnabled(metricsEnabled, "TotalIndexCount", keyspace, table);
+            assertTableStateMetricExistsIfEnabled(metricsEnabled, "DiskUsedBytes", keyspace, table);
+        }
+        finally
+        {
+            // Reset property to default
+            SAI_TABLE_STATE_METRICS_ENABLED.setBoolean(true);
+        }
+    }
+
+    void assertTableStateMetricExistsIfEnabled(boolean shouldExist, String metricName, String keyspace, String table)
+    {
+        if (shouldExist)
+            assertMetricExists(objectNameNoIndex(metricName, keyspace, table, TABLE_STATE_METRIC_TYPE));
+        else
+            assertMetricDoesNotExist(objectNameNoIndex(metricName, keyspace, table, TABLE_STATE_METRIC_TYPE));
     }
 }
