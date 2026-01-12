@@ -110,7 +110,7 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
         sstable = cfs.getLiveSSTables().iterator().next();
 
         // Build IndexDescriptor from the live SSTable using the matching index contexts
-        indexDescriptor = IndexDescriptor.empty(sstable.descriptor).reload(sstable, Set.of(intContext, textContext));
+        indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext));
         TableMetadata tableMetadata = cfs.metadata.get();
         pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(tableMetadata.comparator);
     }
