@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -346,5 +347,14 @@ public interface IndexComponents
          * should be added to this writer after this call).
          */
         void markComplete() throws IOException;
+
+        /**
+         * Create a temporary {@link File} namespaced within the per index components. Repeated calls with the same
+         * componentName will produce the same file.
+         * @param componentName - unique name within the per index components
+         * @return a temprory file for use during index construction
+         * @throws IOException
+         */
+        File tmpFileFor(String componentName) throws IOException;
     }
 }

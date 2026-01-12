@@ -19,6 +19,7 @@ package org.apache.cassandra.distributed.test;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -63,7 +64,7 @@ public class SlowQueryLoggerTest extends TestBaseImpl
     public static void setupCluster() throws Exception
     {
         // effectively disable the scheduled monitoring task so we control it manually for better test stability
-        System.setProperty("cassandra.slow_query_log_interval_in_ms", "3600000");
+        CassandraRelevantProperties.MONITORING_REPORT_INTERVAL_MS.setInt((int) TimeUnit.HOURS.toMillis(1));
 
         cluster = init(Cluster.build(2)
                               .withInstanceInitializer(SlowQueryLoggerTest.BBHelper::install)
@@ -83,7 +84,7 @@ public class SlowQueryLoggerTest extends TestBaseImpl
     @Before
     public void before()
     {
-        CassandraRelevantProperties.SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(true);
+        CassandraRelevantProperties.MONITORING_EXECUTION_INFO_ENABLED.setBoolean(true);
         table = "t_" + SEQ.getAndIncrement();
 
         // trigger the monitoring task to flush any pending slow operations before the test starts
@@ -247,7 +248,7 @@ public class SlowQueryLoggerTest extends TestBaseImpl
         assertLogsDoNotContain(mark, node, "  Fetched/returned/tombstones:");
 
         // disable execution info logging and verify that info is not logged anymore
-        CassandraRelevantProperties.SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED.setBoolean(false);
+        CassandraRelevantProperties.MONITORING_EXECUTION_INFO_ENABLED.setBoolean(false);
         mark = node.logs().mark();
         coordinator.execute(format("SELECT * FROM %s.%s"), ALL);
         assertLogsContain(mark, node, format("<SELECT \\* FROM %s\\.%s ALLOW FILTERING>"));
