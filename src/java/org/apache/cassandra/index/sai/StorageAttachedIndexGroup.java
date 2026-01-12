@@ -77,6 +77,8 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.index.CorruptIndexException;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_TABLE_STATE_METRICS_ENABLED;
+
 /**
  * Orchestrates building of storage-attached indices, and manages lifecycle of resources shared between them.
  */
@@ -88,7 +90,8 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public static final Index.Group.Key GROUP_KEY = new Index.Group.Key(StorageAttachedIndexGroup.class);
 
     private final TableQueryMetrics queryMetrics;
-    private final TableStateMetrics stateMetrics;
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+    private final Optional<TableStateMetrics> stateMetrics;
     private final IndexGroupMetrics groupMetrics;
 
     private final Set<StorageAttachedIndex> indices = ConcurrentHashMap.newKeySet();
@@ -103,7 +106,9 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     {
         this.baseCfs = baseCfs;
         this.queryMetrics = new TableQueryMetrics(baseCfs.metadata());
-        this.stateMetrics = new TableStateMetrics(baseCfs.metadata(), this);
+        this.stateMetrics = SAI_TABLE_STATE_METRICS_ENABLED.getBoolean()
+                            ? Optional.of(new TableStateMetrics(baseCfs.metadata(), this))
+                            : Optional.empty();
         this.groupMetrics = new IndexGroupMetrics(baseCfs.metadata(), this);
         this.contextManager = new SSTableContextManager(baseCfs.getTracker());
         this.version = Version.current(baseCfs.keyspace.getName());
@@ -167,7 +172,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         // in case of removing last index from group,  sstable contexts should already been removed by StorageAttachedIndexGroup#removeIndex
         queryMetrics.release();
         groupMetrics.release();
-        stateMetrics.release();
+        stateMetrics.ifPresent(TableStateMetrics::release);
         baseCfs.getTracker().unsubscribe(this);
     }
 
@@ -179,7 +184,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         contextManager.clear();
         queryMetrics.release();
         groupMetrics.release();
-        stateMetrics.release();
+        stateMetrics.ifPresent(TableStateMetrics::release);
     }
 
     @Override
@@ -524,6 +529,12 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public TableQueryMetrics queryMetrics()
     {
         return queryMetrics;
+    }
+
+    // Needed by CNDB
+    public Optional<TableStateMetrics> stateMetrics()
+    {
+        return stateMetrics;
     }
 
     public ColumnFamilyStore table()

@@ -345,6 +345,7 @@ public enum CassandraRelevantProperties
     CUSTOM_TMD_PROVIDER_PROPERTY("cassandra.custom_token_metadata_provider_class"),
 
     CUSTOM_TRACING_CLASS("cassandra.custom_tracing_class"),
+
     /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
      * This is to remain compatible with older workflows that first change the replication before adding the nodes.
@@ -800,6 +801,12 @@ public enum CassandraRelevantProperties
      * For non-SAI queries, see {@link #MONITORING_EXECUTION_INFO_ENABLED}.
      */
     SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
+
+    /**
+     * Whether to enable SAI table state metrics such as disk usage, queryable index count, and index build progress.
+     * These metrics include gauges for table-level SAI state information.
+     */
+    SAI_TABLE_STATE_METRICS_ENABLED("cassandra.sai.metrics.table_state.enabled", "true"),
 
     SAI_TEST_DISABLE_TIMEOUT("cassandra.sai.test.timeout_disabled", "false"),
     SAI_TEST_LAST_VALID_SEGMENTS("cassandra.sai.test_last_valid_segments", "-1"),
