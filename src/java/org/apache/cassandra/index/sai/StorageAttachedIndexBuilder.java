@@ -128,7 +128,8 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         }
     }
 
-    private String logMessage(String message) {
+    private String logMessage(String message)
+    {
         return String.format("[%s.%s.*] %s", metadata.keyspace, metadata.name, message);
     }
 
