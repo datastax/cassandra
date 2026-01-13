@@ -39,9 +39,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
-import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -50,6 +48,7 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.ComponentsBuildId;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
@@ -129,22 +128,8 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         }
     }
 
-    private String logMessage(String message)
-    {
+    private String logMessage(String message) {
         return String.format("[%s.%s.*] %s", metadata.keyspace, metadata.name, message);
-    }
-
-    /**
-     * Returns a descriptive reason for why the index build was stopped.
-     * If the trigger is {@code NONE} but global compactions are paused, returns a message indicating that.
-     * Otherwise, returns the trigger reason from the {@link CompactionInterruptedException} message.
-     */
-    private String getStopReason()
-    {
-        if (trigger() == TableOperation.StopTrigger.NONE && CompactionManager.instance.isGlobalCompactionPaused())
-            return "Reason: Global compaction pause";
-
-        return String.format("Reason: %s", trigger());
     }
 
     /**
@@ -194,7 +179,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 {
                     if (isStopRequested())
                     {
-                        logger.debug(indexDescriptor.logMessage("Index build has been stopped. {}"), getStopReason());
+                        logger.debug(indexDescriptor.logMessage("Index build has been stopped. Reason: {}"), trigger());
                         throw new CompactionInterruptedException(getProgress(), trigger());
                     }
 
@@ -270,8 +255,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 }
                 else
                 {
-                    logger.info(logMessage("Stop requested while building indexes {} on SSTable {}. {}"),
-                                indexes, sstable.descriptor, getStopReason());
+                    logger.info(logMessage("Stop requested while building indexes {} on SSTable {}. {}"), indexes, sstable.descriptor, t.getMessage());
                     return true;
                 }
             }
