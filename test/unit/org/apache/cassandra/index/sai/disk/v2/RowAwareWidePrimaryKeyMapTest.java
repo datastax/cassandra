@@ -98,7 +98,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         ByteBuffer pkBuf = Int32Type.instance.decompose(pk);
         Token token = partitioner.getToken(pkBuf);
         DecoratedKey key = new BufferDecoratedKey(token, pkBuf);
-        Clustering clustering = Clustering.make(Int32Type.instance.decompose(ck));
+        Clustering<ByteBuffer> clustering = Clustering.make(Int32Type.instance.decompose(ck));
         return pkFactory.create(key, clustering);
     }
 
