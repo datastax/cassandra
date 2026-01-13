@@ -32,7 +32,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.Timeout;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -44,9 +46,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+
 public class VectorSiftSmallTest extends VectorTester.Versioned
 {
     private static final String DATASET = "siftsmall"; // change to "sift" for larger dataset. requires manual download
+    @Rule public Timeout timeout = new Timeout(75, TimeUnit.SECONDS);
 
     @Override
     public void setup() throws Throwable
@@ -54,7 +58,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
         super.setup();
     }
 
-    @Test
+    @Test(timeout=60_000)
     public void testSiftSmall() throws Throwable
     {
         var baseVectors = readFvecs(String.format("test/data/%s/%s_base.fvecs", DATASET, DATASET));
@@ -225,7 +229,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
 
     // exercise the path where we use the PQ from the first segment (constructed on-heap)
     // to construct the others off-heap
-    @Test
+    @Test(timeout=60_000)
     public void testMultiSegmentBuild() throws Throwable
     {
         var baseVectors = readFvecs(String.format("test/data/%s/%s_base.fvecs", DATASET, DATASET));
