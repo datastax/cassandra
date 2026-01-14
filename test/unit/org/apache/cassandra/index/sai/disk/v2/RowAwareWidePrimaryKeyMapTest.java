@@ -127,8 +127,10 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             long id13 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 3));
             long id110 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 10));
 
-            assertTrue("RowIds within a partition should be increasing by clustering",
-                       0 <= id11 && id11 < id12 && id12 < id13 && id13 < id110);
+            assertTrue("A rowId within a partition should be valid", 0 <= id11);
+            assertEquals("Next key by clustering key has next RowId", id11 + 1, id12);
+            assertEquals("Next key by clustering key has next RowId", id12 + 1, id13);
+            assertEquals("Next key by clustering key has next RowId", id13 + 1, id110);
 
             // Between clustering values inside the same partition (1,4) -> next is (1,10)
             long between14 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 4));
