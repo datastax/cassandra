@@ -121,6 +121,9 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             long invBeforeFirst = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
             assertEquals("Expected inverted ceiling before start to be negative", -1, invBeforeFirst);
 
+            long firstRowId = map.exactRowIdOrInvertedCeiling(firstPk);
+            assertEquals(0, firstRowId);
+
             // Exact matches within a single partition should resolve and be ordered by clustering
             long id11 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 1));
             long id12 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 2));
@@ -169,6 +172,9 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             // Before first: token-only with token less than first should yield a negative inverted ceiling
             long ceilBeforeFirst = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
             assertEquals("Expected inverted ceiling before start to be negative", 0, ceilBeforeFirst);
+
+            long firstRowId = map.ceiling(firstPk);
+            assertEquals(0, firstRowId);
 
             // Test exact matches - ceiling should return the exact row id
             long id11 = map.ceiling(buildPk(partitioner, 1, 1));
@@ -238,6 +244,9 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             // Before first: token-only with token less than first should yield a negative inverted ceiling
             long floorBeforeFirst = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
             assertEquals("Expected inverted ceiling before start to be negative", -1, floorBeforeFirst);
+
+            long firstRowId = map.floor(firstPk);
+            assertEquals(0, firstRowId);
 
             // Test exact matches - floor should return the exact row id
             long id11 = map.floor(buildPk(partitioner, 1, 1));
