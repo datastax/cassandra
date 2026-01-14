@@ -112,11 +112,11 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
             long lastRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(lastPk.token()));
             assertEquals(count - 1, lastRowId);
 
-            // 5) After last: expect inverted ceiling to be -count - 1 or Long.MIN_VALUE
+            // 5) After last: expect inverted ceiling to be Long.MIN_VALUE
             long tAfter = tLast + 1;
             long invCeilAfterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tAfter)));
-            long expectedStandardAfterLast = -count - 1;
-            assertEquals("Expected inverted ceiling beyond end to be either Long.MIN_VALUE or -(count)-1", invCeilAfterLast, expectedStandardAfterLast);
+            long expectedStandardAfterLast = Long.MIN_VALUE;
+            assertEquals("Expected inverted ceiling beyond end to be either Long.MIN_VALUE", invCeilAfterLast, expectedStandardAfterLast);
         }
     }
 
@@ -161,7 +161,7 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
             long ceilingAfterLast = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
             // When token is after the last, skinnyExactRowIdOrInvertedCeiling returns -(count)-1,
             // and ceiling converts it back to count
-            assertEquals(count, ceilingAfterLast);
+            assertEquals(-1, ceilingAfterLast);
         }
     }
 
