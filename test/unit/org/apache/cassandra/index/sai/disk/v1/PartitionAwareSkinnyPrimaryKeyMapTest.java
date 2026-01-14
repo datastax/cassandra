@@ -124,9 +124,9 @@ public class PartitionAwareSkinnyPrimaryKeyMapTest extends SAITester
             long lastRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(lastPk.token()));
             assertEquals(count - 1, lastRowId);
 
-            // 5) After last: expect inverted ceiling to be -(count) - 1
+            // 5) After last: expect inverted ceiling to be Long.MIN_VALUE
             long invCeilAfterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
-            assertEquals("Expected inverted ceiling beyond end to be -count-1", invCeilAfterLast, -count - 1);
+            assertEquals("Expected inverted ceiling beyond end to be Long.MIN_VALUE", invCeilAfterLast, Long.MIN_VALUE);
         }
     }
 
