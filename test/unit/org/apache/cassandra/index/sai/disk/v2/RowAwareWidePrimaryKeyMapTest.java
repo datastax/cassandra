@@ -26,6 +26,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -38,29 +39,28 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
  * Wide-table tests (with clustering columns) for
- * {@link RowAwarePrimaryKeyMap#exactRowIdOrInvertedCeiling(PrimaryKey)} using the row-aware on-disk format.
- * <p>
- * This test generates fresh SSTables and SAI components at runtime via SAITester.
+ * {@link RowAwarePrimaryKeyMap} using the row-aware on-disk format.
  */
 public class RowAwareWidePrimaryKeyMapTest extends SAITester
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
-    private IndexDescriptor indexDescriptor;
+
     private SSTableReader sstable;
     private PrimaryKey.Factory pkFactory;
+    private IndexComponents.ForRead perSSTableComponents;
+    private IPartitioner partitioner;
+
 
     @Before
     public void setup() throws Throwable
     {
-        // Create a wide table (with clustering), and two SAI indexes to ensure primary key components exist
         createTable("CREATE TABLE %s (pk int, ck int, int_value int, text_value text, PRIMARY KEY (pk, ck)) WITH CLUSTERING ORDER BY (ck ASC)");
         execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
         execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
@@ -84,13 +84,15 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         flush();
 
         // Obtain the just-flushed SSTable
-        var cfs = getCurrentColumnFamilyStore();
-        sstable = cfs.getLiveSSTables().iterator().next();
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        this.sstable = cfs.getLiveSSTables().iterator().next();
 
         // Build IndexDescriptor from the live SSTable using the matching index contexts
-        indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext));
-        TableMetadata tableMetadata = cfs.metadata.get();
-        pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(tableMetadata.comparator);
+        IndexDescriptor indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext));
+        this.pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(cfs.metadata.get().comparator);
+
+        this.perSSTableComponents = indexDescriptor.perSSTableComponents();
+        this.partitioner = sstable.metadata().partitioner;
     }
 
     private PrimaryKey buildPk(IPartitioner partitioner, int pk, int ck)
@@ -105,180 +107,148 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
     @Test
     public void testExactRowIdOrInvertedCeiling() throws Throwable
     {
-        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
 
-            IPartitioner partitioner = sstable.metadata().partitioner;
-
-            // Get boundary tokens for before/after tests
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
+            PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
             long t0 = firstPk.token().getLongValue();
+            long tLast = lastPk.token().getLongValue();
 
-            // Before first: token-only with token less than first should yield a negative inverted ceiling
-            long invBeforeFirst = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
-            assertEquals("Expected inverted ceiling before start to be negative", -1, invBeforeFirst);
+            // 1_ Before first: inverted first RowId (0), -1
+            long beforeFirst = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
+            assertEquals(-1, beforeFirst);
 
+            // 2) Exact first token (should match first row of that partition)
             long firstRowId = map.exactRowIdOrInvertedCeiling(firstPk);
             assertEquals(0, firstRowId);
 
-            // Exact matches within a single partition should resolve and be ordered by clustering
+            // 3) Exact matches within a single partition should resolve and be ordered by clustering
             long id11 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 1));
             long id12 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 2));
             long id13 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 3));
             long id110 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 10));
+            assertTrue(0 <= id11);
+            assertEquals(id11 + 1, id12);
+            assertEquals(id12 + 1, id13);
+            assertEquals(id13 + 1, id110);
 
-            assertTrue("A rowId within a partition should be valid", 0 <= id11);
-            assertEquals("Next key by clustering key has next RowId", id11 + 1, id12);
-            assertEquals("Next key by clustering key has next RowId", id12 + 1, id13);
-            assertEquals("Next key by clustering key has next RowId", id13 + 1, id110);
-
-            // Between clustering values inside the same partition (1,4) -> next is (1,10)
+            // 4) Between clustering values inside the same partition (1,4) -> next is (1,10)
             long between14 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, 4));
             assertEquals(-id110 - 1, between14);
 
-            // Cross-partition boundary: after last row of pk=1, the next global row id should be id110 + 1
+            // 5) Cross-partition boundary: after last row of pk=1, the next global row id should be id110 + 1, inverted ceiling to be -nextId - 1
             long afterLastPk1 = map.exactRowIdOrInvertedCeiling(buildPk(partitioner, 1, Integer.MAX_VALUE));
-            // If (1, Integer.MAX_VALUE) does not exist (it doesn't), expect inverted ceiling to be -nextId - 1
-            long expectedNextAfterPk1 = id110 + 1;
-            assertEquals(-expectedNextAfterPk1 - 1, afterLastPk1);
+            long expectedNextIdAfterPk1 = id110 + 1;
+            assertEquals(-expectedNextIdAfterPk1 - 1, afterLastPk1);
 
-            // After last: token-only with token greater than last should give Long.MIN_VALUE
-            PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
-            long tLast = lastPk.token().getLongValue();
+            // 6) Exact last
+            long invLast = map.exactRowIdOrInvertedCeiling(lastPk);
+            assertEquals(count - 1, invLast);
 
-            long invAfterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
-            assertEquals("Expected inverted ceiling beyond end to be Long.MIN_VALUE", Long.MIN_VALUE, invAfterLast);
+            // 7) After last: Expected inverted ceiling beyond end to be Long.MIN_VALUE
+            long afterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
+            assertEquals(Long.MIN_VALUE, afterLast);
         }
     }
 
     @Test
     public void testCeiling() throws Throwable
     {
-        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
 
-            IPartitioner partitioner = sstable.metadata().partitioner;
-
-            // Get boundary tokens for before/after tests
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
+            PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
             long t0 = firstPk.token().getLongValue();
+            long tLast = lastPk.token().getLongValue();
 
-            // Before first: token-only with token less than first should yield a negative inverted ceiling
-            long ceilBeforeFirst = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
-            assertEquals("Expected inverted ceiling before start to be negative", 0, ceilBeforeFirst);
+            // 1_ Before first: first RowId 0
+            long beforeFirst = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
+            assertEquals(0, beforeFirst);
 
+            // 2) Exact first token (should match first row of that partition)
             long firstRowId = map.ceiling(firstPk);
             assertEquals(0, firstRowId);
 
-            // Test exact matches - ceiling should return the exact row id
+            // 3) Exact matches within a single partition should resolve and be ordered by clustering
             long id11 = map.ceiling(buildPk(partitioner, 1, 1));
             long id12 = map.ceiling(buildPk(partitioner, 1, 2));
             long id13 = map.ceiling(buildPk(partitioner, 1, 3));
             long id110 = map.ceiling(buildPk(partitioner, 1, 10));
+            assertTrue(0 <= id11);
+            assertEquals(id11 + 1, id12);
+            assertEquals(id12 + 1, id13);
+            assertEquals(id13 + 1, id110);
 
-            assertTrue("Ceiling for exact matches should return valid row ids", id11 >= 0);
-            assertTrue("Row ids should be ordered by clustering", id11 < id12 && id12 < id13 && id13 < id110);
+            // 4) Between clustering values inside the same partition (1,4) -> next is (1,10)
+            long between14 = map.ceiling(buildPk(partitioner, 1, 4));
+            assertEquals(id110, between14);
 
-            // Test between clustering values - ceiling should return next greater row id
-            long ceiling14 = map.ceiling(buildPk(partitioner, 1, 4));
-            assertEquals("Ceiling for (1,4) should be row id of (1,10)", id110, ceiling14);
+            // 5) Cross-partition boundary: after last row of pk=1, the next global row id should be id110 + 1
+            long afterLastPk1 = map.ceiling(buildPk(partitioner, 1, Integer.MAX_VALUE));
+            assertEquals(id110 + 1, afterLastPk1);
 
-            // Test ceiling between existing clustering values
-            long ceiling0 = map.ceiling(buildPk(partitioner, 1, 0));
-            assertEquals("Ceiling for (1,0) should be row id of (1,1)", id11, ceiling0);
+            // 6) Exact last
+            long invLast = map.ceiling(lastPk);
+            assertEquals(count - 1, invLast);
 
-            // Test ceiling after last row in partition pk=1
-            long ceilingAfterPk1 = map.ceiling(buildPk(partitioner, 1, Integer.MAX_VALUE));
-            // Should either find next partition or return negative
-            assertTrue("Ceiling after last row of pk=1 should be valid or negative", ceilingAfterPk1 >= id110 || ceilingAfterPk1 < 0);
-
-            // Test ceiling for partition pk=2
-            long id21 = map.ceiling(buildPk(partitioner, 2, 1));
-            long id25 = map.ceiling(buildPk(partitioner, 2, 5));
-            assertTrue("Ceiling for pk=2 rows should return valid row ids", id21 >= 0 && id25 >= 0);
-            assertTrue("Row ids in pk=2 should be ordered", id21 < id25);
-
-            // Test ceiling between rows in pk=2
-            long ceiling23 = map.ceiling(buildPk(partitioner, 2, 3));
-            assertEquals("Ceiling for (2,3) should be row id of (2,5)", id25, ceiling23);
-
-            // Test ceiling for partition pk=1000
-            long id1000_1 = map.ceiling(buildPk(partitioner, 1000, 1));
-            long id1000_2 = map.ceiling(buildPk(partitioner, 1000, 2));
-            assertTrue("Ceiling for pk=1000 rows should return valid row ids", id1000_1 >= 0 && id1000_2 >= 0);
-            assertTrue("Row ids in pk=1000 should be ordered", id1000_1 < id1000_2);
-
-            // Test floor with token-only key matching a partition
-            Token token1 = partitioner.getToken(Int32Type.instance.decompose(1));
-            long floorToken1 = map.ceiling(pkFactory.createTokenOnly(token1));
-            assertEquals("Floor for token-only matching partition should return last row of that partition", id11, floorToken1);
-
-            // After last: token-only with token greater than last should give -1
-            PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
-            long tLast = lastPk.token().getLongValue();
-
-            long ceilAfterLast = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
-            assertEquals("Expected inverted ceiling beyond end to be -1", -1, ceilAfterLast);
+            // 7) After last: Expected ceiling beyond end to be -1
+            long afterLast = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
+            assertEquals(-1, afterLast);
         }
     }
 
     @Test
     public void testFloor() throws Throwable
     {
-        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
-            IPartitioner partitioner = sstable.metadata().partitioner;
 
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
+            PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
             long t0 = firstPk.token().getLongValue();
+            long tLast = lastPk.token().getLongValue();
 
-            // Before first: token-only with token less than first should yield a negative inverted ceiling
-            long floorBeforeFirst = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
-            assertEquals("Expected inverted ceiling before start to be negative", -1, floorBeforeFirst);
+            // 1_ Before first: expect -1
+            long beforeFirst = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
+            assertEquals(-1, beforeFirst);
 
+            // 2) Exact first token (should match first row of that partition)
             long firstRowId = map.floor(firstPk);
             assertEquals(0, firstRowId);
 
-            // Test exact matches - floor should return the exact row id
+            // 3) Exact matches within a single partition should resolve and be ordered by clustering
             long id11 = map.floor(buildPk(partitioner, 1, 1));
             long id12 = map.floor(buildPk(partitioner, 1, 2));
             long id13 = map.floor(buildPk(partitioner, 1, 3));
             long id110 = map.floor(buildPk(partitioner, 1, 10));
+            assertTrue(0 <= id11);
+            assertEquals(id11 + 1, id12);
+            assertEquals(id12 + 1, id13);
+            assertEquals(id13 + 1, id110);
 
-            assertTrue("Row ids should be ordered by clustering", 0 <= id11 && id11 < id12 && id12 < id13 && id13 < id110);
+            // 4) Between clustering values inside the same partition (1,4) -> previous is (1,3)
+            long between14 = map.floor(buildPk(partitioner, 1, 4));
+            assertEquals(id13, between14);
 
-            // Test floor before first row in partition
-            long floorBeforePk1 = map.floor(buildPk(partitioner, 1, 0));
-            assertTrue("Floor before first row of pk=1 should be negative or from previous partition", floorBeforePk1 < id11);
+            // 5) Cross-partition boundary: after last row of pk=1, the previous row id in the same partition should be id110
+            long afterLastPk1 = map.floor(buildPk(partitioner, 1, Integer.MAX_VALUE));
+            assertEquals(id110, afterLastPk1);
 
-            // Test between clustering values - floor should return previous lesser row id
-            long floor14 = map.floor(buildPk(partitioner, 1, 4));
-            assertEquals("Floor for (1,4) should be row id of (1,3)", id13, floor14);
+            // 6) Exact last
+            long invLast = map.floor(lastPk);
+            assertEquals(count - 1, invLast);
 
-            // Test floor after last row in partition
-            long floorAfterPk1 = map.floor(buildPk(partitioner, 1, Integer.MAX_VALUE));
-            assertEquals("Floor after last row of pk=1 should be row id of (1,10)", id110, floorAfterPk1);
-
-            // Test floor with token-only key after last partition
-            PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
-            long tLast = lastPk.token().getLongValue();
-
-            // Test floor with token-only key matching a partition
-            Token token1 = partitioner.getToken(Int32Type.instance.decompose(1));
-            long floorToken1 = map.floor(pkFactory.createTokenOnly(token1));
-            assertEquals("Floor for token-only matching partition should return last row of that partition", id110, floorToken1);
-
-            long floorAfterLast = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
-            assertEquals("Floor after last should return last row id", count - 1, floorAfterLast);
+            // 7) After last: Expect last
+            long afterLast = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
+            assertEquals(count - 1, afterLast);
         }
     }
 }

@@ -35,21 +35,22 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertEquals;
 
 /**
- * Wide-table tests (with clustering columns) for
- * {@link PartitionAwarePrimaryKeyMap#exactRowIdOrInvertedCeiling(PrimaryKey)} using the legacy V1 on-disk format (AA).
+ * Wide-table tests (with a clustering column) for
+ * {@link PartitionAwarePrimaryKeyMap} API using the V1 on-disk format (AA).
  */
 public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
-    private IndexDescriptor indexDescriptor;
+
     private SSTableReader sstable;
     private PrimaryKey.Factory pkFactory;
+    private IndexComponents.ForRead perSSTableComponents;
+    private IPartitioner partitioner;
 
     private static long getNextTokenRowId(long count, PrimaryKeyMap map, PrimaryKey pk)
     {
@@ -107,12 +108,14 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
 
         // Obtain the just-flushed SSTable
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        sstable = cfs.getLiveSSTables().iterator().next();
+        this.sstable = cfs.getLiveSSTables().iterator().next();
 
         // Build IndexDescriptor from the live SSTable using the matching index contexts
-        indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext));
-        TableMetadata tableMetadata = cfs.metadata.get();
-        pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(tableMetadata.comparator);
+        IndexDescriptor indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext));
+        perSSTableComponents = indexDescriptor.perSSTableComponents();
+
+        this.pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(cfs.metadata.get().comparator);
+        this.partitioner = sstable.metadata().partitioner;
     }
 
     @After
@@ -124,26 +127,21 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
     @Test
     public void testExactRowIdOrInvertedCeiling() throws Throwable
     {
-        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
 
-            IPartitioner partitioner = sstable.metadata().partitioner;
-
-            // Find rows with different tokens (different partitions)
-            // In wide partitions, V1 format only distinguishes by token, not clustering
             final PrimaryKey firstPk = map.primaryKeyFromRowId(0);
             final PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
-
-            // A row with next token than the first
-            long secondTokenRowId = getNextTokenRowId(count, map, firstPk);
-            PrimaryKey secondTokenPk = map.primaryKeyFromRowId(secondTokenRowId);
-            assert secondTokenPk.token() != firstPk.token();
-
             long t0 = firstPk.token().getLongValue();
             long tLast = lastPk.token().getLongValue();
+
+            // A row with next token (partition) than the first
+            // In wide partitions, V1 format only distinguishes by token, not clustering
+            long secondTokenRowId = getNextTokenRowId(count, map, firstPk);
+            PrimaryKey secondTokenPk = map.primaryKeyFromRowId(secondTokenRowId);
+
 
             // 1) Before first: expect -1 (next id 0)
             long invCeilBeforeFirst = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
@@ -153,47 +151,40 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
             long firstRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(firstPk.token()));
             assertEquals(0, firstRowId);
 
-            // 3) If we have different tokens, test between them
+            // 3) Test between the first and second tokens/partitions,
+            // which points to the first row id in the second partition
             long t1 = secondTokenPk.token().getLongValue();
             long midTokenValue = t0 + ((t1 - t0) / 2);
             long invCeilBetween = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
-            // Should point to the next row after the first partition
             assertEquals(-secondTokenRowId - 1, invCeilBetween);
 
             // 4) Exact last token (should match first row of last partition)
             long lastTokenRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(lastPk.token()));
-            // Find the first row with the last token
             long expectedLastTokenRowId = getExpectedLastTokenFirstRowId(count, map, lastPk);
             assertEquals(expectedLastTokenRowId, lastTokenRowId);
 
             // 5) After last: expect inverted ceiling to be Long.MIN_VALUE
             long invCeilAfterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
-            assertEquals("Expected inverted ceiling beyond end to be Long.MIN_VALUE", Long.MIN_VALUE, invCeilAfterLast);
+            assertEquals(Long.MIN_VALUE, invCeilAfterLast);
         }
     }
 
     @Test
     public void testCeiling() throws Throwable
     {
-        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
 
-            IPartitioner partitioner = sstable.metadata().partitioner;
-
-            // Find rows with different tokens
             final PrimaryKey firstPk = map.primaryKeyFromRowId(0);
             final PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
+            long t0 = firstPk.token().getLongValue();
+            long tLast = lastPk.token().getLongValue();
 
             // A row with next token than the first
             long secondTokenRowId = getNextTokenRowId(count, map, firstPk);
             PrimaryKey secondTokenPk = map.primaryKeyFromRowId(secondTokenRowId);
-            assert secondTokenPk.token() != firstPk.token();
-
-            long t0 = firstPk.token().getLongValue();
-            long tLast = lastPk.token().getLongValue();
 
             // 1) Before first: expect ceiling to be 0 (first row)
             long ceilingBeforeFirst = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
@@ -203,18 +194,18 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
             long ceilingFirst = map.ceiling(pkFactory.createTokenOnly(firstPk.token()));
             assertEquals(0, ceilingFirst);
 
-            // 3) If we have different tokens, test between them
+            // 3) Between the first and second token gives the first row ID in the second partition
             long t1 = secondTokenPk.token().getLongValue();
             long midTokenValue = t0 + ((t1 - t0) / 2);
             long ceilingBetween = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
             assertEquals(secondTokenRowId, ceilingBetween);
 
-            // 4) Exact last token: expect first row of last partition
+            // 4) Exact last token: expect first row of the last partition
             long ceilingLast = map.ceiling(pkFactory.createTokenOnly(lastPk.token()));
             long expectedLastTokenRowId = getExpectedLastTokenFirstRowId(count, map, lastPk);
             assertEquals(expectedLastTokenRowId, ceilingLast);
 
-            // 5) After last: AA format returns -1 for ceiling when beyond last token
+            // 5) After last: expect -1 for ceiling
             long ceilingAfterLast = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
             assertEquals(-1, ceilingAfterLast);
         }
@@ -223,7 +214,6 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
     @Test(expected = UnsupportedOperationException.class)
     public void testFloorUnsupported() throws Throwable
     {
-        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
