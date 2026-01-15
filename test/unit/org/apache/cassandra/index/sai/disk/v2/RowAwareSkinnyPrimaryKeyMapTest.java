@@ -21,6 +21,7 @@ import java.util.Set;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.IPartitioner;
@@ -31,27 +32,26 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 /**
  * Skinny-table tests (no clustering columns) for
- * {@link RowAwarePrimaryKeyMap#exactRowIdOrInvertedCeiling(PrimaryKey)} using the row-aware on-disk format.
+ * {@link RowAwarePrimaryKeyMap} using the row-aware on-disk format.
  */
 public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
-    private IndexDescriptor indexDescriptor;
+
+    private IndexComponents.ForRead perSSTableComponents;
     private SSTableReader sstable;
     private PrimaryKey.Factory pkFactory;
+    private IPartitioner partitioner;
 
     @Before
     public void setup() throws Throwable
     {
-        // Create a skinny table (no clustering), and two SAI indexes to ensure primary key components exist
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, int_value int, text_value text)");
         execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
         execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
@@ -66,33 +66,29 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
         flush();
 
         // Obtain the just-flushed SSTable
-        var cfs = getCurrentColumnFamilyStore();
-        sstable = cfs.getLiveSSTables().iterator().next();
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        this.sstable = cfs.getLiveSSTables().iterator().next();
 
-        // Build IndexDescriptor from the live SSTable using the matching index contexts
-        indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext));
-        TableMetadata tableMetadata = cfs.metadata.get();
-        pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(tableMetadata.comparator);
+        IndexDescriptor indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext));
+        this.perSSTableComponents = indexDescriptor.perSSTableComponents();
+
+        this.partitioner = sstable.metadata().partitioner;
+        this.pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(cfs.metadata.get().comparator);
     }
 
     @Test
     public void testExactRowIdOrInvertedCeiling() throws Throwable
     {
-        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
 
-            IPartitioner partitioner = sstable.metadata().partitioner;
-
-            // Prepare tokens in non-decreasing order to satisfy block-packed reader expectations
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
             PrimaryKey secondPk = map.primaryKeyFromRowId(1);
             PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
 
             long t0 = firstPk.token().getLongValue();
-            long t1 = secondPk.token().getLongValue();
             long tLast = lastPk.token().getLongValue();
 
             // 1) Before first: expect -1 (next id 0)
@@ -103,7 +99,8 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
             long firstRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(firstPk.token()));
             assertEquals(0, firstRowId);
 
-            // 3) Between first and second (or equal if collision): expect next id 1 -> -1-1 == -2
+            // 3) Between first and second: expect next id 1 -> -1-1 == -2
+            long t1 = secondPk.token().getLongValue();
             long midTokenValue = t0 + ((t1 - t0) / 2);
             long invCeilBetween01 = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
             assertEquals(-2, invCeilBetween01);
@@ -113,31 +110,24 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
             assertEquals(count - 1, lastRowId);
 
             // 5) After last: expect inverted ceiling to be Long.MIN_VALUE
-            long tAfter = tLast + 1;
-            long invCeilAfterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tAfter)));
-            long expectedStandardAfterLast = Long.MIN_VALUE;
-            assertEquals("Expected inverted ceiling beyond end to be either Long.MIN_VALUE", invCeilAfterLast, expectedStandardAfterLast);
+            long invCeilAfterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
+            assertEquals(Long.MIN_VALUE, invCeilAfterLast);
         }
     }
 
     @Test
     public void testCeiling() throws Throwable
     {
-        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
 
-            IPartitioner partitioner = sstable.metadata().partitioner;
-
-            // Prepare tokens in non-decreasing order to satisfy block-packed reader expectations
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
             PrimaryKey secondPk = map.primaryKeyFromRowId(1);
             PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
 
             long t0 = firstPk.token().getLongValue();
-            long t1 = secondPk.token().getLongValue();
             long tLast = lastPk.token().getLongValue();
 
             // 1) Before first: expect ceiling to be 0 (first row)
@@ -149,6 +139,7 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
             assertEquals(0, ceilingFirst);
 
             // 3) Between first and second: expect ceiling to be 1 (second row)
+            long t1 = secondPk.token().getLongValue();
             long midTokenValue = t0 + ((t1 - t0) / 2);
             long ceilingBetween01 = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
             assertEquals(1, ceilingBetween01);
@@ -157,10 +148,8 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
             long ceilingLast = map.ceiling(pkFactory.createTokenOnly(lastPk.token()));
             assertEquals(count - 1, ceilingLast);
 
-            // 5) After last: expect count (ceiling wraps around to count when beyond last)
+            // 5) After last: expect -1 for ceiling
             long ceilingAfterLast = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
-            // When token is after the last, skinnyExactRowIdOrInvertedCeiling returns -(count)-1,
-            // and ceiling converts it back to count
             assertEquals(-1, ceilingAfterLast);
         }
     }
@@ -168,32 +157,28 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
     @Test
     public void testFloorSkinny() throws Throwable
     {
-        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
             long count = map.count();
 
-            IPartitioner partitioner = sstable.metadata().partitioner;
-
-            // Prepare tokens in non-decreasing order to satisfy block-packed reader expectations
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
             PrimaryKey secondPk = map.primaryKeyFromRowId(1);
             PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
 
             long t0 = firstPk.token().getLongValue();
-            long t1 = secondPk.token().getLongValue();
             long tLast = lastPk.token().getLongValue();
 
-            // 1) Before first: expect negative value (no floor exists)
+            // 1) Before first: expect -1
             long floorBeforeFirst = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
-            assertTrue("Expected negative value for floor before first", floorBeforeFirst < 0);
+            assertEquals(-1, floorBeforeFirst);
 
             // 2) Exact first: expect 0
             long floorFirst = map.floor(pkFactory.createTokenOnly(firstPk.token()));
             assertEquals(0, floorFirst);
 
             // 3) Between first and second: expect floor to be 0 (first row)
+            long t1 = secondPk.token().getLongValue();
             long midTokenValue = t0 + ((t1 - t0) / 2);
             long floorBetween01 = map.floor(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
             assertEquals(0, floorBetween01);
