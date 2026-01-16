@@ -178,9 +178,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         this.tableQueryMetrics = tableQueryMetrics;
         this.indexFeatureSet = indexFeatureSet;
         this.ranges = dataRanges(command);
-        DataRange first = ranges.get(0);
-        DataRange last = ranges.get(ranges.size() - 1);
-        this.mergeRange = ranges.size() == 1 ? first.keyRange() : first.keyRange().withNewRight(last.keyRange().right);
+        this.mergeRange = merge(ranges);
 
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
@@ -372,21 +370,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private void updateIndexMetricsQueriesCount(Plan plan)
     {
         HashSet<IndexContext> queriedIndexesContexts = new HashSet<>();
-        plan.forEach(node -> {
-            IndexContext indexContext = node.getIndexContext();
-            if (indexContext != null)
-                queriedIndexesContexts.add(indexContext);
-            return Plan.ControlFlow.Continue;
-        });
-        queriedIndexesContexts.forEach(indexContext -> indexContext.getIndexMetrics()
-                .ifPresent(m -> m.queriesCount.inc()));
+        plan.visitIndexesRecursive(queriedIndexesContexts::add);
+        queriedIndexesContexts.forEach(indexContext ->
+                                       indexContext.getIndexMetrics()
+                                                   .ifPresent(m -> m.queriesCount.inc()));
     }
 
     Plan buildPlan()
     {
         Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
         Plan.RowsIteration rowsIteration = planFactory.fetch(keysIterationPlan);
-        rowsIteration = planFactory.recheckFilter(command.rowFilter(), rowsIteration);
+
+        rowsIteration = planFactory.recheckFilter(command.rowFilter().withoutOrderingExpressions(), rowsIteration);
         rowsIteration = planFactory.limit(rowsIteration, command.limits().rows());
 
         // Limit the number of intersected clauses before optimizing so we reduce the size of the
@@ -407,7 +402,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         plan = plan.limitIntersectedClauses(intersectionClauseLimit);
 
         if (plan.contains(node -> node instanceof Plan.Filter)
-            && plan.contains(node -> node instanceof Plan.IndexScan && ((Plan.IndexScan) node).ordering != null))
+            && plan.contains(node -> node instanceof Plan.IndexScan && ((Plan.IndexScan) node).ordering != null ||
+                                          node instanceof Plan.ScoredIndexScan))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
         if (plan.contains(node -> node instanceof Plan.KeysSort))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
@@ -549,7 +545,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             Plan.KeysIteration left = buildHalfRangeFromInequality(predicate, Operator.LT);
             Plan.KeysIteration right = buildHalfRangeFromInequality(predicate, Operator.GT);
-            return planFactory.union(new ArrayList<>(Arrays.asList(left, right)));
+            return planFactory.union(new ArrayList<>(Arrays.asList(left, right)), true);
         }
     }
 
@@ -720,7 +716,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     orderer.bm25stats.add(index.getRowCount(),
                                           index.getApproximateTermCount(),
                                           termAndExpressions,
-                                          termExpression -> index.estimateMatchingRowsCountUsingAllShards(termExpression, mergeRange));
+                                          termExpression -> index.estimateMatchingRowsCount(termExpression));
                 for (SSTableIndex index : view.sstableIndexes)
                     orderer.bm25stats.add(index.getRowCount(),
                                           index.getApproximateTermCount(),
@@ -926,12 +922,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     /**
      * Returns the total count of rows in the sstables which overlap with any of the given ranges
-     * and all live memtables.
+     * and the rows in the memtables restricted to the queried token ranges. Token ranges are
+     * approximated to full shards, according to the way how TrieMemtableIndex shards the indexes.
      */
     private long estimateTotalAvailableRows(List<DataRange> ranges)
     {
         long rows = 0;
-
         for (Memtable memtable : cfs.getAllMemtables())
             rows += Memtable.estimateRowCount(memtable);
 
@@ -941,6 +937,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     rows += sstable.getTotalRows();
 
         return rows;
+    }
+
+    private static AbstractBounds<PartitionPosition> merge(List<DataRange> ranges)
+    {
+        DataRange first = ranges.get(0);
+        DataRange last = ranges.get(ranges.size() - 1);
+        return ranges.size() == 1 ? first.keyRange() : first.keyRange().withNewRight(last.keyRange().right);
     }
 
     /**
@@ -979,10 +982,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         long rowCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
-            rowCount += index.estimateMatchingRowsCountUsingFirstShard(predicate, mergeRange);
+            rowCount += index.estimateMatchingRowsCount(predicate);
 
         for (SSTableIndex index : queryView.sstableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
+            rowCount += index.estimateMatchingRowsCount(predicate);
 
         return rowCount;
     }

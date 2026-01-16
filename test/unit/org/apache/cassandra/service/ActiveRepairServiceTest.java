@@ -58,18 +58,29 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.gms.FailureDetector;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.repair.RepairParallelism;
+import org.apache.cassandra.repair.messages.PrepareMessage;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
+import org.mockito.Mockito;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.repair.messages.RepairOption.DATACENTERS_KEY;
@@ -84,6 +95,9 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class ActiveRepairServiceTest
 {
@@ -126,6 +140,54 @@ public class ActiveRepairServiceTest
         StorageService.instance.setTokens(Collections.singleton(tmd.partitioner.getRandomToken()));
         tmd.updateNormalToken(tmd.partitioner.getMinimumToken(), REMOTE);
         assert tmd.isMember(REMOTE);
+    }
+
+    @Test
+    public void testNetworkTimeoutErrorCorrect() throws Throwable
+    {
+        /*
+        There are two ways that the repair service can time out during the prepare phase: through a latch timeout
+        and through a Timeout error thrown by the underlying network. This test forces the network layer
+        itself to timeout (and return a RequestFailure), and verifies that a timeout error is received.
+         */
+        DatabaseDescriptor.setRepairPrepareMessageTimeout(Long.MAX_VALUE);
+        // shut down the cluster so that we get a guaranteed timeout. Reset the state for the next test
+        Gossiper.instance.stop();
+        initialized = false;
+        // now try to do a prepare repair
+        List<ColumnFamilyStore> columnFamilyStores = List.of(prepareColumnFamilyStore());
+        try
+        {
+            ActiveRepairService.instance.prepareForRepair(UUID.randomUUID(), LOCAL, Set.of(LOCAL, REMOTE),
+                                                          RepairOption.parse(Collections.emptyMap(), IPartitioner.global()),
+                                                          true, columnFamilyStores);
+        } catch(RuntimeException re){
+            Assert.assertTrue("Did not return the correct error message",
+                              re.getMessage().contains("Did not get replies from all endpoints"));
+        }
+    }
+
+    @Test
+    public void testNetworkTimeoutFromLatchErrorCorrect() throws Throwable
+    {
+        /*
+        There are two ways that the repair service can time out during the prepare phase: through a latch timeout
+        and through a Timeout error thrown by the underlying network. This test shortens the latch timeout
+        window and forces a latch timeout, to ensure that the error message returned has the correct message.
+         */
+        DatabaseDescriptor.setRepairPrepareMessageTimeout(20L);
+        // now try to do a prepare repair
+        List<ColumnFamilyStore> columnFamilyStores = List.of(prepareColumnFamilyStore());
+        try
+        {
+            ActiveRepairService.instance.prepareForRepair(UUID.randomUUID(), LOCAL, Set.of(LOCAL, REMOTE),
+                                                          RepairOption.parse(Collections.emptyMap(), IPartitioner.global()),
+                                                          true, columnFamilyStores);
+        } catch(RuntimeException re){
+            Assert.assertTrue("Did not return the correct error message",
+                              re.getMessage().contains("Did not get replies from all endpoints"));
+        }
+
     }
 
     @Test

@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
@@ -366,14 +367,23 @@ abstract public class Plan
     }
 
     /**
-     * Returns the index context if the plan node uses one.
-     * Need to be overridden by nodes that use an index.
-     * Non-recursive.
+     * Traverses the tree recursively and calls the consumer for each index used in the plan.
      */
-    protected @Nullable IndexContext getIndexContext()
+    public final void visitIndexesRecursive(Consumer<IndexContext> consumer)
+    {
+        forEach(node -> {
+            node.visitIndexes(consumer);
+            return Plan.ControlFlow.Continue;
+        });
+    }
+
+    /**
+     * Non-recursive auxiliary method for {@link #visitIndexesRecursive(Consumer)}
+     * that calls the consumer for the index(es) in the current node.
+     */
+    protected void visitIndexes(Consumer<IndexContext> consumer)
     {
         // By default, a node does not contain an index.
-        return null;
     }
 
     /**
@@ -961,10 +971,10 @@ abstract public class Plan
         }
 
         @Override
-        final protected IndexContext getIndexContext()
+        final protected void visitIndexes(Consumer<IndexContext> consumer)
         {
             assert predicate != null || ordering != null;
-            return predicate != null ? predicate.context : ordering.context;
+            consumer.accept(predicate != null ? predicate.context : ordering.context);
         }
     }
     /**
@@ -1012,11 +1022,14 @@ abstract public class Plan
     static final class Union extends KeysIteration
     {
         private final LazyTransform<List<KeysIteration>> subplansSupplier;
+        private final boolean disjoint;
 
-        Union(Factory factory, int id, List<KeysIteration> subplans, Access access)
+        Union(Factory factory, int id, List<KeysIteration> subplans, boolean disjoint, Access access)
         {
             super(factory, id, access);
             Preconditions.checkArgument(!subplans.isEmpty(), "Subplans must not be empty");
+
+            this.disjoint = disjoint;
 
             // We propagate Access lazily just before we need the subplans.
             // This is because there may be several requests to change the access pattern from the top,
@@ -1052,14 +1065,25 @@ abstract public class Plan
         @Override
         protected double estimateSelectivity()
         {
-            // Assume independence (lack of correlation) of subplans.
-            // We multiply the probabilities of *not* selecting a key.
-            // Because selectivity is usage-independent, we can use the original subplans,
-            // to avoid forcing pushdown of Access information down.
-            double inverseSelectivity = 1.0;
-            for (KeysIteration plan : subplansSupplier.orig)
-                inverseSelectivity *= (1.0 - plan.selectivity());
-            return 1.0 - inverseSelectivity;
+            if (disjoint)
+            {
+                // If we know the subplans are disjoint, we can just sum their selectivities.
+                double selectivity = 0.0;
+                for (KeysIteration plan : subplansSupplier.orig)
+                    selectivity += plan.selectivity();
+                return Math.min(1.0, selectivity);
+            }
+            else
+            {
+                // Assume independence (lack of correlation) of subplans.
+                // We multiply the probabilities of *not* selecting a key.
+                // Because selectivity is usage-independent, we can use the original subplans,
+                // to avoid forcing pushdown of Access information down.
+                double inverseSelectivity = 1.0;
+                for (KeysIteration plan : subplansSupplier.orig)
+                    inverseSelectivity *= (1.0 - plan.selectivity());
+                return 1.0 - inverseSelectivity;
+            }
         }
 
         @Override
@@ -1083,7 +1107,7 @@ abstract public class Plan
 
             return newSubplans.equals(subplans)
                    ? this
-                   : factory.union(newSubplans, id).withAccess(access);
+                   : factory.union(newSubplans, disjoint, id).withAccess(access);
         }
 
         @Override
@@ -1091,7 +1115,7 @@ abstract public class Plan
         {
             return Objects.equals(access, this.access)
                    ? this
-                   : new Union(factory, id, subplansSupplier.orig, access);
+                   : new Union(factory, id, subplansSupplier.orig, disjoint, access);
         }
 
         @Override
@@ -1430,6 +1454,12 @@ abstract public class Plan
         {
             return source.usesIncludedIndex();
         }
+
+        @Override
+        protected String description()
+        {
+            return ordering.toString();
+        }
     }
 
     /**
@@ -1509,11 +1539,16 @@ abstract public class Plan
                    : new AnnIndexScan(factory, id, access, ordering);
         }
 
-        @Nullable
         @Override
-        protected IndexContext getIndexContext()
+        protected void visitIndexes(Consumer<IndexContext> consumer)
         {
-            return ordering.context;
+            consumer.accept(ordering.context);
+        }
+
+        @Override
+        protected String description()
+        {
+            return ordering.toString();
         }
     }
 
@@ -1551,9 +1586,9 @@ abstract public class Plan
         }
 
         @Override
-        protected IndexContext getIndexContext()
+        protected void visitIndexes(Consumer<IndexContext> consumer)
         {
-            return ordering.context;
+            consumer.accept(ordering.context);
         }
     }
 
@@ -1583,7 +1618,8 @@ abstract public class Plan
             return cost().costPerRow();
         }
 
-        final double expectedRows()
+        @VisibleForTesting
+        public final double expectedRows()
         {
             return cost().expectedRows;
         }
@@ -1903,14 +1939,27 @@ abstract public class Plan
 
         /**
          * Constructs a plan node representing a union of two key sets.
+         * Key sets are assumed to be non-correlated and may overlap.
          * @param subplans a list of subplans for unioned key sets
          */
         public KeysIteration union(List<KeysIteration> subplans)
         {
-            return union(subplans, nextId++);
+            return union(subplans, false, nextId++);
         }
 
-        private KeysIteration union(List<KeysIteration> subplans, int id)
+        /**
+         * Constructs a plan node representing a union of two key sets.
+         *
+         * @param subplans a list of subplans for unioned key sets
+         * @param disjoint hint to the planner that the subplans are disjoint; used for better row count estimation
+         */
+        public KeysIteration union(List<KeysIteration> subplans, boolean disjoint)
+        {
+            return union(subplans, disjoint, nextId++);
+        }
+
+
+        private KeysIteration union(List<KeysIteration> subplans, boolean disjoint, int id)
         {
             if (subplans.contains(everything))
                 return everything;
@@ -1921,7 +1970,7 @@ abstract public class Plan
             if (subplans.isEmpty())
                 return nothing;
 
-            return new Union(this, id, subplans, defaultAccess);
+            return new Union(this, id, subplans, disjoint, defaultAccess);
         }
 
         /**
