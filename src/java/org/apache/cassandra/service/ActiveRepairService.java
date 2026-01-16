@@ -23,6 +23,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.management.openmbean.CompositeData;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -558,11 +559,12 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         registerParentRepairSession(parentRepairSession, coordinator, columnFamilyStores, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal(), options.getPreviewKind());
         final CountDownLatch prepareLatch = new CountDownLatch(endpoints.size());
         final AtomicBoolean status = new AtomicBoolean(true);
-        final Set<String> failedNodes = Collections.synchronizedSet(new HashSet<String>());
-        RequestCallback callback = new RequestCallback()
+        final Set<String> failedNodes = Collections.synchronizedSet(new HashSet<>());
+        final AtomicBoolean hasTimedOut = new AtomicBoolean();
+        RequestCallback<?> callback = new RequestCallback<>()
         {
             @Override
-            public void onResponse(Message msg)
+            public void onResponse(Message<Object> msg)
             {
                 prepareLatch.countDown();
             }
@@ -570,6 +572,10 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             @Override
             public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
             {
+                if(failureReason == RequestFailureReason.TIMEOUT)
+                {
+                    hasTimedOut.set(true);
+                }
                 status.set(false);
                 failedNodes.add(from.toString());
                 prepareLatch.countDown();
@@ -612,7 +618,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         }
         try
         {
-            if (!prepareLatch.await(DatabaseDescriptor.getRepairPrepareMessageTimeout(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS))
+            if (!prepareLatch.await(DatabaseDescriptor.getRepairPrepareMessageTimeout(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS) || hasTimedOut.get())
                 failRepair(parentRepairSession, "Did not get replies from all endpoints.");
         }
         catch (InterruptedException e)
