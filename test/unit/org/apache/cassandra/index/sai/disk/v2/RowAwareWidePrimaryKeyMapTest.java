@@ -188,7 +188,6 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         private final PrimaryKey firstPk;
         private final PrimaryKey lastPk;
         private final long firstToken;
-        private final long secondToken;
         private final long lastToken;
 
         WideMapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
@@ -196,10 +195,8 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             this.rowIdFromPKMethod = rowIdFromPKMethod;
             this.count = map.count();
             this.firstPk = map.primaryKeyFromRowId(0);
-            PrimaryKey secondPk = map.primaryKeyFromRowId(1);
             this.lastPk = map.primaryKeyFromRowId(count - 1);
             this.firstToken = firstPk.token().getLongValue();
-            this.secondToken = secondPk.token().getLongValue();
             this.lastToken = lastPk.token().getLongValue();
 
             // Pre-compute row IDs for clustering tests
