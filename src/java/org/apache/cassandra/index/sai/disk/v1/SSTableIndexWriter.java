@@ -273,8 +273,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (term.remaining() == 0 && TypeUtil.skipsEmptyValue(indexContext.getValidator()))
             return false;
 
-        long allocated = currentBuilder.analyzeAndAdd(term, type, key, sstableRowId);
-        limiter.increment(allocated);
+        currentBuilder.analyzeAndAdd(term, type, key, sstableRowId);
         return true;
     }
 
@@ -300,13 +299,6 @@ public class SSTableIndexWriter implements PerIndexWriter
     private void flushSegment() throws IOException
     {
         currentBuilder.awaitAsyncAdditions();
-        if (currentBuilder.supportsAsyncAdd()
-            && currentBuilder.totalBytesAllocatedConcurrent.sum() > 1.1 * currentBuilder.totalBytesAllocated())
-        {
-            logger.warn("Concurrent memory usage is higher than estimated: {} vs {}",
-                        currentBuilder.totalBytesAllocatedConcurrent.sum(), currentBuilder.totalBytesAllocated());
-        }
-
         // throw exceptions that occurred during async addInternal()
         var ae = currentBuilder.getAsyncThrowable();
         if (ae != null)
