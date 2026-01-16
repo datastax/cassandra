@@ -52,28 +52,6 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
     private IndexComponents.ForRead perSSTableComponents;
     private IPartitioner partitioner;
 
-    private static long getNextTokenRowId(long count, PrimaryKeyMap map, PrimaryKey pk)
-    {
-        long i = 0;
-        while (map.primaryKeyFromRowId(i).token().equals(pk.token()))
-        {
-            assert i < count;
-            i++;
-        }
-        return i;
-    }
-
-    private static long getExpectedLastTokenFirstRowId(long count, PrimaryKeyMap map, PrimaryKey lastPk)
-    {
-        long i = 0;
-        while (!map.primaryKeyFromRowId(i).token().equals(lastPk.token()))
-        {
-            assert i < count;
-            i++;
-        }
-        return i;
-    }
-
     @Before
     public void setup() throws Throwable
     {
@@ -130,42 +108,13 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
-            long count = map.count();
+            MapWalker mapWalker = new MapWalker(map, map::exactRowIdOrInvertedCeiling);
 
-            final PrimaryKey firstPk = map.primaryKeyFromRowId(0);
-            final PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
-            long t0 = firstPk.token().getLongValue();
-            long tLast = lastPk.token().getLongValue();
-
-            // A row with next token (partition) than the first
-            // In wide partitions, V1 format only distinguishes by token, not clustering
-            long secondTokenRowId = getNextTokenRowId(count, map, firstPk);
-            PrimaryKey secondTokenPk = map.primaryKeyFromRowId(secondTokenRowId);
-
-
-            // 1) Before first: expect -1 (next id 0)
-            long invCeilBeforeFirst = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
-            assertEquals(-1, invCeilBeforeFirst);
-
-            // 2) Exact first token (should match first row of that partition)
-            long firstRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(firstPk.token()));
-            assertEquals(0, firstRowId);
-
-            // 3) Test between the first and second tokens/partitions,
-            // which points to the first row id in the second partition
-            long t1 = secondTokenPk.token().getLongValue();
-            long midTokenValue = t0 + ((t1 - t0) / 2);
-            long invCeilBetween = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
-            assertEquals(-secondTokenRowId - 1, invCeilBetween);
-
-            // 4) Exact last token (should match first row of last partition)
-            long lastTokenRowId = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(lastPk.token()));
-            long expectedLastTokenRowId = getExpectedLastTokenFirstRowId(count, map, lastPk);
-            assertEquals(expectedLastTokenRowId, lastTokenRowId);
-
-            // 5) After last: expect inverted ceiling to be Long.MIN_VALUE
-            long invCeilAfterLast = map.exactRowIdOrInvertedCeiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
-            assertEquals(Long.MIN_VALUE, invCeilAfterLast);
+            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
+            mapWalker.assertResult(mapWalker.exactFirstToken(), 0, "exact first token");
+            mapWalker.assertResult(mapWalker.betweenFirstAndSecondToken(), -mapWalker.secondTokenRowId - 1, "between first and second token expects inverted second token first row");
+            mapWalker.assertResult(mapWalker.exactLastToken(), mapWalker.expectedLastTokenRowId, "last token expects first row id of the last token/partition");
+            mapWalker.assertResult(mapWalker.afterLast(), Long.MIN_VALUE, "after last expects out of range");
         }
     }
 
@@ -175,39 +124,13 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
-            long count = map.count();
+            MapWalker mapWalker = new MapWalker(map, map::ceiling);
 
-            final PrimaryKey firstPk = map.primaryKeyFromRowId(0);
-            final PrimaryKey lastPk = map.primaryKeyFromRowId(count - 1);
-            long t0 = firstPk.token().getLongValue();
-            long tLast = lastPk.token().getLongValue();
-
-            // A row with next token than the first
-            long secondTokenRowId = getNextTokenRowId(count, map, firstPk);
-            PrimaryKey secondTokenPk = map.primaryKeyFromRowId(secondTokenRowId);
-
-            // 1) Before first: expect ceiling to be 0 (first row)
-            long ceilingBeforeFirst = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(t0 - 1)));
-            assertEquals(0, ceilingBeforeFirst);
-
-            // 2) Exact first token: expect 0 (first row of that partition)
-            long ceilingFirst = map.ceiling(pkFactory.createTokenOnly(firstPk.token()));
-            assertEquals(0, ceilingFirst);
-
-            // 3) Between the first and second token gives the first row ID in the second partition
-            long t1 = secondTokenPk.token().getLongValue();
-            long midTokenValue = t0 + ((t1 - t0) / 2);
-            long ceilingBetween = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midTokenValue)));
-            assertEquals(secondTokenRowId, ceilingBetween);
-
-            // 4) Exact last token: expect first row of the last partition
-            long ceilingLast = map.ceiling(pkFactory.createTokenOnly(lastPk.token()));
-            long expectedLastTokenRowId = getExpectedLastTokenFirstRowId(count, map, lastPk);
-            assertEquals(expectedLastTokenRowId, ceilingLast);
-
-            // 5) After last: expect -1 for ceiling
-            long ceilingAfterLast = map.ceiling(pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(tLast + 1)));
-            assertEquals(-1, ceilingAfterLast);
+            mapWalker.assertResult(mapWalker.beforeFirst(), 0, "before first expects the first");
+            mapWalker.assertResult(mapWalker.exactFirstToken(), 0, "exact first token");
+            mapWalker.assertResult(mapWalker.betweenFirstAndSecondToken(), mapWalker.secondTokenRowId, "between first and second token expects second token first row");
+            mapWalker.assertResult(mapWalker.exactLastToken(), mapWalker.expectedLastTokenRowId, "last token expects first row id of the last token/partition");
+            mapWalker.assertResult(mapWalker.afterLast(), -1, "after last expects out of range");
         }
     }
 
@@ -220,6 +143,100 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
             // AA format does not support floor operation; it should throw UnsupportedOperationException
             PrimaryKey firstPk = map.primaryKeyFromRowId(0);
             map.floor(pkFactory.createTokenOnly(firstPk.token()));
+        }
+    }
+
+    /**
+     * Functional interface for PrimaryKeyMap API methods that take a PrimaryKey and return a row ID.
+     */
+    @FunctionalInterface
+    private interface PrimaryKeyMapFunction
+    {
+        long apply(PrimaryKey pk);
+    }
+
+    private class MapWalker
+    {
+        private final PrimaryKeyMapFunction rowIdFromPKMethod;
+        protected final long count;
+        private final PrimaryKey firstPk;
+        private final PrimaryKey lastPk;
+        private final long firstToken;
+        private final long lastToken;
+        protected final long secondTokenRowId;
+        private final PrimaryKey secondTokenPk;
+        protected final long expectedLastTokenRowId;
+
+        MapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
+        {
+            this.rowIdFromPKMethod = rowIdFromPKMethod;
+            this.count = map.count();
+            this.firstPk = map.primaryKeyFromRowId(0);
+            this.lastPk = map.primaryKeyFromRowId(count - 1);
+            this.firstToken = firstPk.token().getLongValue();
+            this.lastToken = lastPk.token().getLongValue();
+
+            // Find the first row of the second partition (next token)
+            this.secondTokenRowId = getNextTokenRowId(count, map, firstPk);
+            this.secondTokenPk = map.primaryKeyFromRowId(secondTokenRowId);
+
+            // Find the first row of the last partition
+            this.expectedLastTokenRowId = getExpectedLastTokenFirstRowId(count, map, lastPk);
+        }
+
+        private long getNextTokenRowId(long count, PrimaryKeyMap map, PrimaryKey pk)
+        {
+            long i = 0;
+            while (map.primaryKeyFromRowId(i).token().equals(pk.token()))
+            {
+                assert i < count;
+                i++;
+            }
+            return i;
+        }
+
+        private long getExpectedLastTokenFirstRowId(long count, PrimaryKeyMap map, PrimaryKey lastPk)
+        {
+            long i = 0;
+            while (!map.primaryKeyFromRowId(i).token().equals(lastPk.token()))
+            {
+                assert i < count;
+                i++;
+            }
+            return i;
+        }
+
+        PrimaryKey beforeFirst()
+        {
+            return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(firstToken - 1));
+        }
+
+        PrimaryKey exactFirstToken()
+        {
+            return pkFactory.createTokenOnly(firstPk.token());
+        }
+
+        PrimaryKey betweenFirstAndSecondToken()
+        {
+            long t1 = secondTokenPk.token().getLongValue();
+            long midToken = firstToken + ((t1 - firstToken) / 2);
+            return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midToken));
+        }
+
+        PrimaryKey exactLastToken()
+        {
+            return pkFactory.createTokenOnly(lastPk.token());
+        }
+
+        PrimaryKey afterLast()
+        {
+            return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(lastToken + 1));
+        }
+
+        void assertResult(PrimaryKey pk, long expected, String expectationMessage)
+        {
+            long actual = rowIdFromPKMethod.apply(pk);
+            assertEquals(expectationMessage, expected, actual);
         }
     }
 }
