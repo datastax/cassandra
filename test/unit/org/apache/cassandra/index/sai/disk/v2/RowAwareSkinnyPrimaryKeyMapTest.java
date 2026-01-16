@@ -135,8 +135,8 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
 
     private class MapWalker
     {
-        private final PrimaryKeyMapFunction rowIdFromPKMethod;
         protected final long count;
+        private final PrimaryKeyMapFunction rowIdFromPKMethod;
         private final PrimaryKey firstPk;
         private final PrimaryKey lastPk;
         private final long firstToken;

@@ -157,15 +157,15 @@ public class PartitionAwareWidePrimaryKeyMapTest extends SAITester
 
     private class MapWalker
     {
-        private final PrimaryKeyMapFunction rowIdFromPKMethod;
         protected final long count;
+        protected final long secondTokenRowId;
+        protected final long expectedLastTokenRowId;
+        private final PrimaryKeyMapFunction rowIdFromPKMethod;
         private final PrimaryKey firstPk;
         private final PrimaryKey lastPk;
         private final long firstToken;
         private final long lastToken;
-        protected final long secondTokenRowId;
         private final PrimaryKey secondTokenPk;
-        protected final long expectedLastTokenRowId;
 
         MapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
         {
