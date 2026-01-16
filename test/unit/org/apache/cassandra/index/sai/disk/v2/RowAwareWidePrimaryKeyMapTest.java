@@ -101,7 +101,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
-            WideMapWalker mapWalker = new WideMapWalker(map, map::exactRowIdOrInvertedCeiling);
+            MapWalker mapWalker = new MapWalker(map, map::exactRowIdOrInvertedCeiling);
 
             mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
             mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
@@ -124,7 +124,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
-            WideMapWalker mapWalker = new WideMapWalker(map, map::ceiling);
+            MapWalker mapWalker = new MapWalker(map, map::ceiling);
 
             mapWalker.assertResult(mapWalker.beforeFirst(), 0, "before first expects the first");
             mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
@@ -147,7 +147,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
              PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
-            WideMapWalker mapWalker = new WideMapWalker(map, map::floor);
+            MapWalker mapWalker = new MapWalker(map, map::floor);
 
             mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects out of range");
             mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
@@ -177,7 +177,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
      * Helper class for wide partition tests with clustering columns.
      * Provides position generators and assertion methods for testing PrimaryKeyMap operations.
      */
-    private class WideMapWalker
+    private class MapWalker
     {
         protected final long count;
         protected final long id11;
@@ -190,7 +190,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         private final long firstToken;
         private final long lastToken;
 
-        WideMapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
+        MapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
         {
             this.rowIdFromPKMethod = rowIdFromPKMethod;
             this.count = map.count();
