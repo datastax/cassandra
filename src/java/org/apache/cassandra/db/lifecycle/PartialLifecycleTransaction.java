@@ -173,10 +173,8 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
     public void trackNewWritten(SSTable table)
     {
         throwIfCompositeAborted();
-        synchronized (mainTransaction)
-        {
-            mainTransaction.trackNewWritten(table);
-        }
+        // Beware: not synchronized. Thread safety shall be ensured in the main transaction trackNewWritten.
+        mainTransaction.trackNewWritten(table);
     }
 
     @Override
