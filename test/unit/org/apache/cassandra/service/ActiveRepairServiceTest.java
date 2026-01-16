@@ -28,8 +28,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -57,6 +59,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -124,6 +127,71 @@ public class ActiveRepairServiceTest
         StorageService.instance.setTokens(Collections.singleton(tmd.partitioner.getRandomToken()));
         tmd.updateNormalToken(tmd.partitioner.getMinimumToken(), REMOTE);
         assert tmd.isMember(REMOTE);
+    }
+
+    @Test
+    public void testNetworkTimeoutErrorCorrect() throws Throwable
+    {
+        /*
+        There are two ways that the repair service can time out during the prepare phase: through a scheduled
+        timeout and through a Timeout error thrown by the underlying network. This test forces the network layer
+        itself to timeout (and return a RequestFailure), and verifies that a timeout error is received.
+         */
+        long previousRpcTimeout = DatabaseDescriptor.getRpcTimeout(TimeUnit.MILLISECONDS);
+        try
+        {
+            DatabaseDescriptor.setRpcTimeout(Integer.MAX_VALUE);
+            // shut down the cluster so that we get a guaranteed timeout. Reset the state for the next test
+            Gossiper.instance.stop();
+            initialized = false;
+            // now try to do a prepare repair
+            List<ColumnFamilyStore> columnFamilyStores = List.of(prepareColumnFamilyStore());
+            Future<?> future = ActiveRepairService.instance().prepareForRepair(nextTimeUUID(), LOCAL, Set.of(LOCAL, REMOTE),
+                                                                              RepairOption.parse(Collections.emptyMap(), IPartitioner.global()),
+                                                                              true, columnFamilyStores);
+            future.get(1, TimeUnit.MINUTES);
+            fail("Expected repair to fail with timeout");
+        }
+        catch (ExecutionException e)
+        {
+            assertTrue("Did not return the correct error message: " + e.getCause().getMessage(),
+                       e.getCause().getMessage().contains("Did not get replies from all endpoints"));
+        }
+        finally
+        {
+            DatabaseDescriptor.setRpcTimeout(previousRpcTimeout);
+        }
+    }
+
+    @Test
+    public void testNetworkTimeoutFromScheduledTimeoutErrorCorrect() throws Throwable
+    {
+        /*
+        There are two ways that the repair service can time out during the prepare phase: through a scheduled
+        timeout and through a Timeout error thrown by the underlying network. This test shortens the scheduled
+        timeout window and forces a timeout, to ensure that the error message returned has the correct message.
+         */
+        long previousRpcTimeout = DatabaseDescriptor.getRpcTimeout(TimeUnit.MILLISECONDS);
+        try
+        {
+            DatabaseDescriptor.setRpcTimeout(20L);
+            // now try to do a prepare repair
+            List<ColumnFamilyStore> columnFamilyStores = List.of(prepareColumnFamilyStore());
+            Future<?> future = ActiveRepairService.instance().prepareForRepair(nextTimeUUID(), LOCAL, Set.of(LOCAL, REMOTE),
+                                                                              RepairOption.parse(Collections.emptyMap(), IPartitioner.global()),
+                                                                              true, columnFamilyStores);
+            future.get(1, TimeUnit.MINUTES);
+            fail("Expected repair to fail with timeout");
+        }
+        catch (ExecutionException e)
+        {
+            assertTrue("Did not return the correct error message: " + e.getCause().getMessage(),
+                       e.getCause().getMessage().contains("Did not get replies from all endpoints"));
+        }
+        finally
+        {
+            DatabaseDescriptor.setRpcTimeout(previousRpcTimeout);
+        }
     }
 
     @Test
