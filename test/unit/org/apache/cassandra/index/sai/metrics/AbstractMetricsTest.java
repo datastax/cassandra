@@ -20,9 +20,11 @@ package org.apache.cassandra.index.sai.metrics;
 import java.util.concurrent.TimeUnit;
 import javax.management.ObjectName;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.utils.Throwables;
 
@@ -32,6 +34,11 @@ import static org.junit.Assert.assertTrue;
 @Ignore
 public abstract class AbstractMetricsTest extends SAITester
 {
+    boolean indexMetricsEnabled;
+    boolean perQueryKindPerTableMetricsEnabled;
+    boolean perQueryKindPerQueryMetricsEnabled;
+    boolean queryPlanMetricsEnabled;
+
     @Before
     public void initializeTest() throws Throwable
     {
@@ -40,6 +47,20 @@ public abstract class AbstractMetricsTest extends SAITester
         startJMXServer();
 
         createMBeanServerConnection();
+
+        indexMetricsEnabled = CassandraRelevantProperties.SAI_INDEX_METRICS_ENABLED.getBoolean();
+        perQueryKindPerQueryMetricsEnabled = CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.getBoolean();
+        perQueryKindPerTableMetricsEnabled = CassandraRelevantProperties.SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED.getBoolean();
+        queryPlanMetricsEnabled = CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean();
+    }
+
+    @After
+    public void cleanupTest() throws Throwable
+    {
+        CassandraRelevantProperties.SAI_INDEX_METRICS_ENABLED.setBoolean(indexMetricsEnabled);
+        CassandraRelevantProperties.SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED.setBoolean(perQueryKindPerTableMetricsEnabled);
+        CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.setBoolean(perQueryKindPerQueryMetricsEnabled);
+        CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(indexMetricsEnabled);
     }
 
     protected void waitForIndexCompaction(String keyspace, String table, String index)
@@ -85,7 +106,6 @@ public abstract class AbstractMetricsTest extends SAITester
         }, 10, TimeUnit.SECONDS);
     }
 
-
     protected void waitForGreaterThanZero(ObjectName name)
     {
         waitForAssert(() -> {
@@ -98,5 +118,20 @@ public abstract class AbstractMetricsTest extends SAITester
                 throw Throwables.unchecked(ex);
             }
         }, 160, TimeUnit.SECONDS);
+    }
+
+    protected void waitForMetricValueBetween(ObjectName name, long min, long max)
+    {
+        waitForAssert(() -> {
+            try
+            {
+                double value = ((Number) getMetricValue(name)).longValue();
+                assertTrue("Metric value " + value + " is between " + min + " and " + max, value >= min && value <= max);
+            }
+            catch (Throwable ex)
+            {
+                throw Throwables.unchecked(ex);
+            }
+        }, 60, TimeUnit.SECONDS);
     }
 }
