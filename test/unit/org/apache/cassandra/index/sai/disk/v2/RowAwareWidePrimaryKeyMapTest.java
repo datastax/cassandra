@@ -179,17 +179,17 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
      */
     private class WideMapWalker
     {
-        private final PrimaryKeyMapFunction rowIdFromPKMethod;
         protected final long count;
+        protected final long id11;
+        protected final long id12;
+        protected final long id13;
+        protected final long id110;
+        private final PrimaryKeyMapFunction rowIdFromPKMethod;
         private final PrimaryKey firstPk;
         private final PrimaryKey lastPk;
         private final long firstToken;
         private final long secondToken;
         private final long lastToken;
-        protected final long id11;
-        protected final long id12;
-        protected final long id13;
-        protected final long id110;
 
         WideMapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
         {
