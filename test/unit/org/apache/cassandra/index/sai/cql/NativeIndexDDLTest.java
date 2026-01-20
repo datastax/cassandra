@@ -23,6 +23,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -32,6 +33,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.AppenderBase;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.assertj.core.api.Assertions;
 import org.junit.After;
@@ -82,6 +86,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.mockito.Mockito;
+import org.slf4j.LoggerFactory;
 
 import static java.util.Collections.singletonList;
 import static junit.framework.TestCase.fail;
@@ -847,41 +852,111 @@ public class NativeIndexDDLTest extends SAITester
     {
         createTable(CREATE_TABLE_TEMPLATE);
 
-        if (!concurrentTruncate)
-        {
-            createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-            createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        }
+        // Set up logging appender to capture log messages
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(StorageAttachedIndexBuilder.class);
+        InMemoryAppender appender = new InMemoryAppender();
+        logger.addAppender(appender);
+        Level originalLevel = logger.getLevel();
+        logger.setLevel(Level.INFO);
 
-        // create 100 rows, half in sstable and half in memtable
-        int num = 100;
-        for (int i = 0; i < num; i++)
+        try
         {
-            if (i == num / 2)
+            if (!concurrentTruncate)
+            {
+                createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+                createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+            }
+
+            // create 100 rows, half in sstable and half in memtable
+            int num = 100;
+            for (int i = 0; i < num; i++)
+            {
+                if (i == num / 2)
+                    flush();
+                execute("INSERT INTO %s (id1, v1, v2) VALUES ('" + i + "', 0, '0');");
+            }
+
+            if (concurrentTruncate)
+            {
+                // Flush remaining rows to ensure we have SSTables for index builds
                 flush();
-            execute("INSERT INTO %s (id1, v1, v2) VALUES ('" + i + "', 0, '0');");
-        }
 
-        if (concurrentTruncate)
+                // Inject a delay to slow down the index build so truncate can interrupt it
+                // Using a pause (not a barrier) allows the build to be registered as a compaction task
+                // 500ms delay per partition ensures builds run long enough to be detected and interrupted
+                Injection slowDown = Injections.newPause("slowDownBuild", 5000)
+                                               .add(InvokePointBuilder.newInvokePoint()
+                                                                      .onClass(StorageAttachedIndexWriter.class)
+                                                                      .onMethod("startPartition")
+                                                                      .atEntry())
+                                               .build();
+                
+                Injections.inject(slowDown);
+
+                try
+                {
+                    createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+                    createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+                    
+                    // Wait for index builds to be submitted to CompactionManager
+                    waitForAssert(() -> assertTrue("Index build should be submitted",
+                                                 INDEX_BUILD_COUNTER.get() > 0),
+                                 5, TimeUnit.SECONDS);
+                    
+                    // Let it process a few partitions
+                    Thread.sleep(200);
+
+                    // Verify builds are actively running before truncating
+                    waitForAssert(() -> assertTrue("Index builds should be running",
+                                                   getCompactionTasks() > 0),
+                                  2, TimeUnit.SECONDS);
+                    
+                    // Truncate while builds are actively running (but slow)
+                    // This should interrupt the builds with StopTrigger.TRUNCATE
+                    // The builds will check isStopRequested() at line 181 and throw CompactionInterruptedException
+                    truncate(true);
+                    
+                    // Wait for all compactions/builds to complete after truncate
+                    waitForCompactions();
+                    
+                    waitForTableIndexesQueryable();
+
+                    // Wait for the INFO log to appear (with timeout)
+                    waitForAssert(() -> {
+                        List<ILoggingEvent> events = appender.getEventsForLevel(Level.INFO);
+                        boolean found = events.stream()
+                                              .anyMatch(e -> e.getFormattedMessage().contains("Stop requested while building indexes"));
+                        assertTrue("Expected INFO log", found);
+                    }, 10, TimeUnit.SECONDS);
+                }
+                finally
+                {
+                    Injections.deleteAll();
+                }
+            }
+            else
+            {
+                truncate(true);
+                
+                // Verify NO stop logs when truncating with already-built indexes
+                verifyIndexBuildLog(appender, Level.INFO, "Stop requested while building indexes", false);
+                verifyIndexBuildLog(appender, Level.ERROR, "Stop requested while building initial indexes", false);
+            }
+
+            waitForAssert(this::verifyNoIndexFiles);
+
+            // verify index-view-manager has been cleaned up
+            verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 0);
+            verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 0);
+
+            assertEquals("Segment memory limiter should revert to zero after truncate.", 0L, getSegmentBufferUsedBytes());
+            assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
+        }
+        finally
         {
-            createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-            createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-            truncate(true);
-            waitForTableIndexesQueryable();
+            logger.setLevel(originalLevel);
+            logger.detachAppender(appender);
         }
-        else
-        {
-            truncate(true);
-        }
-
-        waitForAssert(this::verifyNoIndexFiles);
-
-        // verify index-view-manager has been cleaned up
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 0);
-        verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), 0);
-
-        assertEquals("Segment memory limiter should revert to zero after truncate.", 0L, getSegmentBufferUsedBytes());
-        assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
     }
 
     /**
@@ -1525,7 +1600,7 @@ public class NativeIndexDDLTest extends SAITester
         int attempt = 20;
         while (getCompactionTasks() > 0 && attempt > 0)
         {
-            System.out.println("Attempt " + attempt + " at stopping the compaction tasks");
+            logger.info("Attempt {} at stopping the compaction tasks", attempt);
 
             // only interrupts active compactions, not pending compactions.
             CompactionManager.instance.stopCompaction(OperationType.INDEX_BUILD.name());
@@ -1568,6 +1643,129 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
 
         assertTrue(verifyChecksum(numericIndexContext));
+    }
+
+    @Test
+    public void testStopRequestedDuringIndexRebuild() throws Throwable
+    {
+        createTable(CREATE_TABLE_TEMPLATE);
+        disableCompaction(KEYSPACE);
+
+        // Create data and initial index
+        int num = 100;
+        for (int i = 0; i < num; i++)
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('" + i + "', 0, '0');");
+
+        flush();
+
+        String indexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        waitForTableIndexesQueryable();
+
+        // Set up logging appender to capture log messages BEFORE starting rebuild
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(StorageAttachedIndexBuilder.class);
+        InMemoryAppender appender = new InMemoryAppender();
+        logger.addAppender(appender);
+        Level originalLevel = logger.getLevel();
+        logger.setLevel(Level.INFO);
+
+        try
+        {
+            // Set up barrier to delay index rebuild - use newBarrier instead of newBarrierAwait
+            Injections.Barrier delayIndexRebuild = Injections.newBarrier("delayIndexRebuild", 2, false)
+                                                             .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndexBuilder.class).onMethod("build"))
+                                                             .build();
+
+            Injections.inject(delayIndexRebuild);
+
+            // Start index rebuild in background (isInitialBuild=false)
+            Thread rebuildThread = new Thread(() -> {
+                try
+                {
+                    rebuildIndexes(indexName);
+                }
+                catch (Exception e)
+                {
+                    // Expected to be interrupted
+                    NativeIndexDDLTest.logger.info("Rebuild thread caught exception: {}", e.getMessage());
+                }
+            });
+            rebuildThread.start();
+
+            // Wait for rebuild to reach the barrier
+            waitForAssert(() -> assertEquals(1, delayIndexRebuild.getCount()), 5000, TimeUnit.MILLISECONDS);
+
+            // Stop the rebuild (this should trigger the INFO log at line 259)
+            CompactionManager.instance.stopCompaction(OperationType.INDEX_BUILD.name());
+            
+            // Let the rebuild continue and hit the stop
+            delayIndexRebuild.countDown();
+
+            // Wait for rebuild thread to complete
+            rebuildThread.join(10000);
+
+            delayIndexRebuild.disable();
+
+            // Add small delay to allow async logging to complete
+            Thread.sleep(500);
+
+            // Verify that the INFO log was generated (line 259)
+            verifyIndexBuildLog(appender, Level.INFO, "Stop requested while building indexes", true);
+        }
+        finally
+        {
+            logger.setLevel(originalLevel);
+            logger.detachAppender(appender);
+        }
+    }
+
+
+    private static class InMemoryAppender extends AppenderBase<ILoggingEvent>
+    {
+        private final List<ILoggingEvent> events = new ArrayList<>();
+
+        private InMemoryAppender()
+        {
+            start();
+        }
+
+        @Override
+        protected synchronized void append(ILoggingEvent event)
+        {
+            events.add(event);
+        }
+
+        public synchronized List<ILoggingEvent> getEventsForLevel(Level level)
+        {
+            List<ILoggingEvent> result = new ArrayList<>();
+            for (ILoggingEvent event : events)
+            {
+                if (event.getLevel() == level)
+                {
+                    result.add(event);
+                }
+            }
+            return result;
+        }
+    }
+
+    /**
+     * Helper to verify expected log messages from StorageAttachedIndexBuilder
+     * @param appender the log appender that captured events
+     * @param expectedLevel the log level to check (INFO, ERROR, etc.)
+     * @param expectedMessageFragment the text fragment expected in the log message
+     * @param shouldExist true if the log should exist, false if it should NOT exist
+     */
+    private void verifyIndexBuildLog(InMemoryAppender appender, Level expectedLevel, String expectedMessageFragment, boolean shouldExist)
+    {
+        List<ILoggingEvent> events = appender.getEventsForLevel(expectedLevel);
+        boolean found = events.stream()
+            .anyMatch(e -> e.getFormattedMessage().contains(expectedMessageFragment));
+        
+        if (shouldExist)
+            assertTrue("Expected " + expectedLevel + " log containing '" + expectedMessageFragment + "'. Captured " +
+                       events.size() + ' ' + expectedLevel + " events.", found);
+        else
+            assertFalse("Should NOT have " + expectedLevel + " log containing '" + expectedMessageFragment + '\'', found);
     }
 
     @Test
