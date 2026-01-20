@@ -593,8 +593,8 @@
           <dependency groupId="org.slf4j" artifactId="slf4j-api" version="2.0.9"/>
           <dependency groupId="org.slf4j" artifactId="log4j-over-slf4j" version="2.0.9"/>
           <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j" version="2.0.9" />
-          <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.4.14"/>
-          <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.4.14"/>
+          <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.5.25"/>
+          <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.5.25"/>
           <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core" version="2.18.4"/>
           <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.18.4"/>
           <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations" version="2.18.4"/>
