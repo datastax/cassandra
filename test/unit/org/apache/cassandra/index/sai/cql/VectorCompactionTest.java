@@ -31,9 +31,12 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
@@ -254,20 +257,40 @@ abstract public class VectorCompactionTest extends VectorTester
 
     public void testOneToManyCompactionHolesInternal(int vectorsPerSstable, int sstables)
     {
-        createTable();
+        var indexName = createTableAndReturnIndexName();
 
         disableCompaction();
 
         insertOneToManyRows(vectorsPerSstable, sstables);
 
-        // this should be done after writing data so that we exercise the "we thought we were going to use the
-        // one-to-many-path but there were too many holes so we changed plans" code path
-        V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 0.0;
+        double originalGlobalHolesAllowed = V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED;
+        try
+        {
+            // this should be done after writing data so that we exercise the "we thought we were going to use the
+            // one-to-many-path but there were too many holes so we changed plans" code path
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 0.0;
 
-        // queries should behave sanely before and after compaction
-        validateQueries();
-        compact();
-        validateQueries();
+            // queries should behave sanely before and after compaction
+            validateQueries();
+            compact();
+            validateQueries();
+
+            // Validate that we have the expected structure for all the sstables-segment indexes.
+            var sai = (StorageAttachedIndex) Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).getIndexManager().getIndexByName(indexName);
+            var indexes = sai.getIndexContext().getView().getIndexes();
+            for (var index : indexes)
+            {
+                for (var segment : index.getSegments())
+                {
+                    var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                    assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, searcher.getPostingsStructure());
+                }
+            }
+        }
+        finally
+        {
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = originalGlobalHolesAllowed;
+        }
     }
 
     private void insertOneToManyRows(int vectorsPerSstable, int sstables)
@@ -301,8 +324,13 @@ abstract public class VectorCompactionTest extends VectorTester
 
     private void createTable()
     {
+        createTableAndReturnIndexName();
+    }
+
+    private String createTableAndReturnIndexName()
+    {
         createTable("CREATE TABLE %s (pk int, v vector<float, " + dimension() + ">, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        return createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
     }
 
     private void validateQueries()
