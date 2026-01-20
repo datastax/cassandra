@@ -91,8 +91,6 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
 import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -135,7 +133,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final long termsOffset;
     private int lastRowId = -1;
     private int rowsAdded = 0;
-    private int maxOrdinal = 0; // Inclusive
+    private int maxOrdinal = -1; // Inclusive
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
@@ -305,6 +303,7 @@ public class CompactionGraph implements Closeable, Accountable
         // Note that a normal put operation follows this flow, so the overhead of acquiring the lock is required.
         try (var postingsQueryContext = postingsMap.queryContext(vector))
         {
+            // Closing the query context releases the lock.
             //noinspection LockAcquiredButNotSafelyReleased
             postingsQueryContext.writeLock().lock();
             var absentEntry = postingsQueryContext.absentEntry();
@@ -313,7 +312,8 @@ public class CompactionGraph implements Closeable, Accountable
                 // add a new entry
                 // this all runs on the same compaction thread, so we don't need to worry about concurrency
                 int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
-                maxOrdinal = ordinal; // always increasing
+                assert ordinal > maxOrdinal : "Unexpected ordinal " + ordinal + " previous max " + maxOrdinal;
+                maxOrdinal = ordinal;
                 CompactionVectorPostings postings = new CompactionVectorPostings(ordinal, segmentRowId);
                 Data<CompactionVectorPostings> data = postingsQueryContext.wrapValueAsData(postings);
                 absentEntry.doInsert(data);

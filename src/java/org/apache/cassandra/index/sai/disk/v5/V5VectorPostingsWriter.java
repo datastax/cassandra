@@ -475,7 +475,7 @@ public class V5VectorPostingsWriter<T>
     /**
      * return an exhaustive zero-to-many mapping with no renumbering
      */
-    public static <T> RemappedPostings createGenericIdentityMapping(ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, int maxRowId, int maxOldOrdinal)
+    public static RemappedPostings createGenericIdentityMapping(ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, int maxRowId, int maxOldOrdinal)
     {
         var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
 
