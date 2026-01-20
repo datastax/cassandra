@@ -34,7 +34,9 @@ public interface LifecycleNewTracker
     void trackNew(SSTable table);
 
     /**
-     * Called when a new sstable and its indexes bave been fully written
+     * Called when a new sstable and its indexes have been fully written.
+     * Implementation must be thread safe and not alter the state of the transaction.
+     *
      * @param table - the newly written sstable to be tracked
      */
     default void trackNewWritten(SSTable table)
