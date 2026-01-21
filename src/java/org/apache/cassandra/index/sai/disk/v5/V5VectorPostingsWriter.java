@@ -439,7 +439,7 @@ public class V5VectorPostingsWriter<T>
     /**
      * Given the number of vectors and rows indexed, determine if there are too many holes for a one to many mapping.
      * @param totalVectorsIndexed the number of unique vectors in the index segment
-     * @param totalRowsIndexed the numer of rows in the index segment
+     * @param totalRowsIndexed the number of rows in the index segment
      * @return true if there are too many holes, false otherwise
      */
     public static boolean tooManyOrdinalMappingHoles(int totalVectorsIndexed, int totalRowsIndexed)
