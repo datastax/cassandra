@@ -302,8 +302,8 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
             }
             else if (message.verb() == CLEANUP_MSG)
             {
-                logger.debug("cleaning up repair");
                 CleanupMessage cleanup = (CleanupMessage) message.payload;
+                logger.debug("Cleaning up parent repair session {}", cleanup.parentRepairSession);
                 ParticipateState state = ctx.repair().participate(cleanup.parentRepairSession);
                 if (state != null)
                     state.phase.success("Cleanup message recieved");
