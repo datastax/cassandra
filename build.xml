@@ -2122,13 +2122,33 @@
   </target>
 
   <target name="dtest-jar" depends="build-test, build" description="Create dtest-compatible jar, including all dependencies">
-      <jar jarfile="${build.dir}/dtest-${base.version}.jar">
-          <zipgroupfileset dir="${build.lib}" includes="*.jar" excludes="META-INF/*.SF"/>
-          <zipgroupfileset dir="${build.dir.lib}/jars" includes="javassist-*.jar,reflections-*.jar" excludes="META-INF/*.SF"/>
+      <delete dir="${build.dir}/dtest/**" quiet="true"/>
+
+      <copy todir="${build.dir}/dtest" quiet="true" overwrite="false">
           <fileset dir="${build.classes.main}"/>
           <fileset dir="${test.classes}"/>
-          <fileset dir="${test.conf}" />
+          <fileset dir="${test.conf}"/>
+      </copy>
+      <unzip dest="${build.dir}/dtest" overwrite="false">
+          <fileset dir="${build.lib}" includes="*.jar" excludes="META-INF/*.SF"/>
+          <patternset excludes="META-INF/license/**"/>
+      </unzip>
+      <unzip dest="${build.dir}/dtest" overwrite="false">
+          <fileset dir="${build.dir.lib}/jars" includes="javassist-*.jar,reflections-*.jar" excludes="META-INF/*.SF"/>
+          <patternset excludes="META-INF/license/**"/>
+      </unzip>
+
+      <jar jarfile="${build.dir}/dtest-${base.version}.jar" duplicate="preserve">
+          <fileset dir="${build.dir}/dtest">
+              <exclude name="META-INF/*.SF"/>
+              <exclude name="META-INF/*.DSA"/>
+              <exclude name="META-INF/*.RSA"/>
+              <exclude name="META-INF/license/**"/>
+          </fileset>
       </jar>
+
+      <delete dir="${build.dir}/dtest" quiet="true"/>
+
   </target>
 
   <target name="test-jvm-dtest" depends="maybe-build-test" description="Execute in-jvm dtests">

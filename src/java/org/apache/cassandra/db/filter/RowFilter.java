@@ -112,6 +112,14 @@ public class RowFilter
     }
 
     /**
+     * Returns a copy of this {@link RowFilter} with ordering expressions removed
+     */
+    public RowFilter withoutOrderingExpressions()
+    {
+        return restrict(e -> !e.isOrderingExpression());
+    }
+
+    /**
      * @return the {@link ANNOptions} of the ANN expression in this filter, or {@link ANNOptions#NONE} if there is
      * no ANN expression.
      */

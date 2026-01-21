@@ -217,15 +217,9 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public long estimateMatchingRowsCountUsingFirstShard(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCount(Expression expression)
     {
         // For BOUNDED_ANN we use the old way of estimating cardinality - by running the search.
-        throw new UnsupportedOperationException("Cardinality estimation not supported by vector indexes");
-    }
-
-    @Override
-    public long estimateMatchingRowsCountUsingAllShards(Expression expression, AbstractBounds<PartitionPosition> keyRange)
-    {
         throw new UnsupportedOperationException("Cardinality estimation not supported by vector indexes");
     }
 

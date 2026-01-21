@@ -31,14 +31,17 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.cql3.CQL3Type.Native.DECIMAL;
 import static org.apache.cassandra.cql3.CQL3Type.Native.INT;
 import static org.apache.cassandra.cql3.CQL3Type.Native.VARINT;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
@@ -72,35 +75,47 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
     @Test
     public void testMemtablesSAI()
     {
+        // Use fixed number of shards to make the test predictable; without it, the default is
+        // to use the processors count, which may vary depending on the environment where tests are run.
+        TrieMemtable.SHARD_COUNT = 8;
+
         createTables();
 
-        RowCountTest test = new RowCountTest(Operator.NEQ, 25);
-        test.doTest(Version.DB, INT, 97.0);
-        test.doTest(Version.EB, INT, 97.0);
-        // Truncated numeric types planned differently
-        test.doTest(Version.DB, DECIMAL, 97.0);
-        test.doTest(Version.EB, DECIMAL, 97.0);
-        test.doTest(Version.EB, VARINT, 97.0);
+        // Estimates are just estimates, they are expected to have some inaccuracy, therefore we don't check
+        // them for equality. Common sources of estimate inaccuracy are:
+        // - estimating number of memtable rows based on memtable live size and average row size
+        // - finite resolution of histograms (applies to newer histogram based estimation in E* formats and later)
+        // - taking a subset of shards for estimation for better speed
+        // - running search on some shards lazily
 
-        test = new RowCountTest(Operator.LT, 50);
-        test.doTest(Version.DB, INT, 48);
-        test.doTest(Version.EB, INT, 48);
-        test.doTest(Version.DB, DECIMAL, 48);
-        test.doTest(Version.EB, DECIMAL, 48);
+        for (Version version : versions)
+        {
+            RowCountTest test = new RowCountTest(Operator.NEQ, 25);
+            test.doTest(version, INT, 95, 100);
+            test.doTest(version, DECIMAL, 95, version.onOrAfter(Version.EB) ? 99 : 100);
+            test.doTest(version, VARINT, 95, 99);
 
-        test = new RowCountTest(Operator.LT, 150);
-        test.doTest(Version.DB, INT, 97);
-        test.doTest(Version.EB, INT, 97);
-        test.doTest(Version.DB, DECIMAL, 97);
-        test.doTest(Version.EB, DECIMAL, 97);
+            test = new RowCountTest(Operator.LT, 50);
+            test.doTest(version, INT, 40, 60);
+            test.doTest(version, DECIMAL, 40, 60);
+            test.doTest(version, VARINT, 40, 60);
 
-        test = new RowCountTest(Operator.EQ, 31);
-        test.doTest(Version.DB, INT, 15);
-        test.doTest(Version.EB, INT, 0);
-        test.doTest(Version.DB, DECIMAL, 15);
-        test.doTest(Version.EB, DECIMAL, 0);
+            test = new RowCountTest(Operator.LT, 150);
+            test.doTest(version, INT, 95, 100);
+            test.doTest(version, DECIMAL, 95, 100);
+            test.doTest(version, VARINT, 95, 100);
+
+            test = new RowCountTest(Operator.EQ, 31);
+            // For older on-disk formats we expect less accurate estimates due to lack of per-index stats and due to
+            // lazy search on the first shard only; in this scenario each shard iterator will report at least one row,
+            // even if none are matching. We could have run the search on all shards to get more accurate estimates,
+            // but search is expensive, so we accept less accurate estimates for older formats.
+            int maxExpectedRows = version.onOrAfter(Version.EB) ? 1 : TrieMemtable.SHARD_COUNT;
+            test.doTest(version, INT, 1, maxExpectedRows);
+            test.doTest(version, DECIMAL, 1, maxExpectedRows);
+            test.doTest(version, VARINT, 1, maxExpectedRows);
+        }
     }
-
 
     void createTables()
     {
@@ -143,7 +158,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             this.filterValue = filterValue;
         }
 
-        void doTest(Version version, CQL3Type.Native type, double expectedRows)
+        void doTest(Version version, CQL3Type.Native type, double minExpectedRows, double maxExpectedRows)
         {
             ColumnFamilyStore cfs = tables.get(new AbstractMap.SimpleEntry<>(version, type));
             Object filter = getFilterValue(type, filterValue);
@@ -167,9 +182,12 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             Plan.KeysIteration planNode = root.firstNodeOfType(Plan.KeysIteration.class);
             assertNotNull(planNode);
 
-            assertEquals(expectedRows, root.expectedRows(), 0.1);
-            assertEquals(expectedRows, planNode.expectedKeys(), 0.1);
-            assertEquals(expectedRows / totalRows, planNode.selectivity(), 0.01);
+            double minSelectivity = minExpectedRows / totalRows;
+            double maxSelectivity = maxExpectedRows / totalRows;
+
+            assertThat(root.expectedRows()).isBetween(minExpectedRows, maxExpectedRows);
+            assertThat(planNode.expectedKeys()).isBetween(minExpectedRows, maxExpectedRows);
+            assertThat(planNode.selectivity()).isBetween(minSelectivity, maxSelectivity);
         }
     }
 }
