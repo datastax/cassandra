@@ -23,7 +23,10 @@ import java.util.UUID;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.distributed.shared.WithProperties;
+
 import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.gms.Gossiper;
@@ -119,6 +122,34 @@ public class RepairMessageTest
             callback.onFailure(ADDRESS, RequestFailureReason.UNKNOWN);
             assertMetrics(maxAttempts, false, true);
         });
+    }
+
+    @Test
+    public void errorHandlingWithUnknownPeerReturnsNoneByDefault() throws Exception
+    {
+        InetAddressAndPort unknownPeer = InetAddressAndPort.getByName("127.0.0.3");
+        // VALIDATION_REQ has a timeout version, so with unknown peer version it returns NONE
+        RepairMessage.ErrorHandling result = RepairMessage.errorHandlingSupported(ctx(), unknownPeer, Verb.VALIDATION_REQ, SESSION);
+        Assertions.assertThat(result).isEqualTo(RepairMessage.ErrorHandling.NONE);
+    }
+
+    @Test
+    public void errorHandlingWithUnknownPeerReturnsRetryWhenPropertySet() throws Exception
+    {
+        try (WithProperties properties = new WithProperties().set(CassandraRelevantProperties.REPAIR_ALWAYS_CONSIDER_TIMEOUTS_SUPPORTED, true))
+        {
+            InetAddressAndPort unknownPeer = InetAddressAndPort.getByName("127.0.0.3");
+            RepairMessage.ErrorHandling result = RepairMessage.errorHandlingSupported(ctx(), unknownPeer, Verb.VALIDATION_REQ, SESSION);
+            Assertions.assertThat(result).isEqualTo(RepairMessage.ErrorHandling.RETRY);
+        }
+    }
+
+    @Test
+    public void errorHandlingWithKnownPeerIgnoresProperty() throws Exception
+    {
+        // ADDRESS is local and has a version >= SUPPORTS_RETRY, so should return RETRY regardless of property
+        RepairMessage.ErrorHandling result = RepairMessage.errorHandlingSupported(ctx(), ADDRESS, Verb.VALIDATION_REQ, SESSION);
+        Assertions.assertThat(result).isEqualTo(RepairMessage.ErrorHandling.RETRY);
     }
 
     private void assertNoRetries()
