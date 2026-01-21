@@ -221,6 +221,31 @@ public class VectorTester extends SAITester
     }
 
     /**
+     * Convenience method to create junit test version that are exclusively NVQ-enabled.
+     * @return versions which are NVQ enabled
+     */
+    protected static Collection<Object[]> nvqEnabledVersions(boolean requireSupport){
+        // See Version file for explanation of changes associated with each version
+        return Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(v -> requireSupport ? NVQUtil.versionSupportsNVQ(v) : true)
+                          .map(v -> new Object[]{v})
+                          .collect(Collectors.toList());
+    }
+
+    /**
+     * Convenience method to create junit test version that are exclusively NVQ-enabled.
+     * @return versions which are NVQ enabled
+     */
+    protected static Collection<Object[]> nvqDisabledVersions(){
+        // See Version file for explanation of changes associated with each version
+        return Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .map(v -> new Object[]{v})
+                          .collect(Collectors.toList());
+    }
+
+    /**
      * {@link Versioned} that verifies checksums on flushing and compaction.
      */
     abstract static class VersionedWithChecksums extends Versioned

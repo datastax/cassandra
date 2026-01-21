@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.Collection;
-import java.util.stream.Collectors;
 
 import org.junit.Before;
 import org.junit.runner.RunWith;
@@ -29,7 +28,7 @@ import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
 
 @RunWith(Parameterized.class)
-public class NVQDisabledVectorSiftSmallTest extends VectorSiftSmallTest
+public class NVQDisabledVectorCompaction100dTest extends VectorCompaction100dTest
 {
 
     @Parameterized.Parameter
@@ -38,6 +37,7 @@ public class NVQDisabledVectorSiftSmallTest extends VectorSiftSmallTest
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
+        // we don't require support for these, even though it isn't always relevant
         return nvqDisabledVersions();
     }
 

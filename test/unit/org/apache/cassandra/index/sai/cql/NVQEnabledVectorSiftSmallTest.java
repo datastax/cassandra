@@ -38,12 +38,7 @@ public class NVQEnabledVectorSiftSmallTest extends VectorSiftSmallTest
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
-        // See Version file for explanation of changes associated with each version
-        return Version.ALL.stream()
-                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
-               .filter(NVQUtil::versionSupportsNVQ)
-               .map(v -> new Object[]{v})
-               .collect(Collectors.toList());
+        return nvqEnabledVersions(true);
     }
 
     @Before
