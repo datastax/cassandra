@@ -271,6 +271,9 @@ public class V2VectorIndexSearcher extends IndexSearcher
 
     private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, SegmentRowIdOrdinalPairs segmentOrdinalPairs, int limit, int rerankK) throws IOException
     {
+        if (segmentOrdinalPairs.size() == 0)
+            return CloseableIterator.emptyIterator();
+
         // We allow for negative rerankK, but for our cost calculations, it only makes sense to use 0 here.
         rerankK = Math.max(0, rerankK);
         // If we use compressed vectors, we still have to order rerankK results using full resolution similarity
