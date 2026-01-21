@@ -689,6 +689,7 @@ public enum CassandraRelevantProperties
      * The factory for handler of the storage of sstables
      */
     REMOTE_STORAGE_HANDLER_FACTORY("cassandra.remote_storage_handler_factory"),
+    REPAIR_ALWAYS_CONSIDER_TIMEOUTS_SUPPORTED("cassandra.repair.always_consider_timeouts_supported", "false"),
     REPAIR_CLEANUP_INTERVAL_SECONDS("cassandra.repair_cleanup_interval_seconds", convertToString(Ints.checkedCast(TimeUnit.MINUTES.toSeconds(10)))),
     REPAIR_DELETE_TIMEOUT_SECONDS("cassandra.repair_delete_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),
     REPAIR_FAIL_TIMEOUT_SECONDS("cassandra.repair_fail_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),

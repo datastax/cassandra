@@ -52,6 +52,7 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Future;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.REPAIR_ALWAYS_CONSIDER_TIMEOUTS_SUPPORTED;
 import static org.apache.cassandra.net.MessageFlag.CALL_BACK_ON_FAILURE;
 
 /**
@@ -61,7 +62,8 @@ import static org.apache.cassandra.net.MessageFlag.CALL_BACK_ON_FAILURE;
  */
 public abstract class RepairMessage
 {
-    private enum ErrorHandling { NONE, TIMEOUT, RETRY }
+    @VisibleForTesting
+    enum ErrorHandling { NONE, TIMEOUT, RETRY }
     @VisibleForTesting
     static final CassandraVersion SUPPORTS_RETRY = new CassandraVersion("5.0.0-alpha2.SNAPSHOT");
     private static final Map<Verb, CassandraVersion> VERB_TIMEOUT_VERSIONS;
@@ -277,7 +279,8 @@ public abstract class RepairMessage
         sendMessageWithRetries(ctx, allowRetry, request, verb, endpoint, callback);
     }
 
-    private static ErrorHandling errorHandlingSupported(SharedContext ctx, InetAddressAndPort from, Verb verb, TimeUUID parentSessionId)
+    @VisibleForTesting
+    static ErrorHandling errorHandlingSupported(SharedContext ctx, InetAddressAndPort from, Verb verb, TimeUUID parentSessionId)
     {
         if (SUPPORTS_RETRY_WITHOUT_VERSION_CHECK.contains(verb))
             return ErrorHandling.RETRY;
@@ -286,6 +289,14 @@ public abstract class RepairMessage
         CassandraVersion remoteVersion = Nodes.localOrPeerInfoOpt(from).map(INodeInfo::getReleaseVersion).orElse(null);
         if (remoteVersion == null)
         {
+            /*
+             * In CNDB, repair services won't be added to the Nodes.peers() map, so there's no clear way
+             * to check the version of the remote peer. This is the reason why a system property is introduced
+             * to skip the version check, in case it's known that the deployed C* version supports repair message
+             * timeouts.
+             */
+            if (areTimeoutsAlwaysSupported())
+                return ErrorHandling.RETRY;
             if (VERB_TIMEOUT_VERSIONS.containsKey(verb))
             {
                 logger.warn("[#{}] Not failing repair due to remote host {} not supporting repair message timeouts (version is unknown)", parentSessionId, from);
@@ -310,5 +321,10 @@ public abstract class RepairMessage
     public static void sendAck(SharedContext ctx, Message<? extends RepairMessage> message)
     {
         ctx.messaging().send(message.emptyResponse(), message.from());
+    }
+
+    private static boolean areTimeoutsAlwaysSupported()
+    {
+        return REPAIR_ALWAYS_CONSIDER_TIMEOUTS_SUPPORTED.getBoolean();
     }
 }
