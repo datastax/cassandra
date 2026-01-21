@@ -81,24 +81,29 @@ public abstract class AbstractBlockPackedReader implements LongArray
     public long ceilingRowId(long targetValue)
     {
         // already out of range
-        if (lastIndex >= valueCount)
+        if (isOutOfRangeState())
             return -1;
 
         long rowId = findBlockRowId(targetValue);
         lastIndex = rowId >= 0 ? rowId : -rowId - 1;
-        return lastIndex >= valueCount ? -1 : lastIndex;
+        return isOutOfRangeState() ? -1 : lastIndex;
     }
 
     @Override
     public long indexOf(long targetValue)
     {
         // already out of range
-        if (lastIndex >= valueCount)
+        if (isOutOfRangeState())
             return Long.MIN_VALUE;
 
         long rowId = findBlockRowId(targetValue);
         lastIndex = rowId >= 0 ? rowId : -rowId - 1;
-        return rowId >= valueCount ? Long.MIN_VALUE : rowId;
+        return isOutOfRangeState() ? Long.MIN_VALUE : rowId;
+    }
+
+    private boolean isOutOfRangeState()
+    {
+        return lastIndex >= valueCount;
     }
 
     private long findBlockRowId(long targetValue)
