@@ -204,11 +204,15 @@ public class BigTableWriter extends SortedTableWriter
         IndexSummary indexSummary = iwriter.summary.build(metadata().partitioner, boundary);
         long indexFileLength = descriptor.fileFor(Component.PRIMARY_INDEX).length();
         int indexBufferSize = optimizationStrategy.bufferSize(indexFileLength / indexSummary.size());
-        iwriter.indexFile.updateFileHandle(iwriter.builder);
-        FileHandle ifile = iwriter.builder.bufferSize(indexBufferSize).withLength(boundary.indexLength).complete();
-        dataFile.updateFileHandle(dbuilder, boundary.dataLength);
+        FileHandle ifile = iwriter.indexFile.updateFileHandle(iwriter.builder)
+                                            .bufferSize(indexBufferSize)
+                                            .withLength(boundary.indexLength)
+                                            .complete();
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-        FileHandle dfile = dbuilder.bufferSize(dataBufferSize).withLength(boundary.dataLength).complete();
+        FileHandle dfile = dataFile.updateFileHandle(dbuilder, boundary.dataLength)
+                                   .bufferSize(dataBufferSize)
+                                   .withLength(boundary.dataLength)
+                                   .complete();
         invalidateCacheAtPreviousBoundary(dfile, boundary.dataLength);
         SSTableReader sstable = BigTableReader.internalOpen(descriptor,
                                                            components(), metadata,
@@ -244,8 +248,7 @@ public class BigTableWriter extends SortedTableWriter
         IndexSummary indexSummary = iwriter.summary.build(metadata().partitioner);
         long indexFileLength = descriptor.fileFor(Component.PRIMARY_INDEX).length();
         int indexBufferSize = optimizationStrategy.bufferSize(indexFileLength / indexSummary.size());
-        iwriter.indexFile.updateFileHandle(iwriter.builder);
-        FileHandle ifile = iwriter.builder.bufferSize(indexBufferSize).complete();
+        FileHandle ifile = iwriter.indexFile.updateFileHandle(iwriter.builder).bufferSize(indexBufferSize).complete();
         return SSTableReader.internalOpen(descriptor,
                                           components(),
                                           metadata,
