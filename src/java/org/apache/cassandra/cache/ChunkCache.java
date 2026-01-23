@@ -676,6 +676,8 @@ public class ChunkCache
                         // chunks.
                     }
                 }
+                assert buf.offset() <= position : "Buffer offset " + buf.offset() + " must be <= requested position " + position;
+                assert position == source.fileLength() || buf.buffer().limit() >= buf.offset() - position : "Buffer must be non-empty for non-EOF position " + position;
                 return buf;
             }
             catch (Throwable t)
