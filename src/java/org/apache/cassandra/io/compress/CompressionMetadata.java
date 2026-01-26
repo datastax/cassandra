@@ -243,7 +243,8 @@ public class CompressionMetadata implements AutoCloseable
         this.startChunkIndex = 0;
     }
 
-    private CompressionMetadata(File filePath, CompressionParams parameters, long dataLength, long compressedLength)
+    // Package-private constructor for CachedCompressionMetadata
+    CompressionMetadata(File filePath, CompressionParams parameters, long dataLength, long compressedLength)
     {
         this.indexFilePath = filePath;
         this.parameters = parameters;
@@ -462,7 +463,12 @@ public class CompressionMetadata implements AutoCloseable
         return chunkOffsets.get(chunkIdx);
     }
 
-    private int chunkIndex(long uncompressedDataPosition)
+    /**
+     * Package-private to allow CachedCompressionMetadata to calculate chunk indices.
+     * @param uncompressedDataPosition position in uncompressed data
+     * @return chunk index
+     */
+    int chunkIndex(long uncompressedDataPosition)
     {
         return Math.toIntExact(uncompressedDataPosition >> chunkLengthBits) - startChunkIndex;
     }

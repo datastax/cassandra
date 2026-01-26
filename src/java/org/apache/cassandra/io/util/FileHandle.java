@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.compress.CachedCompressionMetadata;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
 import org.apache.cassandra.io.compress.ICompressor;
@@ -437,7 +438,9 @@ public class FileHandle extends SharedCloseableImpl
             {
                 if (compressed && compressionMetadata == null)
                 {
-                    compressionMetadata = CompressionMetadata.read(channelCopy.getFile(), sliceDescriptor, encryptionOnly);
+                    // Use CachedCompressionMetadata if cache is enabled, otherwise fall back to regular
+                    compressionMetadata = CachedCompressionMetadata.create(
+                        channelCopy.getFile(), sliceDescriptor, encryptionOnly);
                     if (!encryptionOnly && overrideLength < 0)
                         overrideLength = compressionMetadata.compressedFileLength;
                     // else the compression metadata is for the corresponding data file rather than the index

@@ -324,5 +324,3 @@ public class VectorPostingsMarshallerTest
         bytes.releaseLast();
     }
 }
-
-// Made with Bob

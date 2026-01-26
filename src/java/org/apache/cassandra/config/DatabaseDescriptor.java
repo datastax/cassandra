@@ -2848,6 +2848,42 @@ public class DatabaseDescriptor
         conf.file_cache_size_in_mb = sizeInMB;
     }
 
+    public static boolean getCompressionMetadataCacheEnabled()
+    {
+        return conf.compression_metadata_cache_enabled;
+    }
+
+    public static void setCompressionMetadataCacheEnabled(boolean enabled)
+    {
+        conf.compression_metadata_cache_enabled = enabled;
+    }
+
+    public static int getCompressionMetadataCacheSizeMB()
+    {
+        return conf.compression_metadata_cache_size_mb;
+    }
+
+    public static void setCompressionMetadataCacheSizeMB(int sizeMB)
+    {
+        if (sizeMB <= 0)
+            throw new IllegalArgumentException("compression_metadata_cache_size_mb must be positive");
+        conf.compression_metadata_cache_size_mb = sizeMB;
+    }
+
+    public static int getCompressionMetadataCacheBlockSize()
+    {
+        return conf.compression_metadata_cache_block_size;
+    }
+
+    public static void setCompressionMetadataCacheBlockSize(int blockSize)
+    {
+        if (blockSize < 64 || blockSize > 8192)
+            throw new IllegalArgumentException("compression_metadata_cache_block_size must be between 64 and 8192");
+        if (Integer.bitCount(blockSize) != 1)
+            throw new IllegalArgumentException("compression_metadata_cache_block_size must be a power of 2");
+        conf.compression_metadata_cache_block_size = blockSize;
+    }
+
     public static int getNetworkingCacheSizeInMB()
     {
         if (conf.networking_cache_size_in_mb == null)

@@ -370,6 +370,29 @@ public class Config
     public boolean file_cache_enabled = Boolean.getBoolean("cassandra.file_cache_enabled");
 
     /**
+     * Enable compression metadata caching to reduce memory usage during large data ingestion.
+     * When enabled, compression metadata chunk offsets are cached in blocks using off-heap memory
+     * instead of loading all offsets into memory per SSTable.
+     * Default: false (disabled for safe rollout)
+     */
+    public volatile boolean compression_metadata_cache_enabled = Boolean.getBoolean("cassandra.compression_metadata_cache_enabled");
+
+    /**
+     * Size of the compression metadata cache in megabytes.
+     * This cache stores blocks of chunk offsets (off-heap) to reduce per-SSTable memory overhead.
+     * Default: 2048 MB (2 GB)
+     */
+    public volatile int compression_metadata_cache_size_mb = Integer.getInteger("cassandra.compression_metadata_cache_size_mb", 2048);
+
+    /**
+     * Number of chunks per cache block for compression metadata.
+     * Larger blocks reduce cache overhead but increase memory per cache entry.
+     * Must be a power of 2 between 64 and 8192.
+     * Default: 1024 chunks per block
+     */
+    public volatile int compression_metadata_cache_block_size = Integer.getInteger("cassandra.compression_metadata_cache_block_size", 1024);
+
+    /**
      * Because of the current {@link org.apache.cassandra.utils.memory.BufferPool} slab sizes of 64 kb, we
      * store in the file cache buffers that divide 64 kb, so we need to round the buffer sizes to powers of two.
      * This boolean controls weather they are rounded up or down. Set it to true to round up to the
