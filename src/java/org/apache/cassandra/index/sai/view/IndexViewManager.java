@@ -163,6 +163,10 @@ public class IndexViewManager
     public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)
     {
         Set<SSTableReader> toRemove = new HashSet<>(sstablesToRebuild);
+        Set<Descriptor> pendingRebuild = new HashSet<>();
+        for (SSTableReader sstable : sstablesToRebuild)
+            pendingRebuild.add(sstable.descriptor);
+
         View oldView, newView = null;
         Collection<SSTableIndex> newIndexes = new ArrayList<>();
 
@@ -187,7 +191,7 @@ public class IndexViewManager
                 }
             }
 
-            newView = new View(context, newIndexes);
+            newView = new View(context, newIndexes, pendingRebuild);
         }
         while (newView == null || !viewRef.compareAndSet(oldView, newView));
         oldView.release();
