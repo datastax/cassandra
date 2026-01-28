@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.view;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -40,6 +41,7 @@ import org.apache.cassandra.utils.IntervalTree;
 public class View implements Iterable<SSTableIndex>
 {
     private final Map<Descriptor, SSTableIndex> view;
+    private final Set<Descriptor> pendingRebuild;
     private final AtomicInteger references = new AtomicInteger(1);
     private volatile boolean indexWasDropped;
 
@@ -56,7 +58,21 @@ public class View implements Iterable<SSTableIndex>
      */
     public View(IndexContext context, Collection<SSTableIndex> indexes)
     {
+        this(context, indexes, Collections.emptySet());
+    }
+
+    /**
+     * Construct a threadsafe view with pending rebuild tracking.
+     * @param context the index context
+     * @param indexes the indexes. Note that the referencing logic for these indexes is handled
+     *                outside of this constructor and all indexes are assumed to have been referenced already.
+     *                The view will release the indexes when it is finally released.
+     * @param pendingRebuild the set of SSTable descriptors that are pending rebuild
+     */
+    public View(IndexContext context, Collection<SSTableIndex> indexes, Set<Descriptor> pendingRebuild)
+    {
         this.view = new HashMap<>();
+        this.pendingRebuild = pendingRebuild;
         this.keyValidator = context.keyValidator();
 
         AbstractType<?> validator = context.getValidator();
@@ -156,11 +172,21 @@ public class View implements Iterable<SSTableIndex>
 
     /**
      * Tells if the view is aware of the given sstable.
+     * The view is aware of an SSTable if it has an index for it, or if the SSTable is pending rebuild.
      * @param descriptor identifies the sstable
      */
     public boolean isAwareOfSSTable(Descriptor descriptor)
     {
-        return view.containsKey(descriptor);
+        return view.containsKey(descriptor) || pendingRebuild.contains(descriptor);
+    }
+
+    /**
+     * Tells if the given sstable is pending rebuild.
+     * @param descriptor identifies the sstable
+     */
+    public boolean isPendingRebuild(Descriptor descriptor)
+    {
+        return pendingRebuild.contains(descriptor);
     }
 
     /**

@@ -264,10 +264,16 @@ public class QueryView implements AutoCloseable
 
                         SSTableIndex index = indexView.getSSTableIndex(sstable.descriptor);
 
-                        // The IndexViewManager got the update about this sstable, but there is no index for the sstable
-                        // (e.g. index was dropped or got corrupt, etc.). In this case retrying won't fix it.
+                        // The IndexViewManager got the update about this sstable, but there is no index for the sstable.
+                        // This can happen in two cases:
+                        // 1. The SSTable is pending rebuild - we should skip it gracefully
+                        // 2. The index was dropped or got corrupt - retrying won't help, throw an exception
                         if (index == null)
+                        {
+                            if (indexView.isPendingRebuild(sstable.descriptor))
+                                continue;
                             throw MissingIndexException.forSSTable(indexContext, sstable.descriptor);
+                        }
 
                         if (!indexInRange(index))
                             continue;
