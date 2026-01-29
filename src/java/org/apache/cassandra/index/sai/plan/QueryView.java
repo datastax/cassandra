@@ -18,15 +18,11 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-
-import com.google.common.base.Function;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,51 +30,40 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
-import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.MonotonicClock;
-import org.apache.cassandra.utils.NoSpamLogger;
 
 
 public class QueryView implements AutoCloseable
 {
-    final ColumnFamilyStore.RefViewFragment viewFragment;
+    final View saiView;
+    final ColumnFamilyStore.ViewFragment viewFragment;
     public final Set<SSTableIndex> sstableIndexes;
     public final Set<MemtableIndex> memtableIndexes;
-    final IndexContext indexContext;
 
-    public QueryView(ColumnFamilyStore.RefViewFragment viewFragment,
+    public QueryView(View saiView,
+                     ColumnFamilyStore.ViewFragment viewFragment,
                      Set<SSTableIndex> sstableIndexes,
-                     Set<MemtableIndex> memtableIndexes,
-                     IndexContext indexContext)
+                     Set<MemtableIndex> memtableIndexes)
     {
-
+        this.saiView = saiView;
         this.viewFragment = viewFragment;
         this.sstableIndexes = sstableIndexes;
         this.memtableIndexes = memtableIndexes;
-        this.indexContext = indexContext;
     }
 
     @Override
     public void close()
     {
-        viewFragment.release();
-        for (SSTableIndex index : sstableIndexes)
-        {
-            index.release();
-        }
+        saiView.release();
     }
 
     /**
@@ -86,12 +71,7 @@ public class QueryView implements AutoCloseable
      */
     public long getTotalSStableRows()
     {
-        long total = 0;
-        for (SSTableReader sstable : viewFragment.sstables)
-        {
-            total += sstable.getTotalRows();
-        }
-        return total;
+        return viewFragment.sstables.stream().mapToLong(SSTableReader::getTotalRows).sum();
     }
 
     /**
@@ -103,17 +83,13 @@ public class QueryView implements AutoCloseable
     {
         private static final Logger logger = LoggerFactory.getLogger(Builder.class);
 
-        private final ColumnFamilyStore cfs;
         private final IndexContext indexContext;
         private final AbstractBounds<PartitionPosition> range;
-        private final QueryContext queryContext;
 
-        Builder(IndexContext indexContext, AbstractBounds<PartitionPosition> range, QueryContext queryContext)
+        Builder(IndexContext indexContext, AbstractBounds<PartitionPosition> range)
         {
-            this.cfs = indexContext.columnFamilyStore();
             this.indexContext = indexContext;
             this.range = range;
-            this.queryContext = queryContext;
         }
 
         /**
@@ -122,30 +98,21 @@ public class QueryView implements AutoCloseable
          */
         static class MissingIndexException extends RuntimeException
         {
-            final IndexContext context;
-            final String dataObjectName;
+            final boolean isDropped;
+            final String indexName;
 
-            private MissingIndexException(IndexContext context, String dataObjectName)
+            private MissingIndexException(IndexContext context)
             {
                 super();
-                this.context = context;
-                this.dataObjectName = dataObjectName;
-            }
-
-            public static MissingIndexException forSSTable(IndexContext context, Descriptor descriptor)
-            {
-                return new MissingIndexException(context, "sstable " + descriptor);
-            }
-
-            public static MissingIndexException forMemtable(IndexContext context, Memtable memtable)
-            {
-                return new MissingIndexException(context, "memtable " + memtable);
+                this.isDropped = context.isDropped();
+                this.indexName = context.getIndexName();
             }
 
             @Override
             public String getMessage()
             {
-                return "Index " + context.getIndexName() + " not found for " + dataObjectName;
+                return isDropped ? "Index " + indexName + " was dropped."
+                                 : "Unable to acquire lock on index view: " + indexName + '.';
             }
         }
 
@@ -156,199 +123,61 @@ public class QueryView implements AutoCloseable
         protected QueryView build() throws MissingIndexException
         {
             var sstableIndexes = new HashSet<SSTableIndex>();
-            ColumnFamilyStore.RefViewFragment refViewFragment = null;
-
-            // We must use the canonical view in order for the equality check for source sstable/memtable
-            // to work correctly.
-            Function<View, Iterable<SSTableReader>> filter = RangeUtil.coversFullRing(range)
-                         ? View.selectFunction(SSTableSet.CANONICAL)
-                         : View.select(SSTableSet.CANONICAL, s -> RangeUtil.intersects(s, range));
-
-
+            View saiView = null;
             try
             {
-                // Keeps track of which memtables we've already tried to match the index to.
-                // If we fail to match the index to the memtable for the first time, we have to retry
-                // because the memtable could be flushed and its index removed between the moment we
-                // got the view and the moment we did the lookup.
-                // If we get the same memtable in the view again, and there is no index,
-                // then the missing index is not due to a concurrent modification, but it doesn't contain indexed
-                // data, so we can ignore it.
-                Set<Memtable> processedMemtables = new HashSet<Memtable>();
+                // Get memtables first in case we are in the middle of flushing one.
+                // Note that we get the memtables from the index context, which is updated via notifications after
+                // the index context's view is updated, which guarantees a complete and correct view of the table in
+                // favor of possibly duplicated search on a recently flushed memtable and its corresponding sstable.
+                var memtableIndexes = new HashSet<>(indexContext.getLiveMemtables().values());
+                // This is an atomic operation to get an already referenced view of all current local indexes for the table
+                saiView = indexContext.getReferencedView(TimeUnit.SECONDS.toNanos(5));
+                if (saiView == null)
+                    throw new MissingIndexException(indexContext);
 
+                // Now that we referenced a view, need to confirm that the view we referenced isn't somehow invalid.
+                if (!indexContext.isIndexed())
+                    throw new MissingIndexException(indexContext);
 
-                var start = MonotonicClock.Global.approxTime.now();
-                Memtable unmatchedMemtable = null;
-                Descriptor unmatchedSStable = null;
-
-                // This loop will spin only if there is a mismatch between the view managed by IndexViewManager
-                // and the view managed by Cassandra Tracker. Such a mismatch can happen at the moment when
-                // the sstable or memtable sets are updated, e.g. on flushes or compactions. The mismatch
-                // should last only until all Tracker notifications get processed by SAI
-                // (which doesn't involve I/O and should be very fast). We expect the mismatch to resolve in order
-                // of nanoceconds, but the timeout is large enough just in case of unpredictable performance hiccups.
-                outer:
-                while (!MonotonicClock.Global.approxTime.isAfter(start + TimeUnit.MILLISECONDS.toNanos(2000)))
+                var sstableReaders = new ArrayList<SSTableReader>(saiView.size());
+                // These are already referenced because they are referenced by the same view we just referenced.
+                for (var index : saiView.getIndexes())
                 {
-                    // cleanup after the previous iteration if we're retrying
-                    release(sstableIndexes);
-                    release(refViewFragment);
-
-                    // Prevent exceeding the query timeout
-                    queryContext.checkpoint();
-
-                    // Lock a consistent view of memtables and sstables.
-                    // A consistent view is required for correctness of order by and vector queries.
-                    refViewFragment = cfs.selectAndReference(filter);
-                    var indexView = indexContext.getView();
-
-                    // Lookup the indexes corresponding to memtables:
-                    Set<MemtableIndex> memtableIndexes = new HashSet<MemtableIndex>();
-                    for (Memtable memtable : refViewFragment.memtables)
-                    {
-                        // Empty memtables have no index but that's not a problem, we can ignore them.
-                        if (memtable.getLiveDataSize() == 0)
-                            continue;
-
-                        MemtableIndex index = indexContext.getLiveMemtables().get(memtable);
-                        if (index != null)
-                        {
-                            memtableIndexes.add(index);
-                        }
-                        else if (indexContext.isDropped())
-                        {
-                            // Index was dropped deliberately by the user.
-                            // We cannot recover here.
-                            throw MissingIndexException.forMemtable(indexContext, memtable);
-                        }
-                        else if (!processedMemtables.contains(memtable))
-                        {
-                            // We can end up here if a flush happened right after we referenced the refViewFragment
-                            // but before looking up the memtable index.
-                            // In that case, we need to retry with the updated view
-                            // (we expect the updated view to not contain this memtable).
-
-                            // Remember this metable to protect from infinite looping in case we have a permanent
-                            // inconsistency between the index set and the memtable set.
-                            processedMemtables.add(memtable);
-
-                            unmatchedMemtable = memtable;
-                            continue outer;
-                        }
-                        // If the memtable was non-empty, the index context hasn't been dropped, but the
-                        // index doesn't exist on the second attempt, then his means there is no indexed data
-                        // in that memtable. In this case we just continue without it.
-                        // Memtable indexes are created lazily, on the first insert, therefore a missing index
-                        // is a normal situation.
-                    }
-
-                    // Lookup and reference the indexes corresponding to the sstables:
-                    for (SSTableReader sstable : refViewFragment.sstables)
-                    {
-                        // Empty sstables are ok to not have the index.
-                        if (sstable.getTotalRows() == 0)
-                            continue;
-
-                        // If the IndexViewManager never saw this sstable, then we need to spin.
-                        // Let's hope in the next iteration we get the indexView based on the same sstable set
-                        // as the refViewFragment.
-                        if (!indexView.isAwareOfSSTable(sstable.descriptor))
-                        {
-                            if (MonotonicClock.Global.approxTime.isAfter(start + 100))
-                                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
-                                                 "Spinning trying to get the index for sstable {} because index view is out of sync", sstable.descriptor);
-
-                            unmatchedSStable = sstable.descriptor;
-                            continue outer;
-                        }
-
-                        SSTableIndex index = indexView.getSSTableIndex(sstable.descriptor);
-
-                        // The IndexViewManager got the update about this sstable, but there is no index for the sstable
-                        // (e.g. index was dropped or got corrupt, etc.). In this case retrying won't fix it.
-                        if (index == null)
-                            throw MissingIndexException.forSSTable(indexContext, sstable.descriptor);
-
-                        if (!indexInRange(index))
-                            continue;
-
-                        // It is unlikely but possible the index got unreferenced just between the moment we grabbed the
-                        // refViewFragment and getting here. In that case we won't be able to reference it and we have
-                        // to retry.
-                        if (!index.reference())
-                        {
-
-                            if (MonotonicClock.Global.approxTime.isAfter(start + 100))
-                                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
-                                                 "Spinning trying to get the index for sstable {} because index was released", sstable.descriptor);
-
-                            unmatchedSStable = sstable.descriptor;
-                            continue outer;
-                        }
-
-                        sstableIndexes.add(index);
-                    }
-
-                    // freeze sstableIndexes and memtableIndexes, so we can safely give access to them
-                    // without risking something messes them up
-                    // (this was added after KeyRangeTermIterator messed them up which led to a bug)
-                    return new QueryView(refViewFragment,
-                                         Collections.unmodifiableSet(sstableIndexes),
-                                         Collections.unmodifiableSet(memtableIndexes),
-                                         indexContext);
+                    if (!indexInRange(index))
+                        continue;
+                    sstableIndexes.add(index);
+                    sstableReaders.add(index.getSSTable());
                 }
 
-                if (unmatchedMemtable != null)
-                    throw MissingIndexException.forMemtable(indexContext, unmatchedMemtable);
-                if (unmatchedSStable != null)
-                    throw MissingIndexException.forSSTable(indexContext, unmatchedSStable);
+                var memtables = new ArrayList<Memtable>(memtableIndexes.size());
+                for (var index : memtableIndexes)
+                {
+                    var memtable = index.getMemtable();
+                    memtables.add(memtable);
+                }
 
-                // This should be unreachable, because whenever we retry, we always set unmatchedMemtable
-                // or unmatchedSSTable, so we'd log a better message above.
-                throw new AssertionError("Failed to build QueryView for index " + indexContext.getIndexName());
+                var viewFragment = new ColumnFamilyStore.ViewFragment(sstableReaders, memtables);
+                return new QueryView(saiView, viewFragment, sstableIndexes, memtableIndexes);
             }
-            catch (MissingIndexException e)
+            catch (Exception e)
             {
-                release(sstableIndexes);
-                release(refViewFragment);
+                if (saiView != null)
+                    saiView.release();
                 throw e;
             }
             finally
             {
                 if (Tracing.isTracing())
                 {
-                    Map<String, Long> groupedIndexes = new HashMap<>();
-                    for (SSTableIndex index : sstableIndexes)
-                    {
-                        String indexName = index.getIndexContext().getIndexName();
-                        groupedIndexes.put(indexName, groupedIndexes.getOrDefault(indexName, 0L) + 1);
-                    }
-                    
-                    StringBuilder summaryBuilder = new StringBuilder();
-                    boolean first = true;
-                    for (Map.Entry<String, Long> entry : groupedIndexes.entrySet())
-                    {
-                        if (!first)
-                            summaryBuilder.append(", ");
-                        summaryBuilder.append(String.format("%s (%s sstables)", entry.getKey(), entry.getValue()));
-                        first = false;
-                    }
-                    Tracing.trace("Querying storage-attached indexes {}", summaryBuilder.toString());
+                    var groupedIndexes = sstableIndexes.stream().collect(
+                    Collectors.groupingBy(i -> i.getIndexContext().getIndexName(), Collectors.counting()));
+                    var summary = groupedIndexes.entrySet().stream()
+                                                .map(e -> String.format("%s (%s sstables)", e.getKey(), e.getValue()))
+                                                .collect(Collectors.joining(", "));
+                    Tracing.trace("Querying storage-attached indexes {}", summary);
                 }
             }
-        }
-
-        private void release(ColumnFamilyStore.RefViewFragment refViewFragment)
-        {
-            if (refViewFragment != null)
-                refViewFragment.release();
-        }
-
-        private void release(Collection<SSTableIndex> indexes)
-        {
-            for (var index : indexes)
-                index.release();
-            indexes.clear();
         }
 
         // I've removed the concept of "most selective index" since we don't actually have per-sstable
