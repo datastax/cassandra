@@ -17,6 +17,9 @@
 
 import cProfile
 import codecs
+import errno
+import os
+import stat
 import pstats
 
 
@@ -100,6 +103,24 @@ def list_bifilter(pred, iterable):
     for i in iterable:
         (yes_s if pred(i) else no_s).append(i)
     return yes_s, no_s
+
+
+def is_file_secure(filename):
+    try:
+        st = os.stat(filename)
+        uid = os.getuid()
+    except OSError as e:
+        if e.errno != errno.ENOENT:
+            raise
+        # the file doesn't exist, the security of it is irrelevant
+        return True
+    except AttributeError as e:
+        # not-Unix os
+        return True
+
+    # Skip enforcing the file owner and UID matching for the root user (uid == 0).
+    # This is to allow "sudo cqlsh" to work with user owned credentials file.
+    return (uid == 0 or st.st_uid == uid) and stat.S_IMODE(st.st_mode) & (stat.S_IRGRP | stat.S_IROTH) == 0
 
 
 def identity(x):

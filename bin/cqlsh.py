@@ -164,7 +164,7 @@ from cqlshlib.formatting import (DEFAULT_DATE_FORMAT, DEFAULT_NANOTIME_FORMAT,
                                  DEFAULT_TIMESTAMP_FORMAT, CqlType, DateTimeFormat,
                                  format_by_type, formatter_for)
 from cqlshlib.tracing import print_trace, print_trace_session
-from cqlshlib.util import get_file_encoding_bomsize, trim_if_present
+from cqlshlib.util import get_file_encoding_bomsize, trim_if_present, is_file_secure
 try:
     from cqlshlib.serverversion import version as build_version
 except ImportError:
@@ -230,27 +230,52 @@ parser.add_argument("--request-timeout", default=DEFAULT_REQUEST_TIMEOUT_SECONDS
                     help='Specify the default request timeout in seconds (default: %default seconds).')
 parser.add_argument("-t", "--tty", action='store_true', dest='tty',
                     help='Force tty mode (command prompt).')
+parser.add_argument('--disable-history', default=False, action='store_true',
+                    help='Disable saving of history (existing history will still be loaded)')
 
 cfarguments, args = parser.parse_known_args()
 
 
 # BEGIN history/config definition
-HISTORY_DIR = os.path.expanduser(os.path.join('~', '.cassandra'))
+
+
+def mkdirp(path):
+    """Creates all parent directories up to path parameter or fails when path exists, but it is not a directory."""
+
+    try:
+        os.makedirs(path)
+    except OSError:
+        if not os.path.isdir(path):
+            raise
+
+
+def resolve_cql_history_file():
+    default_cql_history = os.path.expanduser(os.path.join('~', '.cassandra', 'cqlsh_history'))
+    if 'CQL_HISTORY' in os.environ:
+        return os.environ['CQL_HISTORY']
+    else:
+        return default_cql_history
+
+
+HISTORY = resolve_cql_history_file()
+HISTORY_DIR = os.path.dirname(HISTORY)
+
+try:
+    mkdirp(HISTORY_DIR)
+except OSError:
+    print('\nWarning: Cannot create directory at `%s`. Command history will not be saved. Please check what was the environment property CQL_HISTORY set to.\n' % HISTORY_DIR)
+
+DEFAULT_CQLSHRC = os.path.expanduser(os.path.join('~', '.cassandra', 'cqlshrc'))
 
 if cfarguments.cqlshrc is not None:
-    CONFIG_FILE = cfarguments.cqlshrc
+    CONFIG_FILE = os.path.expanduser(cfarguments.cqlshrc)
     if not os.path.exists(CONFIG_FILE):
-        print('\nWarning: Specified cqlshrc location `%s` does not exist.  Using `%s` instead.\n' % (CONFIG_FILE, HISTORY_DIR))
-        CONFIG_FILE = os.path.join(HISTORY_DIR, 'cqlshrc')
+        print('\nWarning: Specified cqlshrc location `%s` does not exist.  Using `%s` instead.\n' % (CONFIG_FILE, DEFAULT_CQLSHRC))
+        CONFIG_FILE = DEFAULT_CQLSHRC
 else:
-    CONFIG_FILE = os.path.join(HISTORY_DIR, 'cqlshrc')
+    CONFIG_FILE = DEFAULT_CQLSHRC
 
-HISTORY = os.path.join(HISTORY_DIR, 'cqlsh_history')
-if not os.path.exists(HISTORY_DIR):
-    try:
-        os.mkdir(HISTORY_DIR)
-    except OSError:
-        print('\nWarning: Cannot create directory at `%s`. Command history will not be saved.\n' % HISTORY_DIR)
+CQL_DIR = os.path.dirname(CONFIG_FILE)
 
 OLD_CONFIG_FILE = os.path.expanduser(os.path.join('~', '.cqlshrc'))
 if os.path.exists(OLD_CONFIG_FILE):
@@ -265,6 +290,8 @@ if os.path.exists(OLD_CONFIG_FILE):
 OLD_HISTORY = os.path.expanduser(os.path.join('~', '.cqlsh_history'))
 if os.path.exists(OLD_HISTORY):
     os.rename(OLD_HISTORY, HISTORY)
+
+
 # END history/config definition
 
 CQL_ERRORS = (
@@ -441,7 +468,8 @@ class Shell(cmd.Cmd):
                  request_timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS,
                  protocol_version=None,
                  connect_timeout=DEFAULT_CONNECT_TIMEOUT_SECONDS,
-                 is_subshell=False):
+                 is_subshell=False,
+                 disable_history=False):
         cmd.Cmd.__init__(self, completekey=completekey)
         self.hostname = hostname
         self.port = port
@@ -517,10 +545,19 @@ class Shell(cmd.Cmd):
         self.check_build_versions()
 
         if tty:
+            # Inform users about history logging if not disabled
+            if not disable_history and readline is not None:
+                print()
+                print("ATTENTION: All commands will be saved to history file: %s" % HISTORY)
+                print("This may include sensitive information such as passwords.")
+                print("To disable history, use --disable-history or set 'disabled = true' in the [history] section of cqlshrc.")
+                print("See https://cassandra.apache.org/doc/latest/tools/cqlsh.html for more information.")
+                print()
             self.reset_prompt()
             self.maybe_warn_py2()
             self.report_connection()
             print('Use HELP for help.')
+
         else:
             self.show_line_nums = True
         self.stdin = stdin
@@ -843,9 +880,9 @@ class Shell(cmd.Cmd):
         # start coverage collection if requested, unless in subshell
         if self.coverage and not self.is_subshell:
             # check for coveragerc file, write it if missing
-            if os.path.exists(HISTORY_DIR):
-                self.coveragerc_path = os.path.join(HISTORY_DIR, '.coveragerc')
-                covdata_path = os.path.join(HISTORY_DIR, '.coverage')
+            if os.path.exists(CQL_DIR):
+                self.coveragerc_path = os.path.join(CQL_DIR, '.coveragerc')
+                covdata_path = os.path.join(CQL_DIR, '.coverage')
                 if not os.path.isfile(self.coveragerc_path):
                     with open(self.coveragerc_path, 'w') as f:
                         f.writelines(["[run]\n",
@@ -2110,6 +2147,13 @@ def read_options(cmdlineargs, environment):
     rawconfigs = configparser.RawConfigParser()
     rawconfigs.read(CONFIG_FILE)
 
+    username_from_cqlshrc = option_with_default(configs.get, 'authentication', 'username')
+    password_from_cqlshrc = option_with_default(rawconfigs.get, 'authentication', 'password')
+    if username_from_cqlshrc or password_from_cqlshrc:
+        if password_from_cqlshrc and not is_file_secure(os.path.expanduser(CONFIG_FILE)):
+            print("\nWarning: Password is found in an insecure cqlshrc file. The file is owned or readable by other users on the system.",
+                  end='', file=sys.stderr)
+
     argvalues = argparse.Namespace()
 
     argvalues.username = option_with_default(configs.get, 'authentication', 'username')
@@ -2150,6 +2194,7 @@ def read_options(cmdlineargs, environment):
     argvalues.connect_timeout = option_with_default(configs.getint, 'connection', 'timeout', DEFAULT_CONNECT_TIMEOUT_SECONDS)
     argvalues.request_timeout = option_with_default(configs.getint, 'connection', 'request_timeout', DEFAULT_REQUEST_TIMEOUT_SECONDS)
     argvalues.execute = None
+    argvalues.disable_history = option_with_default(configs.getboolean, 'history', 'disabled', False)
 
     options, arguments = parser.parse_known_args(cmdlineargs, argvalues)
     # Make sure some user values read from the command line are in unicode
@@ -2234,8 +2279,8 @@ def init_history():
         readline.set_completer_delims(delims)
 
 
-def save_history():
-    if readline is not None:
+def save_history(history_disabled=False):
+    if readline is not None and not history_disabled:
         try:
             readline.write_history_file(HISTORY)
         except IOError:
@@ -2320,7 +2365,8 @@ def main(options, hostname, port):
                       single_statement=options.execute,
                       request_timeout=options.request_timeout,
                       connect_timeout=options.connect_timeout,
-                      encoding=options.encoding)
+                      encoding=options.encoding,
+                      disable_history=options.disable_history)
     except KeyboardInterrupt:
         sys.exit('Connection aborted.')
     except CQL_ERRORS as e:
@@ -2340,7 +2386,7 @@ def main(options, hostname, port):
         signal.signal(signal.SIGHUP, handle_sighup)
 
     shell.cmdloop()
-    save_history()
+    save_history(options.disable_history)
 
     if shell.batch_mode and shell.statement_error:
         sys.exit(2)
