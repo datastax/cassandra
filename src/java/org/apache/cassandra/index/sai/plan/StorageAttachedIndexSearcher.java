@@ -193,9 +193,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 // and creating the result retriever, we can retry without that index,
                 // because there may be other indexes that could be used to run the query.
                 // And if there are no good indexes left, we'd get a good contextual request error message.
-                if (e.context.isDropped() && retries < 8)
+                if (e.isDropped && retries < 8)
                 {
-                    logger.debug("Index " + e.context.getIndexName() + " dropped while preparing the query plan. Retrying.");
+                    logger.debug("Index " + e.indexName + " dropped while preparing the query plan. Retrying.");
                     retries++;
                     continue;
                 }
