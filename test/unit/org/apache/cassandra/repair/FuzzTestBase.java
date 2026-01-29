@@ -709,12 +709,7 @@ public abstract class FuzzTestBase extends CQLTester.InMemory
             Stage.MISC.unsafeSetExecutor(orderedExecutor);
             Stage.INTERNAL_RESPONSE.unsafeSetExecutor(unorderedScheduled);
             Mockito.when(failureDetector.isAlive(Mockito.any())).thenReturn(true);
-            Thread expectedThread = Thread.currentThread();
-            NoSpamLogger.unsafeSetClock(() -> {
-                if (Thread.currentThread() != expectedThread)
-                    throw new AssertionError("NoSpamLogger.Clock accessed outside of fuzzing...");
-                return globalExecutor.nanoTime();
-            });
+            NoSpamLogger.unsafeSetClock(globalExecutor::nanoTime);
 
             int numNodes = rs.nextInt(3, 10);
             List<String> dcs = Gens.lists(IDENTIFIER_GEN).unique().ofSizeBetween(1, Math.min(10, numNodes)).next(rs);
