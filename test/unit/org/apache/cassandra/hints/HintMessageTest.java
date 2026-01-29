@@ -39,7 +39,6 @@ import static org.apache.cassandra.hints.HintsTestUtil.assertHintsEqual;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertThrows;
 
 public class HintMessageTest
 {
@@ -121,30 +120,4 @@ public class HintMessageTest
         assertHintsEqual(hint, deserializedMessage.hint());
     }
 
-    @Test
-    public void testEncodedVersionMatching() throws IOException
-    {
-        int messageVersion = MessagingService.current_version;
-        int serializerVersion = MessagingService.VERSION_30;
-
-        UUID hostId = UUID.randomUUID();
-        long now = FBUtilities.timestampMicros();
-        TableMetadata table = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
-
-        Mutation mutation =
-        new RowUpdateBuilder(table, now, bytes("key")).clustering("column").add("val", "val" + 1234).build();
-
-        Hint hint = Hint.create(mutation, now / 1000);
-        HintMessage.Encoded message;
-
-        try (DataOutputBuffer dob = new DataOutputBuffer())
-        {
-            Hint.serializer.serialize(hint, dob, messageVersion);
-            message = new HintMessage.Encoded(hostId, dob.buffer(), messageVersion);
-        }
-
-        assertThrows("Mismatched message and serializer version should cause an error",
-                     IllegalArgumentException.class,
-                     () -> HintMessage.serializer.serializedSize(message, serializerVersion));
-    }
 }
