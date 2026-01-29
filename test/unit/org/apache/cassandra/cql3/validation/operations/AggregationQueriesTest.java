@@ -138,18 +138,21 @@ public class AggregationQueriesTest extends CQLTester
         {
             // Increase the local read size fail threshold to avoid hitting it with large data
             DatabaseDescriptor.setLocalReadSizeFailThreshold(new DataStorageSpec.LongBytesBound(100, DataStorageSpec.DataStorageUnit.MEBIBYTES));
-            
+
             // This test verifies that aggregation queries work correctly with multiple page fetches.
             // We use a moderate page size to ensure multiple fetches occur, and add delays to simulate
             // realistic latency. The aggregation timeout is set much higher than the range timeout
             // to demonstrate that aggregation queries are governed by their own timeout.
-            
+
+            // Flush data to SSTables for more predictable read times
+            flush();
+
             // Use a moderate page size to ensure we get multiple page fetches
             DatabaseDescriptor.setAggregationSubPageSize(PageSize.inBytes(64 * 1024)); // 64KB
-            
-            // Set timeouts to reasonable values
-            // The actual values matter less than ensuring the query succeeds
-            int rangeTimeoutMs = 1000;
+
+            // Set timeouts: range timeout must be high enough for individual page fetches to succeed
+            // (each page read has the artificial delay plus actual read time).
+            int rangeTimeoutMs = 10000;
             pageReadDelayMillis.set(30); // Small delay to simulate network/disk latency
             DatabaseDescriptor.setRangeRpcTimeout(rangeTimeoutMs);
             DatabaseDescriptor.setAggregationRpcTimeout(120000);
