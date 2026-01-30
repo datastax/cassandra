@@ -22,10 +22,9 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 
-import org.apache.cassandra.cache.ChunkCache;
+import io.github.jbellis.jvector.disk.IndexWriter;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -36,7 +35,7 @@ import static org.apache.cassandra.utils.Throwables.merge;
  * Adds buffering, mark, and fsyncing to OutputStream.  We always fsync on close; we may also
  * fsync incrementally if Config.trickle_fsync is enabled.
  */
-public class SequentialWriter extends BufferedDataOutputStreamPlus implements Transactional
+public class SequentialWriter extends BufferedDataOutputStreamPlus implements Transactional, IndexWriter
 {
     // absolute path to the given file
     protected final File file;
