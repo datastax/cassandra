@@ -452,7 +452,7 @@ public enum CassandraRelevantProperties
     // it as a global variable in case it's needed.
     SAI_VECTOR_NVQ_NUM_SUB_VECTORS("cassandra.sai.vector.nvq_num_sub_vectors", "2"),
     // When building a compaction graph, encode layer 0 nodes in parallel and subsequently use async io for writes.
-    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL("cassandra.sai.vector.encode_write_graph_parallel", "true"),
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL("cassandra.sai.vector.encode_write_graph_parallel", "false"),
     /**
      * Whether to disable auto-compaction
      */
