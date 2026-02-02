@@ -23,6 +23,7 @@ import java.util.Random;
 
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.FileUtils;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -65,6 +66,7 @@ public class SaiRandomizedTest extends RandomizedTest
     {
         handler = Thread.getDefaultUncaughtExceptionHandler();
         DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
     }
 
     @SuppressWarnings("unused")
