@@ -132,7 +132,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final int postingsEntriesAllocated;
     private final File postingsFile;
     private final File vectorsByOrdinalTmpFile;
-    private final BufferedRandomAccessWriter vectorsByOrdinalBufferedWriter;
+    private final VectorByOrdinalWriter vectorByOrdinalWriter;
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
@@ -202,7 +202,7 @@ public class CompactionGraph implements Closeable, Accountable
 
         // Formatted so that the full resolution vector is written at the ordinal * vector dimension offset
         vectorsByOrdinalTmpFile = perIndexComponents.tmpFileFor("vectors_by_ordinal");
-        vectorsByOrdinalBufferedWriter = new BufferedRandomAccessWriter(vectorsByOrdinalTmpFile.toPath());
+        vectorByOrdinalWriter = new VectorByOrdinalWriter(vectorsByOrdinalTmpFile, dimension);
 
         // VSTODO add LVQ
         BuildScoreProvider bsp;
@@ -265,7 +265,7 @@ public class CompactionGraph implements Closeable, Accountable
     {
         // this gets called in `finally` blocks, so use closeQuietly to avoid generating additional exceptions
         FileUtils.closeQuietly(postingsMap);
-        FileUtils.closeQuietly(vectorsByOrdinalBufferedWriter);
+        FileUtils.closeQuietly(vectorByOrdinalWriter);
         Files.delete(postingsFile.toJavaIOFile().toPath());
         Files.delete(vectorsByOrdinalTmpFile.toJavaIOFile().toPath());
     }
@@ -382,17 +382,9 @@ public class CompactionGraph implements Closeable, Accountable
                 if (globalMean != null)
                     VectorUtil.addInPlace(globalMean, vector);
 
-                // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
-                // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
-                // with the posting list logic.
-                long targetPosition = ordinal * Float.BYTES * (long) dimension;
-                assert vectorsByOrdinalBufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + vectorsByOrdinalBufferedWriter.position() + " > targetPosition=" + targetPosition;
-                vectorsByOrdinalBufferedWriter.seek(targetPosition);
-                if (vector instanceof ArrayVectorFloat)
-                    vectorsByOrdinalBufferedWriter.writeFloats(((ArrayVectorFloat) vector).get(), 0, dimension);
-                else
-                    for (int i = 0; i < dimension; i++)
-                        vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
+                // Store the vector on disk in a mapping from ordinal -> vector for fast retrieval later. This mapping
+                // is only needed during index build. It is a temp file.
+                vectorByOrdinalWriter.write(ordinal, vector);
 
                 // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
                 while (compressedVectors.count() < ordinal)
@@ -436,7 +428,7 @@ public class CompactionGraph implements Closeable, Accountable
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
         // Close the temporary file so the reader will know it is the end of the file.
-        vectorsByOrdinalBufferedWriter.close();
+        vectorByOrdinalWriter.close();
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -713,6 +705,51 @@ public class CompactionGraph implements Closeable, Accountable
         public void close()
         {
             FileUtils.closeQuietly(reader);
+        }
+    }
+
+    // We use this class as a workaround for inefficient buffering. See https://github.com/datastax/jvector/issues/562.
+    private static class VectorByOrdinalWriter implements Closeable
+    {
+        final int dimension;
+        BufferedRandomAccessWriter bufferedWriter;
+        int lastOrdinal;
+
+        VectorByOrdinalWriter(File vectorsByOrdinalTmpFile, int dimension) throws IOException
+        {
+            this.bufferedWriter = new BufferedRandomAccessWriter(vectorsByOrdinalTmpFile.toPath());
+            this.dimension = dimension;
+            this.lastOrdinal = -1;
+        }
+
+        void write(int ordinal, VectorFloat<?> vector) throws IOException
+        {
+            assert ordinal > lastOrdinal : "Unexpected ordinal " + ordinal + " must be greater than " + lastOrdinal;
+
+            if (ordinal != lastOrdinal + 1)
+            {
+                // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
+                // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
+                // with the posting list logic.
+                long targetPosition = ordinal * Float.BYTES * (long) dimension;
+                assert bufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + bufferedWriter.position() + " > targetPosition=" + targetPosition;
+                bufferedWriter.seek(targetPosition);
+            }
+
+            // Update the last ordinal
+            lastOrdinal = ordinal;
+
+            if (vector instanceof ArrayVectorFloat)
+                bufferedWriter.writeFloats(((ArrayVectorFloat) vector).get(), 0, dimension);
+            else
+                for (int i = 0; i < dimension; i++)
+                    bufferedWriter.writeFloat(vector.get(i));
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+            bufferedWriter.close();
         }
     }
 }
