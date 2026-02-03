@@ -171,7 +171,7 @@
     <property name="chronicle-threads.version" value="2.24ea14" />
     <property name="chronicle-map.version" value="3.24ea4" />
 
-    <property name="netty.version" value="4.1.128.Final" />
+    <property name="netty.version" value="4.1.130.Final" />
 
     <condition property="maven-ant-tasks.jar.exists">
       <available file="${build.dir}/maven-ant-tasks-${maven-ant-tasks.version}.jar" />
@@ -567,7 +567,7 @@
         <scm connection="${scm.connection}" developerConnection="${scm.developerConnection}" url="${scm.url}"/>
         <dependencyManagement>
           <dependency groupId="org.xerial.snappy" artifactId="snappy-java" version="1.1.10.7"/>
-          <dependency groupId="org.lz4" artifactId="lz4-java" version="1.8.0"/>
+          <dependency groupId="at.yawk.lz4" artifactId="lz4-java" version="1.10.2"/>
           <dependency groupId="com.ning" artifactId="compress-lzf" version="0.8.4" scope="provided"/>
           <dependency groupId="com.github.luben" artifactId="zstd-jni" version="1.5.5-1"/>
           <dependency groupId="com.google.guava" artifactId="guava" version="33.4.0-jre">
@@ -579,7 +579,7 @@
           </dependency>
           <dependency groupId="org.hdrhistogram" artifactId="HdrHistogram" version="2.1.9"/>
           <dependency groupId="commons-cli" artifactId="commons-cli" version="1.1"/>
-          <dependency groupId="commons-codec" artifactId="commons-codec" version="1.15"/>
+          <dependency groupId="commons-codec" artifactId="commons-codec" version="1.20.0"/>
           <dependency groupId="commons-io" artifactId="commons-io" version="2.6" scope="test"/>
           <dependency groupId="org.apache.commons" artifactId="commons-lang3" version="3.18.0"/>
           <dependency groupId="org.apache.commons" artifactId="commons-math3" version="3.2"/>
@@ -595,10 +595,10 @@
           <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j" version="2.0.9" />
           <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.4.14"/>
           <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.4.14"/>
-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core" version="2.18.3"/>
-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.18.3"/>
-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations" version="2.18.3"/>
-          <dependency groupId="org.msgpack" artifactId="jackson-dataformat-msgpack" version="0.8.16"/>
+          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core" version="2.18.4"/>
+          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.18.4"/>
+          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations" version="2.18.4"/>
+          <dependency groupId="org.msgpack" artifactId="jackson-dataformat-msgpack" version="0.9.11"/>
 
           <dependency groupId="com.googlecode.json-simple" artifactId="json-simple" version="1.1"/>
           <dependency groupId="com.boundary" artifactId="high-scale-lib" version="1.0.6"/>
@@ -661,7 +661,7 @@
           <dependency groupId="io.netty" artifactId="netty-all" version="${netty.version}" />
           <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="${netty.version}"/>
           <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="${netty.version}" classifier="linux-x86_64"/>
-          <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static" version="2.0.69.Final"/>
+          <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static" version="2.0.74.Final"/>
           <dependency groupId="net.openhft" artifactId="chronicle-queue" version="${chronicle-queue.version}">
             <exclusion groupId="com.sun" artifactId="tools" />
           </dependency>
@@ -849,7 +849,7 @@
                 relativePath="${final.name}-parent.pom"/>
         <scm connection="${scm.connection}" developerConnection="${scm.developerConnection}" url="${scm.url}"/>
         <dependency groupId="org.xerial.snappy" artifactId="snappy-java"/>
-        <dependency groupId="org.lz4" artifactId="lz4-java"/>
+        <dependency groupId="at.yawk.lz4" artifactId="lz4-java"/>
         <dependency groupId="com.ning" artifactId="compress-lzf"/>
         <dependency groupId="com.google.guava" artifactId="guava"/>
         <dependency groupId="commons-cli" artifactId="commons-cli"/>
@@ -2122,13 +2122,33 @@
   </target>
 
   <target name="dtest-jar" depends="build-test, build" description="Create dtest-compatible jar, including all dependencies">
-      <jar jarfile="${build.dir}/dtest-${base.version}.jar">
-          <zipgroupfileset dir="${build.lib}" includes="*.jar" excludes="META-INF/*.SF"/>
-          <zipgroupfileset dir="${build.dir.lib}/jars" includes="javassist-*.jar,reflections-*.jar" excludes="META-INF/*.SF"/>
+      <delete dir="${build.dir}/dtest/**" quiet="true"/>
+
+      <copy todir="${build.dir}/dtest" quiet="true" overwrite="false">
           <fileset dir="${build.classes.main}"/>
           <fileset dir="${test.classes}"/>
-          <fileset dir="${test.conf}" />
+          <fileset dir="${test.conf}"/>
+      </copy>
+      <unzip dest="${build.dir}/dtest" overwrite="false">
+          <fileset dir="${build.lib}" includes="*.jar" excludes="META-INF/*.SF"/>
+          <patternset excludes="META-INF/license/**"/>
+      </unzip>
+      <unzip dest="${build.dir}/dtest" overwrite="false">
+          <fileset dir="${build.dir.lib}/jars" includes="javassist-*.jar,reflections-*.jar" excludes="META-INF/*.SF"/>
+          <patternset excludes="META-INF/license/**"/>
+      </unzip>
+
+      <jar jarfile="${build.dir}/dtest-${base.version}.jar" duplicate="preserve">
+          <fileset dir="${build.dir}/dtest">
+              <exclude name="META-INF/*.SF"/>
+              <exclude name="META-INF/*.DSA"/>
+              <exclude name="META-INF/*.RSA"/>
+              <exclude name="META-INF/license/**"/>
+          </fileset>
       </jar>
+
+      <delete dir="${build.dir}/dtest" quiet="true"/>
+
   </target>
 
   <target name="test-jvm-dtest" depends="maybe-build-test" description="Execute in-jvm dtests">

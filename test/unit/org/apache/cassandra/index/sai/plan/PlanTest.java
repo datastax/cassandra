@@ -36,6 +36,7 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.LongIterator;
@@ -67,6 +68,7 @@ public class PlanTest
     {
         Orderer orderer = Mockito.mock(Orderer.class);
         Mockito.when(orderer.isANN()).thenReturn(true);
+        Mockito.when(orderer.toString()).thenReturn("ORDER BY v ANN OF [...]");
         return orderer;
     }
 
@@ -120,6 +122,7 @@ public class PlanTest
         Plan.KeysIteration plan = factory.indexScan(saiPred1, 0);
         assertTrue(plan instanceof Plan.NumericIndexScan);
         assertEquals(0.0, plan.expectedKeys(), 0.01);
+        assertEquals(0.0, plan.estimatedKeysToIterate(), 0.01);
         assertEquals(0.0, plan.selectivity(), 0.01);
         assertEquals(0.0, plan.costPerKey(), 0.01);
     }
@@ -298,6 +301,7 @@ public class PlanTest
         Plan.KeysIteration i = factory.indexScan(saiPred1, (long) (0.5 * factory.tableMetrics.rows));
         Plan.RowsIteration s = factory.fetch(i);
         assertEquals(0.5 * factory.tableMetrics.rows, s.expectedRows(), 0.01);
+        assertEquals(0.5 * factory.tableMetrics.rows, s.estimatedRowsToFetch(), 0.01);
         assertTrue(s.fullCost() > 0.5 * factory.tableMetrics.rows * (SAI_KEY_COST + ROW_COST));
     }
 
@@ -340,6 +344,7 @@ public class PlanTest
         Plan.KeysIteration s = factory.sort(i, ordering);
 
         assertEquals(0.5 * factory.tableMetrics.rows, s.expectedKeys(), 0.01);
+        assertEquals(0.5 * factory.tableMetrics.rows, s.estimatedKeysToIterate(), 0.01);
         assertTrue(s.initCost() >= i.fullCost());
     }
 
@@ -367,6 +372,7 @@ public class PlanTest
     {
         Plan.KeysIteration i = factory.sort(factory.everything, ordering);
         assertEquals(factory.tableMetrics.rows, i.expectedKeys(), 0.01);
+        assertEquals(factory.tableMetrics.rows, i.estimatedKeysToIterate(), 0.01);
         assertEquals(i.initCost() + factory.costEstimator.estimateAnnSearchCost(ordering, (int) ceil(i.expectedKeys()), factory.tableMetrics.rows), i.fullCost(), 0.01);
     }
 
@@ -567,6 +573,7 @@ public class PlanTest
                               " └─ Filter pred1 < %s AND pred2 < %<s AND pred4 < %<s (sel: 1.000000000) (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
                               "     └─ Fetch (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
                               "         └─ KeysSort (keys: 3.0, cost/key: 3792.4, cost: 44171.3..55548.4)\n" +
+                              "            ORDER BY v ANN OF [...]\n" +
                               "             └─ Union (keys: 1999.0, cost/key: 14.8, cost: 13500.0..43001.3)\n" +
                               "                 ├─ Intersection (keys: 1000.0, cost/key: 29.4, cost: 9000.0..38401.3)\n" +
                               "                 │   ├─ NumericIndexScan of pred2_idx (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 0.1, cost: 4500.0..4700.0)\n" +
@@ -1049,6 +1056,28 @@ public class PlanTest
 
         Mockito.verify(indexScan1, Mockito.times(1)).withAccess(Mockito.any());
         Mockito.verify(indexScan1, Mockito.times(1)).estimateCost();
+    }
+
+    @Test
+    public void testReferencedIndexes()
+    {
+        Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));  // numeric
+        Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.001 * factory.tableMetrics.rows));  // numeric
+        Plan.KeysIteration indexScan3 = factory.indexScan(saiPred4, (long) (0.5 * factory.tableMetrics.rows));    // literal
+        Plan.KeysIteration sort = factory.sort(indexScan1, ordering); // will generate ordered scan
+        Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(sort, indexScan2, indexScan3));
+        Plan.RowsIteration fetch = factory.fetch(intersection);
+        Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter123, fetch);
+        Plan.RowsIteration plan = factory.limit(postFilter, 3);
+
+        assertEquals(0, factory.everything.referencedIndexCount());
+        assertEquals(0, factory.nothing.referencedIndexCount());
+        assertEquals(1, indexScan1.referencedIndexCount());
+        assertEquals(1, indexScan2.referencedIndexCount());
+        assertEquals(1, indexScan3.referencedIndexCount());
+        assertEquals(1, sort.referencedIndexCount());
+        assertEquals(3, intersection.referencedIndexCount());
+        assertEquals(3, plan.referencedIndexCount());
     }
 
     private List<Integer> ids(List<? extends Plan> subplans)

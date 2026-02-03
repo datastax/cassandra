@@ -384,13 +384,19 @@ public enum CassandraRelevantProperties
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
     /** Defines the interval for reporting any operations that have timed out.  */
-    SLOW_QUERY_LOG_MONITORING_REPORT_INTERVAL_IN_MS("cassandra.monitoring_report_interval_ms", "5000"),
+    MONITORING_REPORT_INTERVAL_MS("cassandra.monitoring_report_interval_ms", "5000"),
 
     /**
      * Defines the maximum number of unique timed out queries that will be reported in the logs.
      * Use a negative number to remove any limit.
      */
-    SLOW_QUERY_LOG_MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
+    MONITORING_MAX_OPERATIONS("cassandra.monitoring_max_operations", "50"),
+
+    /**
+     * Whether to log detailed execution info when logging slow non-SAI queries.
+     * For SAI queries, see {@link #SAI_MONITORING_EXECUTION_INFO_ENABLED}.
+     */
+    MONITORING_EXECUTION_INFO_ENABLED("cassandra.monitoring_execution_info_enabled", "true"),
 
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
@@ -419,8 +425,9 @@ public enum CassandraRelevantProperties
     /**
      * Whether to log SAI-specific detailed execution info when logging slow SAI queries.
      * This execution info includes the query metrics and the query plan of the slow queries.
+     * For non-SAI queries, see {@link #MONITORING_EXECUTION_INFO_ENABLED}.
      */
-    SAI_SLOW_QUERY_LOG_EXECUTION_INFO_ENABLED("cassandra.sai.slow_query_log.execution_info_enabled", "true"),
+    SAI_MONITORING_EXECUTION_INFO_ENABLED("cassandra.sai.monitoring_execution_info_enabled", "true"),
 
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
@@ -510,10 +517,6 @@ public enum CassandraRelevantProperties
     // that the version configured here, then immutable components will _not_ be used even if the previous flag is set
     // to `true`. You can set this to `aa` to enable immutable components on every version.
     IMMUTABLE_SAI_COMPONENTS_MIN_VERSION("cassandra.sai.immutable_components.min_version", "ca"),
-
-    // Enables parallel index read.
-    USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
-    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
 
     // The quantile used by the dynamic endpoint snitch to compute the score for a replica.
     DYNAMIC_ENDPOINT_SNITCH_QUANTILE("cassandra.dynamic_endpoint_snitch_quantile", "0.5"),
@@ -636,10 +639,23 @@ public enum CassandraRelevantProperties
     SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_query.enabled", "false"),
 
     /**
+     * Whether to enable SAI query plan metrics such as the estimated cost, estimated number of rows,
+     * number of indexes used in the original and optimized query plan, etc.
+     * These metrics are counters and histograms.
+     */
+    SAI_QUERY_PLAN_METRICS_ENABLED("cassandra.sai.metrics.query_plan.enabled", "true"),
+
+    /**
      * Whether to enable SAI index metrics such as memtable flush metrics, compaction metrics, and disk usage metrics.
      * These metrics include timers, histograms, counters, and gauges for index operations.
      */
     SAI_INDEX_METRICS_ENABLED("cassandra.sai.metrics.index.enabled", "true"),
+
+    /**
+     * Whether to enable SAI table state metrics such as disk usage, queryable index count, and index build progress.
+     * These metrics include gauges for table-level SAI state information.
+     */
+    SAI_TABLE_STATE_METRICS_ENABLED("cassandra.sai.metrics.table_state.enabled", "true"),
 
     /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.

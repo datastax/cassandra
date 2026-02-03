@@ -60,6 +60,7 @@ import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.ReadFailureException;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -80,6 +81,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
@@ -93,6 +95,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
@@ -227,7 +230,7 @@ public class SAITester extends CQLTester
     public TestRule testRules = new ResourceLeakDetector();
 
     @Before
-    public void resetQueryOptimizationLevel() throws Throwable
+    public void resetQueryOptimizationLevel()
     {
         // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
         QueryController.QUERY_OPT_LEVEL = 1;
@@ -235,7 +238,7 @@ public class SAITester extends CQLTester
     }
 
     @Before
-    public void resetLastValidSegmentRowId() throws Throwable
+    public void resetLastValidSegmentRowId()
     {
         // Don't want this setting to impact peer tests
         SegmentBuilder.updateLastValidSegmentRowId(-1);
@@ -361,7 +364,7 @@ public class SAITester extends CQLTester
         cfs.indexManager.listIndexes().forEach(index -> {
             ((StorageAttachedIndexGroup)cfs.indexManager.getIndexGroup(index)).reset();
         });
-        cfs.indexManager.listIndexes().forEach(index -> cfs.indexManager.buildIndex(index));
+        cfs.indexManager.listIndexes().forEach(cfs.indexManager::buildIndex);
         cfs.indexManager.executePreJoinTasksBlocking(true);
         if (wait)
         {
@@ -452,6 +455,36 @@ public class SAITester extends CQLTester
         }
     }
 
+    /**
+     * Returns the set containing all SAI index versions found among all sstable indexes of the given table.
+     * Memtable indexes are not included.
+     */
+    public static Set<Version> getSSTableIndexVersions(String keyspace, String table)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
+        var group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+        if (group == null)  // no indexes present on the table
+            return Set.of();
+
+        Set<IndexContext> indexContexts = group.getIndexes()
+                                               .stream()
+                                               .map(StorageAttachedIndex::getIndexContext)
+                                               .collect(Collectors.toSet());
+
+        var versions = new HashSet<Version>();
+        for (var sstable : cfs.getLiveSSTables())
+        {
+            var indexDescriptor = group.descriptorFor(sstable);
+            if (indexDescriptor != null)
+            {
+                versions.add(indexDescriptor.perSSTableComponents().version());
+                for (IndexContext indexContext : indexContexts)
+                    versions.add(indexDescriptor.perIndexComponents(indexContext).version());
+            }
+        }
+        return versions;
+    }
+
     protected static void assertFailureReason(ReadFailureException e, RequestFailureReason reason)
     {
         int expected = reason.codeForNativeProtocol();
@@ -484,6 +517,18 @@ public class SAITester extends CQLTester
             throw new RuntimeException(e);
         }
         return metricValue;
+    }
+
+    protected double getHistogramMean(ObjectName metricObjectName)
+    {
+        try
+        {
+            return ((Number) getMBeanAttribute(metricObjectName, "Mean")).doubleValue();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     protected void assertMetricExists(ObjectName name)
@@ -852,9 +897,9 @@ public class SAITester extends CQLTester
         return CompactionManager.instance.getActiveCompactions() + CompactionManager.instance.getPendingTasks();
     }
 
-    protected String getSingleTraceStatement(Session session, String query, String contains) throws Throwable
+    protected String getSingleTraceStatement(Session session, String query, String contains)
     {
-        query = String.format(query, KEYSPACE + "." + currentTable());
+        query = String.format(query, KEYSPACE + '.' + currentTable());
         QueryTrace trace = session.execute(session.prepare(query).bind().enableTracing()).getExecutionInfo().getQueryTrace();
         waitForTracingEvents();
 
@@ -866,7 +911,7 @@ public class SAITester extends CQLTester
         return null;
     }
 
-    protected void assertNumRows(int expected, String query, Object... args) throws Throwable
+    protected void assertNumRows(int expected, String query, Object... args)
     {
         ResultSet rs = executeNet(String.format(query, args));
         assertEquals(expected, rs.all().size());
@@ -981,7 +1026,7 @@ public class SAITester extends CQLTester
         private final CountDownLatch taskCompleted = new CountDownLatch(1);
 
         private final int verificationIntervalInMs;
-        private final int verificationMaxInMs = 300_000; // 300s
+        private static final int verificationMaxInMs = 300_000; // 300s
 
         public TestWithConcurrentVerification(Runnable verificationTask, Runnable targetTask)
         {
@@ -1062,33 +1107,51 @@ public class SAITester extends CQLTester
         List<String> warnings = ClientWarn.instance.getWarnings();
         ClientWarn.instance.resetWarnings();
 
-        // Then get the indexes used by the plan
-        Set<String> plannedIndexes = plannedIndexes(query);
-        return new PlanSelectionAssertion(plannedIndexes, warnings);
-    }
-
-    private Set<String> plannedIndexes(String query)
-    {
         ReadCommand command = parseReadCommand(query);
         Index.QueryPlan queryPlan = command.indexQueryPlan();
         if (queryPlan == null)
-            return Collections.emptySet();
+            return new PlanSelectionAssertion(null, warnings);
 
         StorageAttachedIndexQueryPlan saiQueryPlan = (StorageAttachedIndexQueryPlan) queryPlan;
         Assertions.assertThat(saiQueryPlan).isNotNull();
+
         StorageAttachedIndexSearcher searcher = saiQueryPlan.searcherFor(command);
-        return searcher.plannedIndexes();
+        try
+        {
+            return new PlanSelectionAssertion(searcher.buildPlan(), warnings);
+        }
+        finally
+        {
+            searcher.abort();
+        }
     }
 
     protected static class PlanSelectionAssertion
     {
+        private final double expectedRows;
         private final Set<String> selectedIndexes;
         private final List<String> warnings;
 
-        public PlanSelectionAssertion(Set<String> selectedIndexes, @Nullable List<String> warnings)
+        public PlanSelectionAssertion(@Nullable Plan.RowsIteration plan, @Nullable List<String> warnings)
         {
-            this.selectedIndexes = selectedIndexes;
+            this.expectedRows = plan != null ? plan.expectedRows() : -1.0;
+            this.selectedIndexes = plan != null ? plannedIndexes(plan) : Set.of();
             this.warnings = warnings;
+        }
+
+        private Set<String> plannedIndexes(Plan plan)
+        {
+            Set<String> indexes = new HashSet<>();
+            plan.visitIndexesRecursive(i -> indexes.add(i.getIndexName()));
+            return indexes;
+        }
+
+        public PlanSelectionAssertion hasEstimatedRowsCountBetween(double minRows, double maxRows)
+        {
+            Assertions.assertThat(expectedRows)
+                      .as("Expected rows to be between %s and %s, but got: %s", minRows, maxRows, expectedRows)
+                      .isBetween(minRows, maxRows);
+            return this;
         }
 
         public PlanSelectionAssertion uses(String... indexes)

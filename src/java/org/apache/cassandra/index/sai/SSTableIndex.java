@@ -154,9 +154,9 @@ public class SSTableIndex
      *
      * @return an approximate number of the matching rows
      */
-    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCount(Expression predicate)
     {
-        return searchableIndex.estimateMatchingRowsCount(predicate, keyRange);
+        return searchableIndex.estimateMatchingRowsCount(predicate);
     }
 
     /**

@@ -73,8 +73,6 @@ public class SortedTermsWriter implements Closeable
     static final int TERMS_DICT_BLOCK_SIZE = 1 << TERMS_DICT_BLOCK_SHIFT;
     static final int TERMS_DICT_BLOCK_MASK = TERMS_DICT_BLOCK_SIZE - 1;
 
-    static final int DIRECT_MONOTONIC_BLOCK_SHIFT = 16;
-
     private final IncrementalTrieWriter<Long> trieWriter;
     private final IndexOutputWriter trieOutput;
     private final IndexOutput termsOutput;

@@ -21,6 +21,8 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import javax.annotation.concurrent.NotThreadSafe;
+
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
@@ -36,13 +38,6 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     @Override
-    public PrimaryKey createTokenOnly(Token token)
-    {
-        assert token != null;
-        return new PartitionAwarePrimaryKey(token, null, null);
-    }
-
-    @Override
     public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
     {
         assert token != null;
@@ -56,7 +51,8 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         return new PartitionAwarePrimaryKey(partitionKey.getToken(), partitionKey, null);
     }
 
-    private class PartitionAwarePrimaryKey implements PrimaryKey
+    @NotThreadSafe
+    private static class PartitionAwarePrimaryKey implements PrimaryKey
     {
         private final Token token;
         private DecoratedKey partitionKey;
@@ -72,10 +68,12 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public PrimaryKey loadDeferred()
         {
-            if (primaryKeySupplier != null && partitionKey == null)
+            if (primaryKeySupplier != null)
             {
+                assert partitionKey == null : "While applying existing primaryKeySupplier to load deferred primaryKey the partition key was unexpectedly already set";
                 this.partitionKey = primaryKeySupplier.get().partitionKey();
                 primaryKeySupplier = null;
+                assert this.token.equals(this.partitionKey.getToken()) : "Deferred primary key must contain the same token";
             }
             return this;
         }
@@ -156,12 +154,26 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
             return shallowSize + token.getHeapSize() + preHashedDecoratedKeySize;
         }
 
+        /**
+         * Compares this primary key with another for ordering purposes.
+         * <p>
+         * This implementation uses a two-tier comparison strategy:
+         * <ul>
+         *   <li>If the given primary key is token only, compares by token only</li>
+         *   <li>If both partition keys are available, performs full partition key comparison</li>
+         * </ul>
+         * Note: This comparison is partition-aware only and does not consider clustering keys.
+         *
+         * @param o the primary key to compare with
+         * @return a negative integer, zero, or a positive integer as this primary key is less than,
+         *         equal to, or greater than the specified primary key
+         */        
         @Override
         public int compareTo(PrimaryKey o)
         {
-            if (partitionKey == null || o.partitionKey() == null)
+            if (o.isTokenOnly())
                 return token().compareTo(o.token());
-            return partitionKey.compareTo(o.partitionKey());
+            return partitionKey().compareTo(o.partitionKey());
         }
 
         @Override

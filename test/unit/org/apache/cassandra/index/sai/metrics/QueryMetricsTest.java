@@ -67,6 +67,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
     @Rule
     public ExpectedException exception = ExpectedException.none();
 
+
     @Test
     public void testSameIndexNameAcrossKeyspaces()
     {
@@ -238,7 +239,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForGreaterThanZero(objectNameNoIndex("QueryLatency", keyspace, table, PER_QUERY_METRIC_TYPE));
 
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), resultCounter);
+        waitForEquals(objectNameNoIndex("TotalPartitionsFetched", keyspace, table, TABLE_QUERY_METRIC_TYPE), resultCounter);
         waitForEquals(objectName("KDTreeIntersectionLatency", keyspace, table, index, GLOBAL_METRIC_TYPE), queryCounter);
     }
 
@@ -355,7 +356,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForGreaterThanZero(objectNameNoIndex("QueryLatency", keyspace, table, PER_QUERY_METRIC_TYPE));
 
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), resultCounter);
+        waitForEquals(objectNameNoIndex("TotalPartitionsFetched", keyspace, table, TABLE_QUERY_METRIC_TYPE), resultCounter);
     }
 
     @Test
@@ -384,9 +385,9 @@ public class QueryMetricsTest extends AbstractMetricsTest
         assertEquals(3, actualRows);
 
         // This is 2 due to partition read batching.
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), 2);
-        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
-        waitForEquals(objectNameNoIndex("TotalRowsFiltered", keyspace, table, TABLE_QUERY_METRIC_TYPE), 3);
+        waitForEquals(objectNameNoIndex("TotalPartitionsFetched", keyspace, table, TABLE_QUERY_METRIC_TYPE), 2);
+        waitForHistogramCountEquals(objectNameNoIndex("RowsFetched", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
+        waitForEquals(objectNameNoIndex("TotalRowsFetched", keyspace, table, TABLE_QUERY_METRIC_TYPE), 3);
     }
 
     @Test
@@ -494,6 +495,14 @@ public class QueryMetricsTest extends AbstractMetricsTest
             for (int c = 0; c < numRowsPerPartition; c++)
                 execute("INSERT INTO %s (k, c, n, v) VALUES (?, ?, 1, [1, 1])", k, c);
 
+        // add a partition tombstone
+        execute("INSERT INTO %s (k, c, n, v) VALUES (?, ?, 1, [1, 1])", numPartitions, numRowsPerPartition);
+        execute("DELETE FROM %s WHERE k = ?", numPartitions);
+
+        // add a row range tombstone
+        execute("INSERT INTO %s (k, c, n, v) VALUES (?, ?, 1, [1, 1])", numPartitions + 1, numRowsPerPartition);
+        execute("DELETE FROM %s WHERE k = ? AND c > 0", numPartitions + 1);
+
         // filter query (goes to the general, filter and range query metrics)
         UntypedResultSet rows = execute("SELECT k, c FROM %s WHERE n = 1");
         assertEquals(numRows, rows.size());
@@ -510,36 +519,74 @@ public class QueryMetricsTest extends AbstractMetricsTest
         rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 1");
         assertEquals(numRowsPerPartition, rows.size());
 
-        // hybrid query, postfiltering (goes to the general, hybrid and range query metrics)
+        // hybrid query doing filtering after the sorted index scan (goes to the general, hybrid and range query metrics)
         rows = execute("SELECT k, c FROM %s WHERE n = 1 ORDER BY v ANN OF [1, 1] LIMIT 1000");
         assertEquals(numRows, rows.size());
 
-        // hybrid query, single partition (goes to the general, hybrid and range query metrics)
+        // hybrid query doing filtering after the sorted index scan, single partition (goes to the general, hybrid and range query metrics)
         rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 1 ORDER BY v ANN OF [1, 1] LIMIT 1000");
         assertEquals(numRowsPerPartition, rows.size());
 
+        // hybrid query doing search first (goes to the general, hybrid and range query metrics)
+        rows = execute("SELECT k, c FROM %s WHERE n = 2 ORDER BY v ANN OF [1, 1] LIMIT 1000");
+        assertEquals(0, rows.size());
+
+        // hybrid query doing search first, single partition (goes to the general, hybrid and range query metrics)
+        rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 2 ORDER BY v ANN OF [1, 1] LIMIT 1000");
+        assertEquals(0, rows.size());
+
         // Verify metrics for total queries completed.
         String name = "TotalQueriesCompleted";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 6);
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 8);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 2);
 
-        // Verify counters for total partition reads.
-        name = "TotalPartitionReads";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 1 + numPartitions + numRowsPerPartition + numRows + numRowsPerPartition + numRows);
+        // Verify counters for total keys fetched.
+        name = "TotalKeysFetched";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 3L * (numRowsPerPartition + numRows + 2));
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numRows + 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows + 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows + 2);
+
+        // Verify counters for total partitions fetched.
+        name = "TotalPartitionsFetched";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 1 + numPartitions + 1 + numRowsPerPartition + numRows + 1 + numRowsPerPartition + numRows + 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numPartitions + 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition); // single-partition top-k issues a partition access per each row
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows + 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition); // single-partition top-k issues a partition access per each row
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows + 1);
+
+        // Verify counters for total partitions returned.
+        name = "TotalPartitionsReturned";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 1 + numPartitions + 1 + numPartitions + 1 + numPartitions);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numPartitions);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition); // single-partition top-k issues a partition access per each row
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition); // single-partition top-k issues a partition access per each row
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numPartitions);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numPartitions);
 
-        // Verify counters for total rows filtered.
-        name = "TotalRowsFiltered";
+        // Verify counters for total partition tombstones fetched.
+        name = "TotalPartitionTombstonesFetched";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 3);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 1);
+
+        // Verify counters for total rows fetched.
+        name = "TotalRowsFetched";
         waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numRowsPerPartition + numRows + numRowsPerPartition + numRows + numRowsPerPartition + numRows);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), numRowsPerPartition);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numRows);
@@ -547,6 +594,26 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows);
+
+        // Verify counters for total rows returned.
+        name = "TotalRowsReturned";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numRowsPerPartition + numRows + numRowsPerPartition + numRows + numRowsPerPartition + numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows);
+
+        // Verify counters for total row tombstones fetched.
+        name = "TotalRowTombstonesFetched";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 6);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 2);
 
         // Verify counters for timeouts.
         name = "TotalQueryTimeouts";
@@ -563,9 +630,9 @@ public class QueryMetricsTest extends AbstractMetricsTest
         // We have no support for forcing the different order of operations in the query engine, so we cannot
         // directly test sort-then-filter queries.
         name = "SortThenFilterQueriesCompleted";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 0);
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 1);
 
         // Verify counters for filter-then-sort hybrid queries.
         name = "FilterThenSortQueriesCompleted";
@@ -573,25 +640,157 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 1);
 
-        // Verify histograms for partitions reads per query.
-        name = "PartitionReads";
-        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 6);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_FILTER_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_FILTER_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_HYBRID_QUERY_METRIC_TYPE), 1);
+        // Verify histograms
+        verifyHistogramCount("KeysFetched", perQuery);
+        verifyHistogramCount("PartitionsFetched", perQuery);
+        verifyHistogramCount("PartitionsReturned", perQuery);
+        verifyHistogramCount("PartitionTombstonesFetched", perQuery);
+        verifyHistogramCount("RowsFetched", perQuery);
+        verifyHistogramCount("RowsReturned", perQuery);
+        verifyHistogramCount("RowTombstonesFetched", perQuery);
+    }
 
-        // Verify histograms for rows filtered per query.
-        name = "RowsFiltered";
-        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 6);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_FILTER_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_FILTER_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_HYBRID_QUERY_METRIC_TYPE), 1);
+    private void verifyHistogramCount(String name, boolean hasPerQueryKindMetrics)
+    {
+        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 8);
+        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_SP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_SP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_SP_HYBRID_QUERY_METRIC_TYPE), 2);
+        waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_HYBRID_QUERY_METRIC_TYPE), 2);
+    }
+
+    @Test
+    public void testQueryPlannerMetrics()
+    {
+        CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(true);
+
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, lc int, hc int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(lc) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(hc) USING 'StorageAttachedIndex'");
+
+        int numRows = 10000;
+        for (int i = 0; i < numRows; i++)
+        {
+            execute("INSERT INTO %s (k, lc, hc) VALUES (?, ?, ?)", i, i % 2, i);
+        }
+
+        flush();
+
+        UntypedResultSet rows = execute("SELECT k FROM %s WHERE lc = 0");
+        assertEquals(numRows / 2, rows.size());
+
+        final double ESTIMATION_TOLERANCE = 0.25;
+        final double LOWER_BOUND_MULTIPLIER = 1.0 - ESTIMATION_TOLERANCE;
+        final double UPPER_BOUND_MULTIPLIER = 1.0 + ESTIMATION_TOLERANCE;
+
+        var rowsToReturnEstimatedMetric = objectNameNoIndex("RowsToReturnEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(rowsToReturnEstimatedMetric, 1);
+        waitForHistogramMeanBetween(rowsToReturnEstimatedMetric, numRows / 2.0 * LOWER_BOUND_MULTIPLIER, numRows / 2.0 * UPPER_BOUND_MULTIPLIER);
+
+        var rowsToFetchEstimatedMetric = objectNameNoIndex("RowsToFetchEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(rowsToFetchEstimatedMetric, 1);
+        waitForHistogramMeanBetween(rowsToFetchEstimatedMetric, numRows / 2.0 * LOWER_BOUND_MULTIPLIER, numRows / 2.0 * UPPER_BOUND_MULTIPLIER);
+
+        var keysToIterateEstimatedMetric = objectNameNoIndex("KeysToIterateEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(keysToIterateEstimatedMetric, 1);
+        waitForHistogramMeanBetween(keysToIterateEstimatedMetric, numRows / 2.0 * LOWER_BOUND_MULTIPLIER, numRows / 2.0 * UPPER_BOUND_MULTIPLIER);
+
+        var objectName = objectNameNoIndex("CostEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(objectName, 1);
+        waitForHistogramMeanBetween(objectName, 1.0, Double.POSITIVE_INFINITY);
+
+        var logSelectivityEstimatedMetric = objectNameNoIndex("LogSelectivityEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(logSelectivityEstimatedMetric, 1);
+        waitForHistogramMeanBetween(logSelectivityEstimatedMetric, 0, 0);
+
+        var indexReferencesInQueryMetric = objectNameNoIndex("IndexReferencesInQuery", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(indexReferencesInQueryMetric, 1);
+        waitForHistogramMeanBetween(indexReferencesInQueryMetric, 1.0, 1.0);
+
+        var indexReferencesInPlan = objectNameNoIndex("IndexReferencesInPlan", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(indexReferencesInPlan, 1);
+        waitForHistogramMeanBetween(indexReferencesInPlan, 1.0, 1.0);
+
+        objectName = objectNameNoIndex("TotalRowsToReturnEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, (long)(numRows / 2.0 * LOWER_BOUND_MULTIPLIER), (long)(numRows / 2.0 * UPPER_BOUND_MULTIPLIER));
+
+        objectName = objectNameNoIndex("TotalRowsToFetchEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, (long)(numRows / 2.0 * LOWER_BOUND_MULTIPLIER), (long)(numRows / 2.0 * UPPER_BOUND_MULTIPLIER));
+
+        objectName = objectNameNoIndex("TotalKeysToIterateEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, (long)(numRows / 2.0 * LOWER_BOUND_MULTIPLIER), (long)(numRows / 2.0 * UPPER_BOUND_MULTIPLIER));
+
+        objectName = objectNameNoIndex("TotalCostEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, 1, Long.MAX_VALUE);
+
+        rows = execute("SELECT k FROM %s WHERE lc = 0 AND hc < 10");
+        assertEquals(5, rows.size());
+
+        waitForHistogramCountEquals(logSelectivityEstimatedMetric, 2);
+        waitForHistogramMeanBetween(logSelectivityEstimatedMetric, 1, 2);
+
+        waitForHistogramCountEquals(indexReferencesInQueryMetric, 2);
+        waitForHistogramMeanBetween(indexReferencesInQueryMetric, 1.4999, 1.5001);  // average of 2 indexes and 1 index
+
+        waitForHistogramCountEquals(indexReferencesInPlan, 2);
+        waitForHistogramMeanBetween(indexReferencesInPlan, 1.0, 1.0);  // low selectivity index eliminated by optimisation
+
+        // Check estimates are updated also for queries returning 0 rows
+        // 0 is special, log selectivity would be -infinity, so we need to check if there is no overflow
+        var oldRowsEstimated = getHistogramMean(rowsToFetchEstimatedMetric);
+        var oldLogSelectivityEstimated = getHistogramMean(logSelectivityEstimatedMetric);
+        rows = execute("SELECT k FROM %s WHERE lc = -1");
+        assertEquals(0, rows.size());
+        var newRowsEstimated = getHistogramMean(rowsToFetchEstimatedMetric);
+        assertTrue(newRowsEstimated < oldRowsEstimated);
+        var newLogSelectivityEstimated = getHistogramMean(logSelectivityEstimatedMetric);
+        assertTrue(Double.isFinite(newLogSelectivityEstimated));
+        assertTrue(newLogSelectivityEstimated > oldLogSelectivityEstimated);
+    }
+
+    @Test
+    public void testDisableQueryPlanMetrics()
+    {
+        CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(false);
+
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, lc int, hc int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(lc) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(hc) USING 'StorageAttachedIndex'");
+
+        int numRows = 10000;
+        for (int i = 0; i < numRows; i++)
+        {
+            execute("INSERT INTO %s (k, lc, hc) VALUES (?, ?, ?)", i, i % 2, i);
+        }
+
+        flush();
+
+        // Check if SAI queries still work correctly when plan metrics are disabled
+        UntypedResultSet rows;
+        rows = execute("SELECT k FROM %s WHERE lc = 0");
+        assertEquals(numRows / 2, rows.size());
+        rows = execute("SELECT k FROM %s WHERE lc = 0 AND hc < 10");
+        assertEquals(5, rows.size());
+        rows = execute("SELECT k FROM %s WHERE lc = 0 ORDER BY hc LIMIT 100");
+        assertEquals(100, rows.size());
+        rows = execute("SELECT k FROM %s WHERE k = 1 AND hc = 1");
+        assertEquals(1, rows.size());
+
+        assertMetricDoesNotExist(objectNameNoIndex("RowsToReturnEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("RowsToFetchEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("KeysToIterateEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("CostEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("LogSelectivityEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("IndexReferencesInQuery", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("IndexReferencesInPlan", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalRowsToReturnEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalRowsToFetchEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalKeysToIterateEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalCostEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("SortThenFilterQueriesCompleted", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("FilterThenSortQueriesCompleted", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
     }
 
     private ObjectName objectName(String name, String type)

@@ -77,7 +77,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         {
             for (int x = 0; x < length; x++)
             {
-                assertEquals(reader.get(x), 1000);
+                assertEquals(1000, reader.get(x));
             }
         }
     }

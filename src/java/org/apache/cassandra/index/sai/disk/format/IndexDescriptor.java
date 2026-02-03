@@ -511,6 +511,14 @@ public class IndexDescriptor
         }
 
         @Override
+        public File tmpFileFor(String componentName) throws IOException
+        {
+            String name = context != null ? String.format("%s_%s_%s", buildId, context.getColumnName(), componentName)
+                                          :  String.format("%s_%s", buildId, componentName);
+            return descriptor.tmpFileFor(new Component(Component.Type.CUSTOM, name));
+        }
+
+        @Override
         public void forceDeleteAllComponents()
         {
             components.values().forEach(IndexComponentImpl::delete);
@@ -522,7 +530,7 @@ public class IndexDescriptor
         {
             addOrGet(completionMarkerComponent()).createEmpty();
             sealed = true;
-            // Until this call, the group is not attached to the parent. This create the link.
+            // Until this call, the group is not attached to the parent. This creates the link.
             updateParentLink(this);
         }
 

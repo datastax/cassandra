@@ -46,7 +46,6 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.vector.AbstractMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
@@ -366,57 +365,54 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     }
 
     /**
-     * Estimates the number of matching rows by extrapolating from the first shard only.
-     * This method provides a fast approximation by calculating the matching row count for the first
-     * shard in the key range and then multiplying by the total number of shards involved.
-     *
-     * <p>This approach assumes that data is uniformly distributed across shards, which may not
+     * Estimates the number of rows matching the given query predicate.
+     * <p>
+     * This method provides a fast approximation by calculating the matching row count from a subset of shards.
+     * The number of shards taken for the computation is determined dynamically depending on the number of indexed
+     * and matching rows – the more rows found in the shard, the fewer shards are needed to get a reliable estimate.
+     * <p>
+     * This approach assumes that data is uniformly distributed across shards, which may not
      * always be accurate but provides a quick estimate with minimal computational overhead.
      * The estimate is particularly useful for query planning and optimization decisions where
      * speed is more important than precision.</p>
      *
      * @param expression the search expression/predicate to match against indexed terms
-     * @param keyRange   the partition key range to search within, used to determine which shards to consider
-     * @return an estimated number of matching rows extrapolated from the first shard;
-     * @see #estimateMatchingRowsCountUsingAllShards(Expression, AbstractBounds) for a more accurate but slower alternative
+     * @return an estimated number of matching rows extrapolated from the first few shards;
      */
     @Override
-    public long estimateMatchingRowsCountUsingFirstShard(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCount(Expression expression)
     {
-        int startShard = boundaries.getShardForToken(keyRange.left.getToken());
-        int endShard = getEndShardForBounds(keyRange);
-        return rangeIndexes[startShard].estimateMatchingRowsCount(expression, keyRange) * (endShard - startShard + 1);
-    }
+        // Control how many shards are taken for estimating the number of keys matching the query expression.
+        // Shards are taken until we reach at least MIN_MATCHING_ROWS matching rows
+        // or the total number of indexed rows in all the shards we considered reaches MIN_INDEXED_ROWS.
+        // Those constants do not affect query correctness, and can be safely to set to any value.
+        // They navigate the tradeoff between the cardinality estimation speed and accuracy. The higher the values are,
+        // the more shards will be considered for the estimation, which will increase accuracy but also
+        // increase the time it takes to estimate.
+        // If set to MAX_VALUE, all shards will be considered.
+        // If set to 0, only the first shard will be considered.
+        final int MIN_MATCHING_ROWS = 100;
+        final int MIN_INDEXED_ROWS = 100000;
 
-    /**
-     * Estimates the number of matching rows by querying all relevant shards individually.
-     * This method provides a more accurate estimate compared to the first-shard extrapolation
-     * approach by actually calculating the matching row count for each shard that intersects
-     * with the given key range and summing the results.
-     *
-     * <p>This approach accounts for non-uniform data distribution across shards and provides
-     * a more precise estimate at the cost of increased computational overhead. Each shard's
-     * memory index is consulted to determine how many rows would match the given expression
-     * within the specified key range.</p>
-     *
-     * @param expression the search expression/predicate to match against indexed terms
-     * @param keyRange the partition key range to search within, used to determine which shards to query
-     * @return the sum of estimated matching rows from all relevant shards;
-     *
-     * @see #estimateMatchingRowsCountUsingFirstShard(Expression, AbstractBounds) for a faster but less accurate alternative
-     */
-    @Override
-    public long estimateMatchingRowsCountUsingAllShards(Expression expression, AbstractBounds<PartitionPosition> keyRange)
-    {
-        int startShard = boundaries.getShardForToken(keyRange.left.getToken());
-        int endShard = getEndShardForBounds(keyRange);
-        long count = 0;
-        for (int shard = startShard; shard <= endShard; ++shard)
+        long matchingRows = 0;
+        long indexedRows = 0;
+        int processedShards = 0;
+
+        for (int shard = 0; shard < shardCount(); ++shard)
         {
             assert rangeIndexes[shard] != null;
-            count += rangeIndexes[shard].estimateMatchingRowsCount(expression, keyRange);
+            matchingRows += rangeIndexes[shard].estimateMatchingRowsCount(expression);
+            indexedRows += rangeIndexes[shard].indexedRows();
+            processedShards++;
+
+            if (matchingRows >= MIN_MATCHING_ROWS)
+                break;
+            if (indexedRows >= MIN_INDEXED_ROWS)
+                break;
         }
-        return count;
+
+        assert processedShards >= 1 : "Must process at least one shard for estimating matching rows count";
+        return Math.round(matchingRows * (double) (shardCount()) / processedShards);
     }
 
     @Override
