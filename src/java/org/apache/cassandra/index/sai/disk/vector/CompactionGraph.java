@@ -62,6 +62,7 @@ import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
+import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
@@ -387,8 +388,11 @@ public class CompactionGraph implements Closeable, Accountable
                 long targetPosition = ordinal * Float.BYTES * (long) dimension;
                 assert vectorsByOrdinalBufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + vectorsByOrdinalBufferedWriter.position() + " > targetPosition=" + targetPosition;
                 vectorsByOrdinalBufferedWriter.seek(targetPosition);
-                for (int i = 0; i < dimension; i++)
-                    vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
+                if (vector instanceof ArrayVectorFloat)
+                    vectorsByOrdinalBufferedWriter.writeFloats(((ArrayVectorFloat) vector).get(), 0, dimension);
+                else
+                    for (int i = 0; i < dimension; i++)
+                        vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
 
                 // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
                 while (compressedVectors.count() < ordinal)
