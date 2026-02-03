@@ -472,11 +472,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
             SAICodecUtils.writeHeader(postingsOutput);
 
             // Write fused unless we don't meet some criteria
-            boolean attemptWritingFused = ENABLE_FUSED && perIndexComponents.version().onDiskFormat().jvectorFileFormatVersion() >= 6;
+            boolean writeFusedPQ = ENABLE_FUSED && perIndexComponents.version().onDiskFormat().jvectorFileFormatVersion() >= 6;
 
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
-            var compressor = writePQ(pqOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context(), attemptWritingFused);
+            var compressor = writePQ(pqOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context(), writeFusedPQ);
             long pqLength = pqOutput.asSequentialWriter().position() - pqOffset;
 
             // write postings
@@ -511,7 +511,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
                 // write the graph
                 var start = System.nanoTime();
-                indexWriter.write(suppliers(perIndexComponents.context(), view, compressor, nvq));
+                indexWriter.write(suppliers(perIndexComponents.context(), view, compressor, nvq, writeFusedPQ));
                 SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
                 logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
                 long termsLength = indexWriter.getOutput().position() - termsOffset;
@@ -550,7 +550,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return metadataMap;
     }
 
-    private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(IndexContext context, ImmutableGraphIndex.View view, VectorCompressor<?> compressor, NVQuantization nvq)
+    private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(IndexContext context, ImmutableGraphIndex.View view, VectorCompressor<?> compressor, NVQuantization nvq, boolean writeFusedPQ)
     {
         var features = new EnumMap<FeatureId, IntFunction<Feature.State>>(FeatureId.class);
 
@@ -560,14 +560,20 @@ public class CassandraOnHeapGraph<T> implements Accountable
         else
             features.put(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
 
-        if (ENABLE_FUSED && context.version().onDiskFormat().jvectorFileFormatVersion() >= 6)
+        if (compressor instanceof ProductQuantization && writeFusedPQ)
         {
-            if (compressor instanceof ProductQuantization)
+            // This block is an extension of an already present design that limits the PQ computation and encoding
+            // to one index at a time -- goal during flush is to evict from memory ASAP so better to do the PQ build
+            // (in parallel) one at a time. We have https://github.com/riptano/cndb/issues/12110 to encode the
+            // PQ iteratively, but since that isn't implemented, we keep the same, fairly brittle pattern.
+            final PQVectors pqVectors;
+            synchronized (CassandraOnHeapGraph.class)
             {
-                // TODO temporary hack to parallelize computation
-                PQVectors pqVectors = (PQVectors) compressor.encodeAll(vectorValues);
-                features.put(FeatureId.FUSED_PQ, nodeId -> new FusedPQ.State(view, pqVectors::get, nodeId));
+                // Note: the features implementation expects the pqVectors to be addressable on their old ordinal
+                // index, so we use the original vectorValues as the source without performing any remapping.
+                pqVectors = (PQVectors) compressor.encodeAll(vectorValues);
             }
+            features.put(FeatureId.FUSED_PQ, nodeId -> new FusedPQ.State(view, pqVectors::get, nodeId));
         }
 
         return features;
@@ -625,7 +631,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
-    private VectorCompressor<?> writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext, boolean attemptWritingFused) throws IOException
+    private VectorCompressor<?> writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext, boolean writeFusedPQ) throws IOException
     {
         var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
 
@@ -649,7 +655,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
             assert !vectorValues.isValueShared();
             // encode (compress) the vectors to save
-            if ((compressor instanceof ProductQuantization && !attemptWritingFused) || compressor instanceof BinaryQuantization)
+            if ((compressor instanceof ProductQuantization && !writeFusedPQ) || compressor instanceof BinaryQuantization)
                 cv = compressor.encodeAll(new RemappedVectorValues(remapped, remapped.maxNewOrdinal, vectorValues));
         }
 
@@ -658,7 +664,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         if (actualType == CompressionType.NONE)
             return null;
 
-        if (attemptWritingFused)
+        if (compressor instanceof ProductQuantization && writeFusedPQ)
         {
             compressor.write(writer, indexContext.version().onDiskFormat().jvectorFileFormatVersion());
             return compressor;
