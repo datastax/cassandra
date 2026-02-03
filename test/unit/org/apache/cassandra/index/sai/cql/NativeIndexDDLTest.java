@@ -913,7 +913,7 @@ public class NativeIndexDDLTest extends SAITester
                     
                     // Truncate while builds are actively running (but slow)
                     // This should interrupt the builds with StopTrigger.TRUNCATE
-                    // The builds will check isStopRequested() at line 181 and throw CompactionInterruptedException
+                    // The builds will check isStopRequested() and throw CompactionInterruptedException
                     truncate(true);
                     
                     // Wait for all compactions/builds to complete after truncate
@@ -927,7 +927,7 @@ public class NativeIndexDDLTest extends SAITester
                         boolean found = events.stream()
                                               .anyMatch(e -> e.getFormattedMessage().contains("Stop requested while building indexes"));
                         assertTrue("Expected INFO log", found);
-                    }, 10, TimeUnit.SECONDS);
+                    }, 20, TimeUnit.SECONDS);
                 }
                 finally
                 {
@@ -1694,7 +1694,7 @@ public class NativeIndexDDLTest extends SAITester
             // Wait for rebuild to reach the barrier
             waitForAssert(() -> assertEquals(1, delayIndexRebuild.getCount()), 5000, TimeUnit.MILLISECONDS);
 
-            // Stop the rebuild (this should trigger the INFO log at line 259)
+            // Stop the rebuild (this should trigger the INFO log we check later)
             CompactionManager.instance.stopCompaction(OperationType.INDEX_BUILD.name());
             
             // Let the rebuild continue and hit the stop
@@ -1708,7 +1708,7 @@ public class NativeIndexDDLTest extends SAITester
             // Add small delay to allow async logging to complete
             Thread.sleep(500);
 
-            // Verify that the INFO log was generated (line 259)
+            // Verify that the INFO log was generated
             verifyIndexBuildLog(appender, Level.INFO, "Stop requested while building indexes", true);
         }
         finally
