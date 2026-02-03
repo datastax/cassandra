@@ -680,7 +680,6 @@ public enum CassandraRelevantProperties
      */
     READ_PREFETCHING_WINDOW("cassandra.read_prefetching_window", "0.5"),
     RELEASE_VERSION("cassandra.releaseVersion"),
-    RELOCATED_SHADED_IO_NETTY_TRANSPORT_NONATIVE("relocated.shaded.io.netty.transport.noNative"),
     /**
      * The factory for handler of the storage of sstables
      */
