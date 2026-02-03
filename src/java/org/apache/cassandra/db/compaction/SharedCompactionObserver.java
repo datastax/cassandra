@@ -84,7 +84,10 @@ public class SharedCompactionObserver implements CompactionObserver
             Throwables.maybeFail(err);
         }
         else
+        {
             assert inProgressReported.get() == progress; // progress object must also be shared
+            assert progress.operationId().equals(parentId) : "progress.operationId() must match parentId";
+        }
     }
 
     @Override
