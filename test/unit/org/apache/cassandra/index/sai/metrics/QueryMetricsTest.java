@@ -661,6 +661,138 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_HYBRID_QUERY_METRIC_TYPE), 2);
     }
 
+    @Test
+    public void testQueryPlannerMetrics()
+    {
+        CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(true);
+
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, lc int, hc int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(lc) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(hc) USING 'StorageAttachedIndex'");
+
+        int numRows = 10000;
+        for (int i = 0; i < numRows; i++)
+        {
+            execute("INSERT INTO %s (k, lc, hc) VALUES (?, ?, ?)", i, i % 2, i);
+        }
+
+        flush();
+
+        UntypedResultSet rows = execute("SELECT k FROM %s WHERE lc = 0");
+        assertEquals(numRows / 2, rows.size());
+
+        final double ESTIMATION_TOLERANCE = 0.25;
+        final double LOWER_BOUND_MULTIPLIER = 1.0 - ESTIMATION_TOLERANCE;
+        final double UPPER_BOUND_MULTIPLIER = 1.0 + ESTIMATION_TOLERANCE;
+
+        var rowsToReturnEstimatedMetric = objectNameNoIndex("RowsToReturnEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(rowsToReturnEstimatedMetric, 1);
+        waitForHistogramMeanBetween(rowsToReturnEstimatedMetric, numRows / 2.0 * LOWER_BOUND_MULTIPLIER, numRows / 2.0 * UPPER_BOUND_MULTIPLIER);
+
+        var rowsToFetchEstimatedMetric = objectNameNoIndex("RowsToFetchEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(rowsToFetchEstimatedMetric, 1);
+        waitForHistogramMeanBetween(rowsToFetchEstimatedMetric, numRows / 2.0 * LOWER_BOUND_MULTIPLIER, numRows / 2.0 * UPPER_BOUND_MULTIPLIER);
+
+        var keysToIterateEstimatedMetric = objectNameNoIndex("KeysToIterateEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(keysToIterateEstimatedMetric, 1);
+        waitForHistogramMeanBetween(keysToIterateEstimatedMetric, numRows / 2.0 * LOWER_BOUND_MULTIPLIER, numRows / 2.0 * UPPER_BOUND_MULTIPLIER);
+
+        var objectName = objectNameNoIndex("CostEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(objectName, 1);
+        waitForHistogramMeanBetween(objectName, 1.0, Double.POSITIVE_INFINITY);
+
+        var logSelectivityEstimatedMetric = objectNameNoIndex("LogSelectivityEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(logSelectivityEstimatedMetric, 1);
+        waitForHistogramMeanBetween(logSelectivityEstimatedMetric, 0, 0);
+
+        var indexReferencesInQueryMetric = objectNameNoIndex("IndexReferencesInQuery", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(indexReferencesInQueryMetric, 1);
+        waitForHistogramMeanBetween(indexReferencesInQueryMetric, 1.0, 1.0);
+
+        var indexReferencesInPlan = objectNameNoIndex("IndexReferencesInPlan", KEYSPACE, table, PER_QUERY_METRIC_TYPE);
+        waitForHistogramCountEquals(indexReferencesInPlan, 1);
+        waitForHistogramMeanBetween(indexReferencesInPlan, 1.0, 1.0);
+
+        objectName = objectNameNoIndex("TotalRowsToReturnEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, (long)(numRows / 2.0 * LOWER_BOUND_MULTIPLIER), (long)(numRows / 2.0 * UPPER_BOUND_MULTIPLIER));
+
+        objectName = objectNameNoIndex("TotalRowsToFetchEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, (long)(numRows / 2.0 * LOWER_BOUND_MULTIPLIER), (long)(numRows / 2.0 * UPPER_BOUND_MULTIPLIER));
+
+        objectName = objectNameNoIndex("TotalKeysToIterateEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, (long)(numRows / 2.0 * LOWER_BOUND_MULTIPLIER), (long)(numRows / 2.0 * UPPER_BOUND_MULTIPLIER));
+
+        objectName = objectNameNoIndex("TotalCostEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE);
+        waitForMetricValueBetween(objectName, 1, Long.MAX_VALUE);
+
+        rows = execute("SELECT k FROM %s WHERE lc = 0 AND hc < 10");
+        assertEquals(5, rows.size());
+
+        waitForHistogramCountEquals(logSelectivityEstimatedMetric, 2);
+        waitForHistogramMeanBetween(logSelectivityEstimatedMetric, 1, 2);
+
+        waitForHistogramCountEquals(indexReferencesInQueryMetric, 2);
+        waitForHistogramMeanBetween(indexReferencesInQueryMetric, 1.4999, 1.5001);  // average of 2 indexes and 1 index
+
+        waitForHistogramCountEquals(indexReferencesInPlan, 2);
+        waitForHistogramMeanBetween(indexReferencesInPlan, 1.0, 1.0);  // low selectivity index eliminated by optimisation
+
+        // Check estimates are updated also for queries returning 0 rows
+        // 0 is special, log selectivity would be -infinity, so we need to check if there is no overflow
+        var oldRowsEstimated = getHistogramMean(rowsToFetchEstimatedMetric);
+        var oldLogSelectivityEstimated = getHistogramMean(logSelectivityEstimatedMetric);
+        rows = execute("SELECT k FROM %s WHERE lc = -1");
+        assertEquals(0, rows.size());
+        var newRowsEstimated = getHistogramMean(rowsToFetchEstimatedMetric);
+        assertTrue(newRowsEstimated < oldRowsEstimated);
+        var newLogSelectivityEstimated = getHistogramMean(logSelectivityEstimatedMetric);
+        assertTrue(Double.isFinite(newLogSelectivityEstimated));
+        assertTrue(newLogSelectivityEstimated > oldLogSelectivityEstimated);
+    }
+
+    @Test
+    public void testDisableQueryPlanMetrics()
+    {
+        CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(false);
+
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, lc int, hc int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(lc) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(hc) USING 'StorageAttachedIndex'");
+
+        int numRows = 10000;
+        for (int i = 0; i < numRows; i++)
+        {
+            execute("INSERT INTO %s (k, lc, hc) VALUES (?, ?, ?)", i, i % 2, i);
+        }
+
+        flush();
+
+        // Check if SAI queries still work correctly when plan metrics are disabled
+        UntypedResultSet rows;
+        rows = execute("SELECT k FROM %s WHERE lc = 0");
+        assertEquals(numRows / 2, rows.size());
+        rows = execute("SELECT k FROM %s WHERE lc = 0 AND hc < 10");
+        assertEquals(5, rows.size());
+        rows = execute("SELECT k FROM %s WHERE lc = 0 ORDER BY hc LIMIT 100");
+        assertEquals(100, rows.size());
+        rows = execute("SELECT k FROM %s WHERE k = 1 AND hc = 1");
+        assertEquals(1, rows.size());
+
+        assertMetricDoesNotExist(objectNameNoIndex("RowsToReturnEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("RowsToFetchEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("KeysToIterateEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("CostEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("LogSelectivityEstimated", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("IndexReferencesInQuery", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("IndexReferencesInPlan", KEYSPACE, table, PER_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalRowsToReturnEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalRowsToFetchEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalKeysToIterateEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("TotalCostEstimated", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("SortThenFilterQueriesCompleted", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+        assertMetricDoesNotExist(objectNameNoIndex("FilterThenSortQueriesCompleted", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE));
+    }
+
     private ObjectName objectName(String name, String type)
     {
         return objectNameNoIndex(name, KEYSPACE, currentTable(), type);

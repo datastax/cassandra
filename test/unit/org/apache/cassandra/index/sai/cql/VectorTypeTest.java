@@ -910,6 +910,26 @@ public class VectorTypeTest extends VectorTester.Versioned
         assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
     }
 
+    @Test
+    public void testCompactionWithEnoughRowsForPQAndARowWithAMissingVector() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+
+        disableCompaction();
+
+        // Insert a row without a vector mapping. This row will be in the middle of the segment.
+        execute("INSERT INTO %s (pk) VALUES (?)", 0);
+
+        // Insert enough rows so that we hit the CompactionGraph during compaction.
+        for (int i = 1; i <= CassandraOnHeapGraph.MIN_PQ_ROWS + 1; i++)
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(i, i + 1));
+
+        runThenFlushThenCompact(() -> {
+            assertRows(execute("SELECT * FROM %s WHERE pk = 0 ORDER BY vec ANN OF [1,2] LIMIT 1"));
+        });
+    }
+
     /**
      * Tests a filter-then-sort query with a concurrent vector deletion. See CNDB-10536 for details.
      */

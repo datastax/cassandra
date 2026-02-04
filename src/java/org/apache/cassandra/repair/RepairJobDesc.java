@@ -65,12 +65,14 @@ public class RepairJobDesc
     @Override
     public String toString()
     {
-        return "[repair #" + sessionId + " on " + keyspace + "/" + columnFamily + ", " + ranges + "]";
+        String parentSessionId = this.parentSessionId == null ? "" : " (parent session id: #" + this.parentSessionId + ")";
+        return "[repair #" + sessionId + parentSessionId + " on " + keyspace + "/" + columnFamily + ", " + ranges + "]";
     }
 
     public String toString(PreviewKind previewKind)
     {
-        return '[' + previewKind.logPrefix() + " #" + sessionId + " on " + keyspace + "/" + columnFamily + ", " + ranges + "]";
+        String parentSessionId = this.parentSessionId == null ? "" : " (parent session id: #" + this.parentSessionId + ")";
+        return '[' + previewKind.logPrefix() + " #" + sessionId + parentSessionId + " on " + keyspace + "/" + columnFamily + ", " + ranges + "]";
     }
 
     @Override
