@@ -131,14 +131,6 @@ public abstract class AbstractBlockPackedReader implements LongArray
         int blockIndex = binarySearchBlockMaxValues(targetValue);
 
         // blockIndex is now the block that might contain our floor value
-        // We need to search within this block (and potentially the next if exact match on block boundary)
-
-        if (blockIndex < 0)
-        {
-            // Convert negative index to actual block position
-            blockIndex = -blockIndex - 1;
-        }
-
         // Search for the floor value within the identified block
         return findBlockRowIDForFloor(targetValue, blockIndex);
     }
@@ -152,46 +144,24 @@ public abstract class AbstractBlockPackedReader implements LongArray
      */
     private int binarySearchBlockMaxValues(long targetValue)
     {
-        int low = 0;
-        int high = Math.toIntExact(blockBitsPerValue.length) - 1;
-
-        while (low <= high)
+        int min = binarySearchBlockMinValues(targetValue);
+        int max = min;
+        int highest = Math.toIntExact(blockBitsPerValue.length) - 1;
+        if (min < 0)
+            min = -min;
+        if (min > highest)
+            min--;
+        if (targetValue < delta(min, 0))
+            return Math.max(min - 1, 0);
         {
-            int mid = low + ((high - low) >> 1);
-
-            // Get the last value in this block (block max)
-            long blockOffset = (long) mid << blockShift;
-            long lastIdxInBlock = Math.min(blockOffset + blockSize - 1, valueCount - 1);
-            long maxVal = get(lastIdxInBlock);
-
-            if (maxVal < targetValue)
+            // Check for duplicates in next blocks
+            while (min <= highest && delta(min, 0) <= targetValue)
             {
-                low = mid + 1;
-            }
-            else if (maxVal > targetValue)
-            {
-                high = mid - 1;
-            }
-            else
-            {
-                // Exact match on block max - but there might be duplicates in the next block
-                if (mid < blockBitsPerValue.length - 1)
-                {
-                    long nextBlockOffset = (long) (mid + 1) << blockShift;
-                    if (nextBlockOffset < valueCount && get(nextBlockOffset) == targetValue)
-                    {
-                        // Duplicates exist in the next block, search there
-                        low = mid + 1;
-                        continue;
-                    }
-                }
-                return mid;
+                max = min;
+                min++;
             }
         }
-
-        // Return the block where floor value should be
-        // high is now the last block with max value < target
-        return -(high + 1);
+        return max;
     }
 
     /**
