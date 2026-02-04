@@ -38,7 +38,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
@@ -648,108 +647,4 @@ public class CompactionGraph implements Closeable, Accountable
         }
     }
 
-    private static class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseable
-    {
-        private final RandomAccessReader reader;
-        private final int dimension;
-        private final long vectorSize;
-
-        public OnDiskVectorValues(File vectorsByOrdinalTmpFile, int dimension)
-        {
-            this.reader = RandomAccessReader.open(vectorsByOrdinalTmpFile);
-            this.dimension = dimension;
-            this.vectorSize = (long) dimension * Float.BYTES;
-        }
-
-        @Override
-        public int size()
-        {
-            return (int) (reader.length() / vectorSize);
-        }
-
-        @Override
-        public int dimension()
-        {
-            return dimension;
-        }
-
-        @Override
-        public VectorFloat<?> getVector(int i)
-        {
-            try
-            {
-                reader.seek(i * vectorSize);
-                var vector = new float[dimension];
-                reader.readFully(vector);
-                return vts.createFloatVector(vector);
-            }
-            catch (IOException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-
-        @Override
-        public boolean isValueShared()
-        {
-            return false;
-        }
-
-        @Override
-        public RandomAccessVectorValues copy()
-        {
-            return new OnDiskVectorValues(reader.getFile(), dimension);
-        }
-
-        @Override
-        public void close()
-        {
-            FileUtils.closeQuietly(reader);
-        }
-    }
-
-    // We use this class as a workaround for inefficient buffering. See https://github.com/datastax/jvector/issues/562.
-    private static class VectorByOrdinalWriter implements Closeable
-    {
-        final int dimension;
-        BufferedRandomAccessWriter bufferedWriter;
-        int lastOrdinal;
-
-        VectorByOrdinalWriter(File vectorsByOrdinalTmpFile, int dimension) throws IOException
-        {
-            this.bufferedWriter = new BufferedRandomAccessWriter(vectorsByOrdinalTmpFile.toPath());
-            this.dimension = dimension;
-            this.lastOrdinal = -1;
-        }
-
-        void write(int ordinal, VectorFloat<?> vector) throws IOException
-        {
-            assert ordinal > lastOrdinal : "Unexpected ordinal " + ordinal + " must be greater than " + lastOrdinal;
-
-            if (ordinal != lastOrdinal + 1)
-            {
-                // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
-                // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
-                // with the posting list logic.
-                long targetPosition = ordinal * Float.BYTES * (long) dimension;
-                assert bufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + bufferedWriter.position() + " > targetPosition=" + targetPosition;
-                bufferedWriter.seek(targetPosition);
-            }
-
-            // Update the last ordinal
-            lastOrdinal = ordinal;
-
-            if (vector instanceof ArrayVectorFloat)
-                bufferedWriter.writeFloats(((ArrayVectorFloat) vector).get(), 0, dimension);
-            else
-                for (int i = 0; i < dimension; i++)
-                    bufferedWriter.writeFloat(vector.get(i));
-        }
-
-        @Override
-        public void close() throws IOException
-        {
-            bufferedWriter.close();
-        }
-    }
 }
