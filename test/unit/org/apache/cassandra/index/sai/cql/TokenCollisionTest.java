@@ -18,14 +18,13 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.Before;
 import org.junit.Test;
 
 import com.datastax.driver.core.Row;
-import java.util.ArrayList;
-
 import org.apache.cassandra.Util;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -78,8 +77,8 @@ public class TokenCollisionTest extends SAITester
     private void doSkinnyPartitionTest(int v1Match, int v2Match)
     {
         createTable("CREATE TABLE %s (pk blob, v1 int, v2 int, PRIMARY KEY (pk))");
-        createIndex("CREATE INDEX ON %s(v1) USING 'sai'");
-        createIndex("CREATE INDEX ON %s(v2) USING 'sai'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
 
         ByteBuffer prefix = ByteBufferUtil.bytes("key");
         int numRows = 100;
@@ -119,8 +118,8 @@ public class TokenCollisionTest extends SAITester
     private void doWidePartitionTest(int numRows, int v1Match, int v2Match)
     {
         createTable("CREATE TABLE %s (pk blob, ck int, v1 int, v2 int, PRIMARY KEY (pk, ck))");
-        createIndex("CREATE INDEX ON %s(v1) USING 'sai'");
-        createIndex("CREATE INDEX ON %s(v2) USING 'sai'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
 
         ByteBuffer prefix = ByteBufferUtil.bytes("key");
         int pkCount = 0;
