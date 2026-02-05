@@ -495,6 +495,7 @@ public enum CassandraRelevantProperties
     // Enable/disable replica response size metrics collection
     REPLICA_RESPONSE_SIZE_METRICS_ENABLED("cassandra.replica_response_size_metrics_enabled", "true"),
     FILE_CACHE_SIZE_IN_MB("cassandra.file_cache_size_in_mb", "2048"),
+    COMPRESSION_METADATA_CHUNK_OFFSET_CACHE_SIZE_IN_MB("cassandra.compression_metadata_chunk_offset_cache_size_in_mb", "5120"),
     CUSTOM_HINTS_RATE_LIMITER_FACTORY("cassandra.custom_hints_rate_limiter_factory"),
 
     CUSTOM_INDEX_BUILD_DECIDER("cassandra.custom_index_build_decider"),
@@ -760,7 +761,10 @@ public enum CassandraRelevantProperties
     /**
      * A directory to the default system key location - used by transparent data encryption
      */
-    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf");
+    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf"),
+
+    COMPRESSION_CHUNK_OFFSETS_TYPE("cassandra.compression_chunk_offsets_type", "IN_MEMORY"),
+    COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB("cassandra.compression_chunk_offsets_cache_in_mb", "0");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

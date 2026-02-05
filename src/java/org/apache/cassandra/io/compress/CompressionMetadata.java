@@ -34,6 +34,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.primitives.Longs;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
@@ -52,6 +53,7 @@ import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.io.util.SafeMemory;
 import org.apache.cassandra.io.util.SliceDescriptor;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Ref;
@@ -62,7 +64,7 @@ import org.apache.cassandra.utils.concurrent.Transactional;
  */
 public class CompressionMetadata implements AutoCloseable
 {
-    private static final AtomicLong NATIVE_MEMORY_USAGE = new AtomicLong(0);
+    public static final AtomicLong NATIVE_MEMORY_USAGE = new AtomicLong(0);
     /**
      * DataLength can represent either the true length of the file
      * or some shorter value, in the case we want to impose a shorter limit on readers
@@ -81,7 +83,7 @@ public class CompressionMetadata implements AutoCloseable
      * chunks. Each item is of Long type, thus 8 bytes long. Note that even if we deal with a partial data file (zero
      * copy metadata is present), we store offsets of all chunks for the original (compressed) data file.
      */
-    private final Memory.LongArray chunkOffsets;
+    private final CompressionChunkOffsets chunkOffsets;
 
     public final File indexFilePath;
 
@@ -165,10 +167,11 @@ public class CompressionMetadata implements AutoCloseable
 
 
 
-        try (FileInputStreamPlus stream = readerType == CompressionMetadataReaderType.WRITE_TIME ?
+        try (FileInputStreamPlus inputStreamPlus = readerType == CompressionMetadataReaderType.WRITE_TIME ?
                                           new FileInputStreamPlus(StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath), indexFilePath.toPath()) :
                                           indexFilePath.newInputStream())
         {
+            TrackedDataInputPlus stream = new TrackedDataInputPlus(inputStreamPlus);
             String compressorName = stream.readUTF();
             int optionCount = stream.readInt();
             Map<String, String> options = new HashMap<>(optionCount);
@@ -208,13 +211,10 @@ public class CompressionMetadata implements AutoCloseable
             {
                 assert uncompressedOffset == (long) startChunkIndex << chunkLengthBits;
                 int endChunkIndex = Math.toIntExact((uncompressedOffset + dataLength - 1) >> chunkLengthBits) + 1;
-                Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
-                chunkOffsets = offsetsAndLimit.left;
-                // We adjust the compressed file length to store the position after the last chunk just to be able to
-                // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
-                // Obvously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
-                // an empty chunk added to the end of the file thus we cannot rely on the file length.
-                compressedFileLength = offsetsAndLimit.right;
+
+                CompressionChunkOffsets.Type type = CompressionChunkOffsets.Type.valueOf(CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.getString());
+                chunkOffsets = CompressionChunkOffsets.getInstance(indexFilePath, stream, startChunkIndex, endChunkIndex, compressedLength, type, readerType);
+                compressedFileLength = chunkOffsets.compressedFileLength();
             }
         }
         catch (FileNotFoundException | NoSuchFileException e)
@@ -238,7 +238,7 @@ public class CompressionMetadata implements AutoCloseable
         this.chunkLengthBits = Integer.numberOfTrailingZeros(parameters.chunkLength());
         this.compressedFileLength = compressedLength;
         assert offsets != null;
-        this.chunkOffsets = offsets;
+        this.chunkOffsets = new CompressionChunkOffsets.InMemoryCompressionChunkOffsets(offsets, compressedLength);
         this.dataLength = dataLength;
         this.startChunkIndex = 0;
     }
@@ -286,7 +286,7 @@ public class CompressionMetadata implements AutoCloseable
      */
     public long offHeapSize()
     {
-        return hasOffsets() ? chunkOffsets.memory.size() : 0;
+        return hasOffsets() ? chunkOffsets.memoryUsed() : 0;
     }
 
     public boolean hasOffsets()
@@ -297,7 +297,7 @@ public class CompressionMetadata implements AutoCloseable
     public void addTo(Ref.IdentityCollection identities)
     {
         if (hasOffsets())
-            identities.add(chunkOffsets.memory);
+            chunkOffsets.addTo(identities);
     }
 
     /**
@@ -311,6 +311,7 @@ public class CompressionMetadata implements AutoCloseable
      *
      * @return A pair of chunk offsets array and the offset next to the last read chunk
      */
+    // FIXME remove
     private static Pair<Memory.LongArray, Long> readChunkOffsets(FileInputStreamPlus input, int startIndex, int endIndex, long compressedFileLength)
     {
         final Memory.LongArray offsets;
@@ -585,6 +586,7 @@ public class CompressionMetadata implements AutoCloseable
             }
         }
 
+        // FIXME
         @SuppressWarnings("resource")
         public CompressionMetadata open(long dataLength, long compressedLength)
         {
