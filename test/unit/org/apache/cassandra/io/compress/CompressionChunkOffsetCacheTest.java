@@ -1,0 +1,172 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.io.compress;
+
+import java.nio.ByteBuffer;
+import java.util.concurrent.TimeUnit;
+
+import com.dynatrace.hash4j.hashing.Hashing;
+import org.junit.Test;
+
+import org.awaitility.Awaitility;
+
+import org.apache.cassandra.metrics.MicrometerCompressionChunkOffsetCacheMetrics;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+public class CompressionChunkOffsetCacheTest
+{
+    @Test
+    public void offsetsBlockRefCounting()
+    {
+        ByteBuffer buffer = ByteBuffer.allocateDirect(16);
+        CompressionChunkOffsetCache.OffsetsBlock block = new CompressionChunkOffsetCache.OffsetsBlock(buffer);
+
+        assertThat(block.references).isEqualTo(1);
+        assertThat(block.ref()).isTrue();
+        assertThat(block.references).isEqualTo(2);
+
+        block.release();
+        assertThat(block.references).isEqualTo(1);
+
+        block.release();
+        assertThat(block.references).isEqualTo(0);
+        assertThat(block.ref()).isFalse();
+    }
+
+    @Test
+    public void testBlockKeyHashUsesFileIdAndBlockIndex()
+    {
+        CompressionChunkOffsetCache.BlockKey key = new CompressionChunkOffsetCache.BlockKey(11L, 7);
+
+        assertThat(key.hashCode()).isEqualTo(Hashing.metroHash64().hashLongLongToInt(11L, 7));
+        assertThat(key).isEqualTo(new CompressionChunkOffsetCache.BlockKey(11L, 7));
+        assertThat(key).isNotEqualTo(new CompressionChunkOffsetCache.BlockKey(12L, 7));
+        assertThat(key).isNotEqualTo(new CompressionChunkOffsetCache.BlockKey(11L, 8));
+        assertThatThrownBy(() -> key.equals(new Object())).isInstanceOf(ClassCastException.class);
+    }
+
+    @Test
+    public void testOffheapMemoryUsage()
+    {
+        long before = CompressionMetadata.nativeMemoryAllocated();
+        CompressionChunkOffsetCache cache = new CompressionChunkOffsetCache(100 * 1024);
+        long fileId = 1;
+
+        CompressionChunkOffsetCache.OffsetsBlock block =
+        cache.getBlock(fileId, 0, key -> new CompressionChunkOffsetCache.OffsetsBlock(ByteBuffer.allocateDirect(1024)));
+
+        Awaitility.await("metrics update")
+                  .atMost(10, TimeUnit.SECONDS)
+                  .untilAsserted(() -> {
+             assertThat(cache.weightedSize()).isEqualTo(1024L);
+             assertThat(CompressionMetadata.nativeMemoryAllocated()).isGreaterThanOrEqualTo(before + 1024L);
+         });
+
+        cache.clear();
+        Awaitility.await("Cache eviction")
+                  .atMost(10, TimeUnit.SECONDS)
+                  .untilAsserted(() -> assertThat(cache.weightedSize()).isEqualTo(0));
+        Awaitility.await("Native memory released")
+                  .atMost(10, TimeUnit.SECONDS)
+                  .untilAsserted(() -> assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before));
+    }
+
+    @Test
+    public void testBlockBufferReusedAfterRelease()
+    {
+        long before = CompressionMetadata.nativeMemoryAllocated();
+        CompressionChunkOffsetCache cache = new CompressionChunkOffsetCache(1024);
+
+        ByteBuffer first = cache.allocateBlockBuffer(512);
+        first.position(512);
+        first.flip();
+
+        CompressionChunkOffsetCache.OffsetsBlock block = cache.wrapBlockBuffer(first);
+        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before + first.capacity());
+        assertThat(block.capacity()).isEqualTo(first.capacity());
+        assertThat(block.count()).isEqualTo(64);
+
+        block.release();
+        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
+
+        ByteBuffer second = cache.allocateBlockBuffer(512);
+        assertThat(second).isSameAs(first);
+
+        cache.releaseBlockBuffer(second);
+        cache.clear();
+    }
+
+    @Test
+    public void testMetrics()
+    {
+        CompressionChunkOffsetCache cache = new CompressionChunkOffsetCache(1024);
+        MicrometerCompressionChunkOffsetCacheMetrics metrics = cache.getMetrics();
+        assertThat(metrics.hits()).isEqualTo(0);
+        assertThat(metrics.hitRate()).isNaN();
+        assertThat(metrics.misses()).isEqualTo(0);
+        assertThat(metrics.entries()).isEqualTo(0);
+        assertThat(metrics.capacity()).isEqualTo(1024);
+        assertThat(metrics.size()).isEqualTo(0);
+
+        long fileId = 1;
+
+        // 1st miss
+        cache.getBlock(fileId, 0, key -> new CompressionChunkOffsetCache.OffsetsBlock(ByteBuffer.allocateDirect(1024)));
+        Awaitility.await("metrics update")
+                  .atMost(10, TimeUnit.SECONDS)
+                  .untilAsserted(() -> {
+                      assertThat(metrics.hits()).isEqualTo(0);
+                      assertThat(metrics.hitRate()).isNaN();
+                      assertThat(metrics.misses()).isEqualTo(1);
+                      assertThat(metrics.missLatency()).isGreaterThan(0);
+                      assertThat(metrics.entries()).isEqualTo(1);
+                      assertThat(metrics.capacity()).isEqualTo(1024);
+                      assertThat(metrics.size()).isEqualTo(1024);
+                  });
+
+        // 1st hit
+        cache.getBlock(fileId, 0, key -> new CompressionChunkOffsetCache.OffsetsBlock(ByteBuffer.allocateDirect(1024)));
+        Awaitility.await("metrics update")
+                  .atMost(10, TimeUnit.SECONDS)
+                  .untilAsserted(() -> {
+                      assertThat(metrics.hits()).isEqualTo(1);
+                      assertThat(metrics.hitRate()).isEqualTo(0.5);
+                      assertThat(metrics.misses()).isEqualTo(1);
+                      assertThat(metrics.missLatency()).isGreaterThan(0);
+                      assertThat(metrics.entries()).isEqualTo(1);
+                      assertThat(metrics.capacity()).isEqualTo(1024);
+                      assertThat(metrics.size()).isEqualTo(1024);
+                  });
+
+        // load another block to evict previous block
+        cache.getBlock(fileId, 1, key -> new CompressionChunkOffsetCache.OffsetsBlock(ByteBuffer.allocateDirect(1024)));
+        Awaitility.await("metrics update")
+                  .atMost(10, TimeUnit.SECONDS)
+                  .untilAsserted(() -> {
+                      assertThat(metrics.hits()).isEqualTo(1);
+                      assertThat(metrics.hitRate()).isLessThan(0.5).isGreaterThan(0.0);
+                      assertThat(metrics.misses()).isEqualTo(2);
+                      assertThat(metrics.missLatency()).isGreaterThan(0);
+                      assertThat(metrics.entries()).isEqualTo(1);
+                      assertThat(metrics.capacity()).isEqualTo(1024);
+                      assertThat(metrics.size()).isEqualTo(1024);
+                  });
+    }
+}
