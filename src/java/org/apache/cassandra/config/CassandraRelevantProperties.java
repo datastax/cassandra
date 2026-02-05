@@ -760,7 +760,11 @@ public enum CassandraRelevantProperties
     /**
      * A directory to the default system key location - used by transparent data encryption
      */
-    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf");
+    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf"),
+
+    COMPRESSION_CHUNK_OFFSETS_TYPE("cassandra.compression_chunk_offsets_type", "IN_MEMORY"),
+    COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB("cassandra.compression_chunk_offsets_cache_in_mb", "0"),
+    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

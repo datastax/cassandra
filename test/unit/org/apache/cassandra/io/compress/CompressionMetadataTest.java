@@ -21,10 +21,22 @@ package org.apache.cassandra.io.compress;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 
+import org.junit.AfterClass;
+import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.CompressionMetadata.Chunk;
 import org.apache.cassandra.io.sstable.format.SSTableReader.PartitionPositionBounds;
 import org.apache.cassandra.io.util.File;
@@ -36,6 +48,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class CompressionMetadataTest
 {
+    @BeforeClass
+    public static void init()
+    {
+        DatabaseDescriptor.toolInitialization();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(100);
+    }
+
+    @AfterClass
+    public static void cleanup()
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.reset();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_FACTORY.reset();
+    }
+
+    @Before
+    public void setup()
+    {
+        CompressionChunkOffsetCache.get().clear();
+    }
+
     private File generateMetaDataFile(long dataLength, long... offsets) throws IOException
     {
         Path path = Files.createTempFile("compression_metadata", ".db");
@@ -60,14 +92,23 @@ public class CompressionMetadataTest
         return new CompressionMetadata(f, compressedFileLength, true);
     }
 
-    private void checkMetadata(CompressionMetadata metadata, long expectedDataLength, long expectedCompressedFileLimit, long expectedOffHeapSize)
+    private void checkMetadata(CompressionMetadata metadata, long expectedDataLength, long expectedCompressedFileLimit, long expectedMemorySize)
     {
         assertThat(metadata.dataLength).isEqualTo(expectedDataLength);
         assertThat(metadata.compressedFileLength).isEqualTo(expectedCompressedFileLimit);
         assertThat(metadata.chunkLength()).isEqualTo(16);
         assertThat(metadata.parameters.chunkLength()).isEqualTo(16);
         assertThat(metadata.parameters.getSstableCompressor().getClass()).isEqualTo(SnappyCompressor.class);
-        assertThat(metadata.offHeapSize()).isEqualTo(expectedOffHeapSize);
+
+        CompressionChunkOffsets.Type type = CompressionChunkOffsets.Type.valueOf(CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.getString());
+        if (type == CompressionChunkOffsets.Type.IN_MEMORY)
+        {
+            assertThat(metadata.offHeapSize()).isEqualTo(expectedMemorySize);
+        }
+        else
+        {
+            assertThat(metadata.offHeapSize()).isEqualTo(0);
+        }
     }
 
     private void assertChunks(CompressionMetadata metadata, long from, long to, long expectedOffset, long expectedLength)
@@ -89,7 +130,103 @@ public class CompressionMetadataTest
     }
 
     @Test
-    public void chunkFor() throws IOException
+    public void testLargeFileAccessInMemory() throws IOException
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.IN_MEMORY.toString());
+        testLargeFileAccess();
+    }
+
+    @Test
+    public void testLargeFileAccessOnDisk() throws IOException
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
+        testLargeFileAccess();
+    }
+
+    @Test
+    public void testLargeFileAccessOnDiskCached() throws IOException
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK_WITH_CACHE.toString());
+        testLargeFileAccess();
+    }
+
+    private void testLargeFileAccess() throws IOException
+    {
+        int chunkCount = 1000_000;
+        int chunkLength = 16;
+        int checksumLength = 4; // payload size is 12 = chunkLength - checksumLength
+        long[] offsets = new long[chunkCount];
+        long offset = 0;
+        for (int i = 0; i < chunkCount; i++)
+        {
+            offsets[i] = offset;
+            offset += chunkLength;
+        }
+
+        File largeFile = generateMetaDataFile((long) chunkCount * chunkLength, offsets);
+        long compressedFileLimit = offset;
+
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.IN_MEMORY.toString());
+        CompressionMetadata metadataWithInMemory = new CompressionMetadata(largeFile, compressedFileLimit, true);
+        checkMetadata(metadataWithInMemory, (long) chunkCount * chunkLength, compressedFileLimit, chunkCount * 8L);
+
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
+        CompressionMetadata metadataWithOnDisk = new CompressionMetadata(largeFile, compressedFileLimit, true);
+        checkMetadata(metadataWithOnDisk, (long) chunkCount * chunkLength, compressedFileLimit, chunkCount * 8L);
+
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK_WITH_CACHE.toString());
+        CompressionMetadata metadataWithOnDiskCache = new CompressionMetadata(largeFile, compressedFileLimit, true);
+        checkMetadata(metadataWithOnDiskCache, (long) chunkCount * chunkLength, compressedFileLimit, chunkCount * 8L);
+        try
+        {
+            for (int i = 0; i < chunkCount;)
+            {
+                long pos = (long) i * chunkLength;
+                Chunk chunkWithInMemory = metadataWithInMemory.chunkFor(pos);
+                assertThat(chunkWithInMemory.offset).isEqualTo((long) i * chunkLength);
+                assertThat(chunkWithInMemory.length).isEqualTo(chunkLength - checksumLength);
+
+                Chunk chunkWithOnDisk = metadataWithOnDisk.chunkFor(pos);
+                assertThat(chunkWithOnDisk.offset).isEqualTo((long) i * chunkLength);
+                assertThat(chunkWithOnDisk.length).isEqualTo(chunkLength - checksumLength);
+
+                Chunk chunkWithOnDiskCache = metadataWithOnDiskCache.chunkFor(pos);
+                assertThat(chunkWithOnDiskCache.offset).isEqualTo((long) i * chunkLength);
+                assertThat(chunkWithOnDiskCache.length).isEqualTo(chunkLength - checksumLength);
+
+                i += ThreadLocalRandom.current().nextInt(100) + 1;
+            }
+        }
+        finally
+        {
+            metadataWithInMemory.close();
+            metadataWithOnDisk.close();
+            metadataWithOnDiskCache.close();;
+        }
+    }
+
+    @Test
+    public void chunkForFromDisk() throws IOException
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
+        chunkFor();
+    }
+
+    @Test
+    public void chunkForFromDiskWithCache() throws IOException
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK_WITH_CACHE.toString());
+        chunkFor();
+    }
+
+    @Test
+    public void chunkForInMemory() throws IOException
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.IN_MEMORY.toString());
+        chunkFor();
+    }
+
+    private void chunkFor() throws IOException
     {
         try (CompressionMetadata lessThanOneChunk = createMetadata(10, 7, 0))
         {
@@ -184,5 +321,76 @@ public class CompressionMetadataTest
             assertThat(md.getChunksForSections(asList(new PartitionPositionBounds(30, 40), new PartitionPositionBounds(50, 60)))).containsExactly(new Chunk(7, 5), new Chunk(16, 7), new Chunk(27, 11));
         });
 
+    }
+
+    @Test
+    public void testConcurrentAccessInMemory() throws Exception
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.IN_MEMORY.toString());
+        testConcurrentAccess();
+    }
+
+    @Test
+    public void testConcurrentAccessOnDisk() throws Exception
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
+        testConcurrentAccess();
+    }
+
+    @Test
+    public void testConcurrentAccessOnDiskCache() throws Exception
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK_WITH_CACHE.toString());
+        testConcurrentAccess();
+    }
+
+    private void testConcurrentAccess() throws Exception
+    {
+        int chunkCount = 100_000;
+        int chunkLength = 16;
+        int checksumLength = 4; // payload size is 12 = chunkLength - checksumLength
+        long[] offsets = new long[chunkCount];
+        long offset = 0;
+        for (int i = 0; i < chunkCount; i++)
+        {
+            offsets[i] = offset;
+            offset += chunkLength;
+        }
+
+        File metadataFile = generateMetaDataFile((long) chunkCount * chunkLength, offsets);
+        long compressedFileLength = offset;
+        try (CompressionMetadata metadata = new CompressionMetadata(metadataFile, compressedFileLength, true))
+        {
+            int numThreads = 16;
+            int operationsPerThread = 10000;
+            ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+            List<Callable<Void>> tasks = new ArrayList<>(numThreads);
+
+            for (int i = 0; i < numThreads; i++)
+            {
+                tasks.add(() -> {
+                    for (int j = 0; j < operationsPerThread; j++)
+                    {
+                        long position = ThreadLocalRandom.current().nextLong(metadata.dataLength);
+                        int chunkIndex = (int) (position / chunkLength);
+                        long expectedOffset = (long) chunkIndex * chunkLength;
+                        int expectedLength = chunkLength - checksumLength;
+
+                        Chunk chunk = metadata.chunkFor(position);
+
+                        assertThat(chunk.offset).isEqualTo(expectedOffset);
+                        assertThat(chunk.length).isEqualTo(expectedLength);
+                    }
+                    return null;
+                });
+            }
+
+            List<Future<Void>> futures = executor.invokeAll(tasks);
+            for (Future<Void> future : futures)
+            {
+                future.get(); // This will throw an exception if the task failed
+            }
+            executor.shutdown();
+        }
     }
 }
