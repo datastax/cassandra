@@ -71,6 +71,8 @@ class VectorByOrdinalWriter implements Closeable
     void write(int ordinal, VectorFloat<?> vector) throws IOException
     {
         assert ordinal > lastOrdinal : "Unexpected ordinal " + ordinal + " must be greater than " + lastOrdinal;
+        assert vector != null : "Vector is null";
+        assert vector.length() == dimension : "Incorrect vector dimension " + vector.length() + " != " + dimension;
 
         // We are careful to only skip or call position() when necessary because the BufferedRandomAccessWriter always
         // flushes the buffer for each of those operations. See https://github.com/datastax/jvector/issues/562.

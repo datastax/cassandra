@@ -477,7 +477,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
             var compressor = writePQ(pqOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context(), writeFusedPQ);
-            long pqLength = pqOutput.asSequentialWriter().position() - pqOffset;
+            long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
@@ -511,7 +511,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
                 // write the graph
                 var start = System.nanoTime();
-                indexWriter.write(suppliers(perIndexComponents.context(), view, compressor, nvq, writeFusedPQ));
+                indexWriter.write(suppliers(view, compressor, nvq, writeFusedPQ));
                 SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
                 logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
                 long termsLength = indexWriter.getOutput().position() - termsOffset;
@@ -550,7 +550,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return metadataMap;
     }
 
-    private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(IndexContext context, ImmutableGraphIndex.View view, VectorCompressor<?> compressor, NVQuantization nvq, boolean writeFusedPQ)
+    private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(ImmutableGraphIndex.View view, VectorCompressor<?> compressor, NVQuantization nvq, boolean writeFusedPQ)
     {
         var features = new EnumMap<FeatureId, IntFunction<Feature.State>>(FeatureId.class);
 
