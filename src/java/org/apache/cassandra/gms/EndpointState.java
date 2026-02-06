@@ -321,17 +321,29 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         assert version < MessagingService.VERSION_40 && !MessagingService.current_version_override;
         VersionedValue vv = state.getValue();
         logger.debug("Loading key {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
+        String[] values;
         switch (state.getKey())
         {
             case INTERNAL_ADDRESS_AND_PORT:
                 logger.debug("INTERNAL_ADDRESS_AND_PORT, version {} vv.value {}", version, vv.value);
-                return Map.of(
-                        ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[0], vv.version),
-                        ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+                values = vv.value.split(":");
+                if (values.length > 1)
+                    return Map.of(ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version),
+                                  ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case NATIVE_ADDRESS_AND_PORT:
-                return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+                values = vv.value.split(":");
+                if (values.length > 1)
+                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case STATUS_WITH_PORT:
-                return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value.split("[:,]")[0], vv.version));
+                values = vv.value.split("[:,]");
+                if (values.length > 1)
+                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case DISK_USAGE:
                 return Map.of(ApplicationState.values()[21], state.getValue());
             case SSTABLE_VERSIONS:
