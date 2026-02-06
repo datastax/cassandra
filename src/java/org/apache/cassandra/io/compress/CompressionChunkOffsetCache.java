@@ -18,19 +18,14 @@
 
 package org.apache.cassandra.io.compress;
 
-import java.io.EOFException;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.Objects;
+import java.util.function.Supplier;
+
+import com.google.common.base.Preconditions;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 
 public class CompressionChunkOffsetCache
@@ -40,119 +35,49 @@ public class CompressionChunkOffsetCache
         private static final CompressionChunkOffsetCache INSTANCE = new CompressionChunkOffsetCache(CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.getInt());
     }
 
-    private static final int DEFAULT_BLOCK_BYTES = 64 * 1024;
-
-    private final int offsetsPerBlock;
-    private final Cache<BlockKey, long[]> cache;
-
-    CompressionChunkOffsetCache(int maxSizeInMB)
-    {
-        this(maxSizeInMB, DEFAULT_BLOCK_BYTES);
-    }
-
-    CompressionChunkOffsetCache(int maxSizeInMB, int blockSize)
-    {
-        offsetsPerBlock = Math.max(1, blockSize / Long.BYTES);
-        long maxBytes = (long) maxSizeInMB * 1024L * 1024L;
-        if (maxBytes <= 0)
-            cache = null;
-        else
-            cache = Caffeine.newBuilder()
-                            .maximumWeight(maxBytes)
-                            .weigher((BlockKey key, long[] value) -> Math.min(Integer.MAX_VALUE, value.length * Long.BYTES))
-                            .build();
-    }
-
     public static CompressionChunkOffsetCache get()
     {
         return CompressionChunkOffsetCache.Holder.INSTANCE;
     }
 
-    long getOffset(File indexFilePath,
-                   long offsetsStart,
-                   int offsetIndex,
-                   int chunkCount,
-                   CompressionMetadataReaderType readerType)
-    {
-        if (offsetIndex < 0 || offsetIndex >= chunkCount)
-            throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d",
-                                                                             offsetIndex,
-                                                                             chunkCount)),
-                                              indexFilePath);
+    private final Cache<BlockKey, long[]> cache;
 
-        int blockIndex = offsetIndex / offsetsPerBlock;
-        int offsetInBlock = offsetIndex % offsetsPerBlock;
+    CompressionChunkOffsetCache(int maxSizeInMB)
+    {
+        Preconditions.checkArgument(maxSizeInMB > 0, maxSizeInMB + " must be positive number");
+        long maxBytes = (long) maxSizeInMB * 1024L * 1024L;
+        cache = Caffeine.newBuilder()
+                        .maximumWeight(maxBytes)
+                        // TODO include key size
+                        .weigher((BlockKey key, long[] value) -> Math.min(Integer.MAX_VALUE, value.length * Long.BYTES))
+                        .build();
+    }
+
+    long[] getBlock(File indexFilePath, long offsetsStart, int blockIndex, Supplier<long[]> blockLoader)
+    {
         BlockKey key = new BlockKey(indexFilePath, offsetsStart, blockIndex);
-        long[] block = cache == null
-                       ? loadBlock(key, chunkCount, readerType)
-                       : cache.get(key, k -> loadBlock(k, chunkCount, readerType));
-        if (offsetInBlock >= block.length)
-            throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d",
-                                                                             offsetIndex,
-                                                                             chunkCount)),
-                                              indexFilePath);
-        return block[offsetInBlock];
+        return cache.get(key, k -> blockLoader.get());
     }
 
-    private long[] loadBlock(BlockKey key, int chunkCount, CompressionMetadataReaderType readerType)
+    public long memoryUsage()
     {
-        int blockStartIndex = key.blockIndex * offsetsPerBlock;
-        int remaining = chunkCount - blockStartIndex;
-        if (remaining <= 0)
-            return new long[0];
-
-        int count = Math.min(offsetsPerBlock, remaining);
-        int bytesToRead = count * Long.BYTES;
-        ByteBuffer buffer = ByteBuffer.allocate(bytesToRead);
-        // FIXME store channel in CompressionMetadata
-        try (FileChannel channel = openChannel(key.file, readerType))
-        {
-            long position = key.offsetsStart + ((long) blockStartIndex * Long.BYTES);
-            int read = 0;
-            while (read < bytesToRead)
-            {
-                int n = channel.read(buffer, position + read);
-                if (n < 0)
-                    throw new EOFException("EOF reading compression offsets from " + key.file);
-                if (n == 0)
-                    continue;
-                read += n;
-            }
-
-            buffer.flip();
-            long[] offsets = new long[count];
-            buffer.asLongBuffer().get(offsets);
-            return offsets;
-        }
-        catch (EOFException e)
-        {
-            throw new CorruptSSTableException(e, key.file);
-        }
-        catch (IOException e)
-        {
-            throw new FSReadError(e, key.file);
-        }
+        return cache.policy().eviction()..evictionWeight();
     }
 
-    private static FileChannel openChannel(File indexFilePath, CompressionMetadataReaderType readerType) throws IOException
-    {
-        if (readerType == CompressionMetadataReaderType.WRITE_TIME)
-            return StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath);
-        return indexFilePath.newReadChannel();
-    }
-
-    // FIXME this is memory consuming
     public static final class BlockKey
     {
+        // TODO this is memory consuming. use file name instead?
         private final File file;
         private final long offsetsStart;
         private final int blockIndex;
+        private final int hashcode;
 
         private BlockKey(File file, long offsetsStart, int blockIndex)
         {
             this.file = file;
             this.offsetsStart = offsetsStart;
             this.blockIndex = blockIndex;
+            this.hashcode = Objects.hash(file, offsetsStart, blockIndex);
         }
 
         public boolean equals(Object other)
@@ -169,7 +94,7 @@ public class CompressionChunkOffsetCache
 
         public int hashCode()
         {
-            return Objects.hash(file, offsetsStart, blockIndex);
+            return hashcode;
         }
     }
 }

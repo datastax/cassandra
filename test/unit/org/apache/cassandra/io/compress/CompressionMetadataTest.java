@@ -23,7 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Consumer;
 
-import org.junit.Before;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -44,10 +44,11 @@ public class CompressionMetadataTest
     public static void init()
     {
         DatabaseDescriptor.toolInitialization();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(100);
     }
 
-    @Before
-    public void setup()
+    @AfterClass
+    public static void cleanup()
     {
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.reset();
     }
@@ -84,7 +85,12 @@ public class CompressionMetadataTest
         assertThat(metadata.chunkLength()).isEqualTo(16);
         assertThat(metadata.parameters.chunkLength()).isEqualTo(16);
         assertThat(metadata.parameters.getSstableCompressor().getClass()).isEqualTo(SnappyCompressor.class);
-//        assertThat(metadata.offHeapSize()).isEqualTo(expectedOffHeapSize); // FIXME
+
+        CompressionChunkOffsets.Type type = CompressionChunkOffsets.Type.valueOf(CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.getString());
+        if (type == CompressionChunkOffsets.Type.IN_MEMORY)
+            assertThat(metadata.offHeapSize()).isEqualTo(expectedOffHeapSize);
+        else
+            assertThat(metadata.offHeapSize()).isEqualTo(0);
     }
 
     private void assertChunks(CompressionMetadata metadata, long from, long to, long expectedOffset, long expectedLength)

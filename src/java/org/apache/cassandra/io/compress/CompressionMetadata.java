@@ -201,7 +201,6 @@ public class CompressionMetadata implements AutoCloseable
 
             startChunkIndex = Math.toIntExact(uncompressedOffset >> chunkLengthBits);
 
-
             if (skipOffsets)
             {
                 chunkOffsets = null;
@@ -282,11 +281,23 @@ public class CompressionMetadata implements AutoCloseable
 
     /**
      * Returns the amount of memory in bytes used off heap.
+     *
      * @return the amount of memory in bytes used off heap
      */
     public long offHeapSize()
     {
-        return hasOffsets() ? chunkOffsets.memoryUsed() : 0;
+        return hasOffsets() ? chunkOffsets.offHeapMemoryUsed() : 0;
+    }
+
+    /**
+     * Returns the amount of memory in bytes used heap.
+     *
+     * @return the amount of memory in bytes used heap
+     */
+    public long heapSize()
+    {
+        11
+        return hasOffsets() ? chunkOffsets.offHeapMemoryUsed() : 0;
     }
 
     public boolean hasOffsets()
@@ -472,7 +483,7 @@ public class CompressionMetadata implements AutoCloseable
     {
         if (hasOffsets())
         {
-            NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
+            NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.offHeapMemoryUsed());
             chunkOffsets.close();
         }
     }
