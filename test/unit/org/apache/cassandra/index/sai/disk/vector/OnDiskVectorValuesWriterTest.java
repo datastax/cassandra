@@ -33,7 +33,7 @@ import org.apache.cassandra.io.util.File;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class VectorByOrdinalWriterTest extends SAITester
+public class OnDiskVectorValuesWriterTest extends SAITester
 {
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
     private File tempFile;
@@ -60,7 +60,7 @@ public class VectorByOrdinalWriterTest extends SAITester
         float[] data = { 1.0f, 2.0f, 3.0f };
         VectorFloat<?> vector = vts.createFloatVector(data);
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(0, vector);
             assertEquals(0, writer.getLastOrdinal());
@@ -86,7 +86,7 @@ public class VectorByOrdinalWriterTest extends SAITester
         int dimension = 4;
         int numVectors = 5;
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < numVectors; i++)
             {
@@ -128,7 +128,7 @@ public class VectorByOrdinalWriterTest extends SAITester
         { 10.0f, 11.0f, 12.0f }
         };
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < ordinals.length; i++)
             {
@@ -167,7 +167,7 @@ public class VectorByOrdinalWriterTest extends SAITester
         float[] data = { 1.5f, 2.5f, 3.5f, 4.5f, 5.5f };
         ArrayVectorFloat vector = (ArrayVectorFloat) vts.createFloatVector(data);
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(0, vector);
         }
@@ -188,7 +188,7 @@ public class VectorByOrdinalWriterTest extends SAITester
         for (int i = 0; i < dimension; i++)
             data[i] = (float) Math.sin(i * 0.1);
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(0, vts.createFloatVector(data));
         }
@@ -207,7 +207,7 @@ public class VectorByOrdinalWriterTest extends SAITester
         int dimension = 768;
         int numVectors = 100;
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < numVectors; i++)
             {
@@ -247,7 +247,7 @@ public class VectorByOrdinalWriterTest extends SAITester
     {
         int dimension = 3;
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(0, vts.createFloatVector(new float[]{ 1.0f, 2.0f, 3.0f }));
             writer.write(1000, vts.createFloatVector(new float[]{ 4.0f, 5.0f, 6.0f }));
@@ -270,7 +270,7 @@ public class VectorByOrdinalWriterTest extends SAITester
     public void testGetDimension() throws IOException
     {
         int dimension = 128;
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             assertEquals(dimension, writer.getDimension());
         }
@@ -279,7 +279,7 @@ public class VectorByOrdinalWriterTest extends SAITester
     @Test
     public void testGetLastOrdinalInitialState() throws IOException
     {
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, 3))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, 3))
         {
             assertEquals(-1, writer.getLastOrdinal());
         }
@@ -290,7 +290,7 @@ public class VectorByOrdinalWriterTest extends SAITester
     {
         int dimension = 4;
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             assertEquals(0, writer.position());
 
@@ -309,7 +309,7 @@ public class VectorByOrdinalWriterTest extends SAITester
     {
         int dimension = 3;
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(5, vts.createFloatVector(new float[]{ 1.0f, 2.0f, 3.0f }));
             // This should fail - ordinal must be greater than last
@@ -322,7 +322,7 @@ public class VectorByOrdinalWriterTest extends SAITester
     {
         int dimension = 3;
 
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(5, vts.createFloatVector(new float[]{ 1.0f, 2.0f, 3.0f }));
             // This should fail - ordinal must be greater than last
@@ -333,7 +333,7 @@ public class VectorByOrdinalWriterTest extends SAITester
     @Test
     public void testCloseIsIdempotent() throws IOException
     {
-        VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, 3);
+        OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, 3);
         writer.write(0, vts.createFloatVector(new float[]{ 1.0f, 2.0f, 3.0f }));
         writer.close();
         writer.close(); // Should not throw
@@ -343,7 +343,7 @@ public class VectorByOrdinalWriterTest extends SAITester
     public void testEmptyFile() throws IOException
     {
         // Create and immediately close without writing
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, 3))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, 3))
         {
             assertEquals(-1, writer.getLastOrdinal());
         }

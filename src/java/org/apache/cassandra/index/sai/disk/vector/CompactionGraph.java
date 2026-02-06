@@ -61,7 +61,6 @@ import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
-import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
@@ -95,7 +94,6 @@ import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.StorageService;
 
 import static java.lang.Math.max;
@@ -131,7 +129,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final int postingsEntriesAllocated;
     private final File postingsFile;
     private final File vectorsByOrdinalTmpFile;
-    private final VectorByOrdinalWriter vectorByOrdinalWriter;
+    private final OnDiskVectorValuesWriter onDiskVectorValuesWriter;
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
@@ -201,7 +199,7 @@ public class CompactionGraph implements Closeable, Accountable
 
         // Formatted so that the full resolution vector is written at the ordinal * vector dimension offset
         vectorsByOrdinalTmpFile = perIndexComponents.tmpFileFor("vectors_by_ordinal");
-        vectorByOrdinalWriter = new VectorByOrdinalWriter(vectorsByOrdinalTmpFile, dimension);
+        onDiskVectorValuesWriter = new OnDiskVectorValuesWriter(vectorsByOrdinalTmpFile, dimension);
 
         // VSTODO add LVQ
         BuildScoreProvider bsp;
@@ -264,7 +262,7 @@ public class CompactionGraph implements Closeable, Accountable
     {
         // this gets called in `finally` blocks, so use closeQuietly to avoid generating additional exceptions
         FileUtils.closeQuietly(postingsMap);
-        FileUtils.closeQuietly(vectorByOrdinalWriter);
+        FileUtils.closeQuietly(onDiskVectorValuesWriter);
         Files.delete(postingsFile.toJavaIOFile().toPath());
         Files.delete(vectorsByOrdinalTmpFile.toJavaIOFile().toPath());
     }
@@ -383,7 +381,7 @@ public class CompactionGraph implements Closeable, Accountable
 
                 // Store the vector on disk in a mapping from ordinal -> vector for fast retrieval later. This mapping
                 // is only needed during index build. It is a temp file.
-                vectorByOrdinalWriter.write(ordinal, vector);
+                onDiskVectorValuesWriter.write(ordinal, vector);
 
                 // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
                 while (compressedVectors.count() < ordinal)
@@ -427,7 +425,7 @@ public class CompactionGraph implements Closeable, Accountable
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
         // Close the temporary file so the reader will know it is the end of the file.
-        vectorByOrdinalWriter.close();
+        onDiskVectorValuesWriter.close();
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);

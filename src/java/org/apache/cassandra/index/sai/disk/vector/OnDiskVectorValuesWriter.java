@@ -37,7 +37,7 @@ import org.apache.cassandra.io.util.File;
  * - Efficient buffering via BufferedRandomAccessWriter
  * This class is not thread-safe and should only be used within the vector index package.
  */
-class VectorByOrdinalWriter implements Closeable
+class OnDiskVectorValuesWriter implements Closeable
 {
     private final int dimension;
     private final BufferedRandomAccessWriter bufferedWriter;
@@ -50,7 +50,7 @@ class VectorByOrdinalWriter implements Closeable
      * @param dimension the dimension of vectors to be written
      * @throws IOException if an I/O error occurs
      */
-    VectorByOrdinalWriter(File file, int dimension) throws IOException
+    OnDiskVectorValuesWriter(File file, int dimension) throws IOException
     {
         this.bufferedWriter = new BufferedRandomAccessWriter(file.toPath());
         this.dimension = dimension;

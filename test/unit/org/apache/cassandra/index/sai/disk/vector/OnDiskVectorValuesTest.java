@@ -70,7 +70,7 @@ public class OnDiskVectorValuesTest extends SAITester
         float[] data = {1.0f, 2.0f, 3.0f};
 
         // Write vector
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(0, vts.createFloatVector(data));
         }
@@ -94,7 +94,7 @@ public class OnDiskVectorValuesTest extends SAITester
         float[][] vectors = new float[numVectors][dimension];
 
         // Write vectors
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < numVectors; i++)
             {
@@ -130,7 +130,7 @@ public class OnDiskVectorValuesTest extends SAITester
         };
 
         // Write sparse vectors
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < ordinals.length; i++)
                 writer.write(ordinals[i], vts.createFloatVector(vectors[i]));
@@ -164,7 +164,7 @@ public class OnDiskVectorValuesTest extends SAITester
             data[i] = (float) Math.sin(i * 0.1);
 
         // Write vector
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(0, vts.createFloatVector(data));
         }
@@ -185,7 +185,7 @@ public class OnDiskVectorValuesTest extends SAITester
         float[][] vectors = new float[numVectors][dimension];
 
         // Write vectors
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < numVectors; i++)
             {
@@ -223,7 +223,7 @@ public class OnDiskVectorValuesTest extends SAITester
         float[] data = {1.0f, 2.0f, 3.0f, 4.0f};
 
         // Write vector
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(0, vts.createFloatVector(data));
         }
@@ -253,7 +253,7 @@ public class OnDiskVectorValuesTest extends SAITester
         float[][] vectors = new float[numVectors][dimension];
 
         // Write vectors
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < numVectors; i++)
             {
@@ -339,7 +339,7 @@ public class OnDiskVectorValuesTest extends SAITester
         int numVectors = 50;
 
         // Write vectors
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < numVectors; i++)
             {
@@ -365,7 +365,7 @@ public class OnDiskVectorValuesTest extends SAITester
     public void testEmptyFile()
     {
         // Create empty file
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, 3))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, 3))
         {
             // Don't write anything
         }
@@ -387,7 +387,7 @@ public class OnDiskVectorValuesTest extends SAITester
         int dimension = 3;
         
         // Write a vector
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             writer.write(0, vts.createFloatVector(new float[]{1.0f, 2.0f, 3.0f}));
         }
@@ -405,7 +405,7 @@ public class OnDiskVectorValuesTest extends SAITester
         int numVectors = 10;
 
         // Write vectors
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < numVectors; i++)
             {
@@ -455,7 +455,7 @@ public class OnDiskVectorValuesTest extends SAITester
         int numVectors = 100;
 
         // Write vectors
-        try (VectorByOrdinalWriter writer = new VectorByOrdinalWriter(tempFile, dimension))
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {
             for (int i = 0; i < numVectors; i++)
             {
