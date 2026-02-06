@@ -325,13 +325,28 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         {
             case INTERNAL_ADDRESS_AND_PORT:
                 logger.debug("INTERNAL_ADDRESS_AND_PORT, version {} vv.value {}", version, vv.value);
-                return Map.of(
-                        ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[0], vv.version),
-                        ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+
+                if (vv.value.split(":").length > 1)
+                {
+                    return Map.of(
+                    ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[0], vv.version),
+                    ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+                }
+                else
+                {
+                    return Map.of(
+                    ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
+                }
             case NATIVE_ADDRESS_AND_PORT:
-                return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+                if (vv.value.split(":").length > 1)
+                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case STATUS_WITH_PORT:
-                return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value.split("[:,]")[0], vv.version));
+                if (vv.value.split("[:,]").length > 1)
+                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value.split("[:,]")[0], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case DISK_USAGE:
                 return Map.of(ApplicationState.values()[21], state.getValue());
             case SSTABLE_VERSIONS:
