@@ -23,6 +23,8 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.utils.Throwables;
 
 import javax.management.ObjectName;
@@ -296,5 +298,38 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
         // Verify the memtable index flush error metric is incremented
         assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushErrors", KEYSPACE, table, index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testIndexFileCacheBytesIncludesAllComponents()
+    {
+        // Create a table with a vector index to ensure we have pq and compressedVectors
+        createTable("CREATE TABLE %s (id TEXT PRIMARY KEY, v1 VECTOR<FLOAT, 1536>)");
+        String index = createIndex("CREATE CUSTOM INDEX ON %s (v1) USING 'StorageAttachedIndex'");
+
+        // Insert some data to populate the index
+        int rowCount = CassandraOnHeapGraph.MIN_PQ_ROWS;
+        for (int i = 0; i < rowCount; i++)
+            execute("INSERT INTO %s (id, v1) VALUES (?, ?)", Integer.toString(i), randomVectorBoxed(1536));
+
+        // Wait for the index to be queryable
+        waitForTableIndexesQueryable();
+
+        // Flush to create on-disk index structures
+        flush();
+
+        // Verify that IndexFileCacheBytes metric exists and is greater than zero
+        // This metric should now include graph.ramBytesUsed() + pq.ramBytesUsed() + compressedVectors.ramBytesUsed()
+        ObjectName metricName = objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics");
+
+        int bytesPerVector = VectorSourceModel.OTHER.compressionProvider.apply(1536).getCompressedSize();
+        long minBytesExpected = bytesPerVector * (long) rowCount;
+
+        // Verify that the bytes contains the compression size. Note that the PQ vectors dominates the memory
+        // consumption significatly, which is what makes this test valid. The test fails if we remove the
+        // compressed vector accounting logic from the CassandraDiskAnn.ramBytesUsed() method.
+        long bytesAfterFlush = (long) getMetricValue(metricName);
+        assertTrue("Expected at least " + minBytesExpected + " bytes but got " + bytesAfterFlush,
+                   bytesAfterFlush >= minBytesExpected);
     }
 }
