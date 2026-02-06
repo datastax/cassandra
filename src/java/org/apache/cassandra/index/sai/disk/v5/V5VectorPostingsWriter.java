@@ -420,13 +420,14 @@ public class V5VectorPostingsWriter<T>
         }
         else
         {
-            logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them", ordinalMap.size(), extraPostings.size());
             structure = extraPostings.isEmpty()
                       ? Structure.ONE_TO_ONE
                       : Structure.ONE_TO_MANY;
             // override one-to-many to generic if there are too many holes
             if (structure == Structure.ONE_TO_MANY && tooManyOrdinalMappingHoles(postingsMap.size(), maxRow))
                 structure = Structure.ZERO_OR_ONE_TO_MANY;
+            logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them. Structure is {}",
+                         ordinalMap.size(), extraPostings.size(), structure);
         }
 
         // create the mapping
@@ -444,7 +445,7 @@ public class V5VectorPostingsWriter<T>
      */
     public static boolean tooManyOrdinalMappingHoles(int totalVectorsIndexed, int totalRowsIndexed)
     {
-        return totalRowsIndexed - totalVectorsIndexed > max(1, GLOBAL_HOLES_ALLOWED * totalRowsIndexed);
+        return totalRowsIndexed - totalVectorsIndexed > GLOBAL_HOLES_ALLOWED * totalRowsIndexed;
     }
 
     /**
