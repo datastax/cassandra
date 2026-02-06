@@ -320,6 +320,7 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
     {
         assert version < MessagingService.VERSION_40 && !MessagingService.current_version_override;
         VersionedValue vv = state.getValue();
+        logger.debug("Loading key {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
         switch (state.getKey())
         {
             case INTERNAL_ADDRESS_AND_PORT:
@@ -356,6 +357,7 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
             for (Map.Entry<ApplicationState, VersionedValue> state : states.entrySet())
             {
                 VersionedValue vv = state.getValue();
+                logger.debug("Saving key {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
                 switch (state.getKey().ordinal())
                 {
                     case 15: // NATIVE_TRANSPORT_PORT --> NATIVE_ADDRESS_AND_PORT
