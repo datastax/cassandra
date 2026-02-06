@@ -49,6 +49,7 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
+import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -66,6 +67,7 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext indexContext;
+    private final IndexMetrics indexMetrics;
     private final int nowInSec = FBUtilities.nowInSeconds();
     private final NamedMemoryLimiter limiter;
     private final BooleanSupplier isIndexDropped;
@@ -84,6 +86,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.perIndexComponents = perIndexComponents;
         this.indexContext = perIndexComponents.context();
         Preconditions.checkNotNull(indexContext, "Provided components %s are the per-sstable ones, expected per-index ones", perIndexComponents);
+        this.indexMetrics = indexContext.getIndexMetrics().orElse(null);
         this.limiter = limiter;
         this.isIndexDropped = isIndexDropped;
         this.isIndexUnloaded = isIndexUnloaded;
@@ -273,7 +276,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (term.remaining() == 0 && TypeUtil.skipsEmptyValue(indexContext.getValidator()))
             return false;
 
-        long allocated = currentBuilder.analyzeAndAdd(term, type, key, sstableRowId);
+        long allocated = currentBuilder.analyzeAndAdd(term, type, key, sstableRowId, indexMetrics);
         limiter.increment(allocated);
         return true;
     }
