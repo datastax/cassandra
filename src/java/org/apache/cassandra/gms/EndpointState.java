@@ -256,6 +256,8 @@ public class EndpointState
 
 class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
 {
+    private static final Logger logger = LoggerFactory.getLogger(EndpointStateSerializer.class);
+
     public void serialize(EndpointState epState, DataOutputPlus out, int version) throws IOException
     {
         /* serialize the HeartBeatState */
@@ -321,6 +323,7 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         switch (state.getKey())
         {
             case INTERNAL_ADDRESS_AND_PORT:
+                logger.debug("INTERNAL_ADDRESS_AND_PORT, version {} vv.value {}", version, vv.value);
                 return Map.of(
                         ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[0], vv.version),
                         ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
