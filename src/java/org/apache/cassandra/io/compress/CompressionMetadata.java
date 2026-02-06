@@ -296,8 +296,7 @@ public class CompressionMetadata implements AutoCloseable
      */
     public long heapSize()
     {
-        11
-        return hasOffsets() ? chunkOffsets.offHeapMemoryUsed() : 0;
+        return hasOffsets() ? chunkOffsets.heapMemoryUsed() : 0;
     }
 
     public boolean hasOffsets()
@@ -484,6 +483,7 @@ public class CompressionMetadata implements AutoCloseable
         if (hasOffsets())
         {
             NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.offHeapMemoryUsed());
+            // TODO track heap memory usage
             chunkOffsets.close();
         }
     }

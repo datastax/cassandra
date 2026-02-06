@@ -61,7 +61,10 @@ public class CompressionChunkOffsetCache
 
     public long memoryUsage()
     {
-        return cache.policy().eviction()..evictionWeight();
+        return cache.policy()
+                    .eviction()
+                    .map(eviction -> eviction.weightedSize().orElse(0))
+                    .orElse(0L);
     }
 
     public static final class BlockKey

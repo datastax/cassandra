@@ -44,7 +44,12 @@ public interface CompressionChunkOffsets extends AutoCloseable
     {
         IN_MEMORY,
         ON_DISK,
-        ON_DISK_WITH_CACHE
+        ON_DISK_WITH_CACHE;
+
+        public boolean heapOnDemandCache()
+        {
+            return this == ON_DISK_WITH_CACHE;
+        }
     }
 
     long get(int index);

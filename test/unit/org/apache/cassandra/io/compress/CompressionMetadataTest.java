@@ -78,7 +78,7 @@ public class CompressionMetadataTest
         return new CompressionMetadata(f, compressedFileLength, true);
     }
 
-    private void checkMetadata(CompressionMetadata metadata, long expectedDataLength, long expectedCompressedFileLimit, long expectedOffHeapSize)
+    private void checkMetadata(CompressionMetadata metadata, long expectedDataLength, long expectedCompressedFileLimit, long expectedMemorySize)
     {
         assertThat(metadata.dataLength).isEqualTo(expectedDataLength);
         assertThat(metadata.compressedFileLength).isEqualTo(expectedCompressedFileLimit);
@@ -88,9 +88,23 @@ public class CompressionMetadataTest
 
         CompressionChunkOffsets.Type type = CompressionChunkOffsets.Type.valueOf(CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.getString());
         if (type == CompressionChunkOffsets.Type.IN_MEMORY)
-            assertThat(metadata.offHeapSize()).isEqualTo(expectedOffHeapSize);
+        {
+            assertThat(metadata.offHeapSize()).isEqualTo(expectedMemorySize);
+            assertThat(metadata.heapSize()).isEqualTo(0);
+        }
         else
+        {
             assertThat(metadata.offHeapSize()).isEqualTo(0);
+            if (type == CompressionChunkOffsets.Type.ON_DISK_WITH_CACHE)
+            {
+                assertThat(metadata.heapSize()).isGreaterThanOrEqualTo(0);
+            }
+            else
+            {
+                assertThat(type).isEqualTo(CompressionChunkOffsets.Type.ON_DISK);
+                assertThat(metadata.heapSize()).isEqualTo(0);
+            }
+        }
     }
 
     private void assertChunks(CompressionMetadata metadata, long from, long to, long expectedOffset, long expectedLength)
