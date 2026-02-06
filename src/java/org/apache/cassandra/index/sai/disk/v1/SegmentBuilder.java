@@ -57,6 +57,7 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
+import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -474,7 +475,7 @@ public abstract class SegmentBuilder
         return metadataBuilder.build();
     }
 
-    public long analyzeAndAdd(ByteBuffer rawTerm, AbstractType<?> type, PrimaryKey key, long sstableRowId)
+    public long analyzeAndAdd(ByteBuffer rawTerm, AbstractType<?> type, PrimaryKey key, long sstableRowId, IndexMetrics indexMetrics)
     {
         long totalSize = 0;
         if (TypeUtil.isLiteral(type))
@@ -482,11 +483,15 @@ public abstract class SegmentBuilder
             var terms = ByteLimitedMaterializer.materializeTokens(analyzer, rawTerm, components.context(), key);
             totalSize += add(terms, key, sstableRowId);
             totalTermCount += terms.size();
+            if (indexMetrics != null)
+                indexMetrics.compactionTermsProcessedCount.inc(terms.size());
         }
         else
         {
             totalSize += add(List.of(rawTerm), key, sstableRowId);
             totalTermCount++;
+            if (indexMetrics != null)
+                indexMetrics.compactionTermsProcessedCount.inc();
         }
         return totalSize;
     }
