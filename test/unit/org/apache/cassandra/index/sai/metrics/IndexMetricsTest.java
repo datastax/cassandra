@@ -334,8 +334,8 @@ public class IndexMetricsTest extends AbstractMetricsTest
         // After compaction, the counter should reflect the number of terms processed
         // Each row has one term (v1 value), so we expect at least rowCount * 2 terms
         long termsProcessed = (Long) getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics"));
-        assertTrue("Expected terms processed to be at least " + (rowCount * 2) + " but was " + termsProcessed,
-                   termsProcessed >= rowCount * 2);
+        assertEquals("Expected terms processed to be at least " + (rowCount * 2) + " but was " + termsProcessed,
+                     rowCount * 2, termsProcessed);
 
         // Verify compaction count was also incremented
         assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
@@ -381,8 +381,8 @@ public class IndexMetricsTest extends AbstractMetricsTest
         // After compaction, the counter should reflect all tokenized terms
         // Expected: 3 + 2 + 2 + 3 + 2 = 12 terms minimum
         long termsProcessed = (Long) getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics"));
-        assertTrue("Expected terms processed to be at least 12 (tokenized terms) but was " + termsProcessed,
-                   termsProcessed >= 12);
+        assertEquals("Expected terms processed to be at least 12 (tokenized terms) but was " + termsProcessed,
+                   12, termsProcessed);
 
         // Verify compaction count was also incremented
         assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
