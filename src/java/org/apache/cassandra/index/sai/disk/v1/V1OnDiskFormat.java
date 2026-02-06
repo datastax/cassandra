@@ -257,7 +257,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perSSTableComponentTypes()
+    public Set<IndexComponentType> perSSTableComponentTypes(boolean hasClustering)
     {
         return PER_SSTABLE_COMPONENTS;
     }
@@ -271,7 +271,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public int openFilesPerSSTable()
+    public int openFilesPerSSTable(boolean hasClustering)
     {
         return 2;
     }
@@ -279,7 +279,8 @@ public class V1OnDiskFormat implements OnDiskFormat
     @Override
     public int openFilesPerIndex(IndexContext indexContext)
     {
-        // For the V1 format there are always 2 open files per index - index (kdtree or terms) + postings
+        // For the V1 format there are always 2 open files per index - index (balanced tree or terms) + auxiliary postings
+        // for the balanced tree and postings for the literal terms
         return 2;
     }
 

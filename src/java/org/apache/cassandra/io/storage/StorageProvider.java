@@ -328,8 +328,8 @@ public interface StorageProvider
             //     (and we already have shortcut code for the common 1:1 vector case)
             //     so we leave it alone here
             if (component.componentType() == IndexComponentType.TERMS_DATA
-                || component.componentType() == IndexComponentType.VECTOR
-                || component.componentType() == IndexComponentType.PRIMARY_KEY_TRIE)
+                || component.componentType() == IndexComponentType.VECTOR)
+//                || component.componentType() == IndexComponentType.PRIMARY_KEY_TRIE)
             {
                 builder = builder.adviseRandom();
             }

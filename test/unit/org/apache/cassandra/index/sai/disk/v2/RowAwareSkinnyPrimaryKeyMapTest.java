@@ -37,7 +37,7 @@ import static org.junit.Assert.assertEquals;
 
 /**
  * Skinny-table tests (no clustering columns) for
- * {@link RowAwarePrimaryKeyMap} using the row-aware on-disk format.
+ * {@link SkinnyPrimaryKeyMap} using the row-aware on-disk format.
  */
 public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
 {

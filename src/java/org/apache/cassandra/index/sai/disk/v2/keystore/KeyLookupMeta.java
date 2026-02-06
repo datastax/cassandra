@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2.sortedterms;
+package org.apache.cassandra.index.sai.disk.v2.keystore;
 
 import java.io.IOException;
 
@@ -24,33 +24,28 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 
 /**
- * Metadata produced by {@link SortedTermsWriter}, needed by {@link SortedTermsReader}.
+ * Metadata produced by {@link KeyStoreWriter}, needed by {@link KeyLookup}.
  */
-public class SortedTermsMeta
+public class KeyLookupMeta
 {
-    public final long trieFP;
-    /** Number of terms */
-    public final long count;
-    public final int maxTermLength;
+    public final long keyCount;
+    public final int maxKeyLength;
 
-    public SortedTermsMeta(IndexInput input) throws IOException
+    public KeyLookupMeta(IndexInput input) throws IOException
     {
-        this.trieFP = input.readLong();
-        this.count = input.readLong();
-        this.maxTermLength = input.readInt();
+        this.keyCount = input.readLong();
+        this.maxKeyLength = input.readInt();
     }
 
-    public SortedTermsMeta(long trieFP, long count, int maxTermLength)
+    public KeyLookupMeta(long keyCount, int maxKeyLength)
     {
-        this.trieFP = trieFP;
-        this.count = count;
-        this.maxTermLength = maxTermLength;
+        this.keyCount = keyCount;
+        this.maxKeyLength = maxKeyLength;
     }
 
-    public void write(IndexOutput output) throws IOException
+    public static void write(IndexOutput output, long keyCount, int maxKeyLength) throws IOException
     {
-        output.writeLong(trieFP);
-        output.writeLong(count);
-        output.writeInt(maxTermLength);
+        output.writeLong(keyCount);
+        output.writeInt(maxKeyLength);
     }
 }

@@ -51,7 +51,7 @@ public class PerIndexFiles implements Closeable
         {
             try
             {
-                files.put(component, perIndexComponents.get(component).createFileHandle());
+                files.put(component, perIndexComponents.get(component).createFileHandle(this::close));
                 componentsPresent.add(component);
             }
             catch (UncheckedIOException e)

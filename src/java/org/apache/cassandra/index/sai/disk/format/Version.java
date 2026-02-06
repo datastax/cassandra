@@ -153,7 +153,7 @@ public class Version implements Comparable<Version>
         int addedLength = SAI_DESCRIPTOR.length()
                           + versionNameLength
                           + generationLength
-                          + IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS.representation.length()
+                          + IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS.representation.length()
                           + SAI_SEPARATOR.length() * 3
                           + EXTENSION.length();
 

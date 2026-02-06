@@ -21,6 +21,7 @@ import java.io.IOException;
 
 import com.google.common.base.Stopwatch;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
@@ -31,6 +32,9 @@ public interface PerSSTableWriter
     PerSSTableWriter NONE = key -> {};
 
     default void startPartition(long position) throws IOException
+    {}
+
+    default void startPartition(DecoratedKey decoratedKey) throws IOException
     {}
 
     void nextRow(PrimaryKey primaryKey) throws IOException;

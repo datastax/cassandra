@@ -23,6 +23,7 @@ import java.util.stream.IntStream;
 
 import org.junit.Test;
 
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.index.sai.iterators.LongIterator.convert;
@@ -438,5 +439,12 @@ public class KeyRangeConcatIteratorTest extends AbstractKeyRangeIteratorTest
     private KeyRangeIterator.Builder getConcatBuilder()
     {
         return KeyRangeConcatIterator.builder();
+    }
+
+    private String createErrorMessage(int max, int min)
+    {
+        return String.format(KeyRangeConcatIterator.MUST_BE_SORTED_ERROR,
+                             TEST_PRIMARY_KEY_FACTORY.createTokenOnly(new Murmur3Partitioner.LongToken(max)),
+                             TEST_PRIMARY_KEY_FACTORY.createTokenOnly(new Murmur3Partitioner.LongToken(min)));
     }
 }

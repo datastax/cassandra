@@ -82,24 +82,36 @@ public enum IndexComponentType
      * V1
      */
     OFFSETS_VALUES("OffsetsValues"),
+
     /**
-     * An on-disk trie containing the primary keys used for looking up the rowId from a partition key
-     *
+     * An on-disk block-packed index containing the starting and ending rowIds for each partition.
+     */
+    PARTITION_SIZES("PartitionSizes"),
+
+    /**
+     * Prefix-compressed blocks of partition keys used for rowId to partition key lookups
+     * <p>
      * V2
      */
-    PRIMARY_KEY_TRIE("PrimaryKeyTrie"),
+    PARTITION_KEY_BLOCKS("PartitionKeyBlocks"),
+
     /**
-     * Prefix-compressed blocks of primary keys used for rowId to partition key lookups
-     *
+     * Encoded sequence of offsets to partition key blocks
+     * <p>
      * V2
      */
-    PRIMARY_KEY_BLOCKS("PrimaryKeyBlocks"),
+    PARTITION_KEY_BLOCK_OFFSETS("PartitionKeyBlockOffsets"),
+
     /**
-     * Encoded sequence of offsets to primary key blocks
-     *
-     * V2
+     * Prefix-compressed blocks of clustering keys used for rowId to clustering key lookups
      */
-    PRIMARY_KEY_BLOCK_OFFSETS("PrimaryKeyBlockOffsets"),
+    CLUSTERING_KEY_BLOCKS("ClusteringKeyBlocks"),
+
+    /**
+     * Encoded sequence of offsets to clustering key blocks
+     */
+    CLUSTERING_KEY_BLOCK_OFFSETS("ClusteringKeyBlockOffsets"),
+
     /**
      * Stores per-sstable metadata.
      *
