@@ -193,6 +193,33 @@ abstract public class VectorCompactionTest extends VectorTester
     }
 
     @Test
+    public void testOneToOneCompaction()
+    {
+        for (int sstables = 2; sstables <= 3; sstables++)
+        {
+            testOneToOneCompactionInternal(10, sstables);
+            testOneToOneCompactionInternal(MIN_PQ_ROWS, sstables);
+        }
+    }
+
+    // Exercise the one-to-one path in compaction where each row has exactly one unique vector
+    public void testOneToOneCompactionInternal(int vectorsPerSstable, int sstables)
+    {
+        var indexName = createTableAndReturnIndexName();
+
+        disableCompaction();
+
+        insertOneToOneRows(vectorsPerSstable, sstables);
+
+        // queries should behave sanely before and after compaction
+        validateQueries();
+        compact();
+        validateQueries();
+
+        validatePostingsStructure(indexName, V5VectorPostingsWriter.Structure.ONE_TO_ONE);
+    }
+
+    @Test
     public void testZeroOrOneToManyCompaction()
     {
         for (int sstables = 2; sstables <= 3; sstables++)
@@ -275,21 +302,26 @@ abstract public class VectorCompactionTest extends VectorTester
             compact();
             validateQueries();
 
-            // Validate that we have the expected structure for all the sstables-segment indexes.
-            var sai = (StorageAttachedIndex) Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).getIndexManager().getIndexByName(indexName);
-            var indexes = sai.getIndexContext().getView().getIndexes();
-            for (var index : indexes)
-            {
-                for (var segment : index.getSegments())
-                {
-                    var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
-                    assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, searcher.getPostingsStructure());
-                }
-            }
+            validatePostingsStructure(indexName, V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY);
         }
         finally
         {
             V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = originalGlobalHolesAllowed;
+        }
+    }
+
+    private void validatePostingsStructure(String indexName, V5VectorPostingsWriter.Structure expectedStructure)
+    {
+        // Validate that we have the expected structure for all the sstables-segment indexes.
+        var sai = (StorageAttachedIndex) Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).getIndexManager().getIndexByName(indexName);
+        var indexes = sai.getIndexContext().getView().getIndexes();
+        for (var index : indexes)
+        {
+            for (var segment : index.getSegments())
+            {
+                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                assertEquals(expectedStructure, searcher.getPostingsStructure());
+            }
         }
     }
 
@@ -316,6 +348,25 @@ abstract public class VectorCompactionTest extends VectorTester
                     vectorsInserted.add(v);
                 }
                 assert v != null;
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", j++, v);
+            }
+            flush();
+        }
+    }
+
+    private void insertOneToOneRows(int vectorsPerSstable, int sstables)
+    {
+        var vectors = new HashSet<Vector<Float>>();
+        int j = 0;
+        for (int i = 0; i < sstables; i++)
+        {
+            for (int k = 0; k < vectorsPerSstable; k++)
+            {
+                Vector<Float> v;
+                do
+                {
+                    v = randomVectorBoxed(dimension()); // ensure no duplicates
+                } while (!vectors.add(v));
                 execute("INSERT INTO %s (pk, v) VALUES (?, ?)", j++, v);
             }
             flush();
