@@ -325,6 +325,9 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
         flush(KEYSPACE, table);
 
+        // Counter should still be 0 after the second flush (no compaction yet)
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
         // Trigger compaction
         compact(KEYSPACE, table);
 
@@ -378,7 +381,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
         waitForIndexCompaction(KEYSPACE, table, index);
 
         // After compaction, the counter should reflect all tokenized terms
-        // Expected: 3 + 2 + 2 + 3 + 2 = 12 terms minimum
+        // Expected: 3 + 2 + 2 + 3 + 2 = 12 terms
         long termsProcessed = (Long) getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics"));
         assertEquals("Expected terms processed to be 12 (tokenized terms) but was " + termsProcessed,
                    12, termsProcessed);
