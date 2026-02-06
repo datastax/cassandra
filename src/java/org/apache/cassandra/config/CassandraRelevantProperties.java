@@ -449,6 +449,10 @@ public enum CassandraRelevantProperties
     // NVQ number of subvectors. This isn't really expected to change much so we're only exposing
     // it as a global variable in case it's needed.
     SAI_VECTOR_NVQ_NUM_SUB_VECTORS("cassandra.sai.vector.nvq_num_sub_vectors", "2"),
+    // The allowed ratio of extra rows (that map to "holes" in the ordinal space) to total rows indexed in the graph
+    // Higher percentages will result in more memory utilized to store the extra postings mappings and larger graph
+    // file sizes to store the empty nodes.
+    SAI_VECTOR_ORDINAL_HOLE_DENSITY_LIMIT("cassandra.sai.vector.ordinal_hole_density_limit", "0.01"),
     /**
      * Whether to disable auto-compaction
      */
