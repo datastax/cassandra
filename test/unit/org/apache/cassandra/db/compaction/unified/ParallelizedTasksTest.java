@@ -103,7 +103,7 @@ public class ParallelizedTasksTest extends ShardingTestBase
         UnifiedCompactionStrategy mockStrategy = strategy;
         strategy.getCompactionLogger().enable();
         SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
-        SharedCompactionObserver sharedObserver = new SharedCompactionObserver(strategy);
+        SharedCompactionObserver sharedObserver = new SharedCompactionObserver(transaction.opId(), strategy);
         SharedTableOperation sharedOperation = new SharedTableOperation(sharedProgress);
 
         List<AbstractCompactionTask> tasks = shardManager.splitSSTablesInShards(
