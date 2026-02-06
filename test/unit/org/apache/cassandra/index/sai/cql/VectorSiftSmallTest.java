@@ -208,6 +208,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
 
         // Take the CassandraOnHeapGraph code path.
         compact();
+        compact();
         for (int topK : List.of(1, 100))
         {
             var recall = testRecall(topK, queryVectors, groundTruth);
@@ -372,7 +373,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
     private void createIndex()
     {
         // we need a long timeout because we are adding many vectors
-        String index = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        String index = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean', 'enable_hierarchy': 'true'}");
         waitForIndexQueryable(KEYSPACE, index, 5, TimeUnit.MINUTES);
     }
 
