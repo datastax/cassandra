@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -475,7 +476,11 @@ public abstract class SegmentBuilder
         return metadataBuilder.build();
     }
 
-    public long analyzeAndAdd(ByteBuffer rawTerm, AbstractType<?> type, PrimaryKey key, long sstableRowId, IndexMetrics indexMetrics)
+    public long analyzeAndAdd(ByteBuffer rawTerm,
+                              AbstractType<?> type,
+                              PrimaryKey key,
+                              long sstableRowId,
+                              @Nullable IndexMetrics indexMetrics)
     {
         long totalSize = 0;
         if (TypeUtil.isLiteral(type))
