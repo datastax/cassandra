@@ -112,7 +112,7 @@ public abstract class SSTable
         this.compression = components.contains(Component.COMPRESSION_INFO);
         this.components = ImmutableSet.copyOf(components);
         this.metadata = metadata;
-        this.hasClustering = metadata().comparator.size() > 0;
+        this.hasClustering = metadata.get().comparator.size() > 0;
         this.optimizationStrategy = Objects.requireNonNull(optimizationStrategy);
     }
 
