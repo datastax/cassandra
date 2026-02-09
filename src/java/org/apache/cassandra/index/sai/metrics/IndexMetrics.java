@@ -38,6 +38,7 @@ public class IndexMetrics extends AbstractMetrics
     
     public final Counter memtableIndexFlushCount;
     public final Counter compactionCount;
+    public final Counter compactionTermsProcessedCount;
     public final Counter memtableIndexFlushErrors;
     public final Counter segmentFlushErrors;
     public final Counter queriesCount;
@@ -59,6 +60,7 @@ public class IndexMetrics extends AbstractMetrics
         ssTableCellCount = Metrics.register(createMetricName("SSTableCellCount"), context::getCellCount);
         memtableIndexFlushCount = Metrics.counter(createMetricName("MemtableIndexFlushCount"));
         compactionCount = Metrics.counter(createMetricName("CompactionCount"));
+        compactionTermsProcessedCount = Metrics.counter(createMetricName("CompactionTermsProcessedCount"));
         memtableIndexFlushErrors = Metrics.counter(createMetricName("MemtableIndexFlushErrors"));
         segmentFlushErrors = Metrics.counter(createMetricName("CompactionSegmentFlushErrors"));
         queriesCount = Metrics.counter(createMetricName("QueriesCount"));
