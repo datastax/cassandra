@@ -57,6 +57,7 @@ import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
@@ -284,46 +285,6 @@ public class IndexDescriptor
     {
         return newComponentsForWrite(null, perSSTable);
     }
-
-//    public FileHandle createPerSSTableFileHandle(IndexComponent indexComponent, Throwables.DiscreteAction<?> cleanup)
-//    {
-//        try
-//        {
-//            final File file = fileFor(indexComponent);
-//
-//            if (logger.isTraceEnabled())
-//            {
-//                logger.trace(logMessage("Opening {} file handle for {} ({})"),
-//                             file, FBUtilities.prettyPrintMemory(file.length()));
-//            }
-//
-//            return new FileHandle.Builder(file).mmapped(true).complete();
-//        }
-//        catch (Throwable t)
-//        {
-//            throw handleFileHandleCleanup(t, cleanup);
-//        }
-//    }
-//
-//    public FileHandle createPerIndexFileHandle(IndexComponent indexComponent, IndexContext indexContext, Throwables.DiscreteAction<?> cleanup)
-//    {
-//        try
-//        {
-//            final File file = fileFor(indexComponent, indexContext);
-//
-//            if (logger.isTraceEnabled())
-//            {
-//                logger.trace(indexContext.logMessage("Opening file handle for {} ({})"),
-//                             file, FBUtilities.prettyPrintMemory(file.length()));
-//            }
-//
-//            return new FileHandle.Builder(file).mmapped(true).complete();
-//        }
-//        catch (Throwable t)
-//        {
-//            throw handleFileHandleCleanup(t, cleanup);
-//        }
-//    }
 
     private static RuntimeException handleFileHandleCleanup(Throwable t, @Nullable Throwables.DiscreteAction<?> cleanup)
     {
@@ -598,7 +559,7 @@ public class IndexDescriptor
         }
 
         @Override
-        public File tmpFileFor(String componentName) throws IOException
+        public File tmpFileFor(String componentName)
         {
             String name = context != null ? String.format("%s_%s_%s", buildId, context.getColumnName(), componentName)
                                           :  String.format("%s_%s", buildId, componentName);
@@ -705,9 +666,14 @@ public class IndexDescriptor
             @Override
             public FileHandle createFileHandle(Throwables.DiscreteAction<?> cleanup)
             {
-                try (var builder = StorageProvider.instance.fileHandleBuilderFor(this))
+                try (FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this))
                 {
-                    var b = builder.order(byteOrder());
+                    if (logger.isTraceEnabled())
+                    {
+                        logger.trace(logMessage("Opening {} file handle for {} ({})"),
+                                     file, FBUtilities.prettyPrintMemory(file.length()));
+                    }
+                    FileHandle.Builder b = builder.order(byteOrder());
                     return b.complete();
                 }
                 catch (Throwable t)
