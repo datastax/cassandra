@@ -350,6 +350,7 @@ public class CompactionGraph implements Closeable, Accountable
                         compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
                         trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
 
+                        long originalBytesUsed = compressedVectors.ramBytesUsed();
                         // re-encode the vectors added so far
                         int encodedVectorCount = compressedVectors.count();
                         compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
@@ -364,6 +365,10 @@ public class CompactionGraph implements Closeable, Accountable
                                              compressedVectors.encodeAndSet(i, v);
                                      });
                         }).join();
+
+                        // Update bytes to account for new encoding. This isn't expected to change, but just
+                        // in case it does, we track it here.
+                        bytesUsed += (compressedVectors.ramBytesUsed() - originalBytesUsed);
 
                         // Keep the existing edges but recompute their scores
                         builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
@@ -383,12 +388,15 @@ public class CompactionGraph implements Closeable, Accountable
                 // is only needed during index build. It is a temp file.
                 onDiskVectorValuesWriter.write(ordinal, vector);
 
+                // Track the bytes used as a result of this operation
+                long compressedVectorsBytesUsed = compressedVectors.ramBytesUsed();
                 // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
                 while (compressedVectors.count() < ordinal)
                     compressedVectors.setZero(compressedVectors.count());
                 compressedVectors.encodeAndSet(ordinal, vector);
 
                 bytesUsed += postings.ramBytesUsed();
+                bytesUsed += (compressedVectors.ramBytesUsed() - compressedVectorsBytesUsed);
                 return new InsertionResult(bytesUsed, ordinal, vector);
             }
 
@@ -464,8 +472,11 @@ public class CompactionGraph implements Closeable, Accountable
                 // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
                 // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
                 // if a row with null vector in sstable A gets updated with a vector in sstable B)
+                // If there are too many holes, we leave the mapping on the disk.
                 if (postingsStructure == Structure.ONE_TO_MANY
-                    && (!V5OnDiskFormat.writeV5VectorPostings(version) || useSyntheticOrdinals))
+                    && (!V5OnDiskFormat.writeV5VectorPostings(version)
+                        || useSyntheticOrdinals
+                        || V5VectorPostingsWriter.tooManyOrdinalMappingHoles(postingsMap.size(), rowsAdded)))
                 {
                     postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
                 }

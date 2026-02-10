@@ -151,6 +151,71 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
         validate(Structure.ONE_TO_ONE, postingsMap, vv);
     }
 
+    @Test
+    public void testTooManyOrdinalMappingHoles_WithZeroHolesAllowed()
+    {
+        double originalValue = V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED;
+        try
+        {
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 0.0;
+
+            // With 0% holes allowed, any holes should be too many
+            assertEquals(false, V5VectorPostingsWriter.tooManyOrdinalMappingHoles(10, 10)); // 0 holes
+            assertEquals(true, V5VectorPostingsWriter.tooManyOrdinalMappingHoles(10, 11));  // 1 hole
+            assertEquals(true, V5VectorPostingsWriter.tooManyOrdinalMappingHoles(10, 12));  // 2 holes
+        }
+        finally
+        {
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = originalValue;
+        }
+    }
+
+    @Test
+    public void testTooManyOrdinalMappingHoles_WithSmallNumberOfRows()
+    {
+        double originalValue = V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED;
+        try
+        {
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 0.1; // 10% holes allowed
+
+            // With 2 rows and 1 vector, there is 1 hole (50% holes) - should be too many
+            assertEquals(true, V5VectorPostingsWriter.tooManyOrdinalMappingHoles(1, 2));
+
+            // With 10 rows and 9 vectors, there is 1 hole (10% holes) - exactly at threshold
+            assertEquals(false, V5VectorPostingsWriter.tooManyOrdinalMappingHoles(9, 10));
+
+            // With 10 rows and 8 vectors, there are 2 holes (20% holes) - over threshold
+            assertEquals(true, V5VectorPostingsWriter.tooManyOrdinalMappingHoles(8, 10));
+        }
+        finally
+        {
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = originalValue;
+        }
+    }
+
+    @Test
+    public void testTooManyOrdinalMappingHoles_StandardCases()
+    {
+        double originalValue = V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED;
+        try
+        {
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 0.1; // 10% holes allowed
+
+            // 100 vectors, 110 rows = 10 holes = 10% holes (exactly at threshold)
+            assertEquals(false, V5VectorPostingsWriter.tooManyOrdinalMappingHoles(100, 110));
+
+            // 100 vectors, 111 rows = 11 holes = ~9.9% holes (rounds down due to truncation)
+            assertEquals(false, V5VectorPostingsWriter.tooManyOrdinalMappingHoles(100, 111));
+
+            // 100 vectors, 109 rows = 9 holes = 9% holes (under threshold)
+            assertEquals(false, V5VectorPostingsWriter.tooManyOrdinalMappingHoles(100, 109));
+        }
+        finally
+        {
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = originalValue;
+        }
+    }
+
     private static void computeRowIds(Map<VectorFloat<?>, VectorPostings<String>> postingsMap)
     {
         for (var p: postingsMap.entrySet())
