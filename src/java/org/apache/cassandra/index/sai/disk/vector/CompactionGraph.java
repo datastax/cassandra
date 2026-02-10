@@ -469,8 +469,11 @@ public class CompactionGraph implements Closeable, Accountable
                 // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
                 // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
                 // if a row with null vector in sstable A gets updated with a vector in sstable B)
+                // If there are too many holes, we leave the mapping on the disk.
                 if (postingsStructure == Structure.ONE_TO_MANY
-                    && (!V5OnDiskFormat.writeV5VectorPostings(version) || useSyntheticOrdinals))
+                    && (!V5OnDiskFormat.writeV5VectorPostings(version)
+                        || useSyntheticOrdinals
+                        || V5VectorPostingsWriter.tooManyOrdinalMappingHoles(postingsMap.size(), rowsAdded)))
                 {
                     postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
                 }
