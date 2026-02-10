@@ -305,33 +305,47 @@ public class IndexMetricsTest extends AbstractMetricsTest
     public void testIndexFileCacheBytesIncludesAllComponents()
     {
         // Create a table with a vector index to ensure we have pq and compressedVectors
-        createTable("CREATE TABLE %s (id TEXT PRIMARY KEY, v1 VECTOR<FLOAT, 1536>)");
+        String table = createTable("CREATE TABLE %s (id INT PRIMARY KEY, v1 VECTOR<FLOAT, 1536>)");
         String index = createIndex("CREATE CUSTOM INDEX ON %s (v1) USING 'StorageAttachedIndex'");
 
+        // Disable compaction so we can manually control it
+        disableCompaction();
+
         // Insert some data to populate the index
-        int rowCount = CassandraOnHeapGraph.MIN_PQ_ROWS;
+        int rowCount = CassandraOnHeapGraph.MIN_PQ_ROWS + 1;
+
+        // Create 4 sstables that do not individually have enough vectors for a PQ, but will together
         for (int i = 0; i < rowCount; i++)
-            execute("INSERT INTO %s (id, v1) VALUES (?, ?)", Integer.toString(i), randomVectorBoxed(1536));
+        {
+            if (i % (rowCount / 4) == 0)
+                flush();
+            execute("INSERT INTO %s (id, v1) VALUES (?, ?)", i, randomVectorBoxed(1536));
+        }
 
         // Wait for the index to be queryable
         waitForTableIndexesQueryable();
-
-        // Flush to create on-disk index structures
-        flush();
 
         // Verify that IndexFileCacheBytes metric exists and is greater than zero
         // This metric should now include graph.ramBytesUsed() + pq.ramBytesUsed() + compressedVectors.ramBytesUsed()
         ObjectName metricName = objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics");
 
         int bytesPerVector = VectorSourceModel.OTHER.compressionProvider.apply(1536).getCompressedSize();
-        long minBytesExpected = bytesPerVector * (long) rowCount;
+        long minPQBytesExpected = bytesPerVector * (long) rowCount;
+
+        // Because we flush half way, we don't have enough vectors for a PQ in either segment
+        long bytesAfterFlush = (long) getMetricValue(metricName);
+        assertTrue("Expected fewer than " + minPQBytesExpected + " bytes but got " + bytesAfterFlush,
+                   minPQBytesExpected >= bytesAfterFlush);
+
+        compact();
+        waitForIndexCompaction(KEYSPACE, table, index);
 
         // Verify that the bytes contains the compression size. Note that the PQ vectors dominates the memory
         // consumption significatly, which is what makes this test valid. The test fails if we remove the
         // compressed vector accounting logic from the CassandraDiskAnn.ramBytesUsed() method.
-        long bytesAfterFlush = (long) getMetricValue(metricName);
-        assertTrue("Expected at least " + minBytesExpected + " bytes but got " + bytesAfterFlush,
-                   bytesAfterFlush >= minBytesExpected);
+        long bytesAfterCompaction = (long) getMetricValue(objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics"));
+        assertTrue("Expected at least " + minPQBytesExpected + " bytes but got " + bytesAfterCompaction,
+                   bytesAfterCompaction >= minPQBytesExpected);
     }
 
     @Test
