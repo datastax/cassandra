@@ -41,6 +41,7 @@ import net.openhft.chronicle.map.ChronicleMap;
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -63,7 +64,7 @@ public class V5VectorPostingsWriter<T>
      * almost two orders of magnitude higher than the observed rate of holes in the same dataset.
      */
     @VisibleForTesting
-    public static double GLOBAL_HOLES_ALLOWED = 0.01;
+    public static double GLOBAL_HOLES_ALLOWED = CassandraRelevantProperties.SAI_VECTOR_ORDINAL_HOLE_DENSITY_LIMIT.getDouble();
 
     public static int MAGIC = 0x90571265; // POSTINGS
 
@@ -419,13 +420,14 @@ public class V5VectorPostingsWriter<T>
         }
         else
         {
-            logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them", ordinalMap.size(), extraPostings.size());
             structure = extraPostings.isEmpty()
                       ? Structure.ONE_TO_ONE
                       : Structure.ONE_TO_MANY;
             // override one-to-many to generic if there are too many holes
-            if (structure == Structure.ONE_TO_MANY && extraPostings.size() > max(1, GLOBAL_HOLES_ALLOWED * maxRow))
+            if (structure == Structure.ONE_TO_MANY && tooManyOrdinalMappingHoles(postingsMap.size(), maxRow))
                 structure = Structure.ZERO_OR_ONE_TO_MANY;
+            logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them. Structure is {}",
+                         ordinalMap.size(), extraPostings.size(), structure);
         }
 
         // create the mapping
@@ -433,6 +435,17 @@ public class V5VectorPostingsWriter<T>
             return createGenericRenumberedMapping(ordinalMap.keySet(), maxOldOrdinal, maxRow);
         var ordinalMapper = new BiMapMapper(maxNewOrdinal, ordinalMap);
         return new RemappedPostings(structure, maxNewOrdinal, maxRow, ordinalMap, extraPostings, ordinalMapper);
+    }
+
+    /**
+     * Given the number of vectors and rows indexed, determine if there are too many holes for a one to many mapping.
+     * @param totalVectorsIndexed the number of unique vectors in the index segment
+     * @param totalRowsIndexed the number of rows in the index segment
+     * @return true if there are too many holes, false otherwise
+     */
+    public static boolean tooManyOrdinalMappingHoles(int totalVectorsIndexed, int totalRowsIndexed)
+    {
+        return totalRowsIndexed - totalVectorsIndexed > GLOBAL_HOLES_ALLOWED * totalRowsIndexed;
     }
 
     /**
