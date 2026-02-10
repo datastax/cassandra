@@ -343,6 +343,7 @@ public class CompactionGraph implements Closeable, Accountable
                         compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
                         trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
 
+                        long originalBytesUsed = compressedVectors.ramBytesUsed();
                         // re-encode the vectors added so far
                         int encodedVectorCount = compressedVectors.count();
                         compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
@@ -357,6 +358,10 @@ public class CompactionGraph implements Closeable, Accountable
                                              compressedVectors.encodeAndSet(i, v);
                                      });
                         }).join();
+
+                        // Update bytes to account for new encoding. This isn't expected to change, but just
+                        // in case it does, we track it here.
+                        bytesUsed += (compressedVectors.ramBytesUsed() - originalBytesUsed);
 
                         // Keep the existing edges but recompute their scores
                         builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
@@ -381,12 +386,15 @@ public class CompactionGraph implements Closeable, Accountable
                 for (int i = 0; i < dimension; i++)
                     vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
 
+                // Track the bytes used as a result of this operation
+                long compressedVectorsBytesUsed = compressedVectors.ramBytesUsed();
                 // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
                 while (compressedVectors.count() < ordinal)
                     compressedVectors.setZero(compressedVectors.count());
                 compressedVectors.encodeAndSet(ordinal, vector);
 
                 bytesUsed += postings.ramBytesUsed();
+                bytesUsed += (compressedVectors.ramBytesUsed() - compressedVectorsBytesUsed);
                 return new InsertionResult(bytesUsed, ordinal, vector);
             }
 
