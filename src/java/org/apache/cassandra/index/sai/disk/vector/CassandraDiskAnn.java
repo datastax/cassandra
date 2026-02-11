@@ -193,7 +193,15 @@ public class CassandraDiskAnn
 
     public long ramBytesUsed()
     {
-        return graph.ramBytesUsed();
+        return graph.ramBytesUsed() + compressedVectorBytes();
+    }
+
+    private long compressedVectorBytes()
+    {
+        // compressedVectors counts the pq internally, so only count pq if compressedVectors is null.
+        return compressedVectors == null
+               ? pq == null ? 0 : pq.ramBytesUsed()
+               : compressedVectors.ramBytesUsed();
     }
 
     public int size()
