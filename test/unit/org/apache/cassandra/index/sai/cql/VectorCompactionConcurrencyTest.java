@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,8 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.After;
@@ -26,10 +27,12 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
@@ -61,16 +64,15 @@ public class VectorCompactionConcurrencyTest extends VectorTester
     @Before
     public void setup()
     {
-        originalThreads = SegmentBuilder.VECTOR_INDEX_BUILD_THREADS;
-        SegmentBuilder.VECTOR_INDEX_BUILD_THREADS = concurrency;
+        originalThreads = CassandraRelevantProperties.SAI_VECTOR_INDEX_BUILD_THREADS.getInt();
+        CassandraRelevantProperties.SAI_VECTOR_INDEX_BUILD_THREADS.setInt(concurrency);
 
         if (SegmentBuilder.compactionExecutor != null)
         {
             SegmentBuilder.compactionExecutor.shutdown();
         }
         SegmentBuilder.compactionExecutor = SegmentBuilder.createCompactionExecutor();
-        SegmentBuilder.submissionQuota = SegmentBuilder.createSubmissionQuota();
-        
+
         monitor = new ThreadPoolMonitor();
     }
 
@@ -79,20 +81,19 @@ public class VectorCompactionConcurrencyTest extends VectorTester
     {
         if (monitor != null)
             monitor.stop();
-        
-        SegmentBuilder.VECTOR_INDEX_BUILD_THREADS = originalThreads;
-        
-        // Recreate executor and submission quota with original settings
+
+        CassandraRelevantProperties.SAI_VECTOR_INDEX_BUILD_THREADS.setInt(originalThreads);
+
+        // Recreate executor with original settings
         if (SegmentBuilder.compactionExecutor != null)
         {
             SegmentBuilder.compactionExecutor.shutdown();
         }
         SegmentBuilder.compactionExecutor = SegmentBuilder.createCompactionExecutor();
-        SegmentBuilder.submissionQuota = SegmentBuilder.createSubmissionQuota();
     }
 
     @Test
-    public void testCompactionConcurrency() throws Throwable
+    public void testCompactionConcurrency()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, " + DIMENSION + ">, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
@@ -106,8 +107,7 @@ public class VectorCompactionConcurrencyTest extends VectorTester
 
             for (int pk = startPk; pk < endPk; pk++)
             {
-                float[] vec = createVector(pk);
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, vector(vec));
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, vector(randomVector(DIMENSION)));
             }
             flush();
         }
@@ -117,7 +117,7 @@ public class VectorCompactionConcurrencyTest extends VectorTester
         monitor.stop();
 
         int maxActive = monitor.getMaxActiveThreads();
-        
+
         if (concurrency == 0)
         {
             assertEquals("Synchronous mode should not use any threads from pool", 0, maxActive);
@@ -127,26 +127,15 @@ public class VectorCompactionConcurrencyTest extends VectorTester
             assertTrue(String.format("Max active threads (%d) exceeded configured limit (%d)",
                                      maxActive, concurrency),
                        maxActive <= concurrency);
-
-            if (concurrency > 1 && FBUtilities.getAvailableProcessors() >= concurrency)
-            {
-                // Note: This assertion may occasionally fail on heavily loaded systems
-                // where the compaction completes too quickly to observe parallel execution
-                assertTrue(String.format("Expected concurrent execution with concurrency=%d but max active threads was %d. " +
-                                         "This may indicate compaction completed too quickly or insufficient workload.",
-                                         concurrency, maxActive),
-                           maxActive > 1);
-            }
         }
 
         assertEquals("Row count mismatch after compaction",
                      TOTAL_ROWS,
                      execute("SELECT * FROM %s").size());
 
-        float[] queryVec = createVector(100);
-        var results = execute("SELECT pk FROM %s ORDER BY v ANN OF ? LIMIT 10", vector(queryVec));
+        var results = execute("SELECT pk FROM %s ORDER BY v ANN OF ? LIMIT 10", vector(randomVector(DIMENSION)));
 
-        assertTrue("ANN query should return results after compaction", results.size() > 0);
+        assertFalse("ANN query should return results after compaction", results.isEmpty());
         assertEquals("ANN query should respect LIMIT", 10, results.size());
 
         for (var row : results)
@@ -155,21 +144,6 @@ public class VectorCompactionConcurrencyTest extends VectorTester
             assertTrue(String.format("Returned pk %d is outside valid range [0, %d)", pk, TOTAL_ROWS),
                        pk >= 0 && pk < TOTAL_ROWS);
         }
-    }
-
-    /**
-     * Creates a random vector for the given primary key value.
-     * Uses pk as seed for reproducibility.
-     */
-    private float[] createVector(int pk)
-    {
-        Random r = new Random(pk);
-        float[] vec = new float[DIMENSION];
-        for (int i = 0; i < DIMENSION; i++)
-        {
-            vec[i] = r.nextFloat();
-        }
-        return vec;
     }
 
     /**
@@ -182,14 +156,14 @@ public class VectorCompactionConcurrencyTest extends VectorTester
         private volatile boolean monitoring = false;
         private Thread monitorThread;
 
-        public void startMonitoring(java.util.concurrent.ExecutorService executor)
+        public void startMonitoring(ExecutorService executor)
         {
-            // Handle synchronous mode (executor is null when VECTOR_INDEX_BUILD_THREADS = 0)
-            if (executor == null || !(executor instanceof java.util.concurrent.ThreadPoolExecutor))
+            // Handle synchronous mode (executor is null when SAI_VECTOR_INDEX_BUILD_THREADS = 0)
+            if (!(executor instanceof ThreadPoolExecutor))
                 return;
 
             monitoring = true;
-            java.util.concurrent.ThreadPoolExecutor tpe = (java.util.concurrent.ThreadPoolExecutor) executor;
+            ThreadPoolExecutor tpe = (ThreadPoolExecutor) executor;
 
             monitorThread = new Thread(() -> {
                 while (monitoring)

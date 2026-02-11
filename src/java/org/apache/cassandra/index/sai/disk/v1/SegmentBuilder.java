@@ -1,11 +1,13 @@
 /*
- * Copyright DataStax, Inc.
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,7 +24,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -40,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -81,57 +83,44 @@ public abstract class SegmentBuilder
     private static final Logger logger = LoggerFactory.getLogger(SegmentBuilder.class);
 
     /**
-     * Number of threads to use for asynchronous vector index building during compaction.
-     * - Default: all available processors (for dedicated compactors)
-     * - Can be set to 1 for shared compactors to limit resource usage
-     * - Can be set to 0 to disable async processing (synchronous mode)
-     */
-    @VisibleForTesting
-    public static volatile int VECTOR_INDEX_BUILD_THREADS = Integer.getInteger("cassandra.sai.vector_index_build_threads",
-                                                                               Runtime.getRuntime().availableProcessors());
-
-    /**
      * Thread pool for async vector index building during compaction.
-     * When VECTOR_INDEX_BUILD_THREADS = 0, executor is null and operations are synchronous.
+     * When thread count is 0 or less, executor is null and operations are synchronous.
      */
     @VisibleForTesting
     public static volatile ExecutorService compactionExecutor = createCompactionExecutor();
 
     /**
-     * Quota for async vector index building tasks to prevent the shared thread pool queue from overflowing.
+     * Creates an executor for async vector index building during compaction.
+     * The queue size is calculated as 10 * threadPoolSize. This provides sufficient
+     * buffering to prevent blocking while allowing backpressure when the queue fills.
+     *
+     * @return an {@link ExecutorService} or {@code null} if threads <= 0
      */
     @VisibleForTesting
-    public static volatile Semaphore submissionQuota = createSubmissionQuota();
-
-    public static Semaphore createSubmissionQuota()
-    {
-        if (VECTOR_INDEX_BUILD_THREADS <= 0)
-            return null;
-
-        return new Semaphore(11 * VECTOR_INDEX_BUILD_THREADS);
-    }
-
-    @VisibleForTesting
+    @Nullable
     public static ExecutorService createCompactionExecutor()
     {
-        if (VECTOR_INDEX_BUILD_THREADS <= 0)
+        int threads = CassandraRelevantProperties.SAI_VECTOR_INDEX_BUILD_THREADS.getInt();
+        
+        if (threads <= 0)
         {
-            logger.info("Vector index building will run synchronously (VECTOR_INDEX_BUILD_THREADS={})", VECTOR_INDEX_BUILD_THREADS);
+            logger.info("Vector index building will run synchronously (SAI_VECTOR_INDEX_BUILD_THREADS={})", threads);
             return null;
         }
 
-        logger.info("Creating vector index building thread pool with {} threads", VECTOR_INDEX_BUILD_THREADS);
+        logger.info("Creating vector index building thread pool with {} threads", threads);
         return new JMXEnabledThreadPoolExecutor(
-        VECTOR_INDEX_BUILD_THREADS,
-        VECTOR_INDEX_BUILD_THREADS,
+        threads,
+        threads,
         1,
         TimeUnit.MINUTES,
-        new ArrayBlockingQueue<>(10 * VECTOR_INDEX_BUILD_THREADS),
+        new ArrayBlockingQueue<>(10 * threads),
         new NamedThreadFactory("VectorIndexBuild", Thread.MIN_PRIORITY),
         "request");
     }
 
     @VisibleForTesting
+    @Nullable
     public static ExecutorService getCompactionExecutor()
     {
         return compactionExecutor;
@@ -367,23 +356,9 @@ public abstract class SegmentBuilder
                 return result.bytesUsed;
 
             ExecutorService executor = getCompactionExecutor();
-
-            // Synchronous mode when compactionExecutor is null (VECTOR_INDEX_BUILD_THREADS = 0)
-            if (executor == null)
-            {
-                return result.bytesUsed + graphIndex.addGraphNode(result);
-            }
+            assert executor != null : "addInternalAsync should not be called when supportsAsyncAdd() returns false";
 
             // Async mode - submit to thread pool
-            try
-            {
-                submissionQuota.acquire();
-            }
-            catch (InterruptedException e)
-            {
-                throw new RuntimeException(e);
-            }
-
             updatesInFlight.incrementAndGet();
             executor.submit(() -> {
                 try
@@ -399,7 +374,6 @@ public abstract class SegmentBuilder
                 finally
                 {
                     updatesInFlight.decrementAndGet();
-                    submissionQuota.release();
                 }
             });
 
@@ -427,7 +401,7 @@ public abstract class SegmentBuilder
         @Override
         public boolean supportsAsyncAdd()
         {
-            return VECTOR_INDEX_BUILD_THREADS > 0;
+            return CassandraRelevantProperties.SAI_VECTOR_INDEX_BUILD_THREADS.getInt() > 0;
         }
 
         @Override
@@ -480,23 +454,9 @@ public abstract class SegmentBuilder
         protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
         {
             ExecutorService executor = getCompactionExecutor();
-
-            // Synchronous mode when compactionExecutor is null (VECTOR_INDEX_BUILD_THREADS = 0)
-            if (executor == null)
-            {
-                return addInternal(terms, segmentRowId);
-            }
+            assert executor != null : "addInternalAsync should not be called when supportsAsyncAdd() returns false";
 
             // Async mode - submit to thread pool
-            try
-            {
-                submissionQuota.acquire();
-            }
-            catch (InterruptedException e)
-            {
-                throw new RuntimeException(e);
-            }
-
             updatesInFlight.incrementAndGet();
             executor.submit(() -> {
                 try
@@ -512,7 +472,6 @@ public abstract class SegmentBuilder
                 finally
                 {
                     updatesInFlight.decrementAndGet();
-                    submissionQuota.release();
                 }
             });
 
@@ -542,7 +501,7 @@ public abstract class SegmentBuilder
         @Override
         public boolean supportsAsyncAdd()
         {
-            return VECTOR_INDEX_BUILD_THREADS > 0;
+            return CassandraRelevantProperties.SAI_VECTOR_INDEX_BUILD_THREADS.getInt() > 0;
         }
     }
 
@@ -668,6 +627,7 @@ public abstract class SegmentBuilder
         return false;
     }
 
+    @Nullable
     public Throwable getAsyncThrowable()
     {
         return asyncThrowable.get();
