@@ -27,7 +27,6 @@ import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.utils.Throwables;
 
-import javax.management.InstanceNotFoundException;
 import javax.management.ObjectName;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -36,7 +35,6 @@ import static org.junit.Assert.*;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.index.sai.disk.v1.MemtableIndexWriter;
-import org.assertj.core.api.Assertions;
 
 public class IndexMetricsTest extends AbstractMetricsTest
 {
@@ -304,7 +302,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testIndexFileCacheBytesIncludesAllComponents()
+    public void testIndexFileCacheBytesIncludesAllComponents() throws Throwable
     {
         // Create a table with a vector index to ensure we have pq and compressedVectors
         String table = createTable("CREATE TABLE %s (id INT PRIMARY KEY, v1 VECTOR<FLOAT, 1536>)");
@@ -349,17 +347,9 @@ public class IndexMetricsTest extends AbstractMetricsTest
         assertTrue("Expected at least " + minPQBytesExpected + " bytes but got " + bytesAfterCompaction,
                    bytesAfterCompaction >= minPQBytesExpected);
 
-        // Drop the index and confirm the metric is no longer reportec.
+        // Drop the index and confirm the metric is no longer reported.
         dropIndex("DROP INDEX %s." + index);
-        try
-        {
-            Object result = getMetricValue(objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics"));
-            Assertions.fail("Metric should not be present");
-        }
-        catch (RuntimeException e)
-        {
-            assertTrue("Unexpected cause: " + e.getCause(), e.getCause() instanceof InstanceNotFoundException);
-        }
+        assertFalse(isMetricPresent(objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics")));
     }
 
     @Test

@@ -492,6 +492,11 @@ public class SAITester extends CQLTester
         assertEquals(expected, actual);
     }
 
+    protected boolean isMetricPresent(ObjectName objectName) throws IOException
+    {
+        return jmxConnection.isRegistered(objectName);
+    }
+
     protected Object getMBeanAttribute(ObjectName name, String attribute) throws Exception
     {
         return jmxConnection.getAttribute(name, attribute);
