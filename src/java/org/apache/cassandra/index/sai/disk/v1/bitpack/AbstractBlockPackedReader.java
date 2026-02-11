@@ -132,7 +132,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
 
         // blockIndex is now the block that might contain our floor value
         // Search for the floor value within the identified block
-        return findBlockRowIDForFloor(targetValue, blockIndex);
+        return findBlockRowIdForFloor(targetValue, blockIndex);
     }
 
     /**
@@ -167,7 +167,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
     /**
      * Find the floor row ID within a specific block.
      */
-    private long findBlockRowIDForFloor(long targetValue, int blockIdx)
+    private long findBlockRowIdForFloor(long targetValue, int blockIdx)
     {
         if (blockIdx < 0)
             return -1; // Target is smaller than all values
