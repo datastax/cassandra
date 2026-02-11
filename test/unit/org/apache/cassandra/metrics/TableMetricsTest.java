@@ -494,6 +494,16 @@ public class TableMetricsTest
         
         // Range deletion should increment the counter once
         assertEquals(11, cfs.metric.deleteRequests.getCount());
+
+        //Test delete of multiple partition keys
+        for (int i = 20; i < 25; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, 'val%d', 'data%d')", KEYSPACE, TABLE, i, i, i));
+
+        // Execute multiple partition deletes
+        session.execute(String.format("DELETE FROM %s.%s WHERE id in (20,21,22,24,25)", KEYSPACE, TABLE));
+
+        assertEquals(16, cfs.metric.deleteRequests.getCount());
+
     }
 
     @AfterClass
