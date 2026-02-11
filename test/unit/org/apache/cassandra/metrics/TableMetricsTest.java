@@ -504,6 +504,14 @@ public class TableMetricsTest
 
         assertEquals(16, cfs.metric.deleteRequests.getCount());
 
+        //Test delete of multiple clustering keys
+        for (int i = 25; i < 30; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (25, 'val%d', 'data%d')", KEYSPACE, TABLE, i, i));
+
+        // Execute multiple partition deletes
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 25 and val1 in ('val25', 'val26', 'val27')", KEYSPACE, TABLE));
+
+        assertEquals(19, cfs.metric.deleteRequests.getCount());
     }
 
     @AfterClass
