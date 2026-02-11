@@ -39,7 +39,7 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
-import org.apache.cassandra.index.sai.disk.vector.NVQUtil;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -205,7 +205,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
         }
 
         // When NVQ is enabled, we expect worse recall
-        float postCompactionRecall = NVQUtil.ENABLE_NVQ ? 0.9499f : 0.975f;
+        float postCompactionRecall = JVectorVersionUtil.ENABLE_NVQ ? 0.9499f : 0.975f;
 
         // Take the CassandraOnHeapGraph code path.
         compact();

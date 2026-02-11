@@ -443,8 +443,9 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.vector_flush_threshold_max_rows", "-1"),
     // Use non-positive value to disable it. Period in millis to trigger a flush for SAI vector memtable index.
     SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
-    // Whether compaction should build vector indexes using fused adc
-    SAI_VECTOR_ENABLE_FUSED("cassandra.sai.vector.enable_fused", "true"),
+    // Whether compaction should build vector indexes using a fused graph, aka a graph where the quantized vectors
+    // are stored inline with a graph node. Feature is still experimental, so defaults to false.
+    SAI_VECTOR_ENABLE_FUSED("cassandra.sai.vector.enable_fused", "false"),
     // Use nvq when building graphs in compaction. Disabled by default for now. Enabling will reduce recall slightly
     // while also reducing the storage footprint.
     SAI_VECTOR_ENABLE_NVQ("cassandra.sai.vector.enable_nvq", "false"),
@@ -456,6 +457,7 @@ public enum CassandraRelevantProperties
     // file sizes to store the empty nodes.
     SAI_VECTOR_ORDINAL_HOLE_DENSITY_LIMIT("cassandra.sai.vector.ordinal_hole_density_limit", "0.01"),
     // When building a compaction graph, encode layer 0 nodes in parallel and subsequently use async io for writes.
+    // This feature is experimental, so defaults to false.
     SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL("cassandra.sai.vector.encode_write_graph_parallel", "false"),
     /**
      * Whether to disable auto-compaction

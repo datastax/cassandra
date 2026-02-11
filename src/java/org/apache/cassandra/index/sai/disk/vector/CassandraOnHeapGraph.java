@@ -56,7 +56,6 @@ import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
-import io.github.jbellis.jvector.quantization.ImmutablePQVectors;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
@@ -69,7 +68,6 @@ import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
-import io.github.jbellis.jvector.vector.types.ByteSequence;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
@@ -104,7 +102,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.StringHelper;
 
-import static org.apache.cassandra.index.sai.disk.vector.NVQUtil.NUM_SUB_VECTORS;
+import static org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil.NUM_SUB_VECTORS;
 
 public class CassandraOnHeapGraph<T> implements Accountable
 {
@@ -113,9 +111,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
         V0, // initial version
         V1, // includes unit vector calculation
     }
-
-    /** whether to use fused ADC when writing indexes (assuming all other conditions are met) */
-    private static boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
 
     /** minimum number of rows to perform PQ codebook generation */
     public static final int MIN_PQ_ROWS = 1024;
@@ -177,7 +172,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         allVectorsAreUnitLength = true;
 
         // NVQ is only written during compaction to save on compute costs
-        writeNvq = NVQUtil.shouldWriteNVQ(dimension, context.version()) && !forSearching;
+        writeNvq = JVectorVersionUtil.shouldWriteNVQ(dimension, context.version()) && !forSearching;
 
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         // This is only a warning since it's not a fatal error to write without hierarchy
@@ -471,8 +466,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
 
-            // Write fused unless we don't meet some criteria
-            boolean writeFusedPQ = ENABLE_FUSED && perIndexComponents.version().onDiskFormat().jvectorFileFormatVersion() >= 6;
+            // Write fused unless we don't meet some criteria (will be determined in the writePQ method)
+            boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(perIndexComponents.version());
 
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
@@ -534,7 +529,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             .withMapper(ordinalMapper)
             .with(nvq != null ? new NVQ(nvq) : new InlineVectors(vectorValues.dimension()));
 
-        if (ENABLE_FUSED && compressor instanceof ProductQuantization && context.version().onDiskFormat().jvectorFileFormatVersion() >= 6)
+        if (compressor instanceof ProductQuantization && JVectorVersionUtil.shouldWriteFused(context.version()))
             indexWriterBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
 
         return indexWriterBuilder.build();

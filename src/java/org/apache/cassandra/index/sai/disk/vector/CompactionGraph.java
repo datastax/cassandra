@@ -117,7 +117,6 @@ public class CompactionGraph implements Closeable, Accountable
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
 
-    private static boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
     private static boolean PARALLEL_ENCODING_WRITING = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL.getBoolean();
 
     private final VectorType.VectorSerializer serializer;
@@ -238,8 +237,8 @@ public class CompactionGraph implements Closeable, Accountable
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
                       + SAICodecUtils.headerSize();
 
-        globalMean = NVQUtil.shouldWriteNVQ(dimension, context.version()) ? vts.createFloatVector(new float[dimension])
-                                                                          : null;
+        globalMean = JVectorVersionUtil.shouldWriteNVQ(dimension, context.version()) ? vts.createFloatVector(new float[dimension])
+                                                                                     : null;
     }
 
     private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper, NVQuantization nvq) throws IOException
@@ -252,7 +251,7 @@ public class CompactionGraph implements Closeable, Accountable
                             .with(feature)
                             .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
                             .withMapper(ordinalMapper);
-        if (ENABLE_FUSED && compressor instanceof ProductQuantization && context.version().onDiskFormat().jvectorFileFormatVersion() >= 6)
+        if (compressor instanceof ProductQuantization && JVectorVersionUtil.shouldWriteFused(context.version()))
             writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
         return writerBuilder.build();
     }
@@ -568,7 +567,7 @@ public class CompactionGraph implements Closeable, Accountable
             return null;
         // Scale in place then create the NVQ
         VectorUtil.scale(globalMean, 1.0f / compressedVectors.count());
-        return NVQuantization.create(globalMean, NVQUtil.NUM_SUB_VECTORS);
+        return NVQuantization.create(globalMean, JVectorVersionUtil.NUM_SUB_VECTORS);
     }
 
     private long writePostings(Version version, V5VectorPostingsWriter.RemappedPostings rp, IndexOutputWriter postingsOutput,
