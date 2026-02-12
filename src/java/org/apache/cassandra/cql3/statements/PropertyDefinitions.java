@@ -17,26 +17,66 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
-
 import javax.annotation.Nullable;
 
-import org.apache.cassandra.cql3.QualifiedName;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.exceptions.SyntaxException;
 
 public class PropertyDefinitions
 {
     public static final String MULTIPLE_DEFINITIONS_ERROR = "Multiple definitions for property '%s'";
+    protected static final Logger logger = LoggerFactory.getLogger(PropertyDefinitions.class);
     private static final Pattern POSITIVE_PATTERN = Pattern.compile("(1|true|yes)");
     private static final Pattern NEGATIVE_PATTERN = Pattern.compile("(0|false|no)");
-    
-    protected static final Logger logger = LoggerFactory.getLogger(PropertyDefinitions.class);
-
+    private static final Map<String, Long> OBSOLETE_PROPERTY_LOG_TIME = new ConcurrentHashMap<>();
+    private static long OBSOLETE_PROPERTY_LOG_INTERVAL_MS = 30_000;
     protected final Map<String, Object> properties = new HashMap<>();
+
+    public static boolean parseBoolean(String key, String value) throws SyntaxException
+    {
+        if (null == value)
+            throw new IllegalArgumentException("value argument can't be null");
+
+        String lowerCasedValue = value.toLowerCase();
+
+        if (POSITIVE_PATTERN.matcher(lowerCasedValue).matches())
+            return true;
+        else if (NEGATIVE_PATTERN.matcher(lowerCasedValue).matches())
+            return false;
+
+        throw new SyntaxException(String.format("Invalid boolean value %s for '%s'. " +
+                                                "Positive values can be '1', 'true' or 'yes'. " +
+                                                "Negative values can be '0', 'false' or 'no'.",
+                                                value, key));
+    }
+
+    public static Integer toInt(String key, String value, Integer defaultValue) throws SyntaxException
+    {
+        if (value == null)
+        {
+            return defaultValue;
+        }
+        else
+        {
+            try
+            {
+                return Integer.valueOf(value);
+            }
+            catch (NumberFormatException e)
+            {
+                throw new SyntaxException(String.format("Invalid integer value %s for '%s'", value, key));
+            }
+        }
+    }
 
     public void addProperty(String name, String value) throws SyntaxException
     {
@@ -64,7 +104,16 @@ public class PropertyDefinitions
                 continue;
 
             if (obsolete.contains(name))
-                logger.warn("Ignoring obsolete property {}", name);
+            {
+                long now = System.currentTimeMillis();
+                Long lastLogged = OBSOLETE_PROPERTY_LOG_TIME.get(name);
+
+                if (lastLogged == null || (now - lastLogged) >= OBSOLETE_PROPERTY_LOG_INTERVAL_MS)
+                {
+                    logger.warn("Ignoring obsolete property {}", name);
+                    OBSOLETE_PROPERTY_LOG_TIME.put(name, now);
+                }
+            }
             else
                 throw new SyntaxException(String.format("Unknown property '%s'", name));
         }
@@ -78,7 +127,7 @@ public class PropertyDefinitions
             return null;
         if (!(val instanceof String))
             throw new SyntaxException(String.format("Invalid value for property '%s'. It should be a string", name));
-        return (String)val;
+        return (String) val;
     }
 
     @Nullable
@@ -88,7 +137,7 @@ public class PropertyDefinitions
         Object val = properties.get(name);
         if (val == null)
             return null;
-        if (val instanceof Map && ((Map<?, ?>)val).isEmpty()) // to solve the ambiguity between empty map and empty set
+        if (val instanceof Map && ((Map<?, ?>) val).isEmpty()) // to solve the ambiguity between empty map and empty set
             return Collections.emptySet();
         if (!(val instanceof Set))
             throw new SyntaxException(String.format("Invalid value for property '%s'. It should be a set of identifiers.", name));
@@ -102,34 +151,16 @@ public class PropertyDefinitions
         Object val = properties.get(name);
         if (val == null)
             return null;
-        if (val instanceof Set && ((Set<?>)val).isEmpty()) // to solve the ambiguity between empty map and empty set
+        if (val instanceof Set && ((Set<?>) val).isEmpty()) // to solve the ambiguity between empty map and empty set
             return Collections.emptyMap();
         if (!(val instanceof Map))
             throw new SyntaxException(String.format("Invalid value for property '%s'. It should be a map.", name));
-        return (Map<String, String>)val;
+        return (Map<String, String>) val;
     }
 
     public Boolean hasProperty(String name)
     {
         return properties.containsKey(name);
-    }
-
-    public static boolean parseBoolean(String key, String value) throws SyntaxException
-    {
-        if (null == value)
-            throw new IllegalArgumentException("value argument can't be null");
-
-        String lowerCasedValue = value.toLowerCase();
-
-        if (POSITIVE_PATTERN.matcher(lowerCasedValue).matches())
-            return true;
-        else if (NEGATIVE_PATTERN.matcher(lowerCasedValue).matches())
-            return false;
-
-        throw new SyntaxException(String.format("Invalid boolean value %s for '%s'. " +
-                                                "Positive values can be '1', 'true' or 'yes'. " +
-                                                "Negative values can be '0', 'false' or 'no'.",
-                                                value, key));
     }
 
     // Return a property value, typed as a Boolean
@@ -165,25 +196,6 @@ public class PropertyDefinitions
     {
         String value = getSimple(key);
         return toInt(key, value, defaultValue);
-    }
-
-    public static Integer toInt(String key, String value, Integer defaultValue) throws SyntaxException
-    {
-        if (value == null)
-        {
-            return defaultValue;
-        }
-        else
-        {
-            try
-            {
-                return Integer.valueOf(value);
-            }
-            catch (NumberFormatException e)
-            {
-                throw new SyntaxException(String.format("Invalid integer value %s for '%s'", value, key));
-            }
-        }
     }
 
     /**
