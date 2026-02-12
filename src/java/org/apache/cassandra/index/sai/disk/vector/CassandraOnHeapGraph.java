@@ -650,7 +650,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
             assert !vectorValues.isValueShared();
             // encode (compress) the vectors to save
-            if ((compressor instanceof ProductQuantization && !writeFusedPQ) || compressor instanceof BinaryQuantization)
+            if (compressor instanceof ProductQuantization && !writeFusedPQ)
                 cv = compressor.encodeAll(new RemappedVectorValues(remapped, remapped.maxNewOrdinal, vectorValues));
         }
 
