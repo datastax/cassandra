@@ -115,7 +115,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     {
         this.command = command;
         this.queryContext = new QueryContext(executionQuotaMs);
-        this.controller = new QueryController(cfs, command, orderer, indexFeatureSet, queryContext);
+        this.controller = new QueryController(cfs, command, orderer, indexFeatureSet, queryContext, tableQueryMetrics);
         this.tableQueryMetrics = tableQueryMetrics;
     }
 
@@ -574,8 +574,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public void close()
         {
             FileUtils.closeQuietly(operation);
-            if (tableQueryMetrics != null)
-                tableQueryMetrics.record(queryContext, command);
         }
     }
 
@@ -833,8 +831,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public void close()
         {
             FileUtils.closeQuietly(scoredPrimaryKeyIterator);
-            if (tableQueryMetrics != null)
-                tableQueryMetrics.record(queryContext, command);
         }
 
         public class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
