@@ -146,59 +146,59 @@ public class KeyLookupTest extends SaiRandomizedTest
 
         // iterate on keys ascending
         withKeyLookup(reader ->
-        {
-            for (int x = 0; x < keys.size(); x++)
-            {
-                try (KeyLookup.Cursor cursor = reader.openCursor())
-                {
-                    ByteComparable key = cursor.seekToPointId(x);
+                      {
+                          for (int x = 0; x < keys.size(); x++)
+                          {
+                              try (KeyLookup.Cursor cursor = reader.openCursor())
+                              {
+                                  ByteComparable key = cursor.seekToPointId(x);
 
-                    byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
+                                  byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
 
-                    assertArrayEquals(keys.get(x), bytes);
+                                  assertArrayEquals(keys.get(x), bytes);
 //                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, keys.get(x)));
 //                    assertEquals(x, pointId);
-                }
-            }
-        });
+                              }
+                          }
+                      });
 
         // iterate on keys descending
         withKeyLookup(reader ->
-        {
-            for (int x = keys.size() - 1; x >= 0; x--)
-            {
-                try (KeyLookup.Cursor cursor = reader.openCursor())
-                {
-                    ByteComparable key = cursor.seekToPointId(x);
+                      {
+                          for (int x = keys.size() - 1; x >= 0; x--)
+                          {
+                              try (KeyLookup.Cursor cursor = reader.openCursor())
+                              {
+                                  ByteComparable key = cursor.seekToPointId(x);
 
-                    byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
+                                  byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
 
-                    assertArrayEquals(keys.get(x), bytes);
+                                  assertArrayEquals(keys.get(x), bytes);
 //                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, keys.get(x)));
 //                    assertEquals(x, pointId);
-                }
-            }
-        });
+                              }
+                          }
+                      });
 
         // iterate randomly
         withKeyLookup(reader ->
-        {
-            for (int x = 0; x < keys.size(); x++)
-            {
-                int target = nextInt(0, keys.size());
+                      {
+                          for (int x = 0; x < keys.size(); x++)
+                          {
+                              int target = nextInt(0, keys.size());
 
-                try (KeyLookup.Cursor cursor = reader.openCursor())
-                {
-                    ByteComparable key = cursor.seekToPointId(target);
+                              try (KeyLookup.Cursor cursor = reader.openCursor())
+                              {
+                                  ByteComparable key = cursor.seekToPointId(target);
 
-                    byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
+                                  byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
 
-                    assertArrayEquals(keys.get(target), bytes);
+                                  assertArrayEquals(keys.get(target), bytes);
 //                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, keys.get(target)));
 //                    assertEquals(target, pointId);
-                }
-            }
-        });
+                              }
+                          }
+                      });
     }
 
 //    @Test
@@ -416,40 +416,40 @@ public class KeyLookupTest extends SaiRandomizedTest
 
         // iterate ascending
         withKeyLookupCursor(cursor ->
-        {
-            for (int x = 0; x < terms.size(); x++)
-            {
-                ByteComparable term = cursor.seekToPointId(x);
+                            {
+                                for (int x = 0; x < terms.size(); x++)
+                                {
+                                    ByteComparable term = cursor.seekToPointId(x);
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
-                assertArrayEquals(terms.get(x), bytes);
-            }
-        });
+                                    byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
+                                    assertArrayEquals(terms.get(x), bytes);
+                                }
+                            });
 
         // iterate descending
         withKeyLookupCursor(cursor ->
-        {
-            for (int x = terms.size() - 1; x >= 0; x--)
-            {
-                ByteComparable term = cursor.seekToPointId(x);
+                            {
+                                for (int x = terms.size() - 1; x >= 0; x--)
+                                {
+                                    ByteComparable term = cursor.seekToPointId(x);
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
-                assertArrayEquals(terms.get(x), bytes);
-            }
-        });
+                                    byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
+                                    assertArrayEquals(terms.get(x), bytes);
+                                }
+                            });
 
         // iterate randomly
         withKeyLookupCursor(cursor ->
-        {
-            for (int x = 0; x < terms.size(); x++)
-            {
-                int target = nextInt(0, terms.size());
-                ByteComparable term = cursor.seekToPointId(target);
+                            {
+                                for (int x = 0; x < terms.size(); x++)
+                                {
+                                    int target = nextInt(0, terms.size());
+                                    ByteComparable term = cursor.seekToPointId(target);
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
-                assertArrayEquals(terms.get(target), bytes);
-            }
-        });
+                                    byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
+                                    assertArrayEquals(terms.get(target), bytes);
+                                }
+                            });
     }
 
     @Test
@@ -593,6 +593,7 @@ public class KeyLookupTest extends SaiRandomizedTest
             assertArrayEquals(keys.get(7), bytes);
         });
     }
+
     private void writeTerms(List<byte[]> terms) throws Exception
     {
 //        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
@@ -608,15 +609,15 @@ public class KeyLookupTest extends SaiRandomizedTest
         writeKeys(writer -> {
 
             for (int x = 0; x < 1000 * 4; x++)
-                {
-                    ByteBuffer buffer = Int32Type.instance.decompose(x);
-                    ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
-                    byte[] bytes = ByteSourceInverse.readBytes(byteSource);
-                    terms.add(bytes);
+            {
+                ByteBuffer buffer = Int32Type.instance.decompose(x);
+                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
+                byte[] bytes = ByteSourceInverse.readBytes(byteSource);
+                terms.add(bytes);
 
-                    writer.add(ByteComparable.preencoded(VERSION, bytes));
-                }
-            }, false);
+                writer.add(ByteComparable.preencoded(VERSION, bytes));
+            }
+        }, false);
 //        }
 //        components.markComplete();
     }
@@ -633,19 +634,19 @@ public class KeyLookupTest extends SaiRandomizedTest
 //                                                                  blockFPWriter,
 //                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
 //            {
-                writeKeys(writer -> {
-                for (int x = 0; x < 1000 ; x++)
+        writeKeys(writer -> {
+            for (int x = 0; x < 1000; x++)
+            {
+                int component1 = x * 2;
+                for (int i = 0; i < numPerPrefix; i++)
                 {
-                    int component1 = x * 2;
-                    for (int i = 0; i < numPerPrefix; i++)
-                    {
-                        String component2 = "v" + i;
-                        termsMinPrefix.add(ByteSource.withTerminator(ByteSource.LT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1))));
-                        termsMaxPrefix.add(ByteSource.withTerminator(ByteSource.GT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1))));
-                        writer.add(v -> ByteSource.withTerminator(ByteSource.TERMINATOR, intByteSource(component1), utfByteSource(component2)));
-                    }
+                    String component2 = "v" + i;
+                    termsMinPrefix.add(ByteSource.withTerminator(ByteSource.LT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1))));
+                    termsMaxPrefix.add(ByteSource.withTerminator(ByteSource.GT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1))));
+                    writer.add(v -> ByteSource.withTerminator(ByteSource.TERMINATOR, intByteSource(component1), utfByteSource(component2)));
                 }
-            }, false);
+            }
+        }, false);
 //        }
 //        components.markComplete();
     }
@@ -680,12 +681,6 @@ public class KeyLookupTest extends SaiRandomizedTest
             }
         }
         components.markComplete();
-    }
-
-    @FunctionalInterface
-    public interface ThrowingConsumer<T>
-    {
-        void accept(T t) throws Exception;
     }
 
     private void withKeyLookup(ThrowingConsumer<KeyLookup> testCode) throws Exception
@@ -726,5 +721,11 @@ public class KeyLookupTest extends SaiRandomizedTest
         {
         }
         return false;
+    }
+
+    @FunctionalInterface
+    public interface ThrowingConsumer<T>
+    {
+        void accept(T t) throws Exception;
     }
 }
