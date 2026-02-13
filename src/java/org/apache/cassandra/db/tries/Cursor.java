@@ -20,6 +20,8 @@ package org.apache.cassandra.db.tries;
 
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import org.agrona.DirectBuffer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -74,7 +76,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// `(0, -1), (1, t), (2, r), (3, e), (4, e)*, (3, i), (4, e)*, (4, p)*, (1, w), (2, i), (3, n)*`
 ///
 /// Because we exhaust transitions on bigger depths before we go the next transition on the smaller ones, when
-/// cursors are advanced together their positions can be easily compared using only the [#depth] and
+/// cursors are advanced together, i.e. when we walk the combination of two or more cursors in order, where we would
+/// want to advance the one that is earlier in the comparison order until it catches up, their positions can be easily
+/// compared using only the [#depth] and
 /// [#incomingTransition]:
 ///   - one that is higher in depth is before one that is lower;
 ///   - for equal depths, the one with smaller incomingTransition is first.
@@ -126,6 +130,7 @@ interface Cursor<T>
 
     /// @return the content associated with the current node. This may be non-null for any presented node, including
     ///         the root.
+    @Nullable
     T content();
 
     /// Returns the direction in which this cursor is progressing.
@@ -235,10 +240,10 @@ interface Cursor<T>
         return true;
     }
 
-    /// Returns a tail trie, i.e. a trie whose root is the current position. Walking a tail trie will list all
+    /// Returns a tail cursor, i.e. a cursor whose root is the current position. Walking a tail cursor will list all
     /// descendants of the current position with depth adjusted by the current depth.
     ///
-    /// It is an error to call `tailTrie` on an exhausted cursor.
+    /// It is an error to call `tailCursor` on an exhausted cursor.
     ///
     /// Descendants that override this class should return their specific cursor type.
     Cursor<T> tailCursor(Direction direction);
@@ -273,7 +278,7 @@ interface Cursor<T>
     }
 
     /// Process the trie using the given [Walker].
-    /// This method should only be called on a freshly constructed cursor.
+    /// This method must only be called on a freshly constructed cursor.
     default <R> R process(Cursor.Walker<? super T, R> walker)
     {
         assert depth() == 0 : "The provided cursor has already been advanced.";
@@ -289,7 +294,14 @@ interface Cursor<T>
         return walker.complete();
     }
 
-    /// Process the trie using the given [Walker], skipping over branches where content was found.
+    /// Process the trie using the given [Walker], skipping over branches where content is found.
+    /// In other words, it walks the top levels of the trie until it finds a content-bearing node. When it does, it
+    /// presents this content and continues with the next sibling of that node, ignoring all substructure below it.
+    /// This is useful, for example, when the user uses content/metadata to mark levels of internal hierarchy and wants
+    /// to visit only the top-level elements.
+    ///
+    /// This is similar to [Trie#tailTries], but able to access only the content instead of the full branch.
+    ///
     /// This method should only be called on a freshly constructed cursor.
     default <R> R processSkippingBranches(Cursor.Walker<? super T, R> walker)
     {

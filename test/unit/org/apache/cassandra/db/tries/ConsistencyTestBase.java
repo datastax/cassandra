@@ -517,20 +517,6 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
                                TestRangeState.COVERED);
     }
 
-    static ByteComparable nextBranch(ByteComparable key)
-    {
-        return version -> {
-            byte[] bytes = key.asByteComparableArray(version);
-            int last = bytes.length - 1;
-            while (last >= 0 && bytes[last] == ((byte) 0xFF))
-                --last;
-            if (last < 0)
-                return null;
-            ++bytes[last];
-            return ByteSource.preencoded(bytes, 0, last + 1);
-        };
-    }
-
     public void checkEntries(String location,
                              int min,
                              boolean usePk,

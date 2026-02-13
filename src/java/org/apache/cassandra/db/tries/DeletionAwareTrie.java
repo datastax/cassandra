@@ -493,8 +493,18 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
         return () -> new TrieTailsIterator.AsEntriesDeletionAware<>(cursor(direction), clazz);
     }
 
+    // The methods below form the non-public implementation, whose visibility is restricted to package-level.
+    // The warning suppression below is necessary because we cannot limit the visibility of an interface method.
+    // We need an interface to be able to implement trie methods by lambdas, which is heavily used above.
+
+    /// Implement this method to provide the concrete trie implementation as the cursor that presents it, most easily
+    /// done via a lambda as in the methods above.
+    //noinspection ClassEscapesDefinedScope
     DeletionAwareCursor<T, D> makeCursor(Direction direction);
 
+    /// @inheritDoc This method's implementation uses [#makeCursor] to get the cursor and may apply additional cursor
+    /// checks for tests that run with verification enabled.
+    //noinspection ClassEscapesDefinedScope
     @Override
     default DeletionAwareCursor<T, D> cursor(Direction direction)
     {

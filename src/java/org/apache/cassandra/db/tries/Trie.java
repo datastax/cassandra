@@ -37,7 +37,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// the trie.
 ///
 /// The internal representation of tries using this interface is defined in the [Cursor] interface, accessed via the
-/// [CursorWalkable] interface's [#cursor] method.
+/// [CursorWalkable] interface's [#cursor] method. [#cursor]/[#makeCursor] is the only method of the interface without
+/// an implementation; to define a trie, one needs to implement it. We usually do this by returning a lambda, and Java's
+/// single abstract method functionality takes care of adding the trie plumbing around it.
 ///
 /// Cursors are a method of presenting the internal structure of a trie without representing nodes as objects, which is
 /// still useful for performing the basic operations on tries (iteration, slicing/intersection and merging). A cursor
@@ -267,8 +269,18 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
         return dir -> new Cursor.Empty<>(dir, byteComparableVersion);
     }
 
+    // The methods below form the non-public implementation, whose visibility is restricted to package-level.
+    // The warning suppression below is necessary because we cannot limit the visibility of an interface method.
+    // We need an interface to be able to implement trie methods by lambdas, which is heavily used above.
+
+    /// Implement this method to provide the concrete trie implementation as the cursor that presents it, most easily
+    /// done via a lambda as in the methods above.
+    //noinspection ClassEscapesDefinedScope
     Cursor<T> makeCursor(Direction direction);
 
+    /// @inheritDoc This method's implementation uses [#makeCursor] to get the cursor and may apply additional cursor
+    /// checks for tests that run with verification enabled.
+    //noinspection ClassEscapesDefinedScope
     @Override
     default Cursor<T> cursor(Direction direction)
     {

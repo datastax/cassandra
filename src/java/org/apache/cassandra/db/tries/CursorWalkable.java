@@ -23,5 +23,7 @@ package org.apache.cassandra.db.tries;
 /// @param <C> The specific type of cursor a descendant uses.
 interface CursorWalkable<C extends Cursor>
 {
+    /// Returns a cursor that can be used to walk over the trie. The cursor will be positioned at the root of the trie
+    /// and prepared to walk it in the given direction.
     C cursor(Direction direction);
 }

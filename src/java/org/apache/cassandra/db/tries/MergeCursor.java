@@ -43,12 +43,12 @@ abstract class MergeCursor<T, C extends Cursor<T>> implements Cursor<T>
 
     MergeCursor(Trie.MergeResolver<T> resolver, C c1, C c2)
     {
+        assert c1.depth() == 0 : "The provided cursor has already been advanced.";
+        assert c2.depth() == 0 : "The provided cursor has already been advanced.";
         this.direction = c1.direction();
         this.resolver = resolver;
         this.c1 = c1;
         this.c2 = c2;
-        assert c1.depth() == c2.depth();
-        assert c1.incomingTransition() == c2.incomingTransition();
         atC1 = atC2 = true;
     }
 

@@ -114,8 +114,11 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
                 head = cursor;
             ++i;
         }
+
         // The cursors are all currently positioned on the root and thus in valid heap order.
-        assert Arrays.stream(heap).allMatch(x -> equalCursor(head, x));
+        assert head.depth() == 0 : "The provided cursor has already been advanced.";
+        for (C cursor : heap)
+            assert cursor.depth() == 0 : "The provided cursor has already been advanced.";
     }
 
     /// Interface for internal operations that can be applied to selected top elements of the heap.

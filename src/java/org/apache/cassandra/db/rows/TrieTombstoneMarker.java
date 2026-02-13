@@ -32,6 +32,12 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// - boundary markers, which switch from one deletion time to a different one (either of which may be null).
 ///
 /// See [RangeState] for further explanation of the types of markers.
+///
+/// In addition to these, we have a special form of boundary for point deletions, where the left and right side are the
+/// same (often null), but there is a deletion time applicable to the exact point. These are used to mark deletions at
+/// the lowest points of the represented data hierarchy where no further complexity can exist below the marked point
+/// (currently point markers are used to mark deleted rows, which is the lowest level reached by `TrieMemtable`) to
+/// improve efficiency compared to bracketing the point with boundaries on both sides.
 public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IMeasurableMemory
 {
     /// Returns the deletion time applicable at this point. Normally this would be called on non-boundary states only,
@@ -54,6 +60,7 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
     /// equal) which is not stored or reported.
     TrieTombstoneMarker mergeWith(TrieTombstoneMarker existing);
 
+    /// Returns true if this marker contains a point deletion.
     boolean hasPointData();
 
     static TrieTombstoneMarker covering(DeletionTime deletionTime)

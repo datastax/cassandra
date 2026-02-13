@@ -277,10 +277,11 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
 
     /// Returns a trie that corresponds to the branch of this trie rooted at the given prefix.
     ///
-    /// The result will include the same values as `subtrie(prefix, nextBranch(prefix))`, but the keys in the
+    /// The result will include the same values as `subtrie(prefix, prefix)`, but the keys in the
     /// resulting trie will not include the prefix. In other words,
-    /// ```tailTrie(prefix).prefixedBy(prefix) = subtrie(prefix, nextBranch(prefix))```
-    /// where `nextBranch` stands for the key adjusted by adding one at the last position.
+    /// ```tailTrie(prefix).prefixedBy(prefix) = subtrie(prefix, prefix)```
+    /// (Note: This equivalence does not hold for content on the path leading to the branch, because the tail trie
+    /// has no way of presenting such content.)
     Q tailTrie(ByteComparable prefix);
 
     /// Returns an entry set containing all tail tree constructed at the points that contain content of
