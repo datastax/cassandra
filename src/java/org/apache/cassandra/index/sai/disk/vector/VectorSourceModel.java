@@ -28,7 +28,6 @@ import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.COSINE;
 import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.DOT_PRODUCT;
 import static java.lang.Math.max;
 import static java.lang.Math.pow;
-import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
 public enum VectorSourceModel
@@ -143,9 +142,7 @@ public enum VectorSourceModel
     {
         assert vc != null;
         // we compress extra-large vectors more aggressively, so we need to bump up the limit for those.
-        if (vc.type == BINARY_QUANTIZATION)
-            return 2.0;
-        else if ((double) vc.getOriginalSize() / vc.getCompressedSize() > 16.0)
+        if ((double) vc.getOriginalSize() / vc.getCompressedSize() > 16.0)
             return 1.5;
         else
             return 1.0;
