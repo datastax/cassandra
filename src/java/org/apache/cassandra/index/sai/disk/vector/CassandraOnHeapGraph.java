@@ -54,7 +54,6 @@ import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
-import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
@@ -494,7 +493,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // Write the NVQ feature. We could compute this at insert time, but because the graph allows for parallel
             // insertions, it would be a bit more complicated. All vectors are in memory, so the computation to build the
             // mean vector should be pretty fast, and this path is only used when we don't have an existing
-            // ProductQuantization or when we're using BQ.
+            // ProductQuantization.
             NVQuantization nvq = writeNvq ? NVQuantization.compute(vectorValues, NUM_SUB_VECTORS) : null;
 
             try (var indexWriter = createIndexWriter(indexFile, termsOffset, perIndexComponents.context(), ordinalMapper, compressor, nvq);
@@ -631,22 +630,17 @@ public class CassandraOnHeapGraph<T> implements Accountable
         var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
 
         // Build encoder and compress vectors
-        VectorCompressor<?> compressor; // will be null if we can't compress
+        VectorCompressor<?> compressor = null; // will be null if we can't compress
         CompressedVectors cv = null;
         // limit the PQ computation and encoding to one index at a time -- goal during flush is to
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
         {
-            // build encoder (expensive for PQ, cheaper for BQ)
+            // build encoder (expensive for PQ)
             if (preferredCompression.type == CompressionType.PRODUCT_QUANTIZATION)
             {
                 var pqi = getPqIfPresent(indexContext, preferredCompression::equals);
                 compressor = computeOrRefineFrom(pqi, preferredCompression);
-            }
-            else
-            {
-                assert preferredCompression.type == CompressionType.BINARY_QUANTIZATION : preferredCompression.type;
-                compressor = BinaryQuantization.compute(vectorValues);
             }
             assert !vectorValues.isValueShared();
             // encode (compress) the vectors to save

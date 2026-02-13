@@ -49,9 +49,6 @@ import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
-import io.github.jbellis.jvector.quantization.BQVectors;
-import io.github.jbellis.jvector.quantization.BinaryQuantization;
-import io.github.jbellis.jvector.quantization.MutableBQVectors;
 import io.github.jbellis.jvector.quantization.MutableCompressedVectors;
 import io.github.jbellis.jvector.quantization.MutablePQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
@@ -200,18 +197,11 @@ public class CompactionGraph implements Closeable, Accountable
         vectorsByOrdinalTmpFile = perIndexComponents.tmpFileFor("vectors_by_ordinal");
         onDiskVectorValuesWriter = new OnDiskVectorValuesWriter(vectorsByOrdinalTmpFile, dimension);
 
-        // VSTODO add LVQ
         BuildScoreProvider bsp;
         if (compressor instanceof ProductQuantization)
         {
             compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
             bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors);
-        }
-        else if (compressor instanceof BinaryQuantization)
-        {
-            var bq = new BinaryQuantization(dimension);
-            compressedVectors = new MutableBQVectors(bq);
-            bsp = BuildScoreProvider.bqBuildScoreProvider((BQVectors) compressedVectors);
         }
         else
         {
