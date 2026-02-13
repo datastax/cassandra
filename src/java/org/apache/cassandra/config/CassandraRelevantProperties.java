@@ -458,7 +458,15 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_ORDINAL_HOLE_DENSITY_LIMIT("cassandra.sai.vector.ordinal_hole_density_limit", "0.01"),
     // When building a compaction graph, encode layer 0 nodes in parallel and subsequently use async io for writes.
     // This feature is experimental, so defaults to false.
-    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL("cassandra.sai.vector.encode_write_graph_parallel", "false"),
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED("cassandra.sai.vector.encode_and_write_graph_in_parallel.enabled", "false"),
+    // When parallel graph encoding is enabled, the number of threads to use for encoding. Defaults to 0, meaning
+    // use all available processors as reported by the JVM.
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_NUM_THREADS("cassandra.sai.vector.encode_and_write_graph_in_parallel.num_threads", "0"),
+    // When parallel graph encoding is enabled, whether to use director buffers. Defaults to false, meaning heap
+    // buffers are used. A buffer will be allocated per encoding thread. The size of each buffer is the size
+    // of the encoded graph node at layer 0, which varies based on graph feature settings.
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS("cassandra.sai.vector.encode_and_write_graph_in_parallel.use_direct_buffers", "false"),
+
     /**
      * Whether to disable auto-compaction
      */

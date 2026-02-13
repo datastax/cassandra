@@ -20,7 +20,6 @@ import java.io.Closeable;
 import java.io.IOException;
 
 import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
-import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.io.util.File;
 
@@ -89,8 +88,8 @@ class OnDiskVectorValuesWriter implements Closeable
         // Update the last ordinal
         lastOrdinal = ordinal;
 
-        // Write the vector data. We only support ArrayVectorFloat at the moment.
-        bufferedWriter.writeFloats(((ArrayVectorFloat) vector).get(), 0, dimension);
+        // Write the vector data
+        vector.writeTo(bufferedWriter);
     }
 
     /**

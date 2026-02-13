@@ -41,6 +41,8 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.graph.disk.OnDiskParallelGraphIndexWriter;
+import io.github.jbellis.jvector.graph.disk.RandomAccessOnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
@@ -114,7 +116,9 @@ public class CompactionGraph implements Closeable, Accountable
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
 
-    private static boolean PARALLEL_ENCODING_WRITING = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL.getBoolean();
+    private static boolean PARALLEL_ENCODING_WRITING = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED.getBoolean();
+    private static int PARALLEL_ENCODING_WRITING_NUM_THREADS = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_NUM_THREADS.getInt();
+    private static boolean PARALLEL_ENCODING_WRITING_USE_DIRECT_BUFFERS = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS.getBoolean();
 
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
@@ -231,16 +235,23 @@ public class CompactionGraph implements Closeable, Accountable
                                                                                      : null;
     }
 
-    private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper, NVQuantization nvq) throws IOException
+    private RandomAccessOnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper, NVQuantization nvq) throws IOException
     {
-        var feature = nvq != null ? new NVQ(nvq) : new InlineVectors(dimension);
         // We call termsFile.toJavaIOFile().toPath() to get a local file.
-        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toJavaIOFile().toPath())
-                            .withParallelWrites(PARALLEL_ENCODING_WRITING)
-                            .withStartOffset(termsOffset)
-                            .with(feature)
-                            .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
-                            .withMapper(ordinalMapper);
+        var path = termsFile.toJavaIOFile().toPath();
+        var graph = builder.getGraph();
+
+        //
+        var writerBuilder = PARALLEL_ENCODING_WRITING
+                            ? new OnDiskParallelGraphIndexWriter.Builder(graph, path)
+                              .withStartOffset(termsOffset)
+                              .withParallelWorkerThreads(PARALLEL_ENCODING_WRITING_NUM_THREADS)
+                              .withParallelDirectBuffers(PARALLEL_ENCODING_WRITING_USE_DIRECT_BUFFERS)
+                            : new OnDiskGraphIndexWriter.Builder(graph, path).withStartOffset(termsOffset);
+
+        writerBuilder.with(nvq != null ? new NVQ(nvq) : new InlineVectors(dimension))
+                     .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
+                     .withMapper(ordinalMapper);
         if (compressor instanceof ProductQuantization && JVectorVersionUtil.shouldWriteFused(context.version()))
             writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
         return writerBuilder.build();
