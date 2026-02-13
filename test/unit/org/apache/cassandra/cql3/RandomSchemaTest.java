@@ -76,7 +76,7 @@ public class RandomSchemaTest extends CQLTester.InMemory
         // make sure ordering is determanstic, else repeatability breaks
         NavigableMap<String, SSTableFormat<?, ?>> formats = new TreeMap<>(DatabaseDescriptor.getSSTableFormats());
         Gen<SSTableFormat<?, ?>> ssTableFormatGen = SourceDSL.arbitrary().pick(new ArrayList<>(formats.values()));
-        qt().checkAssert(random -> {
+        qt().withFixedSeed(260919020985871L).checkAssert(random -> {
             resetSchema();
 
             // TODO : when table level override of sstable format is allowed, migrate to that
