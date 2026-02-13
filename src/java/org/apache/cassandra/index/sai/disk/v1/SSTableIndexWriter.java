@@ -31,11 +31,9 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -382,9 +380,6 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         if (indexContext.isVector())
         {
-            int dimension = ((VectorType<?>) indexContext.getValidator()).dimension;
-            boolean bqPreferred = indexContext.getIndexWriterConfig().getSourceModel().compressionProvider.apply(dimension).type == CompressionType.BINARY_QUANTIZATION;
-
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
             var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
@@ -392,12 +387,10 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (pqi == null && !segments.isEmpty())
                 pqi = maybeReadPqFromLastSegment();
 
-            if ((bqPreferred || pqi != null) && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            if (pqi != null && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
             {
-                var compressor = bqPreferred ? new BinaryQuantization(dimension) : pqi.pq;
-                var unitVectors = bqPreferred ? false : pqi.unitVectors;
                 var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, allRowsHaveVectors, limiter);
             }
             else
             {
