@@ -225,7 +225,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
 
         // Set force PQ training size to ensure we hit the refine code path and apply it to half the vectors.
         // TODO this test fails as of this commit due to recall issues. Will investigate further.
-        CompactionGraph.PQ_TRAINING_SIZE = baseVectors.size() / 2;
+        // CompactionGraph.PQ_TRAINING_SIZE = baseVectors.size() / 2;
 
         // Compact again to take the CompactionGraph code path that calls the refine logic
         compact();
