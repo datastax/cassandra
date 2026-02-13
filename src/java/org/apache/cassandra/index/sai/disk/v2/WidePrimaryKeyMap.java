@@ -198,7 +198,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         ByteSource.Peekable peekable = ByteSource.peekable(clusteringKeyCursor.seekToPointId(sstableRowId)
                                                                               .asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
 
-        Clustering<?> clustering = clusteringComparator.clusteringFromByteComparable(ByteBufferAccessor.instance, v -> peekable);
+        Clustering<?> clustering = clusteringComparator.clusteringFromByteComparable(ByteBufferAccessor.instance, v -> peekable, TypeUtil.BYTE_COMPARABLE_VERSION);
 
         if (clustering == null)
             clustering = Clustering.EMPTY;
