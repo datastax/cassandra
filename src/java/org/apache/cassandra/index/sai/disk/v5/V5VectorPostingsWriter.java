@@ -37,6 +37,7 @@ import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.util.FixedBitSet;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
+import net.openhft.chronicle.map.ChronicleMap;
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
@@ -112,7 +113,7 @@ public class V5VectorPostingsWriter<T>
      * vectors to disk as they are added to the graph, so there is no opportunity to reorder the way there is
      * in a Memtable index.
      */
-    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, Map<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
+    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, int maxRowId, int maxOrdinal, ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
     {
         assert !postingsMap.isEmpty(); // flush+compact should skip writing an index component in this case
 
@@ -128,38 +129,23 @@ public class V5VectorPostingsWriter<T>
 
         if (structure == Structure.ONE_TO_MANY)
         {
-            // compute maxOldOrdinal, maxRow, and extraOrdinals from the postingsMap
-            int maxOldOrdinal = Integer.MIN_VALUE;
-            int maxRow = Integer.MIN_VALUE;
+            // compute extraOrdinals from the postingsMap
             var extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
-            for (var entry : postingsMap.entrySet())
-            {
-                var postings = entry.getValue();
-                int ordinal = postings.getOrdinal();
-
-                maxOldOrdinal = Math.max(maxOldOrdinal, ordinal);
-                var rowIds = postings.getRowIds();
-                assert ordinal == rowIds.getInt(0); // synthetic ordinals not allowed in ONE_TO_MANY
-                for (int i = 0; i < rowIds.size(); i++)
-                {
-                    int rowId = rowIds.getInt(i);
-                    maxRow = Math.max(maxRow, rowId);
-                    if (i > 0)
-                        extraOrdinals.put(rowId, ordinal);
-                }
-            }
+            postingsMap.forEachEntry(entry -> {
+                VectorPostings.CompactionVectorPostings.Marshaller.recordExtraOrdinals(entry, extraOrdinals);
+            });
 
             var skippedOrdinals = extraOrdinals.keySet();
             return new RemappedPostings(Structure.ONE_TO_MANY,
-                                        maxOldOrdinal,
-                                        maxRow,
+                                        maxOrdinal,
+                                        maxRowId,
                                         null,
                                         extraOrdinals,
-                                        new OmissionAwareIdentityMapper(maxOldOrdinal, skippedOrdinals::contains));
+                                        new OmissionAwareIdentityMapper(maxOrdinal, skippedOrdinals::contains));
         }
 
         assert structure == Structure.ZERO_OR_ONE_TO_MANY : structure;
-        return createGenericIdentityMapping(postingsMap);
+        return createGenericIdentityMapping(postingsMap, maxRowId, maxOrdinal);
     }
 
     public long writePostings(SequentialWriter writer,
@@ -481,6 +467,26 @@ public class V5VectorPostingsWriter<T>
         return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
                                     maxOldOrdinal,
                                     maxRow,
+                                    null,
+                                    null,
+                                    new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
+    }
+
+    /**
+     * return an exhaustive zero-to-many mapping with no renumbering
+     */
+    public static RemappedPostings createGenericIdentityMapping(ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, int maxRowId, int maxOldOrdinal)
+    {
+        var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
+
+        // Iterate the whole map using the low level API that avoids deserialization penalties.
+        postingsMap.forEachEntry(entry -> {
+            presentOrdinals.set(VectorPostings.CompactionVectorPostings.Marshaller.extractOrdinal(entry));
+        });
+
+        return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
+                                    maxOldOrdinal,
+                                    maxRowId,
                                     null,
                                     null,
                                     new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
