@@ -85,7 +85,6 @@ Available models:
 | OTHER           | COSINE      | Auto-scaled PQ | Dynamic          | Generic configuration for unknown models |
 
 The `OTHER` model uses dimension-based heuristics to automatically determine appropriate compression settings and adjusts overquery based on compression ratio:
-- Binary quantization: 2.0x overquery
 - High compression (>16x): 1.5x overquery
 - Standard compression: 1.0x overquery
 
