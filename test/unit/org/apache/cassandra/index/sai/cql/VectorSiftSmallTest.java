@@ -209,7 +209,6 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
 
         // Take the CassandraOnHeapGraph code path.
         compact();
-        compact();
         for (int topK : List.of(1, 100))
         {
             var recall = testRecall(topK, queryVectors, groundTruth);
