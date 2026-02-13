@@ -241,7 +241,6 @@ public class CompactionGraph implements Closeable, Accountable
         var path = termsFile.toJavaIOFile().toPath();
         var graph = builder.getGraph();
 
-        //
         var writerBuilder = PARALLEL_ENCODING_WRITING
                             ? new OnDiskParallelGraphIndexWriter.Builder(graph, path)
                               .withStartOffset(termsOffset)
