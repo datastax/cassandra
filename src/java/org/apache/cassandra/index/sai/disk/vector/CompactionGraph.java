@@ -67,8 +67,10 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import net.openhft.chronicle.bytes.Bytes;
+import net.openhft.chronicle.hash.Data;
 import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
+import net.openhft.chronicle.hash.serialization.SizeMarshaller;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
 import org.apache.cassandra.concurrent.ExecutorFactory;
@@ -137,6 +139,8 @@ public class CompactionGraph implements Closeable, Accountable
     private Structure postingsStructure;
     private final long termsOffset;
     private int lastRowId = -1;
+    private int rowsAdded = 0;
+    private int maxOrdinal = -1; // Inclusive
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
@@ -191,8 +195,9 @@ public class CompactionGraph implements Closeable, Accountable
         postingsFile = dd.fileFor(tmpComponent);
         postingsMap = ChronicleMapBuilder.of((Class<VectorFloat<?>>) (Class) VectorFloat.class, (Class<CompactionVectorPostings>) (Class) CompactionVectorPostings.class)
                                          .averageKeySize(dimension * Float.BYTES)
+                                         .keySizeMarshaller(SizeMarshaller.constant((long) dimension * Float.BYTES))
                                          .averageValueSize(VectorPostings.emptyBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF + 2 * Integer.BYTES)
-                                         .keyMarshaller(new VectorFloatMarshaller())
+                                         .keyMarshaller(new VectorFloatMarshaller(dimension))
                                          .valueMarshaller(new VectorPostings.Marshaller())
                                          .entries(postingsEntriesAllocated)
                                          .createPersistedTo(postingsFile.toJavaIOFile());
@@ -271,7 +276,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     public boolean isEmpty()
     {
-        return postingsMap.values().stream().allMatch(VectorPostings::isEmpty);
+        return rowsAdded == 0;
     }
 
     /**
@@ -300,94 +305,115 @@ public class CompactionGraph implements Closeable, Accountable
         if (segmentRowId != lastRowId + 1)
             postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
         lastRowId = segmentRowId;
+        rowsAdded++;
 
         var bytesUsed = 0L;
-        var postings = postingsMap.get(vector);
-        if (postings == null)
+        // QueryContext allows us to avoid re-serializing the vector. Closing the queryContext releases the lock.
+        // Note that a normal put operation follows this flow, so the overhead of acquiring the lock is required.
+        try (var postingsQueryContext = postingsMap.queryContext(vector))
         {
-            // add a new entry
-            // this all runs on the same compaction thread, so we don't need to worry about concurrency
-            int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
-            postings = new CompactionVectorPostings(ordinal, segmentRowId);
-            postingsMap.put(vector, postings);
-
-            // fine-tune the PQ if we've collected enough vectors
-            if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
+            // Closing the query context releases the lock.
+            //noinspection LockAcquiredButNotSafelyReleased
+            postingsQueryContext.writeLock().lock();
+            var absentEntry = postingsQueryContext.absentEntry();
+            if (absentEntry != null)
             {
-                // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
-                // and (2) a map of vectors keyed by ordinal
-                var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
-                var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
-                postingsMap.forEach((v, p) -> {
-                    var vectorClone = v.copy();
-                    trainingVectors.add(vectorClone);
-                    vectorsByOrdinal.put(p.getOrdinal(), vectorClone);
-                });
+                // add a new entry
+                // this all runs on the same compaction thread, so we don't need to worry about concurrency
+                int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
+                assert ordinal > maxOrdinal : "Unexpected ordinal " + ordinal + " previous max " + maxOrdinal;
+                maxOrdinal = ordinal;
+                CompactionVectorPostings postings = new CompactionVectorPostings(ordinal, segmentRowId);
+                Data<CompactionVectorPostings> data = postingsQueryContext.wrapValueAsData(postings);
+                absentEntry.doInsert(data);
 
-                // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
-                trainingLock.writeLock().lock();
-                try
+                // fine-tune the PQ if we've collected enough vectors
+                if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
                 {
-                    // Fine tune the pq codebook
-                    compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
-                    trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
+                    // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
+                    // and (2) a map of vectors keyed by ordinal
+                    var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
+                    var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
+                    postingsMap.forEachEntry(entry -> {
+                        // We copy here to be extra safe because at the time of writing, I couldn't find definitive
+                        // proof that forEachEntry doesn't reuse the float[] backing the instance. Since this is only
+                        // ever called for MAX_PQ_TRAINING_SET_SIZE vectors at a time, the cost is essentially fixed
+                        // and is unlikely to contribute much to compaction duration.
+                        var vectorClone = entry.key().get().copy();
+                        trainingVectors.add(vectorClone);
+                        vectorsByOrdinal.put(VectorPostings.Marshaller.extractOrdinal(entry), vectorClone);
+                    });
 
-                    // re-encode the vectors added so far
-                    int encodedVectorCount = compressedVectors.count();
-                    compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
-                    compactionFjp.submit(() -> {
-                        IntStream.range(0, encodedVectorCount)
-                                 .parallel()
-                                 .forEach(i -> {
-                                     var v = vectorsByOrdinal.get(i);
-                                     if (v == null)
-                                         compressedVectors.setZero(i);
-                                     else
-                                         compressedVectors.encodeAndSet(i, v);
-                                 });
-                    }).join();
+                    // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
+                    trainingLock.writeLock().lock();
+                    try
+                    {
+                        // Fine tune the pq codebook
+                        compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
+                        trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
 
-                    // Keep the existing edges but recompute their scores
-                    builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
+                        // re-encode the vectors added so far
+                        int encodedVectorCount = compressedVectors.count();
+                        compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
+                        compactionFjp.submit(() -> {
+                            IntStream.range(0, encodedVectorCount)
+                                     .parallel()
+                                     .forEach(i -> {
+                                         var v = vectorsByOrdinal.get(i);
+                                         if (v == null)
+                                             compressedVectors.setZero(i);
+                                         else
+                                             compressedVectors.encodeAndSet(i, v);
+                                     });
+                        }).join();
+
+                        // Keep the existing edges but recompute their scores
+                        builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
+                    }
+                    finally
+                    {
+                        trainingLock.writeLock().unlock();
+                    }
+                    pqFinetuned = true;
                 }
-                finally
-                {
-                    trainingLock.writeLock().unlock();
-                }
-                pqFinetuned = true;
+
+                // Update the global mean, if we're tracking it (which is currently only done when we will write using NVQ)
+                if (globalMean != null)
+                    VectorUtil.addInPlace(globalMean, vector);
+
+                // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
+                // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
+                // with the posting list logic.
+                long targetPosition = ordinal * Float.BYTES * (long) dimension;
+                assert vectorsByOrdinalBufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + vectorsByOrdinalBufferedWriter.position() + " > targetPosition=" + targetPosition;
+                vectorsByOrdinalBufferedWriter.seek(targetPosition);
+                for (int i = 0; i < dimension; i++)
+                    vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
+
+                // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
+                while (compressedVectors.count() < ordinal)
+                    compressedVectors.setZero(compressedVectors.count());
+                compressedVectors.encodeAndSet(ordinal, vector);
+
+                bytesUsed += postings.ramBytesUsed();
+                return new InsertionResult(bytesUsed, ordinal, vector);
             }
 
-            // Update the global mean, if we're tracking it (which is currently only done when we will write using NVQ)
-            if (globalMean != null)
-                VectorUtil.addInPlace(globalMean, vector);
+            // postings list already exists, just add the new key
+            if (postingsStructure == Structure.ONE_TO_ONE)
+                postingsStructure = Structure.ONE_TO_MANY;
 
-            // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
-            // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
-            // with the posting list logic.
-            long targetPosition = ordinal * Float.BYTES * (long) dimension;
-            assert vectorsByOrdinalBufferedWriter.position() <= targetPosition : "vectorsByOrdinalBufferedWriter.position()=" + vectorsByOrdinalBufferedWriter.position() + " > targetPosition=" + targetPosition;
-            vectorsByOrdinalBufferedWriter.seek(targetPosition);
-            for (int i = 0; i < dimension; i++)
-                vectorsByOrdinalBufferedWriter.writeFloat(vector.get(i));
+            var postingsEntry = postingsQueryContext.entry();
+            assert postingsEntry != null;
+            var postings = postingsEntry.value().get();
+            var newPosting = postings.add(segmentRowId);
+            assert newPosting;
+            bytesUsed += postings.bytesPerPosting();
+            Data<CompactionVectorPostings> updatedPostings = postingsQueryContext.wrapValueAsData(postings);
+            postingsEntry.doReplaceValue(updatedPostings); // re-serialize value to disk
 
-            // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
-            while (compressedVectors.count() < ordinal)
-                compressedVectors.setZero(compressedVectors.count());
-            compressedVectors.encodeAndSet(ordinal, vector);
-
-            bytesUsed += postings.ramBytesUsed();
-            return new InsertionResult(bytesUsed, ordinal, vector);
+            return new InsertionResult(bytesUsed);
         }
-
-        // postings list already exists, just add the new key
-        if (postingsStructure == Structure.ONE_TO_ONE)
-            postingsStructure = Structure.ONE_TO_MANY;
-        var newPosting = postings.add(segmentRowId);
-        assert newPosting;
-        bytesUsed += postings.bytesPerPosting();
-        postingsMap.put(vector, postings); // re-serialize to disk
-
-        return new InsertionResult(bytesUsed);
     }
 
     public long addGraphNode(InsertionResult result)
@@ -418,8 +444,7 @@ public class CompactionGraph implements Closeable, Accountable
                                                                                         postingsMap.keySet().size(), builder.getGraph().size());
         if (logger.isDebugEnabled())
         {
-            logger.debug("Writing graph with {} rows and {} distinct vectors",
-                         postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
+            logger.debug("Writing graph with {} rows and {} distinct vectors", rowsAdded, builder.getGraph().size());
             logger.debug("Estimated size is {} + {}", compressedVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
         }
 
@@ -452,6 +477,8 @@ public class CompactionGraph implements Closeable, Accountable
                 }
                 var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
                                                                       builder.getGraph().size(),
+                                                                      lastRowId,
+                                                                      maxOrdinal,
                                                                       postingsMap);
                 ordinalMapper.set(rp.ordinalMapper);
                 try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
@@ -554,10 +581,17 @@ public class CompactionGraph implements Closeable, Accountable
         return builder.getGraph().size() >= postingsEntriesAllocated;
     }
 
-    private static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {
+    public static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {
+
+        private final int dimension;
+
+        public VectorFloatMarshaller(int dimension)
+        {
+            this.dimension = dimension;
+        }
+
         @Override
         public void write(Bytes out, VectorFloat<?> vector) {
-            out.writeInt(vector.length());
             for (int i = 0; i < vector.length(); i++) {
                 out.writeFloat(vector.get(i));
             }
@@ -565,16 +599,15 @@ public class CompactionGraph implements Closeable, Accountable
 
         @Override
         public VectorFloat<?> read(Bytes in, VectorFloat<?> using) {
-            int length = in.readInt();
             if (using == null) {
-                float[] data = new float[length];
-                for (int i = 0; i < length; i++) {
+                float[] data = new float[dimension];
+                for (int i = 0; i < dimension; i++) {
                     data[i] = in.readFloat();
                 }
                 return vts.createFloatVector(data);
             }
 
-            for (int i = 0; i < length; i++) {
+            for (int i = 0; i < dimension; i++) {
                 using.set(i, in.readFloat());
             }
             return using;
