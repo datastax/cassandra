@@ -1,0 +1,557 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.index.sai.plan;
+
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import com.google.common.collect.Iterators;
+
+import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DataRange;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
+<<<<<<<
+=======
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
+>>>>>>>
+import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.exceptions.RequestTimeoutException;
+import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.AbstractIterator;
+
+public class StorageAttachedIndexSearcher implements Index.Searcher
+{
+    private static final int PARTITION_ROW_BATCH_SIZE = 100;
+
+    private final ReadCommand command;
+    private final QueryController controller;
+    private final QueryContext queryContext;
+
+    public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
+                                        TableQueryMetrics tableQueryMetrics,
+                                        ReadCommand command,
+                                        List<RowFilter.Expression> expressions,
+                                        long executionQuotaMs)
+    {
+        this.command = command;
+        this.queryContext = new QueryContext(executionQuotaMs);
+        this.controller = new QueryController(cfs, command, expressions, queryContext, tableQueryMetrics);
+    }
+
+    @Override
+    public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
+    {
+        return  new ResultRetriever(analyze(), controller, executionController, queryContext);
+    }
+
+//    @Override
+//    public Flow<FlowableUnfilteredPartition> search(ReadExecutionController executionController) throws RequestTimeoutException
+//    {
+//        return analyzeAsync().map(operation -> new ResultRetriever(operation, controller, executionController, queryContext))
+//                             .flatMap(FlowablePartitions::fromPartitions);
+//    }
+
+    /**
+     * Converts expressions into filter tree and reference {@link SSTableIndex}s used for query.
+     *
+     * @return operation
+     */
+    private Operation analyze()
+    {
+        return Operation.initTreeBuilder(controller).complete();
+    }
+
+    /**
+     * Converts expressions into filter tree (which is currently just a single AND).
+     *
+     * Filter tree allows us to do a couple of important optimizations
+     * namely, group flattening for AND operations (query rewrite), expression bounds checks,
+     * "satisfies by" checks for resulting rows with an early exit.
+     *
+     * @return root of the filter tree.
+     */
+    //TODO How does this get applied in OS
+    private FilterTree analyzeFilter()
+    {
+        return Operation.initTreeBuilder(controller).completeFilter();
+    }
+
+    private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+    {
+        private final PartitionPosition startToken;
+        private final PartitionPosition lastToken;
+        private final Iterator<DataRange> keyRanges;
+<<<<<<<
+        private AbstractBounds<PartitionPosition> current;
+=======
+        private final DataRange firstDataRange;
+        private AbstractBounds<PartitionPosition> currentKeyRange;
+>>>>>>>
+
+        private final Operation operation;
+        private final QueryController controller;
+        private final ReadExecutionController executionController;
+        private final QueryContext queryContext;
+
+        private Iterator<DecoratedKey> currentKeys = null;
+        private DecoratedKey lastKey;
+
+        private ResultRetriever(Operation operation, QueryController controller,
+                                ReadExecutionController executionController, QueryContext queryContext)
+        {
+<<<<<<<
+            this.keyRanges = controller.dataRanges().iterator();
+            this.current = keyRanges.next().keyRange();
+=======
+            this.keyRanges = queryController.dataRanges().iterator();
+            this.firstDataRange = keyRanges.next();
+            this.currentKeyRange = firstDataRange.keyRange();
+            this.resultKeyIterator = Operation.buildIterator(queryController);
+            this.filterTree = Operation.buildFilter(queryController, queryController.usesStrictFiltering());
+            this.executionController = executionController;
+            this.keyFactory = queryController.primaryKeyFactory();
+            this.firstPrimaryKey = queryController.firstPrimaryKeyInRange();
+            this.lastPrimaryKey = queryController.lastPrimaryKeyInRange();
+            this.topK = topK;
+>>>>>>>
+
+            this.operation = operation;
+            this.controller = controller;
+            this.executionController = executionController;
+            this.queryContext = queryContext;
+
+            this.startToken = controller.mergeRange().left;
+            this.lastToken = controller.mergeRange().right;
+        }
+
+        @Override
+        public UnfilteredRowIterator computeNext()
+        {
+            if (operation == null)
+                return endOfData();
+
+<<<<<<<
+            // If being called for the first time, skip to the beginning of the range.
+            // We can't put this code in the constructor because it may throw and the caller
+            // may not be prepared for that.
+            if (lastKey == null)
+            {
+                PrimaryKey skipTarget = firstPrimaryKey;
+                ClusteringComparator comparator = command.metadata().comparator;
+
+                // If there are no clusterings, the first data range selects an entire partitions, or we have static
+                // expressions, don't bother trying to skip forward within the partition.
+                if (comparator.size() > 0 && !firstDataRange.selectsAllPartition() && !command.rowFilter().hasStaticExpression())
+                {
+                    // Only attempt to skip if the first data range covers a single partition.
+                    if (currentKeyRange.left.equals(currentKeyRange.right) && currentKeyRange.left instanceof DecoratedKey)
+                    {
+                        DecoratedKey decoratedKey = (DecoratedKey) currentKeyRange.left;
+                        ClusteringIndexFilter filter = firstDataRange.clusteringIndexFilter(decoratedKey);
+
+                        if (filter instanceof ClusteringIndexSliceFilter)
+                        {
+                            Slices slices = ((ClusteringIndexSliceFilter) filter).requestedSlices();
+
+                            if (!slices.isEmpty())
+                            {
+                                ClusteringBound<?> startBound = slices.get(0).start();
+
+                                if (!startBound.isEmpty())
+                                {
+                                    ByteBuffer[] rawValues = startBound.getBufferArray();
+
+                                    if (rawValues.length == comparator.size())
+                                        skipTarget = keyFactory.create(decoratedKey, Clustering.make(rawValues));
+                                }
+                            }
+                        }
+                        else if (filter instanceof ClusteringIndexNamesFilter)
+                        {
+                            ClusteringIndexNamesFilter namesFilter = (ClusteringIndexNamesFilter) filter;
+
+                            if (!namesFilter.requestedRows().isEmpty())
+                            {
+                                Clustering<?> skipClustering = namesFilter.requestedRows().iterator().next();
+                                skipTarget = keyFactory.create(decoratedKey, skipClustering);
+                            }
+                        }
+                    }
+                }
+
+                resultKeyIterator.skipTo(skipTarget);
+            }
+=======
+            operation.skipTo(startToken.getToken().getLongValue());
+            if (!operation.hasNext())
+                return endOfData();
+            currentKeys = operation.next().keys();
+>>>>>>>
+
+
+            // IMPORTANT: The correctness of the entire query pipeline relies on the fact that we consume a token
+            // and materialize its keys before moving on to the next token in the flow. This sequence must not be broken
+            // with toList() or similar. (Both the union and intersection flow constructs, to avoid excessive object
+            // allocation, reuse their token mergers as they process individual positions on the ring.)
+            while (true)
+            {
+<<<<<<<
+                List<PrimaryKey> keys = keysSupplier.get();
+                if (keys.isEmpty())
+                    return null;
+                iterator = queryStorageAndFilter(keys);
+            }
+            return iterator;
+        }
+
+        /**
+         * Retrieves the next batch of primary keys (i.e. up to {@link #partitionRowBatchSize} of them) that are
+         * contained by one of the query key ranges and selected by the {@link QueryController}. If the next key falls
+         * out of the current key range, it skips to the next key range, and so on. If no more keys accepted by
+         * the controller are available, and empty list is returned.
+         *
+         * @return a list of up to {@link #partitionRowBatchSize} primary keys
+         */
+        private List<PrimaryKey> nextSelectedKeysInRange()
+        {
+            List<PrimaryKey> threadLocalNextKeys = nextKeys.get();
+            threadLocalNextKeys.clear();
+            PrimaryKey firstKey;
+
+            do
+            {
+                firstKey = nextKeyInRange();
+
+                if (firstKey == null)
+                    return Collections.emptyList();
+            }
+            while (queryController.doesNotSelect(firstKey) || firstKey.equals(lastKey, false));
+
+            lastKey = firstKey;
+            threadLocalNextKeys.add(firstKey);
+            fillNextSelectedKeysInPartition(firstKey.partitionKey(), threadLocalNextKeys);
+            return threadLocalNextKeys;
+        }
+
+        /**
+         * Retrieves the next batch of primary keys (i.e. up to {@link #partitionRowBatchSize} of them) that belong to 
+         * the given partition and are selected by the query controller, advancing the underlying iterator only while
+         * the next key belongs to that partition.
+         *
+         * @return a list of up to {@link #partitionRowBatchSize} primary keys within the given partition
+         */
+        private List<PrimaryKey> nextSelectedKeysInPartition(DecoratedKey partitionKey)
+        {
+            List<PrimaryKey> threadLocalNextKeys = nextKeys.get();
+            threadLocalNextKeys.clear();
+            fillNextSelectedKeysInPartition(partitionKey, threadLocalNextKeys);
+            return threadLocalNextKeys;
+        }
+
+        /**
+         * Returns the next available key contained by one of the keyRanges.
+         * If the next key falls out of the current key range, it skips to the next key range, and so on.
+         * If no more keys or no more ranges are available, returns null.
+         */
+        private @Nullable PrimaryKey nextKeyInRange()
+        {
+            PrimaryKey key = nextKey();
+
+            while (key != null && !(currentKeyRange.contains(key.partitionKey())))
+            {
+                if (!currentKeyRange.right.isMinimum() && currentKeyRange.right.compareTo(key.partitionKey()) <= 0)
+=======
+                while (currentKeys.hasNext())
+>>>>>>>
+                {
+                    DecoratedKey key = currentKeys.next();
+
+                    if (!lastToken.isMinimum() && lastToken.compareTo(key) < 0)
+                        return endOfData();
+
+<<<<<<<
+                    while (current != null)
+=======
+                if (key == null)
+                    break;
+
+                if (queryController.doesNotSelect(key) || key.equals(lastKey, false))
+                    continue;
+
+                nextPrimaryKeys.add(key);
+                lastKey = key;
+            }
+        }
+
+        /**
+         * Gets the next key from the underlying operation.
+         * Returns null if there are no more keys <= lastPrimaryKey.
+         */
+        private @Nullable PrimaryKey nextKey()
+        {
+            if (!resultKeyIterator.hasNext())
+                return null;
+            PrimaryKey key = resultKeyIterator.next();
+            return isWithinUpperBound(key) ? key : null;
+        }
+
+        /**
+         * Returns true if the key is not greater than lastPrimaryKey
+         */
+        private boolean isWithinUpperBound(PrimaryKey key)
+        {
+            return lastPrimaryKey.token().isMinimum() || lastPrimaryKey.compareTo(key, false) >= 0;
+        }
+
+        /**
+         * Gets the next key range from the underlying range iterator.
+         */
+        private @Nullable AbstractBounds<PartitionPosition> nextKeyRange()
+        {
+            return keyRanges.hasNext() ? keyRanges.next().keyRange() : null;
+        }
+
+        /**
+         * Convenience function to skip to a given token.
+         */
+        private void skipTo(@Nonnull Token token)
+        {
+            resultKeyIterator.skipTo(keyFactory.create(token));
+        }
+
+        /**
+         * Skips to the key that belongs to a different partition than the last key we fetched.
+         */
+        private void skipToNextPartition()
+        {
+            if (lastKey == null)
+                return;
+            DecoratedKey lastPartitionKey = lastKey.partitionKey();
+            while (resultKeyIterator.hasNext() && resultKeyIterator.peek().partitionKey().equals(lastPartitionKey))
+                resultKeyIterator.next();
+        }
+
+
+        /**
+         * Returns an iterator over the rows in the partition associated with the given iterator.
+         * Initially, it retrieves the rows from the given iterator until it runs out of data.
+         * Then it iterates the remaining primary keys obtained from the index in batches until the end of the 
+         * partition, lazily constructing an itertor for each batch. Only one row iterator is open at a time.
+         * <p>
+         * The rows are retrieved in the order of primary keys provided by the underlying index.
+         * The iterator is complete when the next key to be fetched belongs to different partition
+         * (but the iterator does not consume that key).
+         *
+         * @param startIter an iterator positioned at the first row in the partition that we want to return
+         */
+        private @Nonnull UnfilteredRowIterator iteratePartition(@Nonnull UnfilteredRowIterator startIter)
+        {
+            return new AbstractUnfilteredRowIterator(startIter.metadata(),
+                                                     startIter.partitionKey(),
+                                                     startIter.partitionLevelDeletion(),
+                                                     startIter.columns(),
+                                                     startIter.staticRow(),
+                                                     startIter.isReverseOrder(),
+                                                     startIter.stats())
+            {
+                private UnfilteredRowIterator currentIter = startIter;
+                private final DecoratedKey partitionKey = startIter.partitionKey();
+
+                @Override
+                protected Unfiltered computeNext()
+                {
+                    while (!currentIter.hasNext())
+>>>>>>>
+                    {
+                        if (current.contains(key))
+                        {
+                            UnfilteredRowIterator partition = apply(key);
+                            if (partition != null)
+                                return partition;
+                            break;
+                        }
+                        // bigger than current range
+                        else if (!current.right.isMinimum() && current.right.compareTo(key) <= 0)
+                        {
+                            if (keyRanges.hasNext())
+                                current = keyRanges.next().keyRange();
+                            else
+                                return endOfData();
+                        }
+                        // smaller than current range
+                        else
+                        {
+                            // we already knew that key is not included in "current" abstract bounds,
+                            // so "left" may have the same partition position as "key" when "left" is exclusive.
+                            assert current.left.compareTo(key) >= 0;
+                            operation.skipTo(current.left.getToken().getLongValue());
+                            if (!operation.hasNext())
+                                return endOfData();
+                            currentKeys = operation.next().keys();
+                            break;
+                        }
+                    }
+                }
+                if (!operation.hasNext())
+                    return endOfData();
+                currentKeys = operation.next().keys();
+            }
+        }
+
+        public UnfilteredRowIterator apply(DecoratedKey key)
+        {
+            // Key reads are lazy, delayed all the way to this point. Skip if we've already seen this one:
+            if (key.equals(lastKey))
+                return null;
+
+            lastKey = key;
+
+            // SPRC should only return UnfilteredRowIterator, but it returns UnfilteredPartitionIterator due to Flow.
+            try (UnfilteredRowIterator partition = controller.getPartition(key, executionController))
+            {
+                queryContext.partitionsRead++;
+
+                return applyIndexFilter(key, partition, operation.filterTree, queryContext);
+            }
+        }
+
+        private static UnfilteredRowIterator applyIndexFilter(DecoratedKey key, UnfilteredRowIterator partition, FilterTree tree, QueryContext queryContext)
+        {
+            Row staticRow = partition.staticRow();
+            List<Unfiltered> clusters = new ArrayList<>();
+
+            while (partition.hasNext())
+            {
+                Unfiltered row = partition.next();
+
+                queryContext.rowsFiltered++;
+                if (tree.satisfiedBy(key, row, staticRow))
+                    clusters.add(row);
+            }
+
+            if (clusters.isEmpty())
+            {
+                queryContext.rowsFiltered++;
+                if (tree.satisfiedBy(key, staticRow, staticRow))
+                    clusters.add(staticRow);
+            }
+
+            /*
+             * If {@code clusters} is empty, which means either all clustering row and static row pairs failed,
+             *       or static row and static row pair failed. In both cases, we should not return any partition.
+             * If {@code clusters} is not empty, which means either there are some clustering row and static row pairs match the filters,
+             *       or static row and static row pair matches the filters. In both cases, we should return a partition with static row,
+             *       and remove the static row marker from the {@code clusters} for the latter case.
+             */
+            if (clusters.isEmpty())
+                return null;
+
+            return new PartitionIterator(partition, staticRow, Iterators.filter(clusters.iterator(), u -> !((Row)u).isStatic()));
+        }
+
+        private static class PartitionIterator extends AbstractUnfilteredRowIterator
+        {
+            private final Iterator<Unfiltered> rows;
+
+            public PartitionIterator(UnfilteredRowIterator partition, Row staticRow, Iterator<Unfiltered> content)
+            {
+                super(partition.metadata(),
+                      partition.partitionKey(),
+                      partition.partitionLevelDeletion(),
+                      partition.columns(),
+                      staticRow,
+                      partition.isReverseOrder(),
+                      partition.stats());
+
+                rows = content;
+            }
+
+            @Override
+            protected Unfiltered computeNext()
+            {
+                return rows.hasNext() ? rows.next() : endOfData();
+            }
+        }
+
+        @Override
+        public TableMetadata metadata()
+        {
+            return controller.metadata();
+        }
+
+        public void close()
+        {
+            FileUtils.closeQuietly(operation);
+            controller.finish();
+        }
+    }
+
+//    /**
+//     * Used by {@link StorageAttachedIndexSearcher#filterReplicaFilteringProtection} which is not ported to OSS yet.
+//     */
+//    private static <U extends Unfiltered, F extends FlowablePartitionBase<U, F>> Flow<F>  applyIndexFilter(Flow<F> fp, FilterTree tree, QueryContext queryContext)
+//    {
+//        return fp.flatMap(partition ->
+//        {
+//            Row staticRow = partition.staticRow();
+//            /*
+//             * If {@code content} is empty, which means either all clustering row and static row pairs failed,
+//             *       or static row and static row pair failed. In both cases, we should not return any partition.
+//             * If {@code content} is not empty, which means either there are some clustering row and static row pairs match the filters,
+//             *       or static row and static row pair matches the filters. In both cases, we should return a partition with static row,
+//             *       and remove the static row marker from the {@code content} for the latter case.
+//             */
+//            Flow<U> content = partition.content()
+//                                       .filter(Unfiltered::isRow)
+//                                       .ifEmpty((U) staticRow)
+//                                       .filter(row ->
+//                                               {
+//                                                   queryContext.rowsFiltered++;
+//                                                   return tree.satisfiedBy(partition.partitionKey(), row, staticRow);
+//                                               });
+//
+//                              return content.skipMapEmpty(c -> partition.withContent(c.filter(unfiltered -> !((Row)unfiltered).isStatic())));
+//                          });
+//    }
+}

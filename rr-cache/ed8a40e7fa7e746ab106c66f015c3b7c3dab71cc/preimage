@@ -1,0 +1,270 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.cassandra.hints;
+
+import java.io.DataInput;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Collections;
+import java.util.UUID;
+
+import com.google.common.collect.ImmutableMap;
+import com.google.common.io.ByteStreams;
+import org.apache.cassandra.io.util.File;
+import org.junit.Test;
+
+import org.apache.cassandra.io.compress.LZ4Compressor;
+import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.net.MessagingService;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.fail;
+import static org.assertj.core.api.Assertions.assertThat;
+
+public class HintsDescriptorTest
+{
+    @Test
+    public void testSerializerNormal() throws IOException
+    {
+        UUID hostId = UUID.randomUUID();
+        int version = HintsDescriptor.CURRENT_VERSION;
+        long timestamp = System.currentTimeMillis();
+        ImmutableMap<String, Object> parameters =
+                ImmutableMap.of("compression", (Object) ImmutableMap.of("class_name", LZ4Compressor.class.getName()));
+        HintsDescriptor descriptor = new HintsDescriptor(hostId, version, timestamp, parameters);
+
+        testSerializeDeserializeLoop(descriptor);
+    }
+
+    @Test
+    public void testSerializerWithEmptyParameters() throws IOException
+    {
+        UUID hostId = UUID.randomUUID();
+        int version = HintsDescriptor.CURRENT_VERSION;
+        long timestamp = System.currentTimeMillis();
+        ImmutableMap<String, Object> parameters = ImmutableMap.of();
+        HintsDescriptor descriptor = new HintsDescriptor(hostId, version, timestamp, parameters);
+
+        testSerializeDeserializeLoop(descriptor);
+    }
+
+    @Test
+    public void testCorruptedDeserialize() throws IOException
+    {
+        UUID hostId = UUID.randomUUID();
+        int version = HintsDescriptor.CURRENT_VERSION;
+        long timestamp = System.currentTimeMillis();
+        ImmutableMap<String, Object> parameters = ImmutableMap.of();
+        HintsDescriptor descriptor = new HintsDescriptor(hostId, version, timestamp, parameters);
+
+        byte[] bytes = serializeDescriptor(descriptor);
+
+        // mess up the parameters size
+        bytes[28] = (byte) 0xFF;
+        bytes[29] = (byte) 0xFF;
+        bytes[30] = (byte) 0xFF;
+        bytes[31] = (byte) 0x7F;
+
+        // attempt to deserialize
+        try
+        {
+            deserializeDescriptor(bytes);
+            fail("Deserializing the descriptor should but didn't");
+        }
+        catch (IOException e)
+        {
+            assertEquals("Hints Descriptor CRC Mismatch", e.getMessage());
+        }
+    }
+
+    @Test
+    @SuppressWarnings("EmptyTryBlock")
+    public void testReadFromFile() throws IOException
+    {
+        UUID hostId = UUID.randomUUID();
+        int version = HintsDescriptor.CURRENT_VERSION;
+        long timestamp = System.currentTimeMillis();
+        ImmutableMap<String, Object> parameters = ImmutableMap.of();
+        HintsDescriptor expected = new HintsDescriptor(hostId, version, timestamp, parameters);
+
+        File directory = new File(Files.createTempDirectory("hints"));
+        try
+        {
+            try (HintsWriter ignored = HintsWriter.create(directory, expected))
+            {
+            }
+            HintsDescriptor actual = HintsDescriptor.readFromFile(expected.file(directory));
+            assertEquals(expected, actual);
+        }
+        finally
+        {
+            directory.deleteOnExit();
+        }
+    }
+
+    @Test
+    public void testMessagingVersion()
+    {
+        String errorMsg = "Please update the current Hints messaging version to match the current messaging version";
+        int messageVersion = HintsDescriptor.messagingVersion(HintsDescriptor.CURRENT_VERSION);
+        assertEquals(errorMsg, messageVersion, MessagingService.current_version);
+
+        HintsDescriptor descriptor = new HintsDescriptor(UUID.randomUUID(), HintsDescriptor.CURRENT_VERSION, System.currentTimeMillis(), ImmutableMap.of());
+        assertEquals(errorMsg, descriptor.messagingVersion(), MessagingService.current_version);
+    }
+
+    @Test
+    public void testHandleIOE() throws IOException
+    {
+        Path p = Files.createTempFile("testing", ".hints");
+        // empty file;
+        assertThat(p).exists();
+        assertThat(Files.size(p)).isEqualTo(0);
+        HintsDescriptor.handleDescriptorIOE(new IOException("test"), p);
+        assertThat(p).doesNotExist();
+
+        // non-empty
+        p = Files.createTempFile("testing", ".hints");
+        Files.write(p, Collections.singleton("hello"));
+        HintsDescriptor.handleDescriptorIOE(new IOException("test"), p);
+        File newFile = new File(p.getParent().toFile(), p.getFileName().toString().replace(".hints", ".corrupt.hints"));
+        assertThat(p).doesNotExist();
+        assertThat(newFile.exists());
+        newFile.deleteOnExit();
+    }
+
+    private static void testSerializeDeserializeLoop(HintsDescriptor descriptor) throws IOException
+    {
+        // serialize to a byte array
+        byte[] bytes = serializeDescriptor(descriptor);
+        // make sure the sizes match
+        assertEquals(bytes.length, descriptor.serializedSize());
+        // deserialize back
+        HintsDescriptor deserializedDescriptor = deserializeDescriptor(bytes);
+        // compare equality
+        assertDescriptorsEqual(descriptor, deserializedDescriptor);
+    }
+
+    private static byte[] serializeDescriptor(HintsDescriptor descriptor) throws IOException
+    {
+        DataOutputBuffer dob = new DataOutputBuffer();
+        descriptor.serialize(dob);
+        return dob.toByteArray();
+    }
+
+    private static HintsDescriptor deserializeDescriptor(byte[] bytes) throws IOException
+    {
+        DataInput in = ByteStreams.newDataInput(bytes);
+        return HintsDescriptor.deserialize(in);
+    }
+
+    private static void assertDescriptorsEqual(HintsDescriptor expected, HintsDescriptor actual)
+    {
+        assertNotSame(expected, actual);
+        assertEquals(expected, actual);
+        assertEquals(expected.hashCode(), actual.hashCode());
+        assertEquals(expected.hostId, actual.hostId);
+        assertEquals(expected.version, actual.version);
+        assertEquals(expected.timestamp, actual.timestamp);
+        assertEquals(expected.parameters, actual.parameters);
+    }
+<<<<<<<
+=======
+
+    @Test
+    public void testCurrentStorageVersionUsesStorageCompatibilityMode()
+    {
+        // Verify that currentStorageVersion() returns the correct version based on storage compatibility mode
+        for (StorageCompatibilityMode mode : StorageCompatibilityMode.values())
+        {
+            int expectedVersion = mode.storageMessagingVersion();
+
+            switch (mode)
+            {
+                case CASSANDRA_4:
+                case CC_4:
+                    // These modes should use VERSION_40 for storage
+                    assertEquals("Mode " + mode + " should use VERSION_40 for hints storage",
+                                 MessagingService.VERSION_40, expectedVersion);
+                    break;
+                case UPGRADING:
+                case NONE:
+                    // These modes should use current_version
+                    assertEquals("Mode " + mode + " should use current_version for hints storage",
+                                 MessagingService.current_version, expectedVersion);
+                    break;
+                default:
+                    throw new AssertionError("Undefined hints storage version behaviour for mode " + mode);
+            }
+        }
+    }
+
+    @Test
+    public void testCurrentStorageVersionCC4ReturnsVersion40()
+    {
+        // Explicit test that CC_4 compatibility mode results in VERSION_40 hints format
+        int version = StorageCompatibilityMode.CC_4.storageMessagingVersion();
+        assertEquals("CC_4 mode should produce VERSION_40 hints for rollback compatibility",
+                     MessagingService.VERSION_40, version);
+    }
+
+    @Test
+    public void testHintsVersionFromMessagingVersion()
+    {
+        // Test that all supported messaging versions can be translated to valid hints versions
+        int[] messagingVersions = {
+            MessagingService.VERSION_30,
+            MessagingService.VERSION_3014,
+            MessagingService.VERSION_40,
+            MessagingService.VERSION_50,
+            MessagingService.VERSION_DS_10,
+            MessagingService.VERSION_DS_11,
+            MessagingService.VERSION_DS_12,
+            MessagingService.VERSION_DS_20
+        };
+
+        for (int msgVersion : messagingVersions)
+        {
+            int hintsVersion = HintsDescriptor.hintsVersionFromMessagingVersion(msgVersion);
+            // Verify the translated version is valid by calling messagingVersion() on it
+            // This will throw if the hints version is not recognized
+            int roundTripped = HintsDescriptor.messagingVersion(hintsVersion);
+            assertThat(roundTripped).as("Messaging version for hints version derived from " + msgVersion)
+                                    .isGreaterThan(0);
+        }
+    }
+
+    @Test
+    public void testHintsVersionFromMessagingVersionCC4Compatibility()
+    {
+        int messagingVersion = StorageCompatibilityMode.CC_4.storageMessagingVersion();
+        assertEquals("CC_4 should return VERSION_40 messaging version", MessagingService.VERSION_40, messagingVersion);
+
+        int hintsVersion = HintsDescriptor.hintsVersionFromMessagingVersion(messagingVersion);
+        assertEquals("VERSION_40 messaging version should translate to hints VERSION_40",
+                     HintsDescriptor.VERSION_40, hintsVersion);
+
+        // Verify the hints version can be used without throwing AssertionError
+        int resolvedMsgVersion = HintsDescriptor.messagingVersion(hintsVersion);
+        assertEquals("Hints VERSION_40 should resolve back to messaging VERSION_40",
+                     MessagingService.Version.VERSION_40.value, resolvedMsgVersion);
+    }
+>>>>>>>
+}
