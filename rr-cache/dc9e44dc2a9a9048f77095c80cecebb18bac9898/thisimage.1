@@ -15,946 +15,318 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.cassandra.index.sai.utils;
 
-package org.apache.cassandra.index.sai.cql;
-
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.io.Closeable;
+import java.util.Collection;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
-import org.junit.Assert;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import com.google.common.annotations.VisibleForTesting;
 
-import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
-import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
-import org.apache.cassandra.index.sai.plan.QueryController;
-import org.apache.cassandra.inject.ActionBuilder;
-import org.apache.cassandra.inject.Expression;
-import org.apache.cassandra.inject.Injections;
-import org.apache.cassandra.inject.InvokePointBuilder;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertEquals;
-
-@RunWith(Parameterized.class)
-public class VectorTypeTest extends VectorTester.VersionedWithChecksums
-{
-    @Test
-    public void endToEndTest()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [3.0, 4.0, 5.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', [4.0, 5.0, 6.0])");
-
-        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
-        assertThat(result).hasSize(3);
-
-        flush();
-        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
-        assertThat(result).hasSize(3);
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', [5.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (5, 'F', [6.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (6, 'G', [7.0, 4.0, 5.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (7, 'H', [8.0, 5.0, 6.0])");
-
-        flush();
-        compact();
-
-        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 5");
-        assertThat(result).hasSize(5);
-
-        // some data that only lives in memtable
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (8, 'I', [9.0, 5.0, 6.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (9, 'J', [10.0, 6.0, 7.0])");
-        result = execute("SELECT * FROM %s ORDER BY val ann of [9.5, 5.5, 6.5] LIMIT 5");
-        assertContainsInt(result, "pk", 8);
-        assertContainsInt(result, "pk", 9);
-
-        // data from sstables
-        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
-        assertContainsInt(result, "pk", 1);
-        assertContainsInt(result, "pk", 2);
-    }
-
-    @Test
-    public void createIndexAfterInsertTest()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [3.0, 4.0, 5.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', [4.0, 5.0, 6.0])");
-
-        flush();
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
-        assertThat(result).hasSize(3);
-    }
-
-    public static void assertContainsInt(UntypedResultSet result, String columnName, int columnValue)
-    {
-        for (UntypedResultSet.Row row : result)
-        {
-            if (row.has(columnName))
-            {
-                int value = row.getInt(columnName);
-                if (value == columnValue)
-                {
-                    return;
-                }
-            }
-        }
-        throw new AssertionError("Result set does not contain a row with " + columnName + " = " + columnValue);
-    }
-
-    @Test
-    public void testTwoPredicates()
-    {
-        createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, b, v) VALUES (0, true, [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, b, v) VALUES (1, true, [2.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, b, v) VALUES (2, false, [3.0, 4.0, 5.0])");
-
-        // the vector given is closest to row 2, but we exclude that row because b=false
-        var result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        // VSTODO assert specific row keys
-        assertThat(result).hasSize(2);
-
-        flush();
-        compact();
-
-        result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        assertThat(result).hasSize(2);
-    }
-
-    @Test
-    public void testTwoPredicatesWithBruteForce()
-    {
-        // Note: the PKs in this test are chosen intentionally to ensure their tokens overlap so that
-        // we can test the brute force path.
-        setMaxBruteForceRows(0);
-        createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, b, v) VALUES (1, true, [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, b, v) VALUES (2, true, [2.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, b, v) VALUES (3, false, [3.0, 4.0, 5.0])");
-
-        // the vector given is closest to row 2, but we exclude that row because b=false
-        var result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        // VSTODO assert specific row keys
-        assertThat(result).hasSize(2);
-
-        flush();
-        compact();
-
-        result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        assertThat(result).hasSize(2);
-
-        // Add 3 rows to memtable. Need number of rows to be greater than both maxBruteForceRows and the LIMIT
-        execute("INSERT INTO %s (pk, b, v) VALUES (4, true, [4.0, 5.0, 6.0])");
-        execute("INSERT INTO %s (pk, b, v) VALUES (5, true, [5.0, 6.0, 7.0])");
-        execute("INSERT INTO %s (pk, b, v) VALUES (6, true, [6.0, 7.0, 8.0])");
-
-        result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        assertThat(result).hasSize(2);
-    }
-
-    @Test
-    public void testTwoPredicatesWithUnnecessaryAllowFiltering()
-    {
-        createTable("CREATE TABLE %s (pk int, b int, v vector<float, 3>, PRIMARY KEY(pk, b))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, b, v) VALUES (0, 0, [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, b, v) VALUES (1, 2, [2.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, b, v) VALUES (2, 4, [3.0, 4.0, 5.0])");
-        execute("INSERT INTO %s (pk, b, v) VALUES (3, 6, [4.0, 5.0, 6.0])");
-
-        // Choose a vector closer to b = 0 to ensure that b's restriction is applied.
-        assertRows(execute("SELECT pk FROM %s WHERE b > 2 ORDER BY v ANN OF [1,2,3] LIMIT 2 ALLOW FILTERING;"),
-                   row(2), row(3));
-    }
-
-    @Test
-    public void testTwoPredicatesManyRows()
-    {
-        createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        for (int i = 0; i < 100; i++)
-            execute("INSERT INTO %s (pk, b, v) VALUES (?, true, ?)",
-                    i, vector(i, i + 1, i + 2));
-
-        var result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        assertThat(result).hasSize(2);
-
-        flush();
-        compact();
-
-        result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        assertThat(result).hasSize(2);
-    }
-
-    @Test
-    public void testThreePredicates()
-    {
-        createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, str text, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(str) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, b, v, str) VALUES (0, true, [1.0, 2.0, 3.0], 'A')");
-        execute("INSERT INTO %s (pk, b, v, str) VALUES (1, true, [2.0, 3.0, 4.0], 'B')");
-        execute("INSERT INTO %s (pk, b, v, str) VALUES (2, false, [3.0, 4.0, 5.0], 'C')");
-
-        // the vector given is closest to row 2, but we exclude that row because b=false and str!='B'
-        var result = execute("SELECT * FROM %s WHERE b=true AND str='B' ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        // VSTODO assert specific row keys
-        assertThat(result).hasSize(1);
-
-        flush();
-        compact();
-
-        result = execute("SELECT * FROM %s WHERE b=true AND str='B' ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        assertThat(result).hasSize(1);
-    }
-
-    @Test
-    public void testSameVectorMultipleRows()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'A', [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'A', [1.0, 2.0, 3.0])");
-
-        var result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
-        assertThat(result).hasSize(3);
-
-        flush();
-        compact();
-
-        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
-        assertThat(result).hasSize(3);
-    }
-
-    @Test
-    public void testQueryEmptyTable()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        var result = execute("SELECT * FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 1");
-        assertThat(result).hasSize(0);
-    }
-
-    @Test
-    public void testQueryTableWithNulls()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', null)");
-        var result = execute("SELECT * FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 1");
-        assertThat(result).hasSize(0);
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [4.0, 5.0, 6.0])");
-        result = execute("SELECT pk FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 1");
-        assertRows(result, row(1));
-    }
-
-    @Test
-    public void testLimitLessThanInsertedRowCount()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        // Insert more rows than the query limit
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [4.0, 5.0, 6.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [7.0, 8.0, 9.0])");
-
-        // Query with limit less than inserted row count
-        var result = execute("SELECT * FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 2");
-        assertThat(result).hasSize(2);
-    }
-
-    @Test
-    public void testQueryMoreRowsThanInserted()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
-
-        var result = execute("SELECT * FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 2");
-        assertThat(result).hasSize(1);
-    }
-
-    @Test
-    public void changingOptionsTest()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        if (CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.getBoolean())
-        {
-            createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " +
-                        "{'maximum_node_connections' : 10, 'construction_beam_width' : 200, 'similarity_function' : 'euclidean' }");
-        }
-        else
-        {
-            assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " +
-                                                 "{'maximum_node_connections' : 10, 'construction_beam_width' : 200, 'similarity_function' : 'euclidean' }"))
-            .isInstanceOf(InvalidRequestException.class);
-            return;
-        }
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [3.0, 4.0, 5.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', [4.0, 5.0, 6.0])");
-
-        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
-        assertThat(result).hasSize(3);
-
-        flush();
-        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
-        assertThat(result).hasSize(3);
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', [5.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (5, 'F', [6.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (6, 'G', [7.0, 4.0, 5.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (7, 'H', [8.0, 5.0, 6.0])");
-
-        flush();
-        compact();
-
-        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 5");
-        assertThat(result).hasSize(5);
-    }
-
-    @Test
-    public void defaultOptionsTest()
-    {
-        createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-
-        var sim = getCurrentColumnFamilyStore().indexManager;
-        var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
-        assertEquals(VectorSourceModel.OTHER, index.getIndexContext().getIndexWriterConfig().getSourceModel());
-        assertEquals(VectorSimilarityFunction.COSINE, index.getIndexContext().getIndexWriterConfig().getSimilarityFunction());
-    }
-
-    @Test
-    public void customModelOptionsTest()
-    {
-        createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model' : 'ada002' }");
-        waitForTableIndexesQueryable();
-
-        var sim = getCurrentColumnFamilyStore().indexManager;
-        var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
-        assertEquals(VectorSourceModel.ADA002, index.getIndexContext().getIndexWriterConfig().getSourceModel());
-        assertEquals(VectorSimilarityFunction.DOT_PRODUCT, index.getIndexContext().getIndexWriterConfig().getSimilarityFunction());
-    }
-
-    @Test
-    public void obsoleteOptionsTest()
-    {
-        createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'optimize_for' : 'recall' }");
-        waitForTableIndexesQueryable();
-        // as long as CREATE doesn't error out, we're good
-    }
-
-    @Test
-    public void bindVariablesTest()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1, 2 , 3));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vector(2 , 3, 4));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vector(3, 4, 5));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', ?)", vector(4, 5, 6));
-
-        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of ? LIMIT 3", vector(2.5f, 3.5f, 4.5f));
-        assertThat(result).hasSize(3);
-    }
-
-    @Test
-    public void intersectedSearcherTest()
-    {
-        // check that we correctly get back the two rows with str_val=B even when those are not
-        // the closest rows to the query vector
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1, 2 , 3));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vector(2 , 3, 4));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vector(3, 4, 5));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'B', ?)", vector(4, 5, 6));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', ?)", vector(5, 6, 7));
-
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE str_val = 'B' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
-        assertThat(result).hasSize(2);
-
-        flush();
-        result = execute("SELECT * FROM %s WHERE str_val = 'B' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
-        assertThat(result).hasSize(2);
-    }
-
-    @Test
-    public void nullVectorTest()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1, 2 , 3));
-        execute("INSERT INTO %s (pk, str_val) VALUES (1, 'B')"); // no vector
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vector(3, 4, 5));
-        execute("INSERT INTO %s (pk, str_val) VALUES (3, 'D')"); // no vector
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', ?)", vector(5, 6, 7));
-
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE str_val = 'B' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
-        assertThat(result).hasSize(0);
-
-        result = execute("SELECT * FROM %s WHERE str_val = 'A' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
-        assertThat(result).hasSize(1);
-
-        flush();
-
-        result = execute("SELECT * FROM %s WHERE str_val = 'B' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
-        assertThat(result).hasSize(0);
-
-        result = execute("SELECT * FROM %s WHERE str_val = 'A' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
-        assertThat(result).hasSize(1);
-    }
-
-    @Test
-    public void lwtTest()
-    {
-        createTable("CREATE TABLE %s (p int, c int, v text, vec vector<float, 2>, PRIMARY KEY(p, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (p, c, v) VALUES (?, ?, ?)", 0, 0, "test");
-        execute("INSERT INTO %s (p, c, v) VALUES (?, ?, ?)", 0, 1, "00112233445566");
-
-        execute("UPDATE %s SET v='00112233', vec=[0.9, 0.7] WHERE p = 0 AND c = 0 IF v = 'test'");
-
-        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY vec ANN OF [0.1, 0.9] LIMIT 100");
-
-        assertThat(result).hasSize(1);
-    }
-
-    @Test
-    public void twoVectorFieldsTest()
-    {
-        createTable("CREATE TABLE %s (pk int, v2 vector<float, 2>, v3 vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v3) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-    }
-
-    @Test
-    public void primaryKeySearchTest()
-    {
-        createTable("CREATE TABLE %s (pk int, val vector<float, 3>, i int, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        var N = 5;
-        for (int i = 0; i < N; i++)
-            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vector(1 + i, 2 + i, 3 + i));
-
-        for (int i = 0; i < N; i++)
-        {
-            UntypedResultSet result = execute("SELECT pk FROM %s WHERE pk = ? ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2", i);
-            assertThat(result).hasSize(1);
-            assertRows(result, row(i));
-        }
-
-        flush();
-        for (int i = 0; i < N; i++)
-        {
-            UntypedResultSet result = execute("SELECT pk FROM %s WHERE pk = ? ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2", i);
-            assertThat(result).hasSize(1);
-            assertRows(result, row(i));
-        }
-    }
-
-    @Test
-    public void partitionKeySearchTest()
-    {
-        createTable("CREATE TABLE %s (partition int, row int, val vector<float, 2>, PRIMARY KEY(partition, row))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForTableIndexesQueryable();
-
-        var nPartitions = 5;
-        var rowsPerPartition = 10;
-        Map<Integer, List<float[]>> vectorsByPartition = new HashMap<>();
-
-        for (int i = 1; i <= nPartitions; i++)
-        {
-            for (int j = 1; j <= rowsPerPartition; j++)
-            {
-                logger.debug("Inserting partition {} row {}: [{}, {}]", i, j, i, j);
-                execute("INSERT INTO %s (partition, row, val) VALUES (?, ?, ?)", i, j, vector((float) i, (float) j));
-                float[] vector = {(float) i, (float) j};
-                vectorsByPartition.computeIfAbsent(i, k -> new ArrayList<>()).add(vector);
-            }
-        }
-
-        var queryVector = vector(1.5f, 1.5f);
-        for (int i = 1; i <= nPartitions; i++)
-        {
-            UntypedResultSet result = execute("SELECT partition, row FROM %s WHERE partition = ? ORDER BY val ann of ? LIMIT 2", i, queryVector);
-            assertThat(result).hasSize(2);
-            assertRowsIgnoringOrder(result,
-                                    row(i, 1),
-                                    row(i, 2));
-        }
-
-        flush();
-        for (int i = 1; i <= nPartitions; i++)
-        {
-            UntypedResultSet result = execute("SELECT partition, row FROM %s WHERE partition = ? ORDER BY val ann of ? LIMIT 2", i, queryVector);
-            assertThat(result).hasSize(2);
-            assertRowsIgnoringOrder(result,
-                                    row(i, 1),
-                                    row(i, 2));
-        }
-    }
-
-
-
-    @Test
-    public void selectFloatVectorFunctions()
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
-
-        // basic functionality
-        Vector<Float> q = vector(1f, 2f);
-        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, 2));
-        execute("SELECT similarity_cosine(value, value) FROM %s WHERE pk=0");
-
-        // type inference checks
-        var result = execute("SELECT similarity_cosine(value, ?) FROM %s WHERe pk=0", q);
-        assertRows(result, row(1f));
-        result = execute("SELECT similarity_euclidean(value, ?) FROM %s WHERe pk=0", q);
-        assertRows(result, row(1f));
-        execute("SELECT similarity_cosine(?, value) FROM %s WHERE pk=0", q);
-        assertThatThrownBy(() -> execute("SELECT similarity_cosine(?, ?) FROM %s WHERE pk=0", q, q))
-        .hasMessageContaining("Cannot infer type of argument ?");
-
-        // with explicit typing
-        execute("SELECT similarity_cosine((vector<float, 2>) ?, ?) FROM %s WHERE pk=0", q, q);
-        execute("SELECT similarity_cosine(?, (vector<float, 2>) ?) FROM %s WHERE pk=0", q, q);
-        execute("SELECT similarity_cosine((vector<float, 2>) ?, (vector<float, 2>) ?) FROM %s WHERE pk=0", q, q);
-    }
-
-    @Test
-    public void selectSimilarityWithAnn()
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [3.0, 4.0, 5.0])");
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', [4.0, 5.0, 6.0])");
-
-        Vector<Float> q = vector(1.5f, 2.5f, 3.5f);
-        var result = execute("SELECT str_val, similarity_cosine(val, ?) FROM %s ORDER BY val ANN OF ? LIMIT 2",
-                q, q);
-
-        assertRowsIgnoringOrder(result,
-                row("A", 0.9987074f),
-                row("B", 0.9993764f));
-    }
-
-    @Test
-    public void castedTerminalFloatVectorFunctions()
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
-
-        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, 2));
-        execute("SELECT similarity_cosine(value, (vector<float, 2>) [1.0, 1.0]) FROM %s WHERE pk=0");
-        execute("SELECT similarity_cosine((vector<float, 2>) [1.0, 1.0], value) FROM %s WHERE pk=0");
-        execute("SELECT similarity_cosine((vector<float, 2>) [1.0, 1.0], (vector<float, 2>) [1.0, 1.0]) FROM %s WHERE pk=0");
-    }
-
-    @Test
-    public void inferredTerminalFloatVectorFunctions()
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
-
-        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, 2));
-        assertRows(execute("SELECT similarity_cosine(value, [2.0, 4.0]) FROM %s WHERE pk=0"), row(1f));
-        assertRows(execute("SELECT similarity_cosine([2.0, 4.0], value) FROM %s WHERE pk=0"), row(1f));
-        assertRows(execute("SELECT similarity_cosine([1.0, 2.0], [2.0, 4.0]) FROM %s WHERE pk=0"), row(1f));
-
-        // wrong number of arguments
-        assertInvalidMessage("Invalid number of arguments for function system.similarity_cosine(vector<float, n>, vector<float, n>)",
-                             "SELECT similarity_cosine([1.0, 2.0]) FROM %s WHERE pk=0");
-        assertInvalidMessage("Invalid number of arguments for function system.similarity_cosine(vector<float, n>, vector<float, n>)",
-                             "SELECT similarity_cosine([1.0, 2.0]) FROM %s WHERE pk=0");
-
-        // assignable element types
-        assertRows(execute("SELECT similarity_cosine([1, 2], [2, 4]) FROM %s WHERE pk=0"), row(1f));
-        assertRows(execute("SELECT similarity_cosine([1.0, 2.0], [2, 4]) FROM %s WHERE pk=0"), row(1f));
-        assertRows(execute("SELECT similarity_cosine([1, 2], [2.0, 4.0]) FROM %s WHERE pk=0"), row(1f));
-
-        // not-assignable element types
-        assertInvalidMessage("Type error: ['a', 'b'] cannot be passed as argument 1",
-                             "SELECT similarity_cosine(value, ['a', 'b']) FROM %s WHERE pk=0");
-        assertInvalidMessage("Type error: ['a', 'b'] cannot be passed as argument 0",
-                             "SELECT similarity_cosine(['a', 'b'], value) FROM %s WHERE pk=0");
-        assertInvalidMessage("Type error: ['a', 'b'] cannot be passed as argument 0",
-                             "SELECT similarity_cosine(['a', 'b'], ['a', 'b']) FROM %s WHERE pk=0");
-
-        // different vector sizes, message could be more informative
-        assertInvalidMessage("All arguments must have the same vector dimensions",
-                             "SELECT similarity_cosine(value, [2, 4, 6]) FROM %s WHERE pk=0");
-        assertInvalidMessage("All arguments must have the same vector dimensions",
-                             "SELECT similarity_cosine([1, 2, 3], value) FROM %s WHERE pk=0");
-        assertInvalidMessage("All arguments must have the same vector dimensions",
-                             "SELECT similarity_cosine([1, 2], [3, 4, 5]) FROM %s WHERE pk=0");
-    }
-
-    @Test
-    public void testSamePKWithBruteForceAndGraphBasedScoring()
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        // Use euclidean distance to more easily verify correctness of caching
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
-
-        // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
-        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vector(1f, 1f));
-        flush();
-
-        // Must be enough rows to go to graph
-        for (int j = 1; j <= 10; j++)
-        {
-            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", j, vector(j, j));
-        }
-        flush();
-
-        assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(1), row(2));
-    }
-
-    @Test
-    public void testSamePKWithBruteForceAndOnDiskGraphBasedScoring()
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        // Use euclidean distance to more easily verify correctness of caching
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
-
-        // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
-        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vector(1f, 1f));
-        flush();
-
-        // over 1024 vectors to guarantee PQ on disk
-        // Must be enough rows to go to graph
-        for (int j = 1; j <= 1100; j++)
-        {
-            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", j, vector((float) j, (float) j));
-        }
-        flush();
-
-        assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(1), row(2));
-    }
-
-    @Test
-    public void testRowWithMissingVectorThatMatchesQueryPredicates()
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        // There was an edge case where we failed because there was just a single row in the table.
-        execute("INSERT INTO %s (pk, val) VALUES (1, 'match me')");
-        assertRows(execute("SELECT pk FROM %s WHERE val = 'match me' ORDER BY vec ANN OF [1,1] LIMIT 2"));
-        // Push memtable to sstable. we should get same result
-        flush();
-        assertRows(execute("SELECT pk FROM %s WHERE val = 'match me' ORDER BY vec ANN OF [1,1] LIMIT 2"));
-    }
-
-    @Test
-    public void testMultipleVectorsInMemoryWithPredicate()
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        // When we search the memtable, we filter out PKs outside the memtable's bounrdaries.
-        // Persist two rows and push to sstable that will be outside of bounds.
-        execute("INSERT INTO %s (pk, val, vec) VALUES (1, 'match me', [1, 1])");
-        execute("INSERT INTO %s (pk, val, vec) VALUES (5, 'match me', [1, 1])");
-        flush();
-        execute("INSERT INTO %s (pk, val, vec) VALUES (2, 'match me', [1, 1])");
-        execute("INSERT INTO %s (pk, val, vec) VALUES (3, 'match me', [1, 1])");
-        execute("INSERT INTO %s (pk, val, vec) VALUES (4, 'match me', [1, 1])");
-        assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE val = 'match me' ORDER BY vec ANN OF [1,1] LIMIT 5"),
-                                row(1), row(2), row(3), row(4), row(5));
-    }
-
-    @Test
-    public void testNestedANNQuery()
-    {
-        createTable("CREATE TABLE %s (pk int, name text, body text, vals vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vals) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(name) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-        execute("INSERT INTO %s (pk, name, body, vals) VALUES (1, 'Ann', 'A lizard said bad things to the snakes', [0.1, 0.1])");
-        execute("INSERT INTO %s (pk, name, body, vals) VALUES (2, 'Bea', 'Please wear protective gear before operating the machine', [0.2, -0.3])");
-        execute("INSERT INTO %s (pk, name, body, vals) VALUES (3, 'Cal', 'My name is Slim Shady', [0.0, 0.9])");
-        execute("INSERT INTO %s (pk, name, body, vals) VALUES (4, 'Bea', 'I repeat: wear your helmet!', [0.3, -0.2])");
-        var result = execute("SELECT pk FROM %s WHERE name='Bea' OR name='Ann' ORDER BY vals ANN OF [0.3, 0.1] LIMIT 5");
-        assertRowsIgnoringOrder(result, row(1), row(2), row(4));
-    }
-
-    @Test
-    public void testIntersectionWithMatchingPrimaryKeyDownToClusteringValues() throws Throwable
-    {
-        createTable("CREATE TABLE %s (pk int, a int, b int, c int, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        // This row is created so that it matches the query parameters, and so that the PK is before the other PKs.
-        // The token for 5 is -7509452495886106294 and the token for 1 is -4069959284402364209.
-        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 5, 1, 1, 2, vector(1, 1));
-        // This row is created so that it matches one, but not both, predicates, and so that it has the same token
-        // as the third row, but is technically before it when sorting using clustering columns.
-        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 1, 1, 1, 0, vector(1, 1));
-        // This row is the only valid match and is the final row in the sstable.
-        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 1, 2, 1, 2, vector(1, 1));
-
-        beforeAndAfterFlush(
-        () -> {
-            // Query has three important details. First, we restrict by the partition, then we have an intersection
-            // on b and c. It is a vector query because there is a separate code path for it.
-            assertRows(execute("SELECT a FROM %s WHERE b = 1 AND c = 2 AND pk = 1 ORDER BY vec ANN OF [1,1] LIMIT 3"), row(2));
-            // Verify this works for the non vector code path as well, which was also broken.
-            assertRows(execute("SELECT a FROM %s WHERE b = 1 AND c = 2 AND pk = 1"), row(2));
-        });
-    }
-
-    // search across multiple sstables each with multiple segments, verify results with and without non-ann filtering
-    @Test
-    public void multipleSSTablesAndMultipleSegmentsTest()
-    {
-        createTable("CREATE TABLE %s (pk int, constant boolean, val vector<float, 2>, PRIMARY KEY(pk))");
-        disableCompaction(KEYSPACE);
-
-        int vectorCountPerSSTable = getRandom().nextIntBetween(200, 400);
-        int pk = 0;
-
-        // 50 rows per segment to ensure certain kinds of skipping
-        SegmentBuilder.updateLastValidSegmentRowId(50);
-
-        // create multiple sstables to ensure that not all PKs have the same source table
-        for (int i = 0; i < 6; i++)
-        {
-            for (int row = 0; row < vectorCountPerSSTable; row++)
-                // Create random vectors, we're only testing internal consistency
-                execute("INSERT INTO %s (pk, constant, val) VALUES (?, ?, ?)", pk++, true,
-                        vector(getRandom().nextIntBetween(1, 400), getRandom().nextIntBetween(1, 400)));
-            flush();
-        }
-
-        // create indexes on existing sstable to produce multiple segments
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        createIndex("CREATE CUSTOM INDEX ON %s(constant) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        // query multiple on-disk indexes
-        int limit = getRandom().nextIntBetween(5,25);
-        // Pick a vector in the middle of the distribution
-        UntypedResultSet unfilteredResults = execute("SELECT pk FROM %s ORDER BY val ANN OF [200,200] LIMIT ?", limit);
-        UntypedResultSet filteredResults = execute("SELECT pk FROM %s WHERE constant = true ORDER BY val ANN OF [200,200] LIMIT ?", limit);
-
-        // Extract the primary keys while retaining order
-        var unfilteredRows = unfilteredResults.stream().map(row -> row.getInt("pk")).toArray();
-        var filteredRows = filteredResults.stream().map(row -> row.getInt("pk")).toArray();
-
-        // Assert that the results are the same
-        assertThat(filteredRows).containsExactly(unfilteredRows);
-    }
-
-    @Test
-    public void insertstuff()
-    {
-        // This test requires the non-bruteforce route
-        setMaxBruteForceRows(0);
-        createTable("CREATE TABLE %s (pk int, val text, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        // Insert data
-        execute("INSERT INTO %s (pk, val) VALUES (1, 'A')");
-        execute("INSERT INTO %s (pk, val) VALUES (2, 'B')");
-        execute("INSERT INTO %s (pk, val) VALUES (3, 'C')");
-
-        // no solution yet, so flush()
-        flush();
-
-        // query with order
-        assertRows(execute("SELECT pk FROM %s ORDER BY val limit 3"), row(1), row(2), row(3));
-        assertRows(execute("SELECT pk FROM %s ORDER BY val limit 1"), row(1));
-    }
-
-    @Test
-    public void testEnsureIndexQueryableAfterTransientFailure() throws Throwable
-    {
-        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        var injection = Injections.newCustom("fail_on_searcher_search")
-                                  .add(InvokePointBuilder.newInvokePoint().onClass(GraphSearcher.class).onMethod("search").atEntry())
-                                  .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
-                                  .build();
-        Injections.inject(injection);
-        // Insert data so we can query the index
-        execute("INSERT INTO %s (pk, vec) VALUES (1, [1,1])");
-
-        // Ensure that we fail, as expected, and that a subsequent call to search is successful.
-        beforeAndAfterFlush(() -> {
-            injection.enable();
-            assertThatThrownBy(() -> execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2")).hasMessageContaining("Injected failure!");
-            injection.disable();
-            assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(1));
-        });
-    }
-
-    @Test
-    public void testCompactionWithEnoughRowsForPQAndDeleteARow()
-    {
-        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        disableCompaction();
-
-        for (int i = 0; i <= CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
-            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(i, i + 1));
-        flush();
-
-        // By deleting a row, we trigger a key histogram to round its estimate to 0 instead of 1 rows per key, and
-        // that broke compaction, so we test that here.
-        execute("DELETE FROM %s WHERE pk = 0");
-        flush();
-
-        // Run compaction, it fails if compaction is not successful
-        compact();
-
-        // Confirm we can query the data
-        assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
-    }
-
-    /**
-     * Tests a filter-then-sort query with a concurrent vector deletion. See CNDB-10536 for details.
-     */
-    @Test
-    public void testFilterThenSortQueryWithConcurrentVectorDeletion() throws Throwable
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>, c int)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        // write into memtable
-        execute("INSERT INTO %s (k, v, c) VALUES (1, [1, 1], 1)");
-        execute("INSERT INTO %s (k, v, c) VALUES (2, [2, 2], 1)");
-
-        // inject a barrier to block CassandraOnHeapGraph#getOrdinal
-        Injections.Barrier barrier = Injections.newBarrier("block_get_ordinal", 2, false)
-                                               .add(InvokePointBuilder.newInvokePoint()
-                                                                      .onClass(CassandraOnHeapGraph.class)
-                                                                      .onMethod("getOrdinal")
-                                                                      .atEntry())
-                                               .build();
-        Injections.inject(barrier);
-
-        // start a filter-then-sort query asynchronously that will get blocked in the injected barrier
-        QueryController.QUERY_OPT_LEVEL = 0;
-        try
-        {
-            ExecutorService executor = Executors.newFixedThreadPool(1);
-            String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
-            Future<UntypedResultSet> future = executor.submit(() -> execute(select));
-
-            // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
-            waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
-            execute("DELETE v FROM %s WHERE k = 1");
-            flush();
-
-            // release the barrier to resume the query, which should succeed
-            barrier.countDown();
-            assertRows(future.get(), row(2));
-
-            assertEquals(0, executor.shutdownNow().size());
-        }
-        finally
-        {
-            QueryController.QUERY_OPT_LEVEL = 1;
-        }
-    }
 <<<<<<<
 =======
 
 >>>>>>>
+/**
+ * Range iterators contain primary keys, in sorted order, with no duplicates.  They also
+ * know their minimum and maximum keys, and an upper bound on the number of keys they contain.
+ */
+public abstract class RangeIterator extends AbstractIterator<PrimaryKey> implements Closeable
+{
+    private static final Builder.EmptyRangeIterator EMPTY = new Builder.EmptyRangeIterator();
+
+    private final PrimaryKey min, max;
+    private final long count;
+
+    protected RangeIterator(Builder.Statistics statistics)
+    {
+        this(statistics.min, statistics.max, statistics.tokenCount);
+    }
+
+    public RangeIterator(RangeIterator range)
+    {
+        this(range == null ? null : range.min, range == null ? null : range.max, range == null ? -1 : range.count);
+    }
+
+    public RangeIterator(PrimaryKey min, PrimaryKey max, long count)
+    {
+        if (min == null || max == null || count == 0)
+        {
+            assert min == null && max == null && (count == 0 || count == -1) : min + " - " + max + " " + count;
+            endOfData();
+        }
+
+        this.min = min;
+        this.max = max;
+        this.count = count;
+    }
+
+    public final PrimaryKey getMinimum()
+    {
+        return min;
+    }
+
+    public final PrimaryKey getMaximum()
+    {
+        return max;
+    }
+
+    /**
+     * @return an upper bound on the number of keys that can be returned by this iterator.
+     */
+    public final long getMaxKeys()
+    {
+        return count;
+    }
+
+    public final PrimaryKey nextOrNull()
+    {
+        return hasNext() ? next() : null;
+    }
+
+    /**
+     * When called, this iterators current position will
+     * be skipped forwards until finding either:
+     *   1) an element equal to or bigger than next
+     *   2) the end of the iterator
+     *
+     * @param nextToken value to skip the iterator forward until matching
+     */
+    public final void skipTo(PrimaryKey nextToken)
+    {
+        if (state == State.DONE)
+            return;
+
+        if (state == State.READY && next.compareTo(nextToken) >= 0)
+            return;
+
+        performSkipTo(nextToken);
+        state = State.NOT_READY;
+    }
+
+    /**
+     * Skip up to nextKey, but leave the internal state in a position where
+     * calling computeNext() will return nextKey or the first one after it.
+     */
+    protected abstract void performSkipTo(PrimaryKey nextKey);
+
+    public static RangeIterator empty()
+    {
+        return EMPTY;
+    }
+
+    public static abstract class Builder
+    {
+        public enum IteratorType
+        {
+            CONCAT,
+            UNION,
+            INTERSECTION
+        }
+
+        @VisibleForTesting
+        protected final Statistics statistics;
+
+
+        public Builder(IteratorType type)
+        {
+            statistics = new Statistics(type);
+        }
+
+        public PrimaryKey getMinimum()
+        {
+            return statistics.min;
+        }
+
+        public PrimaryKey getMaximum()
+        {
+            return statistics.max;
+        }
+
+        public long getTokenCount()
+        {
+            return statistics.tokenCount;
+        }
+
+        public abstract int rangeCount();
+
+        public abstract Collection<RangeIterator> ranges();
+
+        // Implementation takes ownership of the range iterator. If the implementation decides not to include it, such
+        // that `rangeCount` may return 0, it must close the range iterator.
+        public abstract Builder add(RangeIterator range);
+
+        public abstract Builder add(List<RangeIterator> ranges);
+
+        public final RangeIterator build()
+        {
+            if (rangeCount() == 0)
+                return new Builder.EmptyRangeIterator();
+            else
+                return buildIterator();
+        }
+
+        public static class EmptyRangeIterator extends RangeIterator
+        {
+            EmptyRangeIterator() { super(null, null, 0); }
+            public org.apache.cassandra.index.sai.utils.PrimaryKey computeNext() { return endOfData(); }
+            protected void performSkipTo(org.apache.cassandra.index.sai.utils.PrimaryKey nextToken) { }
+            public void close() { }
+        }
+
+        protected abstract RangeIterator buildIterator();
+
+        public static class Statistics
+        {
+            protected final IteratorType iteratorType;
+
+            protected org.apache.cassandra.index.sai.utils.PrimaryKey min, max;
+            protected long tokenCount;
+
+            // iterator with the least number of items
+            protected RangeIterator minRange;
+            // iterator with the most number of items
+            protected RangeIterator maxRange;
+
+            // tracks if all of the added ranges overlap, which is useful in case of intersection,
+            // as it gives direct answer as to such iterator is going to produce any results.
+            private boolean isOverlapping = true;
+
+            private boolean hasRange = false;
+
+            public Statistics(IteratorType iteratorType)
+            {
+                this.iteratorType = iteratorType;
+            }
+
+            /**
+             * Update statistics information with the given range.
+             *
+             * Updates min/max of the combined range, token count and
+             * tracks range with the least/most number of tokens.
+             *
+             * @param range The range to update statistics with.
+             */
+            public void update(RangeIterator range)
+            {
+                switch (iteratorType)
+                {
+                    case CONCAT:
+                        // range iterators should be sorted, but previous max must not be greater than next min.
+                        if (range.getMaxKeys() > 0)
+                        {
+                            if (tokenCount == 0)
+                            {
+                                min = range.getMinimum();
+                            }
+                            else if (tokenCount > 0 && max.compareTo(range.getMinimum()) > 0)
+                            {
+                                throw new IllegalArgumentException("RangeIterator must be sorted, previous max: " + max + ", next min: " + range.getMinimum());
+                            }
+
+                            max = range.getMaximum();
+                        }
+                        tokenCount += range.getMaxKeys();
+                        break;
+
+                    case UNION:
+                        min = nullSafeMin(min, range.getMinimum());
+                        max = nullSafeMax(max, range.getMaximum());
+                        tokenCount += range.getMaxKeys();
+                        break;
+
+                    case INTERSECTION:
+                        // minimum of the intersection is the biggest minimum of individual iterators
+                        min = nullSafeMax(min, range.getMinimum());
+                        // maximum of the intersection is the smallest maximum of individual iterators
+                        max = nullSafeMin(max, range.getMaximum());
+                        if (hasRange)
+                            tokenCount = Math.min(tokenCount, range.getMaxKeys());
+                        else
+                            tokenCount = range.getMaxKeys();
+                        break;
+
+                    default:
+                        throw new IllegalStateException("Unknown iterator type: " + iteratorType);
+                }
+
+                // check if new range is disjoint with already added ranges, which means that this intersection
+                // is not going to produce any results, so we can cleanup range storage and never added anything to it.
+                isOverlapping &= isOverlapping(min, max, range);
+
+                minRange = minRange == null ? range : min(minRange, range);
+                maxRange = maxRange == null ? range : max(maxRange, range);
+
+                hasRange = true;
+            }
+
+            private RangeIterator min(RangeIterator a, RangeIterator b)
+            {
+                return a.getMaxKeys() > b.getMaxKeys() ? b : a;
+            }
+
+            private RangeIterator max(RangeIterator a, RangeIterator b)
+            {
+                return a.getMaxKeys() > b.getMaxKeys() ? a : b;
+            }
+
+            public boolean isDisjoint()
+            {
+                return !isOverlapping;
+            }
+
+            public double sizeRatio()
+            {
+                return minRange.getMaxKeys() * 1d / maxRange.getMaxKeys();
+            }
+        }
+    }
+
+    @VisibleForTesting
+    protected static <U extends Comparable<U>> boolean isOverlapping(RangeIterator a, RangeIterator b)
+    {
+        return isOverlapping(a.peek(), a.getMaximum(), b);
+    }
+
+    /**
+     * Ranges are overlapping the following cases:
+     *
+     *   * When they have a common subrange:
+     *
+     *   min       b.current      max          b.max
+     *   +---------|--------------+------------|
+     *
+     *   b.current      min       max          b.max
+     *   |--------------+---------+------------|
+     *
+     *   min        b.current     b.max        max
+     *   +----------|-------------|------------+
+     *
+     *
+     *  If either range is empty, they're disjoint.
+     */
+    @VisibleForTesting
+    protected static boolean isOverlapping(PrimaryKey min, PrimaryKey max, RangeIterator b)
+    {
+        return (min != null && max != null) &&
+               b.hasNext() && min.compareTo(b.getMaximum()) <= 0 && b.peek().compareTo(max) <= 0;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Comparable> T nullSafeMin(T a, T b)
+    {
+        if (a == null) return b;
+        if (b == null) return a;
+
+        return a.compareTo(b) > 0 ? b : a;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Comparable> T nullSafeMax(T a, T b)
+    {
+        if (a == null) return b;
+        if (b == null) return a;
+
+        return a.compareTo(b) > 0 ? a : b;
+    }
 }
