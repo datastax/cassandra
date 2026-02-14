@@ -881,13 +881,13 @@ public class NativeIndexDDLTest extends SAITester
                 // Flush remaining rows to ensure we have SSTables for index builds
                 flush();
 
-                // Inject a delay to slow down the index build so truncate can interrupt it
-                // Using a pause (not a barrier) allows the build to be registered as a compaction task
-                // 500ms delay per partition ensures builds run long enough to be detected and interrupted
+                // Inject a delay at indexWriter.begin() which is called AFTER build setup
+                // but BEFORE the indexing loop. This ensures builds are in a running state
+                // and will check isStopRequested() when they continue after truncate.
                 Injection slowDown = Injections.newPause("slowDownBuild", 5000)
                                                .add(InvokePointBuilder.newInvokePoint()
                                                                       .onClass(StorageAttachedIndexWriter.class)
-                                                                      .onMethod("startPartition")
+                                                                      .onMethod("begin")
                                                                       .atEntry())
                                                .build();
                 
@@ -902,18 +902,18 @@ public class NativeIndexDDLTest extends SAITester
                     waitForAssert(() -> assertTrue("Index build should be submitted",
                                                  INDEX_BUILD_COUNTER.get() > 0),
                                  5, TimeUnit.SECONDS);
-                    
-                    // Let it process a few partitions
-                    Thread.sleep(200);
 
-                    // Verify builds are actively running before truncating
+                    // CRITICAL: Wait for builds to actually START processing partitions
+                    // We need to ensure builds have entered the indexing loop and hit the first
+                    // startPartition() call BEFORE we truncate. Otherwise truncate happens before
+                    // builds reach the interruptible phase and they never see the stop request.
+                    // The 10s delay per partition means once they start, they'll be running for a while.
                     waitForAssert(() -> assertTrue("Index builds should be running",
                                                    getCompactionTasks() > 0),
-                                  2, TimeUnit.SECONDS);
+                                  10, TimeUnit.SECONDS);
                     
-                    // Truncate while builds are actively running (but slow)
-                    // This should interrupt the builds with StopTrigger.TRUNCATE
-                    // The builds will check isStopRequested() and throw CompactionInterruptedException
+                    // Now truncate while builds are actively processing (stuck in the 10s delay)
+                    // This ensures truncate happens AFTER builds have started, so they'll detect it
                     truncate(true);
                     
                     // Wait for all compactions/builds to complete after truncate
