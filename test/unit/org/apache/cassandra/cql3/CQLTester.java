@@ -1092,8 +1092,8 @@ public abstract class CQLTester
             isQuotedGeneratedIndexName = ParseUtils.isQuoted(column, '\"');
 
             String baseName = Strings.isNullOrEmpty(column)
-                              ? IndexMetadata.generateDefaultIndexName(keyspace, table, null)
-                              : IndexMetadata.generateDefaultIndexName(keyspace, table, new ColumnIdentifier(column, true));
+                              ? IndexMetadata.generateDefaultIndexName(table, null)
+                              : IndexMetadata.generateDefaultIndexName(table, new ColumnIdentifier(column, true));
 
             KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(keyspace);
             assertNotNull(ks);

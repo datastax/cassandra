@@ -28,8 +28,8 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.schema.SchemaConstants;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertEquals;
 
 @RunWith(Parameterized.class)
 public class IndexNameTest extends CQLTester
@@ -144,14 +144,14 @@ public class IndexNameTest extends CQLTester
     @Test
     public void testMaxAcceptableLongNamesNewIndex() throws Throwable
     {
-        assertEquals(182, Version.calculateIndexNameAllowedLength(KEYSPACE));
-        String longName = "a".repeat(182);
+        assertThat(Version.calculateIndexNameAllowedLength(KEYSPACE)).isGreaterThanOrEqualTo(SchemaConstants.INDEX_NAME_LENGTH);
+
+        String longName = "a".repeat(SchemaConstants.INDEX_NAME_LENGTH);
         createTable("CREATE TABLE %s (" +
                     "key int PRIMARY KEY," +
                     "value int)"
         );
         executeNet(String.format(createIndexQuery, longName, "%s", "value"));
-
         execute(String.format("INSERT INTO %%s (\"key\", %s) VALUES (1, 1)", "value"));
         execute(String.format("INSERT INTO %%s (\"key\", %s) VALUES (2, 2)", "value"));
 
@@ -161,7 +161,7 @@ public class IndexNameTest extends CQLTester
     @Test
     public void failTooLongNamesNewIndex()
     {
-        String longName = "a".repeat(183);
+        String longName = "a".repeat(SchemaConstants.INDEX_NAME_LENGTH + 1);
         createTable("CREATE TABLE %s (" +
                     "key int PRIMARY KEY," +
                     "value int)"
