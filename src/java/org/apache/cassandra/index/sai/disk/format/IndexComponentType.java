@@ -93,24 +93,24 @@ public enum IndexComponentType
      * <p>
      * V2
      */
-    PARTITION_KEY_BLOCKS("PartitionKeyBlocks"),
+    PARTITION_KEY_BLOCKS("PKBlocks"),
 
     /**
      * Encoded sequence of offsets to partition key blocks
      * <p>
      * V2
      */
-    PARTITION_KEY_BLOCK_OFFSETS("PartitionKeyBlockOffsets"),
+    PARTITION_KEY_BLOCK_OFFSETS("PKBlockOffsets"),
 
     /**
      * Prefix-compressed blocks of clustering keys used for rowId to clustering key lookups
      */
-    CLUSTERING_KEY_BLOCKS("ClusteringKeyBlocks"),
+    CLUSTERING_KEY_BLOCKS("CKBlocks"),
 
     /**
      * Encoded sequence of offsets to clustering key blocks
      */
-    CLUSTERING_KEY_BLOCK_OFFSETS("ClusteringKeyBlockOffsets"),
+    CLUSTERING_KEY_BLOCK_OFFSETS("CKBlockOffsets"),
 
     /**
      * Stores per-sstable metadata.
