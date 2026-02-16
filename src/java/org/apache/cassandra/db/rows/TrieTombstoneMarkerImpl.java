@@ -118,9 +118,9 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         }
 
         @Override
-        public Covering withUpdatedTimestamp(long l)
+        public Covering withUpdatedTimestamp(long newTimestamp)
         {
-            return new Covering(l, localDeletionTime());
+            return new Covering(newTimestamp, localDeletionTime());
         }
 
         @Override
@@ -256,10 +256,10 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         }
 
         @Override
-        public TrieTombstoneMarker withUpdatedTimestamp(long l)
+        public TrieTombstoneMarker withUpdatedTimestamp(long newTimestamp)
         {
-            Covering newLeft = leftDeletion != null ? leftDeletion.withUpdatedTimestamp(l) : null;
-            Covering newRight = rightDeletion != null ? rightDeletion.withUpdatedTimestamp(l) : null;
+            Covering newLeft = leftDeletion != null ? leftDeletion.withUpdatedTimestamp(newTimestamp) : null;
+            Covering newRight = rightDeletion != null ? rightDeletion.withUpdatedTimestamp(newTimestamp) : null;
             if (Objects.equals(newLeft, newRight))
                 return null;
             return new Boundary(newLeft, newRight);
@@ -319,6 +319,14 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         }
     }
 
+    /// Point deletion. Marks a deletion at the lowest points of the represented data hierarchy where no further
+    /// complexity can exist below the marked point to improve efficiency compared to bracketing the point with
+    /// boundaries on both sides.
+    ///
+    /// Both sides of a point deletion are the same (null if no covering deletion applies), and the point deletion
+    /// applies only to the exact position of the marker (i.e. if there is substructure, this deletion will not be
+    /// covering for the branch). `isBoundary` returns true even though the applicable covering deletion does not
+    /// change, because the point must be reported as content.
     static class Point implements TrieTombstoneMarkerImpl
     {
         // Every point deletion introduces a new deletion time. If it interrupts an existing deletion, it will reuse
@@ -362,7 +370,7 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
                                                            ClusteringComparator comparator,
                                                            DeletionTime deletionToOmit)
         {
-            return null;
+            throw new AssertionError("Point trie tombstone cannot be converted to a RangeTombstoneMarker");
         }
 
         @Override
@@ -377,7 +385,7 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
                 if (!pointDeletion.supersedes(existingCovering))
                 {
                     if (coveringDeletion == null || !coveringDeletion.supersedes(existingCovering))
-                        return null;
+                        return existingCovering; // This point is fully superseded/deleted.
                     else
                         return coveringDeletion;
                 }
@@ -411,16 +419,17 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         }
 
         @Override
-        public TrieTombstoneMarker withUpdatedTimestamp(long l)
+        public TrieTombstoneMarker withUpdatedTimestamp(long newTimestamp)
         {
             if (coveringDeletion != null)
-                return new Covering(l, coveringDeletion.localDeletionTime()); // subsumed by range deletion
-            return new Point(new Covering(l, pointDeletion.localDeletionTime()), null);
+                return new Covering(newTimestamp, coveringDeletion.localDeletionTime()); // subsumed by range deletion
+            return new Point(new Covering(newTimestamp, pointDeletion.localDeletionTime()), null);
         }
 
         @Override
         public boolean isBoundary()
         {
+            // Must be reported.
             return true;
         }
 

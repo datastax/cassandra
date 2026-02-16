@@ -60,7 +60,9 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
     /// equal) which is not stored or reported.
     TrieTombstoneMarker mergeWith(TrieTombstoneMarker existing);
 
-    /// Returns true if this marker contains a point deletion.
+    /// Returns true if this marker contains a point deletion. The point deletion applies only to the position of the
+    /// marker, and it only makes sense for points on the lowest level of the trie hierarchy.
+    /// See [TrieTombstoneMarkerImpl.Point] for further details.
     boolean hasPointData();
 
     static TrieTombstoneMarker covering(DeletionTime deletionTime)
@@ -68,5 +70,5 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
         return TrieTombstoneMarkerImpl.covering(deletionTime);
     }
 
-    TrieTombstoneMarker withUpdatedTimestamp(long l);
+    TrieTombstoneMarker withUpdatedTimestamp(long newTimestamp);
 }

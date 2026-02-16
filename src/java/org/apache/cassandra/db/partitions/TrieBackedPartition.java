@@ -413,6 +413,9 @@ public class TrieBackedPartition implements Partition
 
     public DeletionTime partitionLevelDeletion()
     {
+        // Since static rows can only be deleted via the partition deletion, getting the applicable deletion of the
+        // static row (or a logical position for it if a static row is not defined) gives us the applicable partition
+        // deletion.
         TrieTombstoneMarker applicableRange = trie.deletionOnlyTrie().applicableRange(STATIC_CLUSTERING_PATH);
         return applicableRange != null ? applicableRange.deletionTime() : DeletionTime.LIVE;
     }
@@ -514,11 +517,21 @@ public class TrieBackedPartition implements Partition
 
     public static Object combineDataAndDeletion(Object data, TrieTombstoneMarker deletion)
     {
-        if (data == null || data instanceof PartitionMarker)
+        if (data == null)
+            return deletion; // Range or partitions tombstones will follow this path.
+        // drop the PartitionMarker
+        if (data instanceof PartitionMarker)
             return deletion;
 
-        if (deletion == null || !deletion.hasPointData())
+        if (deletion == null)
             return data;
+        // mergedTrie will give the covering deletion for any row it reports (i.e. active range or partition deletion);
+        // ignore it as we don't want to change rows' deletion time to apply it.
+        if (!deletion.isBoundary())
+            return data;
+        // Tombstone boundaries have different clustering positions than rows; the only boundary that can match the
+        // position of a row is a point deletion.
+        assert deletion.hasPointData() : "Deletion tombstone boundary " + deletion + " clashes with row " + data;
 
         // This is a row combined with a point deletion.
         RowData rowData = (RowData) data;
@@ -679,6 +692,8 @@ public class TrieBackedPartition implements Partition
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, NavigableSet<Clustering<?>> clusteringsInQueryOrder, boolean reversed)
     {
         ByteComparable[] bounds = new ByteComparable[clusteringsInQueryOrder.size() * 2];
+        // Trie intersection requires the boundaries to be given in forward order. Our clusterings are given in query
+        // order, which is why we have to reverse them if we are making a reversed iterator.
         int index = reversed ? (clusteringsInQueryOrder.size() - 1) * 2 : 0;
         int indexInc = reversed ? -2 : +2;
         for (Clustering<?> clustering : clusteringsInQueryOrder)

@@ -343,7 +343,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     @Override
     public long maxTimestamp()
     {
-        long maxTimestamp = Long.MIN_VALUE;
+        long maxTimestamp = LivenessInfo.NO_TIMESTAMP;
         for (Iterator<TrieTombstoneMarker> it = trie.deletionOnlyTrie().valueIterator(); it.hasNext();)
             maxTimestamp = Math.max(maxTimestamp, it.next().deletionTime().markedForDeleteAt());
         for (Iterator<Row> it = rowsIncludingStatic(); it.hasNext();)
@@ -452,10 +452,10 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                     trie.apply(DeletionAwareTrie.<Row, TrieTombstoneMarker>singleton(comparableClustering,
                                                                                      BYTE_COMPARABLE_VERSION,
                                                                                      row),
-                               this::merge,
+                               this::mergeIncomingRow,
                                this::mergeTombstones,
-                               this::applyTombstone,
-                               this::applyTombstone,
+                               this::applyIncomingTombstone,
+                               this::applyExistingTombstoneToIncomingRow,
                                true,
                                x -> false);
                 }
@@ -476,10 +476,10 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                                       end,
                                                       BYTE_COMPARABLE_VERSION,
                                                       TrieTombstoneMarker.covering(deletionTime)),
-                           this::merge,
+                           this::mergeIncomingRow,
                            this::mergeTombstones,
-                           this::applyTombstone,
-                           this::applyTombstone,
+                           this::applyIncomingTombstone,
+                           this::applyExistingTombstoneToIncomingRow,
                            true,
                            x -> false);
                 statsCollector.update(deletionTime);
@@ -535,7 +535,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             return pu;
         }
 
-        RowData merge(Object existing, Row update)
+        RowData mergeIncomingRow(Object existing, Row update)
         {
             if (existing != null)
             {
@@ -553,12 +553,12 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             return rowToData(update);
         }
 
-        private Row applyTombstone(TrieTombstoneMarker trieTombstoneMarker, Row o)
+        private Row applyExistingTombstoneToIncomingRow(TrieTombstoneMarker trieTombstoneMarker, Row o)
         {
             return o.filter(cf, trieTombstoneMarker.deletionTime(), false, metadata);
         }
 
-        private Object applyTombstone(Object o, TrieTombstoneMarker trieTombstoneMarker)
+        private Object applyIncomingTombstone(Object o, TrieTombstoneMarker trieTombstoneMarker)
         {
             RowData row = (RowData) o;
             return row.delete(trieTombstoneMarker.deletionTime());
@@ -568,11 +568,17 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             if (existing == null)
             {
+                // We are adding a new tombstone.
                 ++tombstoneCount;
                 return update;
             }
             else
-                return update.mergeWith(existing);
+            {
+                TrieTombstoneMarker merged = update.mergeWith(existing);
+                if (merged == null || !merged.isBoundary())
+                    --tombstoneCount;   // dropped the existing tombstone (covered by a newer one)
+                return merged;
+            }
         }
 
         public RegularAndStaticColumns columns()

@@ -125,6 +125,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
                 : new InMemoryRangeTrie.InMemoryRangeCursor<>((InMemoryReadTrie) this, direction, alternateBranch, 0, -1);
     }
 
+    //noinspection ClassEscapesDefinedScope
     @Override
     public DeletionAwareInMemoryCursor<T, D> makeCursor(Direction direction)
     {
@@ -136,6 +137,11 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         return bufferType == BufferType.ON_HEAP ? EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP;
     }
 
+    /// Reused storage for the state of application of deletions (i.e. merging deletion branches into this trie).
+    /// Mutations switch to using this state object (leaving the [#applyState] to store the state leading up to the
+    /// deletion branch) whenever we switch to using [InMemoryRangeTrie] methods to apply deletions.
+    ///
+    /// See [#applyState] for additional information about the state arrays.
     @SuppressWarnings("unchecked")
     InMemoryTrie<D>.ApplyState deletionState = (InMemoryTrie<D>.ApplyState) new ApplyState();
 
@@ -417,11 +423,13 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
             throws TrieSpaceExhaustedException
     {
         apply(mutation,
-                (UpsertTransformerWithKeyProducer<T, V>) dataTransformer,
-                deletionTransformer, existingDeleter, insertedDeleter, deletionsAtFixedPoints, needsForcedCopy);
+              (UpsertTransformerWithKeyProducer<T, V>) dataTransformer,
+              (UpsertTransformerWithKeyProducer<D, E>) deletionTransformer,
+              (UpsertTransformerWithKeyProducer<T, E>) existingDeleter,
+              insertedDeleter, deletionsAtFixedPoints, needsForcedCopy);
     }
 
-    class DumpCursor extends InMemoryReadTrie<T>.DumpCursor<DeletionAwareInMemoryCursor<T, D>> implements DeletionAwareCursor<String, D>
+    private class DumpCursor extends InMemoryReadTrie<T>.DumpCursor<DeletionAwareInMemoryCursor<T, D>> implements DeletionAwareCursor<String, D>
     {
         DumpCursor(DeletionAwareInMemoryCursor<T, D> source, Function<T, String> contentToString)
         {
@@ -438,6 +446,8 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         @Override
         public DumpCursor tailCursor(Direction direction)
         {
+            // `DumpCursor` is only created by the dump method to be used immediately, and that use should never call
+            // `tailCursor`.
             throw new AssertionError();
         }
     }

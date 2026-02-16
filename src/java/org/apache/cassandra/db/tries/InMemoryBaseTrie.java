@@ -956,14 +956,21 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
+    /// Reused storage for the state of application of mutations. This stores the backtracking path, including changes
+    /// already applied (e.g. new version of a node that is not yet linked to the current trie) and some that are yet
+    /// to be applied (e.g. updated content).
+    ///
+    /// Because in-memory tries are single-writer, we can reuse a single state array for all updates. The updates are
+    /// serialized and thus no other thread can corrupt this state (note that this is not the factor enforcing the
+    /// single writer policy, and since we are already bound to it there is cost involved in reusing this state array).
     final ApplyState applyState = new ApplyState();
 
     /// Represents the state for an [InMemoryTrie#apply] operation. Contains a stack of all nodes we descended through
     /// and used to update the nodes with any new data during ascent.
     ///
     /// To make this as efficient and GC-friendly as possible, we use an integer array (instead of is an object stack)
-    /// and we reuse the same object. The latter is safe because memtable tries cannot be mutated in parallel by multiple
-    /// writers.
+    /// and we reuse the same object. The latter is safe because memtable tries cannot be mutated in parallel by
+    /// multiple writers.
     class ApplyState implements KeyProducer<T>
     {
         static final int STATE_SIZE = 5;

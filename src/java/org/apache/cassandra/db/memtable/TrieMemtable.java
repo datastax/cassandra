@@ -661,8 +661,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                         data.apply(TriePartitionUpdate.asMergableTrie(update),
                                    updater,
                                    updater::mergeMarkers,
-                                   updater::applyMarker,
-                                   updater::applyMarker,
+                                   updater::applyIncomingMarker,
+                                   updater::applyExistingMarkerToIncomingRow,
                                    true,
                                    FORCE_COPY_PARTITION_BOUNDARY);
                     }

@@ -76,7 +76,7 @@ implements InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object>
         if (update == TrieBackedPartition.PARTITION_MARKER)
             return mergePartitionMarkers((TrieMemtable.PartitionData) existing);
         else if (update instanceof RowData)
-            return applyRow((RowData) existing, (RowData) update, keyState);
+            return applyIncomingRow((RowData) existing, (RowData) update, keyState);
         else
             throw new AssertionError("Unexpected update type: " + update.getClass());
     }
@@ -101,6 +101,8 @@ implements InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object>
             {
                 if (rangeTombstoneOpenPosition != null)
                 {
+                    // We have an active range. The incoming marker's left side (preceding in forward direction) must
+                    // close it. Combine with the start position to form the tombstone range we report to the indexer.
                     TrieTombstoneMarker preceding = update.precedingState(Direction.FORWARD);
                     assert preceding != null; // open markers are always closed
                     DeletionTime deletionTime = preceding.deletionTime();
@@ -114,6 +116,9 @@ implements InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object>
                                                                 deletionTime));
                 }
 
+                // The right side (preceding in reverse direction) of the marker tells us if this boundary opens a new
+                // deletion. If so, store the position to report the range when it closes.
+                // Note: we don't need to save the deletion time as the closing side will repeat it.
                 TrieTombstoneMarker succeeding = update.precedingState(Direction.REVERSE);
                 // Ignore the partition deletion.
                 if (succeeding != null && !succeeding.deletionTime().equals(partitionLevelDeletion))
@@ -145,7 +150,7 @@ implements InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object>
         }
     }
 
-    public Object applyMarker(Object existingContent, TrieTombstoneMarker updateMarker, InMemoryBaseTrie.KeyProducer<Object> keyState)
+    public Object applyIncomingMarker(Object existingContent, TrieTombstoneMarker updateMarker, InMemoryBaseTrie.KeyProducer<Object> keyState)
     {
         assert existingContent instanceof RowData; // must be non-null, and can't be partition root
         RowData existing = (RowData) existingContent;
@@ -170,7 +175,7 @@ implements InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object>
         return updated;
     }
 
-    public Object applyMarker(TrieTombstoneMarker marker, Object content)
+    public Object applyExistingMarkerToIncomingRow(TrieTombstoneMarker marker, Object content)
     {
         // This is called to apply an existing tombstone to incoming data, before applyRow is called on the result.
         // No size tracking is needed, because the result of this then gets applied to the trie with applyRow.
@@ -186,7 +191,7 @@ implements InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object>
      * @param keyState Used to obtain the path through which this node was reached.
      * @return the insert row, or the merged row, copied using our allocator
      */
-    private RowData applyRow(@Nullable RowData existing, RowData insert, InMemoryBaseTrie.KeyProducer<Object> keyState)
+    private RowData applyIncomingRow(@Nullable RowData existing, RowData insert, InMemoryBaseTrie.KeyProducer<Object> keyState)
     {
         if (existing == null)
         {
@@ -247,8 +252,6 @@ implements InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object>
      */
     private TrieMemtable.PartitionData mergePartitionMarkers(@Nullable TrieMemtable.PartitionData existing)
     {
-        // TODO: Check if we need to call onPartitionDeletion
-
         if (existing == null)
         {
             // Note: Always on-heap, regardless of cloner
