@@ -93,9 +93,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slow query metrics:",
                               "sstablesHit: 1",
                               "segmentsHit: 1",
-                              "partitionsRead: 2",
-                              "rowsFiltered: 3",
-                              "rowsPreFiltered: 0",
+                              "keysFetched: 3",
+                              "partitionsFetched: 2",
+                              "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 3",
+                              "rowsReturned: 3",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 1",
                               "bkdSegmentsHit: 1",
@@ -103,8 +107,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "bkdPostingsDecodes: 4",
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
-                              "annGraphSearchLatencyNanos: ",
-                              "shadowedPrimaryKeyCount",
+                              "annGraphSearchLatencyNanos: 0",
                               "SAI slow query plan:",
                               "NumericIndexScan");
 
@@ -116,9 +119,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slowest query metrics:",
                               "sstablesHit: 1",
                               "segmentsHit: 1",
-                              "partitionsRead: 2",
-                              "rowsFiltered: 3",
-                              "rowsPreFiltered: 0",
+                              "keysFetched: 3",
+                              "partitionsFetched: 2",
+                              "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 3",
+                              "rowsReturned: 3",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 1",
                               "bkdSegmentsHit: 1",
@@ -126,8 +133,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "bkdPostingsDecodes: 4",
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
-                              "annGraphSearchLatencyNanos: ",
-                              "shadowedPrimaryKeyCount",
+                              "annGraphSearchLatencyNanos: 0",
                               "SAI slowest query plan:",
                               "NumericIndexScan");
 
@@ -139,9 +145,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slow query metrics:",
                               "sstablesHit: 2",
                               "segmentsHit: 2",
-                              "partitionsRead: 2",
-                              "rowsFiltered: 2",
-                              "rowsPreFiltered: 0",
+                              "keysFetched: 2",
+                              "partitionsFetched: 2",
+                              "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 2",
+                              "rowsReturned: 2",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 2",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -150,7 +160,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 2",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount: 0",
                               "SAI slow query plan:",
                               "LiteralIndexScan");
 
@@ -162,9 +171,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slowest query metrics:",
                               "sstablesHit: 2",
                               "segmentsHit: 2",
-                              "partitionsRead: 2",
-                              "rowsFiltered: 2",
-                              "rowsPreFiltered: 0",
+                              "keysFetched: 2",
+                              "partitionsFetched: 2",
+                              "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 2",
+                              "rowsReturned: 2",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 2",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -173,7 +186,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 2",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount: 0",
                               "SAI slowest query plan:",
                               "LiteralIndexScan");
 
@@ -185,9 +197,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slow query metrics:",
                               "sstablesHit: 1",
                               "segmentsHit: 1",
-                              "partitionsRead: 4",
-                              "rowsFiltered: 4",
-                              "rowsPreFiltered: 0",
+                              "keysFetched: 4",
+                              "partitionsFetched: 4",
+                              "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 4",
+                              "rowsReturned: 4",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -196,7 +212,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
-                              "shadowedPrimaryKeyCount: 0",
                               "SAI slow query plan:",
                               "AnnIndexScan");
 
@@ -208,9 +223,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slowest query metrics:",
                               "sstablesHit: 1",
                               "segmentsHit: 1",
-                              "partitionsRead: 4",
-                              "rowsFiltered: 4",
-                              "rowsPreFiltered: 0",
+                              "keysFetched: 4",
+                              "partitionsFetched: 4",
+                              "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 4",
+                              "rowsReturned: 4",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -219,7 +238,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
-                              "shadowedPrimaryKeyCount: 0",
                               "SAI slowest query plan:",
                               "AnnIndexScan");
 
@@ -231,9 +249,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slow query metrics:",
                               "sstablesHit: 1",
                               "segmentsHit: 1",
-                              "partitionsRead: 4",
-                              "rowsFiltered: 5",
-                              "rowsPreFiltered: 0",
+                              "keysFetched: 4",
+                              "partitionsFetched: 4",
+                              "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 4",
+                              "rowsReturned: 3",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -242,7 +264,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount: 1",
                               "SAI slow query plan:",
                               "LiteralIndexScan");
 
@@ -254,9 +275,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slowest query metrics:",
                               "sstablesHit: 1",
                               "segmentsHit: 1",
-                              "partitionsRead: 4",
-                              "rowsFiltered: 5",
-                              "rowsPreFiltered: 0",
+                              "keysFetched: 4",
+                              "partitionsFetched: 4",
+                              "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 4",
+                              "rowsReturned: 3",
+                              "rowTombstonesFetched: 0",
                               "trieSegmentsHit: 0",
                               "bkdPostingListsHit: 0",
                               "bkdSegmentsHit: 0",
@@ -265,7 +290,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsSkips: 0",
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
-                              "shadowedPrimaryKeyCount: 1",
                               "SAI slowest query plan:",
                               "LiteralIndexScan");
 
@@ -277,9 +301,13 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                     "SAI slow query metrics:",
                     "sstablesHit: 2",
                     "segmentsHit: 2",
-                    "partitionsRead: 3",
-                    "rowsFiltered: 3",
-                    "rowsPreFiltered: 0",
+                    "keysFetched: 3",
+                    "partitionsFetched: 3",
+                    "partitionsReturned: 2",
+                    "partitionTombstonesFetched: 0",
+                    "rowsFetched: 3",
+                    "rowsReturned: 3",
+                    "rowTombstonesFetched: 0",
                     "trieSegmentsHit: 0",
                     "bkdPostingListsHit: 1",
                     "bkdSegmentsHit: 1",
@@ -288,7 +316,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                     "triePostingsSkips: 0",
                     "triePostingsDecodes: 0",
                     "annGraphSearchLatencyNanos: 0",
-                    "shadowedPrimaryKeyCount: 0",
                     "SAI slow query plan:",
                     "KeysSort",
                     "NumericIndexScan");
@@ -309,8 +336,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "SAI slowest query metrics:",
                               "sstablesHit: 3",
                               "segmentsHit: 3",
-                              "partitionsRead: 3",
-                              "rowsFiltered: 6");
+                              "partitionsFetched: 3",
+                              "rowsFetched: 6");
             node.runOnInstance(() -> BB.queryDelay.updateAndGet(x -> x / 4)); // restore the query delay
 
             // disable execution info logging and verify they are not logged
@@ -353,6 +380,17 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             assertLogsContain(mark, node, "was slow 2 times", "WHERE n = ?", "SAI slowest query metrics:");
             assertLogsContain(mark, node, "was slow 3 times", "WHERE n > ?", "SAI slowest query metrics:");
             assertLogsDoNotContain(mark, node, "WHERE n = 1", "WHERE n = 2", "WHERE n > 1", "WHERE n > 2", "WHERE n > 3");
+
+            // test some partition and row deletions
+            coordinator.execute(withKeyspace("DELETE FROM %s.t WHERE k = 1 AND c = 1"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("DELETE FROM %s.t WHERE k = 1 AND c = 2"), ConsistencyLevel.ONE);
+            coordinator.execute(withKeyspace("DELETE FROM %s.t WHERE k = 2"), ConsistencyLevel.ONE);
+            node.flush(KEYSPACE);
+            String selectAllQuery = withKeyspace("SELECT * FROM %s.t WHERE n >= 0");
+            coordinator.execute(selectAllQuery, ConsistencyLevel.ONE);
+            assertLogsContain(mark, node,
+                              "partitionTombstonesFetched: 1",
+                              "rowTombstonesFetched: 2");
         }
     }
 

@@ -111,13 +111,13 @@ public class OperationTest extends IndexingSchemaLoader
     public void beforeTest()
     {
         ReadCommand command = PartitionRangeReadCommand.allDataRead(BACKEND.metadata(), FBUtilities.nowInSeconds());
-        controller = new QueryController(BACKEND, command,  V1OnDiskFormat.instance.indexFeatureSet(), new QueryContext());
+        controller = new QueryController(BACKEND, command,  V1OnDiskFormat.instance.indexFeatureSet(), new QueryContext(), null);
 
         command = PartitionRangeReadCommand.allDataRead(CLUSTERING_BACKEND.metadata(), FBUtilities.nowInSeconds());
-        controllerClustering = new QueryController(CLUSTERING_BACKEND, command, V1OnDiskFormat.instance.indexFeatureSet(), new QueryContext());
+        controllerClustering = new QueryController(CLUSTERING_BACKEND, command, V1OnDiskFormat.instance.indexFeatureSet(), new QueryContext(), null);
 
         command = PartitionRangeReadCommand.allDataRead(STATIC_BACKEND.metadata(), FBUtilities.nowInSeconds());
-        controllerStatic = new QueryController(STATIC_BACKEND, command, V1OnDiskFormat.instance.indexFeatureSet(), new QueryContext());
+        controllerStatic = new QueryController(STATIC_BACKEND, command, V1OnDiskFormat.instance.indexFeatureSet(), new QueryContext(), null);
     }
 
     @After
