@@ -42,6 +42,7 @@ import com.google.common.collect.Multimap;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -127,6 +128,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private final ReadCommand command;
     private final Orderer orderer;
     private final QueryContext queryContext;
+    private final TableQueryMetrics tableQueryMetrics;
     private final IndexFeatureSet indexFeatureSet;
     private final List<DataRange> ranges;
     private final AbstractBounds<PartitionPosition> mergeRange;
@@ -166,21 +168,24 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
                            IndexFeatureSet indexFeatureSet,
-                           QueryContext queryContext)
+                           QueryContext queryContext,
+                           TableQueryMetrics tableQueryMetrics)
     {
-        this(cfs, command, null, indexFeatureSet, queryContext);
+        this(cfs, command, null, indexFeatureSet, queryContext, tableQueryMetrics);
     }
 
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
                            Orderer orderer,
                            IndexFeatureSet indexFeatureSet,
-                           QueryContext queryContext)
+                           QueryContext queryContext,
+                           TableQueryMetrics tableQueryMetrics)
     {
         this.cfs = cfs;
         this.command = command;
         this.orderer = orderer;
         this.queryContext = queryContext;
+        this.tableQueryMetrics = tableQueryMetrics;
         this.indexFeatureSet = indexFeatureSet;
         this.ranges = dataRanges(command);
         DataRange first = ranges.get(0);
@@ -877,6 +882,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         closeUnusedIterators();
         closeQueryViews();
+        if (tableQueryMetrics != null)
+            tableQueryMetrics.record(queryContext, command);
     }
 
     /**
