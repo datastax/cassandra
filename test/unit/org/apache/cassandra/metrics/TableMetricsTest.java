@@ -415,6 +415,42 @@ public class TableMetricsTest
     }
 
 
+    @Test
+    public void testWriteRequestsCounter()
+    {
+        ColumnFamilyStore cfs = recreateTable();
+        
+        // Verify initial state
+        assertEquals(0, cfs.metric.writeRequests.getCount());
+        assertEquals(0, cfs.metric.readRequests.getCount());
+        
+        int numWrites = 10;
+        
+        // Execute write operations
+        for (int i = 0; i < numWrites; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, '%s', '%s')",
+                                        KEYSPACE, TABLE, i, "val" + i, "val" + i));
+        
+        // Verify writeRequests counter is incremented
+        assertEquals(numWrites, cfs.metric.writeRequests.getCount());
+        assertEquals(0, cfs.metric.readRequests.getCount());
+        
+        // Execute more writes
+        for (int i = 0; i < numWrites; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, '%s', '%s')",
+                                        KEYSPACE, TABLE, i + numWrites, "val" + i, "val" + i));
+        
+        // Verify counter continues to increment
+        assertEquals(numWrites * 2, cfs.metric.writeRequests.getCount());
+        
+        // Execute a read to verify writeRequests doesn't increment on reads
+        session.execute(String.format("SELECT * FROM %s.%s WHERE id = 0 AND val1 = 'val0'", KEYSPACE, TABLE));
+        
+        // writeRequests should remain the same, readRequests should increment
+        assertEquals(numWrites * 2, cfs.metric.writeRequests.getCount());
+        assertEquals(1, cfs.metric.readRequests.getCount());
+    }
+
     @AfterClass
     public static void tearDown()
     {
