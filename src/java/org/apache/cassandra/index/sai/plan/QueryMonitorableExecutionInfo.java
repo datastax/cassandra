@@ -72,9 +72,13 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
         sb.append(sectionNamePrefix).append("metrics:\n");
         appendMetric(sb, "sstablesHit", metrics.sstablesHit);
         appendMetric(sb, "segmentsHit", metrics.segmentsHit);
-        appendMetric(sb, "partitionsRead", metrics.partitionsRead);
-        appendMetric(sb, "rowsFiltered", metrics.rowsFiltered);
-        appendMetric(sb, "rowsPreFiltered", metrics.rowsPreFiltered);
+        appendMetric(sb, "keysFetched", metrics.keysFetched);
+        appendMetric(sb, "partitionsFetched", metrics.partitionsFetched);
+        appendMetric(sb, "partitionsReturned", metrics.partitionsReturned);
+        appendMetric(sb, "partitionTombstonesFetched", metrics.partitionTombstonesFetched);
+        appendMetric(sb, "rowsFetched", metrics.rowsFetched);
+        appendMetric(sb, "rowsReturned", metrics.rowsReturned);
+        appendMetric(sb, "rowTombstonesFetched", metrics.rowTombstonesFetched);
         appendMetric(sb, "trieSegmentsHit", metrics.trieSegmentsHit);
         appendMetric(sb, "bkdPostingListsHit", metrics.bkdPostingListsHit);
         appendMetric(sb, "bkdSegmentsHit", metrics.bkdSegmentsHit);
@@ -83,7 +87,6 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
         appendMetric(sb, "triePostingsSkips", metrics.triePostingsSkips);
         appendMetric(sb, "triePostingsDecodes", metrics.triePostingsDecodes);
         appendMetric(sb, "annGraphSearchLatencyNanos", metrics.annGraphSearchLatency);
-        appendMetric(sb, "shadowedPrimaryKeyCount", metrics.shadowedPrimaryKeyCount);
 
         // append the plan
         sb.append(sectionNamePrefix).append("plan:\n").append(plan);
