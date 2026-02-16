@@ -211,7 +211,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     }
 
     @Override
-    public Index.Searcher searcherFor(ReadCommand command)
+    public StorageAttachedIndexSearcher searcherFor(ReadCommand command)
     {
         return new StorageAttachedIndexSearcher(cfs,
                                                 queryMetrics,

@@ -45,9 +45,31 @@ public class QueryContext
 
     private final LongAdder sstablesHit = new LongAdder();
     private final LongAdder segmentsHit = new LongAdder();
-    private final LongAdder partitionsRead = new LongAdder();
-    private final LongAdder rowsPreFiltered = new LongAdder();
-    private final LongAdder rowsFiltered = new LongAdder();
+
+    /**
+     * The partition/row keys that will be used to fetch rows from the base table.
+     * They will be either partition keys in AA, or row keys in the later row-aware disk formats.
+     */
+    private final LongAdder keysFetched = new LongAdder();
+
+    /** The number of live partitions fetched from the storage engine, before post-filtering. */
+    private final LongAdder partitionsFetched = new LongAdder();
+
+    /** The number of live partitions returned to the coordinator, after post-filtering. */
+    private final LongAdder partitionsReturned = new LongAdder();
+
+    /** The number of deleted partitions that are fetched. */
+    private final LongAdder partitionTombstonesFetched = new LongAdder();
+
+    /** The number of live rows fetched from the storage engine, before post-filtering. */
+    private final LongAdder rowsFetched = new LongAdder();
+
+    /** The number of live rows returned to the coordinator, after post-filtering. */
+    private final LongAdder rowsReturned = new LongAdder();
+
+    /** The number of deleted individual rows or ranges of rows that are fetched. */
+    private final LongAdder rowTombstonesFetched = new LongAdder();
+
     private final LongAdder trieSegmentsHit = new LongAdder();
 
     private final LongAdder bkdPostingListsHit = new LongAdder();
@@ -65,7 +87,6 @@ public class QueryContext
 
     private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
-    private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
     private final LongAdder postFilteringReadLatency = new LongAdder();
 
     // Determines the order of using indexes for filtering and sorting.
@@ -94,49 +115,81 @@ public class QueryContext
     {
         sstablesHit.add(val);
     }
+
     public void addSegmentsHit(long val) {
         segmentsHit.add(val);
     }
-    public void addPartitionsRead(long val)
+
+    public void addKeysFetched(long val)
     {
-        partitionsRead.add(val);
+        keysFetched.add(val);
     }
-    public void addRowsFiltered(long val)
+
+    public void addPartitionsFetched(long val)
     {
-        rowsFiltered.add(val);
+        partitionsFetched.add(val);
     }
-    public void addRowsPreFiltered(long val)
+
+    public void addPartitionsReturned(long val)
     {
-        rowsPreFiltered.add(val);
+        partitionsReturned.add(val);
     }
+
+    public void addPartitionTombstonesFetched(long val)
+    {
+        partitionTombstonesFetched.add(val);
+    }
+
+    public void addRowsFetched(long val)
+    {
+        rowsFetched.add(val);
+    }
+
+    public void addRowsReturned(long val)
+    {
+        rowsReturned.add(val);
+    }
+
+    public void addRowTombstonesFetched(long val)
+    {
+        rowTombstonesFetched.add(val);
+    }
+
     public void addTrieSegmentsHit(long val)
     {
         trieSegmentsHit.add(val);
     }
+
     public void addBkdPostingListsHit(long val)
     {
         bkdPostingListsHit.add(val);
     }
+
     public void addBkdSegmentsHit(long val)
     {
         bkdSegmentsHit.add(val);
     }
+
     public void addBkdPostingsSkips(long val)
     {
         bkdPostingsSkips.add(val);
     }
+
     public void addBkdPostingsDecodes(long val)
     {
         bkdPostingsDecodes.add(val);
     }
+
     public void addTriePostingsSkips(long val)
     {
         triePostingsSkips.add(val);
     }
+
     public void addTriePostingsDecodes(long val)
     {
         triePostingsDecodes.add(val);
     }
+
     public void addQueryTimeouts(long val)
     {
         queryTimeouts.add(val);
@@ -163,53 +216,86 @@ public class QueryContext
     {
         return sstablesHit.longValue();
     }
+
     public long segmentsHit() {
         return segmentsHit.longValue();
     }
-    public long partitionsRead()
+
+    public long keysFetched()
     {
-        return partitionsRead.longValue();
+        return keysFetched.longValue();
     }
-    public long rowsFiltered()
+
+    public long partitionsFetched()
     {
-        return rowsFiltered.longValue();
+        return partitionsFetched.longValue();
     }
-    public long rowsPreFiltered()
+
+    public long partitionsReturned()
     {
-        return rowsPreFiltered.longValue();
+        return partitionsReturned.longValue();
     }
+
+    public long partitionTombstonesFetched()
+    {
+        return partitionTombstonesFetched.longValue();
+    }
+
+    public long rowsFetched()
+    {
+        return rowsFetched.longValue();
+    }
+
+    public long rowsReturned()
+    {
+        return rowsReturned.longValue();
+    }
+
+    public long rowTombstonesFetched()
+    {
+        return rowTombstonesFetched.longValue();
+    }
+
     public long trieSegmentsHit()
     {
         return trieSegmentsHit.longValue();
     }
+
     public long bkdPostingListsHit()
     {
         return bkdPostingListsHit.longValue();
     }
+
     public long bkdSegmentsHit()
     {
         return bkdSegmentsHit.longValue();
     }
+
     public long bkdPostingsSkips()
     {
         return bkdPostingsSkips.longValue();
     }
+
     public long bkdPostingsDecodes()
     {
         return bkdPostingsDecodes.longValue();
     }
+
     public long triePostingsSkips()
     {
         return triePostingsSkips.longValue();
     }
+
     public long triePostingsDecodes()
     {
         return triePostingsDecodes.longValue();
     }
+
     public long queryTimeouts()
     {
         return queryTimeouts.longValue();
     }
+
     public long annGraphSearchLatency()
     {
         return annGraphSearchLatency.longValue();
@@ -227,19 +313,6 @@ public class QueryContext
             addQueryTimeouts(1);
             throw new AbortedOperationException();
         }
-    }
-
-    public void addShadowed(long count)
-    {
-        shadowedPrimaryKeyCount.add(count);
-    }
-
-    /**
-     * @return shadowed primary keys, in ascending order
-     */
-    public long getShadowedPrimaryKeyCount()
-    {
-        return shadowedPrimaryKeyCount.longValue();
     }
 
     public float getAnnRerankFloor()
@@ -289,9 +362,13 @@ public class QueryContext
         public final long totalQueryTimeNs;
         public final long sstablesHit;
         public final long segmentsHit;
-        public final long partitionsRead;
-        public final long rowsFiltered;
-        public final long rowsPreFiltered;
+        public final long keysFetched;
+        public final long partitionsFetched;
+        public final long partitionsReturned;
+        public final long partitionTombstonesFetched;
+        public final long rowsFetched;
+        public final long rowsReturned;
+        public final long rowTombstonesFetched;
         public final long trieSegmentsHit;
         public final long bkdPostingListsHit;
         public final long bkdSegmentsHit;
@@ -301,7 +378,6 @@ public class QueryContext
         public final long triePostingsDecodes;
         public final long queryTimeouts;
         public final long annGraphSearchLatency;
-        public final long shadowedPrimaryKeyCount;
         public final long postFilteringReadLatency;
         public final FilterSortOrder filterSortOrder;
 
@@ -315,9 +391,13 @@ public class QueryContext
             totalQueryTimeNs = context.totalQueryTimeNs();
             sstablesHit = context.sstablesHit();
             segmentsHit = context.segmentsHit();
-            partitionsRead = context.partitionsRead();
-            rowsFiltered = context.rowsFiltered();
-            rowsPreFiltered = context.rowsPreFiltered();
+            keysFetched = context.keysFetched();
+            partitionsFetched = context.partitionsFetched();
+            partitionsReturned = context.partitionsReturned();
+            partitionTombstonesFetched = context.partitionTombstonesFetched();
+            rowsFetched = context.rowsFetched();
+            rowsReturned = context.rowsReturned();
+            rowTombstonesFetched = context.rowTombstonesFetched();
             trieSegmentsHit = context.trieSegmentsHit();
             bkdPostingListsHit = context.bkdPostingListsHit();
             bkdSegmentsHit = context.bkdSegmentsHit();
@@ -327,7 +407,6 @@ public class QueryContext
             triePostingsDecodes = context.triePostingsDecodes();
             queryTimeouts = context.queryTimeouts();
             annGraphSearchLatency = context.annGraphSearchLatency();
-            shadowedPrimaryKeyCount = context.getShadowedPrimaryKeyCount();
             postFilteringReadLatency = context.getPostFilteringReadLatency();
             filterSortOrder = context.filterSortOrder();
         }
