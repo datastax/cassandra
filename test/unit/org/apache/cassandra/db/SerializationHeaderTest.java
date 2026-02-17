@@ -66,7 +66,7 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+
 
 public class SerializationHeaderTest
 {
@@ -197,13 +197,19 @@ public class SerializationHeaderTest
                                                                                                        new LinkedHashMap<>(Map.of(ByteBufferUtil.bytes("v"), multicellTupleType)),
                                                                                                        EncodingStats.NO_STATS);
 
-        SerializationHeader header = component.toHeader("asdfa", metadata, versionWithImplicitFrozenTuples, false);
+        SerializationHeader header = component.toHeader("test-descriptor", metadata, versionWithImplicitFrozenTuples, false);
         assertThat(header.keyType().isMultiCell()).isFalse();
         assertThat(header.clusteringTypes().get(0).isMultiCell()).isFalse();
         assertThat(header.columns().statics.iterator().next().type.isMultiCell()).isFalse();
         assertThat(header.columns().regulars.iterator().next().type.isMultiCell()).isFalse();
 
-        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("asdfa", metadata, versionWithExplicitFrozenTuples, false));
+        // Tuples are always fixed regardless of version (type.isTuple() triggers the fix path),
+        // so the explicit frozen version should produce the same result as the implicit frozen version.
+        SerializationHeader header2 = component.toHeader("test-descriptor", metadata, versionWithExplicitFrozenTuples, false);
+        assertThat(header2.keyType().isMultiCell()).isFalse();
+        assertThat(header2.clusteringTypes().get(0).isMultiCell()).isFalse();
+        assertThat(header2.columns().statics.iterator().next().type.isMultiCell()).isFalse();
+        assertThat(header2.columns().regulars.iterator().next().type.isMultiCell()).isFalse();
     }
 
     @Test
@@ -232,7 +238,11 @@ public class SerializationHeaderTest
         assertThat(Iterables.find(header.columns().regulars, md -> md.name.toString().equals("dv")).type.isMultiCell()).isTrue();
         assertThat(Iterables.find(header.columns().statics, md -> md.name.toString().equals("ds")).type.isMultiCell()).isTrue();
 
-        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("tab", metadata, versionWithExplicitFrozenTuples, false));
+        // Tuples are always fixed regardless of version (type.isTuple() triggers the fix path),
+        // so the explicit frozen version should produce the same result as the implicit frozen version.
+        SerializationHeader header2 = component.toHeader("tab", metadata, versionWithExplicitFrozenTuples, false);
+        assertThat(Iterables.find(header2.columns().regulars, md -> md.name.toString().equals("dv")).type.isMultiCell()).isTrue();
+        assertThat(Iterables.find(header2.columns().statics, md -> md.name.toString().equals("ds")).type.isMultiCell()).isTrue();
     }
 
 }

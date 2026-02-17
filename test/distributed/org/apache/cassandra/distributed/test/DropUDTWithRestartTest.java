@@ -190,7 +190,13 @@ public class DropUDTWithRestartTest extends TestBaseImpl
 
     private static List<Path> getDataDirectories(IInvokableInstance node)
     {
-        return node.callOnInstance(() -> Keyspace.open(KS).getColumnFamilyStores().stream().map(cfs -> cfs.getDirectories().getDirectoryForNewSSTables().toPath()).collect(Collectors.toList()));
+        // CNDB-16146: Use getCFDirectories() to get ALL directories where SSTables may exist,
+        // not just getDirectoryForNewSSTables() which only returns one directory per table.
+        // SSTables can be spread across multiple data directories (data0, data1, data2).
+        return node.callOnInstance(() -> Keyspace.open(KS).getColumnFamilyStores().stream()
+            .flatMap(cfs -> cfs.getDirectories().getCFDirectories().stream())
+            .map(File::toPath)
+            .collect(Collectors.toList()));
     }
 
     /**
