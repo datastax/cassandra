@@ -310,6 +310,23 @@ public abstract class InMemoryReadTrie<T>
         }
     }
 
+    int getFirstChild(int node, Direction direction)
+    {
+        assert !isNullOrLeaf(node);
+        switch (offset(node))
+        {
+            case PREFIX_OFFSET:
+                throw new AssertionError();
+            case SPARSE_OFFSET:
+                return getSparseFirstChild(node, direction);
+            case SPLIT_OFFSET:
+                return getSplitFirstChild(node, direction);
+            default:
+                // directly jump over all bytes of the chain
+                return getChildOfChainNode(node);
+        }
+    }
+
     /// Returns first present transition byte in the node that is the same or greater as the given target transition.
     int getNextTransition(int node, int trans)
     {
@@ -439,6 +456,21 @@ public abstract class InMemoryReadTrie<T>
             return transition;
     }
 
+    int getSparseFirstChild(int node, Direction direction)
+    {
+        UnsafeBuffer chunk = getBuffer(node);
+        int inChunkNode = inBufferOffset(node);
+        int data = chunk.getShortVolatile(inChunkNode + SPARSE_ORDER_OFFSET) & 0xFFFF;
+
+        if (direction.isForward())
+            data %= SPARSE_CHILD_COUNT;
+        else
+            while (data >= SPARSE_CHILD_COUNT)
+                data /= SPARSE_CHILD_COUNT;
+
+        return chunk.getIntVolatile(inChunkNode + SPARSE_CHILDREN_OFFSET + data * Integer.BYTES);
+    }
+
     int getChainNextTransition(int node, int targetTransition)
     {
         int transition = getUnsignedByte(node);
@@ -446,6 +478,11 @@ public abstract class InMemoryReadTrie<T>
             return Integer.MAX_VALUE;
         else
             return transition;
+    }
+
+    int getChildOfChainNode(int node)
+    {
+        return getIntVolatile((node & -CELL_SIZE) + (CHAIN_MAX_OFFSET + 1));
     }
 
     int getSplitNextTransition(int node, int targetTransition)
@@ -482,6 +519,37 @@ public abstract class InMemoryReadTrie<T>
             ++midIndex;
         }
         return Integer.MAX_VALUE;
+    }
+
+    int getSplitFirstChild(int node, Direction direction)
+    {
+        for (int midIndex = direction.select(0, SPLIT_START_LEVEL_LIMIT - 1);
+             direction.inLoop(midIndex, 0, SPLIT_START_LEVEL_LIMIT - 1);
+             midIndex += direction.increase)
+        {
+            int mid = getSplitCellPointer(node, midIndex, SPLIT_START_LEVEL_LIMIT);
+            if (!isNull(mid))
+            {
+                for (int tailIndex = direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1);
+                     direction.inLoop(tailIndex, 0, SPLIT_OTHER_LEVEL_LIMIT - 1);
+                     tailIndex += direction.increase)
+                {
+                    int tail = getSplitCellPointer(mid, tailIndex, SPLIT_OTHER_LEVEL_LIMIT);
+                    if (!isNull(tail))
+                    {
+                        for (int childIndex = direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1);
+                             direction.inLoop(childIndex, 0, SPLIT_OTHER_LEVEL_LIMIT - 1);
+                             childIndex += direction.increase)
+                        {
+                            int child = getSplitCellPointer(tail, childIndex, SPLIT_OTHER_LEVEL_LIMIT);
+                            if (!isNull(child))
+                                return child;
+                        }
+                    }
+                }
+            }
+        }
+        throw new AssertionError("Empty split node");
     }
 
     /// Given a transition, returns the corresponding index (within the node cell) of the pointer to the mid cell of
