@@ -895,7 +895,12 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         {
             if (isMultiCell())
             {
-                if (isTuple() && !isDroppedColumn && !isForOfflineTool)
+                // Plain tuples (TupleType, not UserType) are always implicitly frozen in CQL. A multi-cell tuple in the SSTable
+                // header indicates data from an old SSTable format where tuples could be non-frozen. This
+                // triggers the tryFix path in SerializationHeader.validateAndMaybeFixColumnType(), which will
+                // fix subtypes and then use the schema's dropped column type to determine the correct
+                // isMultiCell for dropped columns.
+                if (isTuple() && !isForOfflineTool)
                     throw columnException(columnName,
                                           "tuple type %s is not frozen, which should not have happened",
                                           asCQL3Type().toSchemaString());
