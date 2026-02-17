@@ -779,13 +779,13 @@ syntax_rules += r'''
 <groupByFunctionArgument> ::= [groupcol]=<cident>
                             | <term>
                             ;
-<identifiers> ::= "{" <identifier> ( "," <identifier> )* "}" 
+<identifiers> ::= "{" <identifier> ( "," <identifier> )* "}"
                   ;
 <options> ::= <option> ( "AND" <option> )*
                   ;
-<option> ::= "ann_options" "=" <mapLiteral> 
-           | "included_indexes" "=" <identifiers> 
-           | "excluded_indexes" "=" <identifiers> 
+<option> ::= "ann_options" "=" <mapLiteral>
+           | "included_indexes" "=" <identifiers>
+           | "excluded_indexes" "=" <identifiers>
            ;
 '''
 
