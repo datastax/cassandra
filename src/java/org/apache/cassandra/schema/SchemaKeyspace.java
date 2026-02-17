@@ -1219,7 +1219,9 @@ public final class SchemaKeyspace
         assert kind == ColumnMetadata.Kind.REGULAR || kind == ColumnMetadata.Kind.STATIC
             : "Unexpected dropped column kind: " + kind;
 
-        type.validateForColumn(UTF8Type.instance.decompose(name), false, isCounterTable, true, false);
+        // Pass isForOfflineTool=true for dropped columns to allow historical types like non-frozen tuples
+        // that were valid in older SSTable formats but are no longer allowed in current schema
+        type.validateForColumn(UTF8Type.instance.decompose(name), false, isCounterTable, true, true);
         ColumnMetadata column = ColumnMetadata.droppedColumn(keyspace, table, ColumnIdentifier.getInterned(name, true), type, kind, null);
         long droppedTime = TimeUnit.MILLISECONDS.toMicros(row.getLong("dropped_time"));
         return new DroppedColumn(column, droppedTime);
