@@ -356,10 +356,13 @@ public class SerializationHeader
                 }
                 else
                 {
-                    // For dropped columns, the schema's dropped column type preserves the original
-                    // frozen status (frozen<tuple<...>> for plain tuples, tuple<...> for non-frozen UDTs).
-                    // If the fixed type's isMultiCell differs from the schema's type, adjust to match the schema.
-                    // This ensures column ordering (based on isComplex) matches the write-time expectation.
+                    // For dropped tuple columns, use the schema's dropped column type to determine the correct
+                    // isMultiCell. We cannot rely on the SSTable header's isMultiCell because old SSTable formats
+                    // (e.g. C41) may incorrectly record plain tuples as multi-cell even though they were always
+                    // implicitly frozen (single-cell) in CQL. The schema's dropped column type is the authoritative
+                    // source because it preserves the original column type at drop time: plain tuples are recorded
+                    // as frozen<tuple<...>> (single-cell), while non-frozen UDTs are recorded as the UDT type
+                    // (multi-cell). If the schema entry is missing, we keep the tryFix default (frozen for tuples).
                     if (dropped && fixed.isTuple())
                     {
                         ColumnMetadata droppedColumn = metadata.getDroppedColumn(columnName);
@@ -423,8 +426,8 @@ public class SerializationHeader
                 {
                     // For tuples, default to frozen (isMultiCell=false) since plain tuples in CQL are
                     // always implicitly frozen. For dropped columns, validateAndMaybeFixColumnType will adjust
-                    // the isMultiCell to match the schema's dropped column type (which preserves the original
-                    // frozen status from before the column was dropped).
+                    // the isMultiCell to match the schema's dropped column type, which preserves the original
+                    // frozen status from before the column was dropped.
                     boolean isMultiCell = !invalidType.isTuple();
                     return invalidType.with(AbstractType.freeze(invalidType.subTypes()), isMultiCell);
                 }
@@ -513,9 +516,10 @@ public class SerializationHeader
 
                         // Use the SSTable's validated type for the dropped column metadata instead of the
                         // schema's type. This is critical because column ordering depends on isComplex() which depends
-                        // on the type's isMultiCell(). If the schema's dropped column type has different isMultiCell()
-                        // than the SSTable's type, the column order will be wrong, causing bitmap decode errors and
-                        // data corruption. The SSTable's 'type' (variable) has already been fixed above.
+                        // on the type's isMultiCell(). The SSTable's type has been validated and adjusted above
+                        // (via tryFix + schema-based isMultiCell correction for tuples), so it reflects the correct
+                        // frozen status for deserialization. Using the schema's type directly could have a different
+                        // isMultiCell, causing column order mismatches and data corruption.
                         // We must also expand user types since droppedColumn() asserts that the type has no UDT refs.
                         // expandUserTypes() preserves the isMultiCell() property which is what we need.
                         AbstractType<?> expandedType = type.expandUserTypes();
