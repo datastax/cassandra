@@ -895,7 +895,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         {
             if (isMultiCell())
             {
-                // Plain tuples are always implicitly frozen in CQL. A multi-cell tuple in the SSTable
+                // Plain tuples (TupleType, not UserType) are always implicitly frozen in CQL. A multi-cell tuple in the SSTable
                 // header indicates data from an old SSTable format where tuples could be non-frozen. This
                 // triggers the tryFix path in SerializationHeader.validateAndMaybeFixColumnType(), which will
                 // fix subtypes and then use the schema's dropped column type to determine the correct

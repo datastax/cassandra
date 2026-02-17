@@ -358,9 +358,10 @@ public class SerializationHeader
                 {
                     // For dropped tuple columns, use the schema's dropped column type to determine the correct
                     // isMultiCell. We cannot rely on the SSTable header's isMultiCell because old SSTable formats
-                    // (e.g. C41) may incorrectly record plain tuples as multi-cell even though they were always
-                    // implicitly frozen (single-cell) in CQL. The schema's dropped column type is the authoritative
-                    // source because it preserves the original column type at drop time: plain tuples are recorded
+                    // (e.g. C41) may incorrectly record plain tuples (TupleType, not UserType) as multi-cell
+                    // even though they were always implicitly frozen (single-cell) in CQL. The schema's dropped
+                    // column type is the authoritative source because it preserves the original column type at
+                    // drop time: plain tuples are recorded
                     // as frozen<tuple<...>> (single-cell), while non-frozen UDTs are recorded as the UDT type
                     // (multi-cell). If the schema entry is missing, we keep the tryFix default (frozen for tuples).
                     if (dropped && fixed.isTuple())
@@ -420,11 +421,11 @@ public class SerializationHeader
             else
             {
                 // Here again, it's mainly issues of frozen-ness that are fixable, namely multi-cell types that either:
-                // - are plain tuples (which _should_ be frozen). In which case we freeze it.
+                // - are plain tuples (TupleType, not UserType) which _should_ be frozen. In which case we freeze it.
                 // - has non-frozen subtypes. In which case, we just freeze all subtypes.
                 if (invalidType.isMultiCell())
                 {
-                    // For tuples, default to frozen (isMultiCell=false) since plain tuples in CQL are
+                    // For tuples, default to frozen (isMultiCell=false) since plain tuples (TupleType) in CQL are
                     // always implicitly frozen. For dropped columns, validateAndMaybeFixColumnType will adjust
                     // the isMultiCell to match the schema's dropped column type, which preserves the original
                     // frozen status from before the column was dropped.
