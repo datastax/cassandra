@@ -178,9 +178,37 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
         private S getNearestContent(Direction direction)
         {
-            // Walk a copy of this cursor to find the nearest child content in the direction of the cursor.
-            // (Note: we can't use a non-range cursor because that does not use secondary content in prefixes.)
-            return new InMemoryRangeCursor<>(trie, direction, currentFullNode).advanceToContent(null);
+            // Descend into the children of the node until content is found, making sure to ignore return-path content
+            // for non-leaf nodes (because there must be a leaf that is before them in iteration order).
+
+            // This should yield the same result as walking a copy of this cursor in the given direction until the first
+            // content, i.e.
+            //   new InMemoryRangeCursor<>(trie, direction, currentFullNode).advanceToContent(null);
+            int node = currentFullNode;
+            if (isNull(node))
+                return null;
+            while (true)
+            {
+                assert !isNull(node);
+                if (isLeaf(node))
+                {
+                    // We have reached the bottom of the branch. Report regardless of direction as it's the closest
+                    // content either way.
+                    return trie.getContent(node);
+                }
+
+                if (offset(node) == PREFIX_OFFSET)
+                {
+                    int contentId = trie.getIntVolatile(node + direction.select(PREFIX_CONTENT_OFFSET, PREFIX_ALTERNATE_OFFSET));
+                    if (isLeaf(contentId))
+                        return trie.getContent(contentId);
+
+                    node = trie.followPrefixTransition(node);
+                    assert !isNull(node);
+                }
+
+                node = trie.getFirstChild(node, direction);
+            }
         }
 
         @Override
