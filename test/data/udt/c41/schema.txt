@@ -1,16 +1,39 @@
-CREATE TYPE ks.udt1 (
-    foo int,
-    bar text,
-    baz int
-);
-CREATE TYPE ks.udt2 (
-    foo int,
-    bar frozen<udt1>,
-    baz int
-);
+CREATE TABLE ks.tab5_tuple (
+    pk int PRIMARY KEY,
+    a_int int,
+    c_int int,
+    b_complex frozen<tuple<int, text, int>>
+) WITH ID = 90826dd3-8437-4585-9de4-15908236687f;
+ALTER TABLE ks.tab5_tuple DROP b_complex USING TIMESTAMP 1770661720952002;
+CREATE TABLE ks.tab8_frozen_tuple_with_udt (
+    pk int PRIMARY KEY,
+    a_int int,
+    c_int int,
+    b_complex frozen<tuple<int, frozen<tuple<int, text, int>>, int>>
+) WITH ID = 8660f235-0816-4019-9cc9-1798fa7beb17;
+ALTER TABLE ks.tab8_frozen_tuple_with_udt DROP b_complex USING TIMESTAMP 1770661721057001;
+CREATE TABLE ks.tab6_frozen_tuple (
+    pk int PRIMARY KEY,
+    a_int int,
+    c_int int,
+    b_complex frozen<tuple<int, text, int>>
+) WITH ID = 54185f9a-a6fd-487c-abc3-c01bd5835e48;
+ALTER TABLE ks.tab6_frozen_tuple DROP b_complex USING TIMESTAMP 1770661720989002;
 CREATE TYPE ks.udt3 (
     foo int,
     bar frozen<tuple<int, text, int>>,
+    baz int
+);
+CREATE TABLE ks.tab2_frozen_udt1 (
+    pk int PRIMARY KEY,
+    a_int int,
+    c_int int,
+    b_complex frozen<tuple<int, text, int>>
+) WITH ID = 450f91fe-7c47-41c9-97bf-fdad854fa7e5;
+ALTER TABLE ks.tab2_frozen_udt1 DROP b_complex USING TIMESTAMP 1770661720874001;
+CREATE TYPE ks.udt1 (
+    foo int,
+    bar text,
     baz int
 );
 CREATE TABLE ks.tab10_frozen_udt_with_tuple (
@@ -19,46 +42,23 @@ CREATE TABLE ks.tab10_frozen_udt_with_tuple (
     c_int int,
     b_complex frozen<tuple<int, frozen<tuple<int, text, int>>, int>>
 ) WITH ID = 6a5cff4e-2f94-4c8b-9aa2-0fbd65292caa;
-ALTER TABLE ks.tab10_frozen_udt_with_tuple DROP b_complex USING TIMESTAMP 1764366551941002;
-CREATE TABLE ks.tab2_frozen_udt1 (
-    pk int PRIMARY KEY,
-    a_int int,
-    c_int int,
-    b_complex frozen<tuple<int, text, int>>
-) WITH ID = 450f91fe-7c47-41c9-97bf-fdad854fa7e5;
-ALTER TABLE ks.tab2_frozen_udt1 DROP b_complex USING TIMESTAMP 1764366551360000;
+ALTER TABLE ks.tab10_frozen_udt_with_tuple DROP b_complex USING TIMESTAMP 1770661721090002;
+CREATE TYPE ks.udt2 (
+    foo int,
+    bar frozen<udt1>,
+    baz int
+);
 CREATE TABLE ks.tab4_frozen_udt2 (
     pk int PRIMARY KEY,
     a_int int,
     c_int int,
     b_complex frozen<tuple<int, frozen<tuple<int, text, int>>, int>>
 ) WITH ID = 9c03c71c-6775-4357-9173-0f8808901afa;
-ALTER TABLE ks.tab4_frozen_udt2 DROP b_complex USING TIMESTAMP 1764366551439002;
-CREATE TABLE ks.tab5_tuple (
-    pk int PRIMARY KEY,
-    a_int int,
-    c_int int,
-    b_complex frozen<tuple<int, text, int>>
-) WITH ID = 90826dd3-8437-4585-9de4-15908236687f;
-ALTER TABLE ks.tab5_tuple DROP b_complex USING TIMESTAMP 1764366551522002;
-CREATE TABLE ks.tab6_frozen_tuple (
-    pk int PRIMARY KEY,
-    a_int int,
-    c_int int,
-    b_complex frozen<tuple<int, text, int>>
-) WITH ID = 54185f9a-a6fd-487c-abc3-c01bd5835e48;
-ALTER TABLE ks.tab6_frozen_tuple DROP b_complex USING TIMESTAMP 1764366551642002;
+ALTER TABLE ks.tab4_frozen_udt2 DROP b_complex USING TIMESTAMP 1770661720919002;
 CREATE TABLE ks.tab7_tuple_with_udt (
     pk int PRIMARY KEY,
     a_int int,
     c_int int,
     b_complex frozen<tuple<int, frozen<tuple<int, text, int>>, int>>
 ) WITH ID = 4e78f403-7b63-4e0d-a231-42e42cba7cb5;
-ALTER TABLE ks.tab7_tuple_with_udt DROP b_complex USING TIMESTAMP 1764366551730002;
-CREATE TABLE ks.tab8_frozen_tuple_with_udt (
-    pk int PRIMARY KEY,
-    a_int int,
-    c_int int,
-    b_complex frozen<tuple<int, frozen<tuple<int, text, int>>, int>>
-) WITH ID = 8660f235-0816-4019-9cc9-1798fa7beb17;
-ALTER TABLE ks.tab8_frozen_tuple_with_udt DROP b_complex USING TIMESTAMP 1764366551810002;
+ALTER TABLE ks.tab7_tuple_with_udt DROP b_complex USING TIMESTAMP 1770661721024002;
