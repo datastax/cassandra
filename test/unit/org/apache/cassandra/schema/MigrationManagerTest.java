@@ -20,6 +20,7 @@ package org.apache.cassandra.schema;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -40,7 +41,9 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.ByteType;
 import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -51,7 +54,9 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.apache.cassandra.Util.throwAssert;
 import static org.apache.cassandra.cql3.CQLTester.assertRows;
 import static org.apache.cassandra.cql3.CQLTester.row;
+import static org.apache.cassandra.cql3.FieldIdentifier.forUnquoted;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -615,6 +620,32 @@ public class MigrationManagerTest
         assertTrue(diff.dropped.isEmpty());
         assertEquals(1, diff.altered.size());
         assertEquals(keyspace1, diff.altered.get(0).after);
+    }
+
+    @Test
+    public void testInheritTypesFromPreviousKeyspace()
+    {
+        // given
+        TableMetadata table0 = addTestTable("ks2", "t", "");
+        UserType udt = new UserType("ks2",
+                                    bytes("PreviousType"),
+                                    List.of(forUnquoted("a"), forUnquoted("b")),
+                                    List.of(Int32Type.instance, Int32Type.instance),
+                                    true);
+        KeyspaceMetadata previousKeyspace = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table0), Views.none(), Types.of(udt), UserFunctions.none());
+        KeyspaceMetadata currentKeyspace = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table0));
+
+        // when
+        SchemaTransformation transformation = SchemaTransformations.updateSystemKeyspace(currentKeyspace, 1);
+        Keyspaces after = transformation.apply(Keyspaces.of(previousKeyspace));
+
+        // then
+        KeyspaceMetadata keyspaceAfterTransformation = after.getNullable("ks2");
+        assertNotNull(keyspaceAfterTransformation);
+        assertEquals(currentKeyspace.types.stream().count() + 1, keyspaceAfterTransformation.types.stream().count());
+        UserType inheritedUdt = keyspaceAfterTransformation.types.getNullable(udt.name);
+        assertNotNull(inheritedUdt);
+        assertEquals(udt, inheritedUdt);
     }
 
     private TableMetadata addTestTable(String ks, String cf, String comment)
