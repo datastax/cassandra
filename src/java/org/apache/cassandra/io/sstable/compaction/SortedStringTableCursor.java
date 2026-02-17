@@ -44,6 +44,7 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.vint.VIntCoding;
 
 /**
  * Cursor over sstable data files.
@@ -414,7 +415,7 @@ public class SortedStringTableCursor implements SSTableCursor
             sstable.markSuspect();
             throw e;
         }
-        catch (IOException | IndexOutOfBoundsException | AssertionError e)
+        catch (IOException | IndexOutOfBoundsException | VIntCoding.VIntOutOfRangeException | AssertionError e)
         {
             sstable.markSuspect();
             throw new CorruptSSTableException(e, dataFile.getFile().path());
