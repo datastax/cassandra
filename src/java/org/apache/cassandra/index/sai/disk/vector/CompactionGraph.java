@@ -508,20 +508,20 @@ public class CompactionGraph implements Closeable, Accountable
             {
                 writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
                 SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()), perIndexComponents.version());
-                // Use thread local readers as we do not control which thread jvector uses
-                try (var threadLocalReaders = ExplicitThreadLocal.withInitial(() -> new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension)))
+                // OnDiskVectorValues is thread safe, making it safe to close over it.
+                try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
                 {
                     EnumMap<FeatureId, IntFunction<Feature.State>> supplier;
                     if (nvq != null)
                     {
                         supplier = Feature.singleStateFactory(FeatureId.NVQ_VECTORS, ordinal -> {
-                            return new NVQ.State(nvq.encode(threadLocalReaders.get().getVector(ordinal)));
+                            return new NVQ.State(nvq.encode(vectorValues.getVector(ordinal)));
                         });
                     }
                     else
                     {
                         supplier = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, ordinal -> {
-                            return new InlineVectors.State(threadLocalReaders.get().getVector(ordinal));
+                            return new InlineVectors.State(vectorValues.getVector(ordinal));
                         });
                     }
                     if (writer.getFeatureSet().contains(FeatureId.FUSED_PQ))

@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
@@ -37,15 +38,16 @@ import org.apache.cassandra.io.util.RandomAccessReader;
  * - Determining the total number of vectors in the file
  * - Creating independent copies for concurrent access
  * <p>
- * This class is not thread-safe and to reduce the cost of allocations, there is a single shared vector array.
+ * This class is thread-safe.
  * It should only be used within the vector index package.
  */
 public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseable
 {
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
-    private final RandomAccessReader reader;
-    private final float[] sharedVector;
+    // Because of the way RandomAccessVectorValues are used within jvector, this is the safest solution
+    // at the moment. See https://github.com/datastax/jvector/issues/635.
+    private final ExplicitThreadLocal<RandomAccessReader> threadLocalRandomAccessReader;
     private final int dimension;
     private final long vectorSize;
 
@@ -57,8 +59,7 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
      */
     public OnDiskVectorValues(File file, int dimension)
     {
-        this.reader = RandomAccessReader.open(file);
-        this.sharedVector = new float[dimension];
+        this.threadLocalRandomAccessReader = ExplicitThreadLocal.withInitial(() -> RandomAccessReader.open(file));
         this.dimension = dimension;
         this.vectorSize = (long) dimension * Float.BYTES;
     }
@@ -70,7 +71,7 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     @Override
     public int size()
     {
-        return (int) (reader.length() / vectorSize);
+        return (int) (threadLocalRandomAccessReader.get().length() / vectorSize);
     }
 
     /**
@@ -94,9 +95,9 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     {
         try
         {
+            var reader = threadLocalRandomAccessReader.get();
             reader.seek(ordinal * vectorSize);
-            reader.readFully(sharedVector);
-            return vts.createFloatVector(sharedVector);
+            return vts.readFloatVector(reader, dimension);
         }
         catch (IOException e)
         {
@@ -105,25 +106,24 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     }
 
     /**
-     * Returns true, indicating that vectors are shared between calls to getVector.
-     * Each call reuses the same vector instance.
+     * Returns false, indicating that vectors are not shared between calls to getVector.
      */
     @Override
     public boolean isValueShared()
     {
-        return true;
+        return false;
     }
 
     /**
-     * Creates an independent copy of this reader that can be used concurrently.
-     * The copy shares the same file but has its own file position and its own shared vector.
+     * Returns an instance of self since the implementation is completely thread safe.
      *
-     * @return a new independent reader for the same file
+     * @return self
      */
     @Override
     public RandomAccessVectorValues copy()
     {
-        return new OnDiskVectorValues(reader.getFile(), dimension);
+        // The only shared state are thread local readers only used within this class, so it is safe to share them
+        return this;
     }
 
     /**
@@ -131,7 +131,7 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
      */
     File getFile()
     {
-        return reader.getFile();
+        return threadLocalRandomAccessReader.get().getFile();
     }
 
     /**
@@ -145,6 +145,8 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     @Override
     public void close()
     {
-        FileUtils.closeQuietly(reader);
+        // Safely closes all readers, which is important because jvector doesn't handle closing them correctly
+        // at the moment.
+        FileUtils.closeQuietly(threadLocalRandomAccessReader);
     }
 }
