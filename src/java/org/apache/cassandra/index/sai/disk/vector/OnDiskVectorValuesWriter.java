@@ -36,7 +36,7 @@ import org.apache.cassandra.io.util.File;
  * - Efficient buffering via BufferedRandomAccessWriter
  * This class is not thread-safe and should only be used within the vector index package.
  */
-class OnDiskVectorValuesWriter implements Closeable
+public class OnDiskVectorValuesWriter implements Closeable
 {
     private final int dimension;
     private final BufferedRandomAccessWriter bufferedWriter;
@@ -49,7 +49,7 @@ class OnDiskVectorValuesWriter implements Closeable
      * @param dimension the dimension of vectors to be written
      * @throws IOException if an I/O error occurs
      */
-    OnDiskVectorValuesWriter(File file, int dimension) throws IOException
+    public OnDiskVectorValuesWriter(File file, int dimension) throws IOException
     {
         this.bufferedWriter = new BufferedRandomAccessWriter(file.toPath());
         this.dimension = dimension;
@@ -67,7 +67,7 @@ class OnDiskVectorValuesWriter implements Closeable
      * @throws IOException if an I/O error occurs
      * @throws AssertionError if ordinal is not greater than the last written ordinal, or if seeking backwards
      */
-    void write(int ordinal, VectorFloat<?> vector) throws IOException
+    public void write(int ordinal, VectorFloat<?> vector) throws IOException
     {
         assert ordinal > lastOrdinal : "Unexpected ordinal " + ordinal + " must be greater than " + lastOrdinal;
         assert vector != null : "Vector is null";
@@ -103,7 +103,7 @@ class OnDiskVectorValuesWriter implements Closeable
     /**
      * Returns the last ordinal that was written, or -1 if no vectors have been written yet.
      */
-    int getLastOrdinal()
+    public int getLastOrdinal()
     {
         return lastOrdinal;
     }

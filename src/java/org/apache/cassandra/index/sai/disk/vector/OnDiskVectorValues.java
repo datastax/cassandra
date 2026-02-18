@@ -37,10 +37,10 @@ import org.apache.cassandra.io.util.RandomAccessReader;
  * - Determining the total number of vectors in the file
  * - Creating independent copies for concurrent access
  * <p>
- * This class is thread-safe for read operations when using independent copies.
+ * This class is not thread-safe and to reduce the cost of allocations, there is a single shared vector array.
  * It should only be used within the vector index package.
  */
-class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseable
+public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseable
 {
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
     
@@ -54,7 +54,7 @@ class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseable
      * @param file the file containing vectors written by VectorByOrdinalWriter
      * @param dimension the dimension of vectors in the file
      */
-    OnDiskVectorValues(File file, int dimension)
+    public OnDiskVectorValues(File file, int dimension)
     {
         this.reader = RandomAccessReader.open(file);
         this.dimension = dimension;

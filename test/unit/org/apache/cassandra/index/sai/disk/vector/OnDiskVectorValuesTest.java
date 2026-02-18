@@ -42,6 +42,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertTrue;
 
 public class OnDiskVectorValuesTest extends SAITester
 {
@@ -212,7 +213,7 @@ public class OnDiskVectorValuesTest extends SAITester
     {
         try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, 3))
         {
-            assertFalse("Vectors should not be shared", reader.isValueShared());
+            assertTrue("Vectors should be shared", reader.isValueShared());
         }
     }
 
