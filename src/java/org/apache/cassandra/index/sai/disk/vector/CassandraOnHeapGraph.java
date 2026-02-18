@@ -644,7 +644,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
             assert !vectorValues.isValueShared();
             // encode (compress) the vectors to save
-            if (compressor instanceof ProductQuantization && !writeFusedPQ)
+            if (compressor != null && !writeFusedPQ)
                 cv = compressor.encodeAll(new RemappedVectorValues(remapped, remapped.maxNewOrdinal, vectorValues));
         }
 
@@ -653,7 +653,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         if (actualType == CompressionType.NONE)
             return null;
 
-        if (compressor instanceof ProductQuantization && writeFusedPQ)
+        if (writeFusedPQ)
         {
             compressor.write(writer, indexContext.version().onDiskFormat().jvectorFileFormatVersion());
             return compressor;
