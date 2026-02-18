@@ -525,13 +525,22 @@ public class TableMetricsTest
             for (int j = 0; j < 10; j++)
                 session.execute(String.format("INSERT INTO %s.%s (id, ck1, ck2, val) VALUES (100, 'ck%d', %d, 'data')", KEYSPACE, multiSliceTable, i, j));
         
-        // Execute a delete with IN on first clustering column and range on second clustering column
+        // Test 1: Execute a delete with IN on first clustering column and range on second clustering column
         // This creates multiple slices: one slice per value in the IN clause
         // DELETE WHERE id = 100 AND ck1 IN ('ck0', 'ck1', 'ck2') AND ck2 > 3 AND ck2 < 7
         session.execute(String.format("DELETE FROM %s.%s WHERE id = 100 AND ck1 IN ('ck0', 'ck1', 'ck2') AND ck2 > 3 AND ck2 < 7", KEYSPACE, multiSliceTable));
         
         // Should increment by 3 (one per value in IN clause, each creating a slice)
         assertEquals(3, multiSliceCfs.metric.deleteRequests.getCount());
+        
+        // Test 2: Execute a delete with IN on both clustering columns (specific clustering keys, not slices)
+        // This creates multiple specific deletes: one per combination of clustering key values
+        // DELETE WHERE id = 100 AND ck1 IN ('ck3', 'ck4') AND ck2 IN (5, 6, 7)
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 100 AND ck1 IN ('ck3', 'ck4') AND ck2 IN (5, 6, 7)", KEYSPACE, multiSliceTable));
+        
+        // Should increment by 6 (2 values for ck1 * 3 values for ck2 = 6 combinations)
+        // Total count: 3 (from test 1) + 6 (from test 2) = 9
+        assertEquals(9, multiSliceCfs.metric.deleteRequests.getCount());
         
         // Clean up
         session.execute(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, multiSliceTable));
