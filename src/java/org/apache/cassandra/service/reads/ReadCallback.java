@@ -156,8 +156,7 @@ implements RequestCallback<ReadResponse>
         else if (logger.isDebugEnabled())
         {
             String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            logger.debug("{}; received {} of {} responses{}", failed ? "Failed" : "Timed out", received, blockFor,
-                         gotData);
+            logger.debug("{}; received {} of {} responses{}", failed ? "Failed" : "Timed out", received, blockFor, gotData);
         }
 
         // Same as for writes, see AbstractWriteResponseHandler
