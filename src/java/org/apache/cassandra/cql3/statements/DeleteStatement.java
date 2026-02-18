@@ -60,6 +60,7 @@ public class DeleteStatement extends ModificationStatement
     throws InvalidRequestException
     {
         TableMetadata metadata = metadata();
+
         List<Operation> regularDeletions = getRegularOperations();
         List<Operation> staticDeletions = getStaticOperations();
 
