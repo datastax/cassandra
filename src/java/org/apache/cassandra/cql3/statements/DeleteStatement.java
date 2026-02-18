@@ -27,8 +27,6 @@ import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.conditions.Conditions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -62,10 +60,6 @@ public class DeleteStatement extends ModificationStatement
     throws InvalidRequestException
     {
         TableMetadata metadata = metadata();
-        // Track DELETE metric per table
-        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
-        cfs.metric.deleteRequests.inc();
-
         List<Operation> regularDeletions = getRegularOperations();
         List<Operation> staticDeletions = getStaticOperations();
 
@@ -119,10 +113,6 @@ public class DeleteStatement extends ModificationStatement
     @Override
     public void addUpdateForKey(PartitionUpdate.Builder update, Slice slice, UpdateParameters params)
     {
-        // Track DELETE metric per table for range deletions
-        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
-        cfs.metric.deleteRequests.inc();
-
         List<Operation> regularDeletions = getRegularOperations();
         List<Operation> staticDeletions = getStaticOperations();
 

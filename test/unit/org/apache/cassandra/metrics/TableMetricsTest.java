@@ -512,6 +512,29 @@ public class TableMetricsTest
         session.execute(String.format("DELETE FROM %s.%s WHERE id = 25 and val1 in ('val25', 'val26', 'val27')", KEYSPACE, TABLE));
 
         assertEquals(19, cfs.metric.deleteRequests.getCount());
+
+        // Test multiple slices scenario - create a table with composite clustering key
+        String multiSliceTable = "multi_slice_test";
+        session.execute(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, multiSliceTable));
+        session.execute(String.format("CREATE TABLE %s.%s (id int, ck1 text, ck2 int, val text, PRIMARY KEY(id, ck1, ck2))", KEYSPACE, multiSliceTable));
+        
+        ColumnFamilyStore multiSliceCfs = ColumnFamilyStore.getIfExists(KEYSPACE, multiSliceTable);
+        
+        // Insert test data
+        for (int i = 0; i < 5; i++)
+            for (int j = 0; j < 10; j++)
+                session.execute(String.format("INSERT INTO %s.%s (id, ck1, ck2, val) VALUES (100, 'ck%d', %d, 'data')", KEYSPACE, multiSliceTable, i, j));
+        
+        // Execute a delete with IN on first clustering column and range on second clustering column
+        // This creates multiple slices: one slice per value in the IN clause
+        // DELETE WHERE id = 100 AND ck1 IN ('ck0', 'ck1', 'ck2') AND ck2 > 3 AND ck2 < 7
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 100 AND ck1 IN ('ck0', 'ck1', 'ck2') AND ck2 > 3 AND ck2 < 7", KEYSPACE, multiSliceTable));
+        
+        // Should increment by 3 (one per value in IN clause, each creating a slice)
+        assertEquals(3, multiSliceCfs.metric.deleteRequests.getCount());
+        
+        // Clean up
+        session.execute(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, multiSliceTable));
     }
 
     @AfterClass
