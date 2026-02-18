@@ -117,7 +117,7 @@ public interface TableOperation
 
     enum StopTrigger
     {
-        NONE("Unknwon reason", false),
+        NONE("Unknown reason", false),
         TRUNCATE("Truncated table", true),
         DROP_TABLE("Dropped table", true),
         INVALIDATE_INDEX("Index invalidation", true),
