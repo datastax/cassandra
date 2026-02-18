@@ -43,8 +43,9 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseable
 {
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
-    
+
     private final RandomAccessReader reader;
+    private final float[] sharedVector;
     private final int dimension;
     private final long vectorSize;
 
@@ -57,6 +58,7 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     public OnDiskVectorValues(File file, int dimension)
     {
         this.reader = RandomAccessReader.open(file);
+        this.sharedVector = new float[dimension];
         this.dimension = dimension;
         this.vectorSize = (long) dimension * Float.BYTES;
     }
@@ -93,9 +95,8 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
         try
         {
             reader.seek(ordinal * vectorSize);
-            var vector = new float[dimension];
-            reader.readFully(vector);
-            return vts.createFloatVector(vector);
+            reader.readFully(sharedVector);
+            return vts.createFloatVector(sharedVector);
         }
         catch (IOException e)
         {
@@ -104,18 +105,18 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     }
 
     /**
-     * Returns false, indicating that vectors are not shared between calls to getVector.
-     * Each call creates a new vector instance.
+     * Returns true, indicating that vectors are shared between calls to getVector.
+     * Each call reuses the same vector instance.
      */
     @Override
     public boolean isValueShared()
     {
-        return false;
+        return true;
     }
 
     /**
      * Creates an independent copy of this reader that can be used concurrently.
-     * The copy shares the same file but has its own file position.
+     * The copy shares the same file but has its own file position and its own shared vector.
      *
      * @return a new independent reader for the same file
      */
