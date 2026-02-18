@@ -34,16 +34,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @RunWith(Parameterized.class)
 public class IndexNameTest extends CQLTester
 {
-    @Parameterized.Parameter()
+    @Parameterized.Parameter(0)
     public String createIndexQuery;
 
-    @Parameterized.Parameters(name = "{0}")
+    @Parameterized.Parameter(1)
+    public Version version;
+
+    @Parameterized.Parameters(name = "{0}, version={1}")
     public static List<Object[]> parameters()
     {
-        return List.of(
-        new Object[]{ "CREATE INDEX %s ON %s(%s)" },
-        new Object[]{ "CREATE CUSTOM INDEX %s ON %s(%s) USING 'StorageAttachedIndex'" }
-        );
+        List<Object[]> params = new java.util.ArrayList<>();
+        for (Version version : Version.ALL)
+        {
+            params.add(new Object[]{ "CREATE INDEX %s ON %s(%s)", version });
+            params.add(new Object[]{ "CREATE CUSTOM INDEX %s ON %s(%s) USING 'StorageAttachedIndex'", version });
+        }
+        return params;
     }
 
     private String intoColumnDefs(String[] columnNames)
