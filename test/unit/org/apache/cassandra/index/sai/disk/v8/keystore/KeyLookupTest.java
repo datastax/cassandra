@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2.keystore;
+package org.apache.cassandra.index.sai.disk.v8.keystore;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

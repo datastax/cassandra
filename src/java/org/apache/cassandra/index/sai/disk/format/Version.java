@@ -40,6 +40,7 @@ import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v7.V7OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v8.V8OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -76,10 +77,13 @@ public class Version implements Comparable<Version>
     public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
     // total terms count serialization in index metadata, enables ANN_USE_SYNTHETIC_SCORE by default
     public static final Version ED = new Version("ed", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ed"));
+    // Replaces primary key components with partition key and clustering key
+    // components and uses key lookup store instead of sorted terms.
+    public static final Version FA = new Version("fa", V8OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "fa"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version, so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(ED, EC, EB, DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(FA, ED, EC, EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;

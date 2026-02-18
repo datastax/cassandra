@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2.keystore;
+package org.apache.cassandra.index.sai.disk.v8.keystore;
 
 import java.io.IOException;
 
@@ -35,12 +35,6 @@ public class KeyLookupMeta
     {
         this.keyCount = input.readLong();
         this.maxKeyLength = input.readInt();
-    }
-
-    public KeyLookupMeta(long keyCount, int maxKeyLength)
-    {
-        this.keyCount = keyCount;
-        this.maxKeyLength = maxKeyLength;
     }
 
     public static void write(IndexOutput output, long keyCount, int maxKeyLength) throws IOException

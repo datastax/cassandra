@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2.keystore;
+package org.apache.cassandra.index.sai.disk.v8.keystore;
 
 import java.io.IOException;
 import javax.annotation.Nonnull;
@@ -59,7 +59,7 @@ import org.apache.lucene.util.BytesRefBuilder;
  * For documentation of the underlying on-disk data structures, see the package documentation.
  *
  * @see KeyStoreWriter
- * @see org.apache.cassandra.index.sai.disk.v2.keystore
+ * @see org.apache.cassandra.index.sai.disk.v8.keystore
  */
 @NotThreadSafe
 public class KeyLookup

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2;
+package org.apache.cassandra.index.sai.disk.v8;
 
 import java.util.Arrays;
 

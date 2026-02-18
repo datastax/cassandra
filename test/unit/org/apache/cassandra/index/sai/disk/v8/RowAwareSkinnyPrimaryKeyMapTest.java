@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2;
+package org.apache.cassandra.index.sai.disk.v8;
 
 import java.util.Set;
 
@@ -27,9 +27,11 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -37,7 +39,7 @@ import static org.junit.Assert.assertEquals;
 
 /**
  * Skinny-table tests (no clustering columns) for
- * {@link RowAwarePrimaryKeyMap} using the row-aware on-disk format.
+ * {@link SkinnyPrimaryKeyMap} using the row-aware on-disk format.
  */
 public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
 {
@@ -52,6 +54,8 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
     @Before
     public void setup() throws Throwable
     {
+        SAIUtil.setCurrentVersion(Version.FA);
+
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, int_value int, text_value text)");
         execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
         execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");

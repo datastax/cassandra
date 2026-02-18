@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2;
+package org.apache.cassandra.index.sai.disk.v8;
 
 import java.nio.ByteBuffer;
 import java.util.Set;
@@ -34,9 +34,11 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -44,7 +46,7 @@ import static org.junit.Assert.assertEquals;
 
 /**
  * Wide-table tests (with clustering columns) for
- * {@link RowAwarePrimaryKeyMap} using the row-aware on-disk format.
+ * {@link WidePrimaryKeyMap} using the row-aware on-disk format.
  */
 public class RowAwareWidePrimaryKeyMapTest extends SAITester
 {
@@ -60,6 +62,8 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
     @Before
     public void setup() throws Throwable
     {
+        SAIUtil.setCurrentVersion(Version.FA);
+
         createTable("CREATE TABLE %s (pk int, ck int, int_value int, text_value text, PRIMARY KEY (pk, ck)) WITH CLUSTERING ORDER BY (ck ASC)");
         execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
         execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");

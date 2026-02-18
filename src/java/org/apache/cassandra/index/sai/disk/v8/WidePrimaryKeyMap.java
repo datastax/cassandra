@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2;
+package org.apache.cassandra.index.sai.disk.v8;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -33,8 +33,9 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
-import org.apache.cassandra.index.sai.disk.v2.keystore.KeyLookup;
-import org.apache.cassandra.index.sai.disk.v2.keystore.KeyLookupMeta;
+import org.apache.cassandra.index.sai.disk.v2.PrimaryKeyWithSource;
+import org.apache.cassandra.index.sai.disk.v8.keystore.KeyLookup;
+import org.apache.cassandra.index.sai.disk.v8.keystore.KeyLookupMeta;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableId;
