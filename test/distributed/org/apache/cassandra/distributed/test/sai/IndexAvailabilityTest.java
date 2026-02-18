@@ -261,7 +261,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
 
             // get index name base on node id to have different non-queryable index on different nodes.
             Function<Integer, String> nodeIdToColumn = nodeId -> "v" + (nodeId % 2 + 1);
-            IntFunction<String> nodeIdToIndex = nodeId -> IndexMetadata.generateDefaultIndexName(KEYSPACE, table, ColumnIdentifier.getInterned(nodeIdToColumn.apply(nodeId), false));
+            IntFunction<String> nodeIdToIndex = nodeId -> IndexMetadata.generateDefaultIndexName(table, ColumnIdentifier.getInterned(nodeIdToColumn.apply(nodeId), false));
 
             for (List<Integer> nonQueryableNodes : nonQueryableNodesList)
             {

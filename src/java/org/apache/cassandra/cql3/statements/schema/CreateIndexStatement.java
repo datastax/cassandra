@@ -111,7 +111,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (isDseIndexCreateStatement())
         {
             // DSE indexes are not supported. The index is not created, the attempt is ignored (doesn't cause error),
-            // a meaningfull warning is returned instead.
+            // a meaningful warning is returned instead.
             return schema;
         }
 
@@ -280,8 +280,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     {
         assert keyspace.name.equals(keyspaceName);
         String baseName = targets.size() == 1
-                        ? IndexMetadata.generateDefaultIndexName(keyspaceName, tableName, targets.get(0).column)
-                        : IndexMetadata.generateDefaultIndexName(keyspaceName, tableName, null);
+                          ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
+                          : IndexMetadata.generateDefaultIndexName(tableName, null);
         return keyspace.findAvailableIndexName(baseName);
     }
 
