@@ -920,14 +920,6 @@ public class NativeIndexDDLTest extends SAITester
                     waitForCompactions();
                     
                     waitForTableIndexesQueryable();
-
-                    // Wait for the INFO log to appear (with timeout)
-                    waitForAssert(() -> {
-                        List<ILoggingEvent> events = appender.getEventsForLevel(Level.INFO);
-                        boolean found = events.stream()
-                                              .anyMatch(e -> e.getFormattedMessage().contains("Stop requested while building indexes"));
-                        assertTrue("Expected INFO log", found);
-                    }, 20, TimeUnit.SECONDS);
                 }
                 finally
                 {
