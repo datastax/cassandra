@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 
@@ -128,7 +129,10 @@ public class Version implements Comparable<Version>
      * Calculates the maximum allowed length for SAI index names to ensure generated filenames
      * do not exceed the system's filename length limit (defined in {@link SchemaConstants#FILENAME_LENGTH}).
      * This accounts for all additional components in the filename.
+     * It is only used to validate that {@link SchemaConstants#INDEX_NAME_LENGTH}
+     * is not bigger than the actual acceptable length.
      */
+    @VisibleForTesting
     public static int calculateIndexNameAllowedLength(String keyspace)
     {
         int addedLength = getAddedLengthFromDescriptorAndVersion(keyspace);
@@ -151,7 +155,7 @@ public class Version implements Comparable<Version>
         int addedLength = SAI_DESCRIPTOR.length()
                           + versionNameLength
                           + generationLength
-                          + IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS.representation.length()
+                          + calculateMaxComponentRepresentationLength()
                           + SAI_SEPARATOR.length() * 3
                           + EXTENSION.length();
 
@@ -164,6 +168,14 @@ public class Version implements Comparable<Version>
                        + tableIdLength
                        + separatorLength * 3;
         return addedLength;
+    }
+
+    private static int calculateMaxComponentRepresentationLength()
+    {
+        int maxLength = 0;
+        for (IndexComponentType component : IndexComponentType.values())
+            maxLength = Math.max(maxLength, component.representation.length());
+        return maxLength;
     }
 
     @Override
