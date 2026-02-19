@@ -98,9 +98,17 @@ public class CompressionChunkOffsetCache
                         .build();
     }
 
-    OffsetsBlock getBlock(File indexFilePath, long offsetsStart, int blockIndex, Supplier<OffsetsBlock> blockLoader)
+    /**
+     * Get a cached offsets block for the provided file and block index, loading it from disk if absent.
+     *
+     * @param indexFilePath compression info file path
+     * @param blockIndex index of the offsets block
+     * @param blockLoader loader used to create a block on cache miss
+     * @return cached or newly loaded offsets block
+     */
+    OffsetsBlock getBlock(File indexFilePath, int blockIndex, Supplier<OffsetsBlock> blockLoader)
     {
-        BlockKey key = new BlockKey(indexFilePath, offsetsStart, blockIndex);
+        BlockKey key = new BlockKey(indexFilePath, blockIndex);
         return cache.get(key, k -> blockLoader.get());
     }
 
@@ -121,16 +129,14 @@ public class CompressionChunkOffsetCache
     public static final class BlockKey
     {
         private final File file;
-        private final long offsetsStart;
         private final int blockIndex;
         private final int hashcode;
 
-        private BlockKey(File file, long offsetsStart, int blockIndex)
+        private BlockKey(File file, int blockIndex)
         {
             this.file = file;
-            this.offsetsStart = offsetsStart;
             this.blockIndex = blockIndex;
-            this.hashcode = Objects.hash(file, offsetsStart, blockIndex);
+            this.hashcode = Objects.hash(file, blockIndex);
         }
 
         @Override
@@ -141,8 +147,7 @@ public class CompressionChunkOffsetCache
             if (!(other instanceof BlockKey))
                 return false;
             BlockKey that = (BlockKey) other;
-            return offsetsStart == that.offsetsStart
-                   && blockIndex == that.blockIndex
+            return blockIndex == that.blockIndex
                    // file object should be the same
                    && file == that.file;
         }

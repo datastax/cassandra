@@ -419,7 +419,7 @@ public interface CompressionChunkOffsetsFactory
             int retries = MAX_RETIRES;
             while (retries-- > 0)
             {
-                CompressionChunkOffsetCache.OffsetsBlock block = cache.getBlock(file, offsetsStart, blockIndex, () -> loadBlock(blockIndex, offsetsPerBlock, offsetsStart, chunkCount));
+                CompressionChunkOffsetCache.OffsetsBlock block = cache.getBlock(file, blockIndex, () -> loadBlock(blockIndex, offsetsPerBlock, offsetsStart, chunkCount));
                 if (block.ref())
                 {
                     try

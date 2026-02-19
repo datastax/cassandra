@@ -56,7 +56,7 @@ public class CompressionChunkOffsetCacheTest
         File file = new File("cache_test");
 
         CompressionChunkOffsetCache.OffsetsBlock block =
-        cache.getBlock(file, 0L, 0, () -> new CompressionChunkOffsetCache.OffsetsBlock(ByteBuffer.allocateDirect(1024)));
+        cache.getBlock(file, 0, () -> new CompressionChunkOffsetCache.OffsetsBlock(ByteBuffer.allocateDirect(1024)));
 
         assertThat(block).isNotNull();
         assertThat(cache.offHeapMemoryUsage()).isGreaterThanOrEqualTo(1024L);
