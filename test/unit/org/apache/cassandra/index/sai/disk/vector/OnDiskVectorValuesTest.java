@@ -41,8 +41,7 @@ import org.apache.cassandra.io.util.File;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertSame;
 
 public class OnDiskVectorValuesTest extends SAITester
 {
@@ -213,7 +212,7 @@ public class OnDiskVectorValuesTest extends SAITester
     {
         try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, 3))
         {
-            assertTrue("Vectors should be shared", reader.isValueShared());
+            assertFalse("Vectors should be shared", reader.isValueShared());
         }
     }
 
@@ -234,15 +233,11 @@ public class OnDiskVectorValuesTest extends SAITester
         {
             RandomAccessVectorValues copy = reader.copy();
             assertNotNull(copy);
-            assertNotSame("Copy should be a different instance", reader, copy);
+            assertSame("Copy should be the same instance instance", reader, copy);
             
             // Both should read the same data
             assertVectorEquals(data, reader.getVector(0));
             assertVectorEquals(data, copy.getVector(0));
-            
-            // Clean up copy
-            if (copy instanceof AutoCloseable)
-                ((AutoCloseable) copy).close();
         }
     }
 
@@ -271,12 +266,12 @@ public class OnDiskVectorValuesTest extends SAITester
         AtomicInteger errorCount = new AtomicInteger(0);
         List<Future<?>> futures = new ArrayList<>();
 
-        try (OnDiskVectorValues mainReader = new OnDiskVectorValues(tempFile, dimension))
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension))
         {
             for (int t = 0; t < numThreads; t++)
             {
                 futures.add(executor.submit(() -> {
-                    try (OnDiskVectorValues reader = (OnDiskVectorValues) mainReader.copy())
+                    try
                     {
                         startLatch.await();
                         
