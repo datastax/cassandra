@@ -74,6 +74,14 @@ final class CC4NodesFileReader
     }
 
     /**
+     * @return true if a CC4 nodes directory exists in the metadata directory
+     */
+    static boolean hasCC4NodesDirectory()
+    {
+        return getCC4NodesDirectory() != null;
+    }
+
+    /**
      * Try to read local node info from CC4's file-based store.
      *
      * @return a CC5 {@link LocalInfo} populated from CC4 data, or null if the file doesn't exist or is unreadable

@@ -129,17 +129,7 @@ public class NodesPersistence implements INodesPersistence
     {
         UntypedResultSet results = QueryProcessor.executeInternal("SELECT * FROM system." + LOCAL + " WHERE key = ?", LOCAL);
         if (results == null || results.isEmpty())
-        {
-            // CC4 migration fallback: try reading from CC4's file-based metadata store
-            LocalInfo migrated = CC4NodesFileReader.tryReadLocalInfo();
-            if (migrated != null)
-            {
-                logger.info("Migrated local node metadata from CC4 file-based store (host_id={})", migrated.getHostId());
-                saveLocal(migrated);
-                return migrated;
-            }
             return null;
-        }
         Row row = results.one();
         LocalInfo info = readCommonInfo(new LocalInfo(), row);
         info.setBroadcastAddressAndPort(readInetAddressAndPort(row, "broadcast_address", "broadcast_port", DatabaseDescriptor.getStoragePort()))
@@ -197,19 +187,7 @@ public class NodesPersistence implements INodesPersistence
     {
         UntypedResultSet results = QueryProcessor.executeInternal("SELECT * FROM system." + PEERS_V2);
         if (results == null || results.isEmpty())
-        {
-            // CC4 migration fallback: try reading from CC4's file-based metadata store
-            Stream<PeerInfo> migratedPeers = CC4NodesFileReader.tryReadPeers();
-            List<PeerInfo> peerList = migratedPeers.collect(Collectors.toList());
-            if (!peerList.isEmpty())
-            {
-                logger.info("Migrating {} peer entries from CC4 file-based store", peerList.size());
-                for (PeerInfo peer : peerList)
-                    savePeer(peer);
-                return peerList.stream();
-            }
             return Stream.empty();
-        }
         return StreamSupport.stream(results.spliterator(), false).map(row -> {
             PeerInfo info = readCommonInfo(new PeerInfo(), row);
             info.setPeerAddressAndPort(readInetAddressAndPort(row, "peer", "peer_port", DatabaseDescriptor.getStoragePort()))
