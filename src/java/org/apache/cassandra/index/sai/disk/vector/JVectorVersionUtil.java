@@ -21,7 +21,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 
 public class JVectorVersionUtil
 {
-    /** Whether to use fused ADC when writing indexes, assuming all other conditions are met */
+    /** Whether to fuse quantized vectors into the graph when writing indexes, assuming all other conditions are met */
     public static final boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
     public static final boolean ENABLE_NVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean();
     public static final int NUM_SUB_VECTORS = CassandraRelevantProperties.SAI_VECTOR_NVQ_NUM_SUB_VECTORS.getInt();

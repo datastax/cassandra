@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -31,22 +32,35 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 @Ignore
 @RunWith(Parameterized.class)
 abstract public class VectorCompactionTest extends VectorTester
 {
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
     // Subclasses must implement this to cover different dimensions
     abstract public int dimension();
 
@@ -172,7 +186,7 @@ abstract public class VectorCompactionTest extends VectorTester
     // Exercise the one-to-many path in compaction
     public void testOneToManyCompactionInternal(int vectorsPerSstable, int sstables)
     {
-        createTable();
+        var index = createTableAndReturnIndexName();
 
         disableCompaction();
 
@@ -182,6 +196,12 @@ abstract public class VectorCompactionTest extends VectorTester
         validateQueries();
         compact();
         validateQueries();
+
+        // ONE_TO_MANY is version dependent, so we need to branch based on which version we're writing
+        var expectedStructure = V5OnDiskFormat.writeV5VectorPostings(version)
+                                ? V5VectorPostingsWriter.Structure.ONE_TO_MANY
+                                : V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY;
+        validatePostingsStructureAndOrdinalToVectorMapping(index, expectedStructure, vectorsPerSstable * sstables);
     }
 
     @Test
@@ -216,7 +236,7 @@ abstract public class VectorCompactionTest extends VectorTester
         compact();
         validateQueries();
 
-        validatePostingsStructure(indexName, V5VectorPostingsWriter.Structure.ONE_TO_ONE);
+        validatePostingsStructureAndOrdinalToVectorMapping(indexName, V5VectorPostingsWriter.Structure.ONE_TO_ONE, vectorsPerSstable * sstables);
     }
 
     @Test
@@ -302,7 +322,7 @@ abstract public class VectorCompactionTest extends VectorTester
             compact();
             validateQueries();
 
-            validatePostingsStructure(indexName, V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY);
+            validatePostingsStructureAndOrdinalToVectorMapping(indexName, V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, vectorsPerSstable * sstables);
         }
         finally
         {
@@ -310,17 +330,70 @@ abstract public class VectorCompactionTest extends VectorTester
         }
     }
 
-    private void validatePostingsStructure(String indexName, V5VectorPostingsWriter.Structure expectedStructure)
+    private void validatePostingsStructureAndOrdinalToVectorMapping(String indexName, V5VectorPostingsWriter.Structure expectedStructure, int numRows)
     {
         // Validate that we have the expected structure for all the sstables-segment indexes.
         var sai = (StorageAttachedIndex) Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).getIndexManager().getIndexByName(indexName);
         var indexes = sai.getIndexContext().getView().getIndexes();
+        var columnMetadata = sai.getIndexContext().getDefinition();
+        var columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(columnMetadata));
         for (var index : indexes)
         {
             for (var segment : index.getSegments())
             {
                 var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
                 assertEquals(expectedStructure, searcher.getPostingsStructure());
+
+                // Validate that the vectors in the sstable row correctly match the vectors in the graph by grabbing
+                // the vector, creating a score function for the vector, converting its row id into an ordinal, and
+                // then assert that the sstable's vector is similar to the graph's vector within an epsilon.
+                assertNotNull(segment.sstableContext);
+                assertNotNull(segment.sstableContext.primaryKeyMapFactory());
+                try (var view = searcher.graph.getView();
+                     var ordinalsView = searcher.graph.getOrdinalsView();
+                     var pkm = segment.sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
+                {
+                    assertNotNull(segment.metadata);
+                    for (long i = segment.metadata.minSSTableRowId; i <= segment.metadata.maxSSTableRowId; i++)
+                    {
+                        var primaryKey = pkm.primaryKeyFromRowId(i);
+                        assertTrue("The subsequent logic assumes that we have no clustering columns", primaryKey.hasEmptyClustering());
+                        try (var sstableIter = segment.sstableContext
+                                               .sstable()
+                                               .iterator(primaryKey.partitionKey(), Slices.ALL, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
+                        {
+                            assertTrue(sstableIter.hasNext());
+                            var next = (Row) sstableIter.next();
+                            var vectorData = next.getCell(columnMetadata);
+                            float[] vector = ((VectorType<?>) columnMetadata.type).composeAsFloat(vectorData.buffer());
+                            VectorFloat<?> vectorFloat = vts.createFloatVector(vector);
+                            int ordinal = ordinalsView.getOrdinalForRowId(Math.toIntExact(i - segment.metadata.segmentRowIdOffset));
+                            // Compare using cosine to ignore magnitude
+                            float sim = view.rerankerFor(vectorFloat, VectorSimilarityFunction.COSINE).similarityTo(ordinal);
+                            assertEquals(1.0f, sim, 0.001f);
+
+                            if (searcher.graph.getCompressedVectors() != null)
+                            {
+                                // Compare using cosine to ignore magnitude
+                                float quantizedSim = searcher.graph.getCompressedVectors()
+                                                     .scoreFunctionFor(vectorFloat, VectorSimilarityFunction.COSINE)
+                                                     .similarityTo(ordinal);
+                                // Note that this tolerance failed at 0.001f, but passes at 0.01f. Assuming this is
+                                // reasonable for now.
+                                assertEquals(1.0f, quantizedSim, 0.01f);
+                            }
+                            else
+                            {
+                                // We should only hit this case when we don't have enough rows to build a PQ.
+                                assertTrue("Found " + numRows + " but no PQ", MIN_PQ_ROWS > numRows);
+                            }
+                        }
+                    }
+                }
+                catch (IOException e)
+                {
+                    throw new RuntimeException(e);
+                }
             }
         }
     }
