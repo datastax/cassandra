@@ -164,7 +164,6 @@ public class CompressionChunkOffsetCache
         private static final AtomicIntegerFieldUpdater<OffsetsBlock> referencesUpdater = AtomicIntegerFieldUpdater.newUpdater(OffsetsBlock.class, "references");
         private final ByteBuffer offsetsBuffer;
         private final int capacity;
-        private final int count;
 
         public volatile int references;
 
@@ -172,7 +171,6 @@ public class CompressionChunkOffsetCache
         {
             this.offsetsBuffer = offsetsBuffer;
             this.capacity = offsetsBuffer.capacity();
-            this.count = capacity / Long.BYTES;
             this.references = 1;
             NATIVE_MEMORY_USAGE.addAndGet(capacity);
         }
@@ -208,7 +206,7 @@ public class CompressionChunkOffsetCache
 
         public int count()
         {
-            return count;
+            return capacity / Long.BYTES;
         }
 
         public long getLongAtIndex(int index)
