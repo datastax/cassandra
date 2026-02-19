@@ -29,9 +29,11 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalListener;
 import io.netty.util.internal.PlatformDependent;
+import org.apache.cassandra.cache.CacheSize;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.metrics.MicrometerCompressionChunkOffsetCacheMetrics;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.io.compress.CompressionMetadata.NATIVE_MEMORY_USAGE;
@@ -45,7 +47,7 @@ import static org.apache.cassandra.io.compress.CompressionMetadata.NATIVE_MEMORY
  * <p>
  * Note that Blocks are weighted by direct buffer capacity; key overhead is not included.
  */
-public class CompressionChunkOffsetCache
+public class CompressionChunkOffsetCache implements CacheSize
 {
     private static volatile CompressionChunkOffsetCache INSTANCE;
 
@@ -83,9 +85,13 @@ public class CompressionChunkOffsetCache
     }
 
     private final Cache<BlockKey, OffsetsBlock> cache;
+    private final MicrometerCompressionChunkOffsetCacheMetrics metrics;
+    private final long maxSizeInBytes;
 
     CompressionChunkOffsetCache(long maxSizeInBytes)
     {
+        this.maxSizeInBytes = maxSizeInBytes;
+        this.metrics = new MicrometerCompressionChunkOffsetCacheMetrics(this, "compression_chunk_offsets_cache");
         RemovalListener<BlockKey, OffsetsBlock> remover = (key, value, cause) ->
         {
             if (value != null)
@@ -95,6 +101,7 @@ public class CompressionChunkOffsetCache
                         .maximumWeight(maxSizeInBytes)
                         .weigher((BlockKey key, OffsetsBlock value) -> Math.min(Integer.MAX_VALUE, value.capacity()))
                         .removalListener(remover)
+                        .recordStats(() -> metrics)
                         .build();
     }
 
@@ -112,12 +119,36 @@ public class CompressionChunkOffsetCache
         return cache.get(key, k -> blockLoader.get());
     }
 
-    public long offHeapMemoryUsage()
+    public MicrometerCompressionChunkOffsetCacheMetrics getMetrics()
+    {
+        return metrics;
+    }
+
+    @Override
+    public long capacity()
+    {
+        return maxSizeInBytes;
+    }
+
+    @Override
+    public void setCapacity(long capacity)
+    {
+        throw new UnsupportedOperationException("Compression chunk offsets cache size cannot be changed.");
+    }
+
+    @Override
+    public int size()
+    {
+        return cache.asMap().size();
+    }
+
+    @Override
+    public long weightedSize()
     {
         return cache.policy()
                     .eviction()
-                    .map(eviction -> eviction.weightedSize().orElse(0L))
-                    .orElse(0L);
+                    .map(policy -> policy.weightedSize().orElseGet(cache::estimatedSize))
+                    .orElseGet(cache::estimatedSize);
     }
 
     @VisibleForTesting
