@@ -774,9 +774,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                 PartitionUpdate.Builder updateBuilder = collector.getPartitionUpdateBuilder(metadata(), dk, options.getConsistency());
 
                 for (Slice slice : slices)
-                {
                     addUpdateForKey(updateBuilder, slice, params);
-                }
             }
         }
         else
