@@ -28,9 +28,11 @@ import com.google.common.annotations.VisibleForTesting;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import io.netty.util.internal.PlatformDependent;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.io.compress.CompressionMetadata.NATIVE_MEMORY_USAGE;
 
@@ -45,33 +47,52 @@ import static org.apache.cassandra.io.compress.CompressionMetadata.NATIVE_MEMORY
  */
 public class CompressionChunkOffsetCache
 {
-    private static final class Holder
-    {
-        private static final CompressionChunkOffsetCache INSTANCE =
-                new CompressionChunkOffsetCache(CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.getInt());
-    }
+    private static volatile CompressionChunkOffsetCache INSTANCE;
 
     public static CompressionChunkOffsetCache get()
     {
         // do not initialize the cache if cache size is non-positive
-        int cacheSizeInMB = CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.getInt();
-        if (cacheSizeInMB <= 0)
+        long cacheSizeInBytes = getCacheSizeInBytes(PlatformDependent.maxDirectMemory());
+        if (cacheSizeInBytes <= 0)
             return null;
-        return Holder.INSTANCE;
+
+        if (INSTANCE == null)
+        {
+            synchronized (CompressionChunkOffsetCache.class)
+            {
+                if (INSTANCE == null)
+                    INSTANCE = new CompressionChunkOffsetCache(cacheSizeInBytes);
+            }
+        }
+        return INSTANCE;
+    }
+
+    @VisibleForTesting
+    static synchronized void resetCache()
+    {
+        if (INSTANCE != null)
+            INSTANCE.clear();
+
+        INSTANCE = null;
+    }
+
+    static long getCacheSizeInBytes(long maxDirectMemoryInSize)
+    {
+        String configString = CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.getString();
+        return FBUtilities.parseHumanReadableConfig(maxDirectMemoryInSize, configString);
     }
 
     private final Cache<BlockKey, OffsetsBlock> cache;
 
-    CompressionChunkOffsetCache(int maxSizeInMB)
+    CompressionChunkOffsetCache(long maxSizeInBytes)
     {
-        long maxBytes = (long) maxSizeInMB * 1024L * 1024L;
         RemovalListener<BlockKey, OffsetsBlock> remover = (key, value, cause) ->
         {
             if (value != null)
                 value.release();
         };
         cache = Caffeine.newBuilder()
-                        .maximumWeight(maxBytes)
+                        .maximumWeight(maxSizeInBytes)
                         .weigher((BlockKey key, OffsetsBlock value) -> Math.min(Integer.MAX_VALUE, value.capacity()))
                         .removalListener(remover)
                         .build();

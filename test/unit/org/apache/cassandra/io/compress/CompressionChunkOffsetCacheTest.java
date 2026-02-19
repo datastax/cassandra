@@ -52,7 +52,7 @@ public class CompressionChunkOffsetCacheTest
     public void testOffheapMemoryUsage()
     {
         long before = CompressionMetadata.nativeMemoryAllocated();
-        CompressionChunkOffsetCache cache = new CompressionChunkOffsetCache(1);
+        CompressionChunkOffsetCache cache = new CompressionChunkOffsetCache(100 * 1024);
         File file = new File("cache_test");
 
         CompressionChunkOffsetCache.OffsetsBlock block =

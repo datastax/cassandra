@@ -38,7 +38,7 @@ public interface CompressionChunkOffsets extends AutoCloseable
          */
         IN_MEMORY,
         /**
-         * When {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB} is configured, chunk offsets
+         * When {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE} is configured, chunk offsets
          * are read from the compression info file in blocks and cached in memory; otherwise requested chunk offset is
          * read directly from the compression info file.
          *

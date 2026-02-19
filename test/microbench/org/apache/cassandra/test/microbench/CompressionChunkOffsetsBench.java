@@ -80,7 +80,7 @@ public class CompressionChunkOffsetsBench
         public void setup() throws Exception
         {
             DatabaseDescriptor.toolInitialization();
-            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(cacheSizeMb);
+            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString(cacheSizeMb + "MiB");
             CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(mode);
 
             metadataFile = createMetadataFile();
@@ -96,7 +96,7 @@ public class CompressionChunkOffsetsBench
             if (metadata != null)
                 metadata.close();
 
-            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.reset();
+            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.reset();
             CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_FACTORY.reset();
             CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.reset();
         }

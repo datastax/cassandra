@@ -52,7 +52,7 @@ import static org.apache.cassandra.io.compress.CompressionMetadata.NATIVE_MEMORY
  * </p>
  * Configs:
  * - {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_TYPE} - type of compression offset implementation
- * - {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB}: cache size for block caching. Non-positive value to disable caching.
+ * - {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE}: cache size for block caching. Non-positive value to disable caching.
  * <p>
  */
 public interface CompressionChunkOffsetsFactory

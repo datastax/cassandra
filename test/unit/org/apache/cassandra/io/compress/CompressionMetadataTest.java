@@ -30,8 +30,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 
+import org.junit.After;
 import org.junit.AfterClass;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -42,8 +42,10 @@ import org.apache.cassandra.io.sstable.format.SSTableReader.PartitionPositionBou
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.utils.units.SizeUnit;
 
 import static java.util.Arrays.asList;
+import static org.apache.cassandra.io.compress.CompressionChunkOffsetCache.getCacheSizeInBytes;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class CompressionMetadataTest
@@ -57,16 +59,14 @@ public class CompressionMetadataTest
     @AfterClass
     public static void cleanup()
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.reset();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.reset();
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_FACTORY.reset();
     }
 
-    @Before
-    public void setup()
+    @After
+    public void tearDown()
     {
-        CompressionChunkOffsetCache cache = CompressionChunkOffsetCache.get();
-        if (cache != null)
-            cache.clear();
+        CompressionChunkOffsetCache.resetCache();
     }
 
     private File generateMetaDataFile(long dataLength, long... offsets) throws IOException
@@ -140,7 +140,7 @@ public class CompressionMetadataTest
     @Test
     public void testLargeFileAccessOnDisk() throws IOException
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(0);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("0B");
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
         testLargeFileAccess();
     }
@@ -148,7 +148,7 @@ public class CompressionMetadataTest
     @Test
     public void testLargeFileAccessOnDiskCached() throws IOException
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(100);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("100MiB");
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
         testLargeFileAccess();
     }
@@ -173,12 +173,12 @@ public class CompressionMetadataTest
         CompressionMetadata metadataWithInMemory = new CompressionMetadata(largeFile, compressedFileLimit, true);
         checkMetadata(metadataWithInMemory, (long) chunkCount * chunkLength, compressedFileLimit, chunkCount * 8L);
 
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(0);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("0B");
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
         CompressionMetadata metadataWithOnDisk = new CompressionMetadata(largeFile, compressedFileLimit, true);
         checkMetadata(metadataWithOnDisk, (long) chunkCount * chunkLength, compressedFileLimit, chunkCount * 8L);
 
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(100);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("100MiB");
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
         CompressionMetadata metadataWithOnDiskCache = new CompressionMetadata(largeFile, compressedFileLimit, true);
         checkMetadata(metadataWithOnDiskCache, (long) chunkCount * chunkLength, compressedFileLimit, chunkCount * 8L);
@@ -213,7 +213,7 @@ public class CompressionMetadataTest
     @Test
     public void chunkForFromDisk() throws IOException
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(0);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("0B");
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
         chunkFor();
     }
@@ -221,7 +221,7 @@ public class CompressionMetadataTest
     @Test
     public void chunkForFromDiskWithCache() throws IOException
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(100);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("100MiB");
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
         chunkFor();
     }
@@ -340,7 +340,7 @@ public class CompressionMetadataTest
     @Test
     public void testConcurrentAccessOnDisk() throws Exception
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(0);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("0B");
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
         testConcurrentAccess();
     }
@@ -348,7 +348,7 @@ public class CompressionMetadataTest
     @Test
     public void testConcurrentAccessOnDiskCache() throws Exception
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(100);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("100MiB");
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(CompressionChunkOffsets.Type.ON_DISK.toString());
         testConcurrentAccess();
     }
@@ -401,5 +401,23 @@ public class CompressionMetadataTest
             }
             executor.shutdown();
         }
+    }
+
+    @Test
+    public void testCacheSize()
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("0B");
+        assertThat(getCacheSizeInBytes(1000)).isEqualTo(0);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("10GiB");
+        assertThat(getCacheSizeInBytes(1000)).isEqualTo(SizeUnit.GIGABYTES.toBytes(10));
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("10MiB");
+        assertThat(getCacheSizeInBytes(1000)).isEqualTo(SizeUnit.MEGABYTES.toBytes(10));
+
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("auto");
+        assertThat(getCacheSizeInBytes(1000)).isEqualTo(1000);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("auto@1");
+        assertThat(getCacheSizeInBytes(1000)).isEqualTo(1000);
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_ON_DISK_CACHE_SIZE.setString("auto@0.1");
+        assertThat(getCacheSizeInBytes(1000)).isEqualTo(100);
     }
 }
