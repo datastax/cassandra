@@ -22,9 +22,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
@@ -43,9 +40,11 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
 implements RequestCallback<ReadResponse>
@@ -64,6 +63,7 @@ implements RequestCallback<ReadResponse>
     private final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final boolean couldSpeculate;
     private final RequestSensors requestSensors;
+    private final MonotonicClock clock;
     private volatile int failures = 0;
 
     public ReadCallback(ResponseResolver<E, P> resolver, ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
@@ -86,6 +86,7 @@ implements RequestCallback<ReadResponse>
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockFor, this.replicaPlan);
         this.requestSensors = RequestTracker.instance.get();
+        this.clock = MonotonicClock.preciseTime;
     }
 
     protected P replicaPlan()
@@ -122,7 +123,7 @@ implements RequestCallback<ReadResponse>
 
     public void awaitResults() throws ReadFailureException, ReadTimeoutException
     {
-        boolean signaled = awaitFrom(queryStartNanoTime, command.getTimeout(MILLISECONDS), TimeUnit.MILLISECONDS);
+        boolean signaled = awaitFrom(queryStartNanoTime, command.getTimeout(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS);
         /**
          * Here we are checking isDataPresent in addition to the responses size because there is a possibility
          * that an asynchronous speculative execution request could be returning after a local failure already
@@ -140,7 +141,7 @@ implements RequestCallback<ReadResponse>
             String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
             Tracing.trace("{}; received {} of {} responses{}", failed ? "Failed" : "Timed out", received, blockFor,
                           gotData);
-            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStartNanoTime);
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(clock.now() - queryStartNanoTime);
             long timeoutMillis = TimeUnit.MILLISECONDS.convert(
             command.getTimeout(TimeUnit.NANOSECONDS), TimeUnit.NANOSECONDS);
 
