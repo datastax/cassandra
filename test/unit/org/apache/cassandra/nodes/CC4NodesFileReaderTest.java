@@ -41,6 +41,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.File;
@@ -222,6 +223,90 @@ public class CC4NodesFileReaderTest extends CQLTester
         assertThat(Files.exists(nodesDir.resolve("local.old"))).isFalse();
     }
 
+    @Test
+    public void testTryReadLocalInfoWithTruncationRecords() throws Exception
+    {
+        UUID hostId = UUID.randomUUID();
+        UUID tableId1 = UUID.randomUUID();
+        UUID tableId2 = UUID.randomUUID();
+        long segmentId1 = 42L;
+        int position1 = 1024;
+        long truncatedAt1 = 1700000000000L;
+        long segmentId2 = 99L;
+        int position2 = 0;
+        long truncatedAt2 = 1700000001000L;
+
+        Map<String, Object> cc4Local = new LinkedHashMap<>();
+        cc4Local.put("host_id", serializeUUID(hostId));
+        cc4Local.put("data_center", "dc1");
+        cc4Local.put("rack", "rack1");
+        cc4Local.put("truncated_at", serializeTruncatedAt(
+            tableId1, truncatedAt1, segmentId1, position1,
+            tableId2, truncatedAt2, segmentId2, position2));
+
+        writeMsgpack(nodesDir.resolve("local"), cc4Local);
+
+        LocalInfo info = CC4NodesFileReader.tryReadLocalInfo();
+        assertThat(info).isNotNull();
+        assertThat(info.getTruncationRecords()).hasSize(2);
+
+        TruncationRecord rec1 = info.getTruncationRecords().get(tableId1);
+        assertThat(rec1).isNotNull();
+        assertThat(rec1.position).isEqualTo(new CommitLogPosition(segmentId1, position1));
+        assertThat(rec1.truncatedAt).isEqualTo(truncatedAt1);
+
+        TruncationRecord rec2 = info.getTruncationRecords().get(tableId2);
+        assertThat(rec2).isNotNull();
+        assertThat(rec2.position).isEqualTo(new CommitLogPosition(segmentId2, position2));
+        assertThat(rec2.truncatedAt).isEqualTo(truncatedAt2);
+    }
+
+    @Test
+    public void testTryReadLocalInfoWithEmptyTruncatedAt() throws Exception
+    {
+        UUID hostId = UUID.randomUUID();
+
+        Map<String, Object> cc4Local = new LinkedHashMap<>();
+        cc4Local.put("host_id", serializeUUID(hostId));
+        cc4Local.put("data_center", "dc1");
+        cc4Local.put("rack", "rack1");
+        cc4Local.put("truncated_at", new LinkedHashMap<>());
+
+        writeMsgpack(nodesDir.resolve("local"), cc4Local);
+
+        LocalInfo info = CC4NodesFileReader.tryReadLocalInfo();
+        assertThat(info).isNotNull();
+        assertThat(info.getHostId()).isEqualTo(hostId);
+        assertThat(info.getTruncationRecords()).isEmpty();
+    }
+
+    @Test
+    public void testTryReadLocalInfoWithLargeSegmentId() throws Exception
+    {
+        UUID hostId = UUID.randomUUID();
+        UUID tableId = UUID.randomUUID();
+        long segmentId = Long.MAX_VALUE - 1;
+        int position = Integer.MAX_VALUE;
+        long truncatedAt = Long.MAX_VALUE;
+
+        Map<String, Object> cc4Local = new LinkedHashMap<>();
+        cc4Local.put("host_id", serializeUUID(hostId));
+        cc4Local.put("data_center", "dc1");
+        cc4Local.put("rack", "rack1");
+        cc4Local.put("truncated_at", serializeTruncatedAt(
+            tableId, truncatedAt, segmentId, position));
+
+        writeMsgpack(nodesDir.resolve("local"), cc4Local);
+
+        LocalInfo info = CC4NodesFileReader.tryReadLocalInfo();
+        assertThat(info).isNotNull();
+
+        TruncationRecord rec = info.getTruncationRecords().get(tableId);
+        assertThat(rec).isNotNull();
+        assertThat(rec.position).isEqualTo(new CommitLogPosition(segmentId, position));
+        assertThat(rec.truncatedAt).isEqualTo(truncatedAt);
+    }
+
     // ---- Helpers to write CC4-format msgpack data ----
 
     private static ObjectMapper createWriteMapper()
@@ -249,6 +334,24 @@ public class CC4NodesFileReaderTest extends CQLTester
     {
         InetAddress inet = address.getAddress();
         return new Object[]{ inet.getAddress(), address.getPort() };
+    }
+
+    /**
+     * Serialize truncation records in CC4 format: map of UUID string keys to [truncatedAt, segmentId, position] arrays.
+     * Accepts varargs of (tableId, truncatedAt, segmentId, position) groups.
+     */
+    private static Map<String, Object> serializeTruncatedAt(Object... args)
+    {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (int i = 0; i < args.length; i += 4)
+        {
+            UUID tableId = (UUID) args[i];
+            long truncatedAt = (long) args[i + 1];
+            long segmentId = (long) args[i + 2];
+            int position = (int) args[i + 3];
+            result.put(tableId.toString(), new Object[]{ truncatedAt, segmentId, position });
+        }
+        return result;
     }
 
     private static Collection<byte[]> serializeTokens(Collection<Token> tokens)
