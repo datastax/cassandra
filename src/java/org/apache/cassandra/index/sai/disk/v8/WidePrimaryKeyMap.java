@@ -93,7 +93,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
 
         // Find the partition using the token array for initial lookup
         long rowId = tokenArray.indexOf(key.token().getLongValue());
-        if (key.isTokenOnly() || rowId < 0)
+        if (key.isTokenOnly() || rowId < 0 || key.clustering().isEmpty())
             return rowId;
         // If we have skipped a token (shouldn't happen with indexOf, but check for safety)
         if (tokenArray.get(rowId) != key.token().getLongValue())
@@ -168,7 +168,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         {
             // If the key is a prefix (token-only or partition-only), 
             // the floor is the *greatest* row ID associated with this prefix.
-            if (key.isTokenOnly())
+            if (key.isTokenOnly() || key.clustering().isEmpty())
                 return startOfNextPartition(rowId) - 1;
 
             return rowId;
