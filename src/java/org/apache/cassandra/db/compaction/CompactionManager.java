@@ -17,8 +17,15 @@
  */
 package org.apache.cassandra.db.compaction;
 
+import static java.util.Collections.singleton;
+import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
+import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
+
+import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -45,28 +52,10 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
 import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularData;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.base.Predicates;
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Collections2;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.ListenableFutureTask;
-import com.google.common.util.concurrent.RateLimiter;
-import com.google.common.util.concurrent.Uninterruptibles;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
@@ -126,10 +115,26 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import static java.util.Collections.singleton;
-import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
-import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Predicates;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Collections2;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.ListenableFutureTask;
+import com.google.common.util.concurrent.RateLimiter;
+import com.google.common.util.concurrent.Uninterruptibles;
+
+import io.netty.util.concurrent.FastThreadLocal;
 
 /**
  * <p>
@@ -2379,22 +2384,86 @@ public class CompactionManager implements CompactionManagerMBean
 
         // interrupt in-progress compactions
         boolean interrupted = false;
+        logger.debug("interruptCompactionFor: entered with " + columnFamilies);
+        logger.debug("interruptCompactionFor: initial compactionstats: " + getCompactionStats());
+        logger.debug("interruptCompactionFor: See active.getTableOperations() of " + active.getTableOperations());
+        List<TableOperation> opsToStopIfWeCantFindAnyoneElse = new ArrayList();
         for (TableOperation operationSource : active.getTableOperations())
         {
+        	logger.debug("interruptCompactionFor: evaluating operationSource " + operationSource);
+        	try {
+        		logger.debug("interruptCompactionFor: evaluating operationSource " + operationSource.getProgress().table());
+        	} catch (Throwable t) {
+        		logger.debug("interruptCompactionFor: - error on .table()");
+        	}
+        	try {
+        		for (SSTableReader sstr : operationSource.getProgress().sstables()) {
+        			logger.debug("interruptCompactionFor: evaluating operationSource with table " + sstr.getFilename());	
+        		}        		
+        	} catch (Throwable t) {
+        		logger.debug("interruptCompactionFor: - error on filename");
+        	}
             AbstractTableOperation.OperationProgress info = operationSource.getProgress();
-            if ((info.operationType() == OperationType.VALIDATION) && !interruptValidation)
-                continue;
+            if ((info.operationType() == OperationType.VALIDATION) && !interruptValidation) {
+            	logger.debug("interruptCompactionFor: see validation compaction that we do not want to interrupt - continuing");
+            	continue;
+            }
+                
 
             if (info.metadata() == null || Iterables.contains(columnFamilies, info.metadata()))
             {
+            	logger.debug("interruptCompactionFor: current operationSource contains table we wanted of " + info.metadata());
                 if (operationSource.shouldStop(sstablePredicate))
                 {
+                	logger.debug("interruptCompactionFor: current operationSource also matched shouldStop predicate - asking for it to be stopped");
                     operationSource.stop(trigger);
                     interrupted = true;
+                } else {
+                	opsToStopIfWeCantFindAnyoneElse.add(operationSource);
+                	logger.debug("interruptCompactionFor: current operationSource did not match shouldStop predicate of " + sstablePredicate);
                 }
+            } else {
+            	logger.debug("interruptCompactionFor: current operationSource metadata did not match - saw " + info.metadata() + " and " + columnFamilies);            	
             }
+            logger.debug("interruptCompactionFor: at this point interrupted was " + interrupted);            
         }
+        logger.debug("interruptCompactionFor: was about to return final value of interrupted of " + interrupted);
+        if (!interrupted && opsToStopIfWeCantFindAnyoneElse.size() > 0) {
+        	for (TableOperation toStop : opsToStopIfWeCantFindAnyoneElse) {
+        		logger.debug("interruptCompactionFor: OverrideTryHarderToStop - stopping " + toStop);
+        		toStop.stop(trigger);
+        	}
+        	interrupted = true;
+        }
+        logger.debug("interruptCompactionFor: really going to return final value of interrupted of " + interrupted);
+        logger.debug("interruptCompactionFor: final compactionstats: " + getCompactionStats());
         return interrupted;
+    }
+    
+    private static String getCompactionStats() {
+    	StringBuffer retVal = new StringBuffer();
+    	try {
+    		Process p = Runtime.getRuntime().exec("/usr/local/sbin/nodetool compactionstats");
+    		p.waitFor();
+    		InputStream processOutput = p.getInputStream();
+    		BufferedReader br = new BufferedReader(new InputStreamReader(processOutput));
+    		String line = null;
+    		while ((line = br.readLine()) != null) {
+    			retVal.append(line + "\n");
+    		}
+    		br.close();
+    		
+    		InputStream processError = p.getErrorStream();
+    		br = new BufferedReader(new InputStreamReader(processError));
+    		line = null;
+    		while ((line = br.readLine()) != null) {
+    			retVal.append(line + "\n");
+    		}
+    		br.close();
+    	} catch (Exception e) {
+    		logger.error("Error gathering compaction stats", e);    		
+    	}
+    	return retVal.toString();
     }
 
     public boolean interruptCompactionFor(Iterable<TableMetadata> tables, TableOperation.StopTrigger trigger)
@@ -2462,3 +2531,4 @@ public class CompactionManager implements CompactionManagerMBean
         public void close();
     }
 }
+

@@ -198,10 +198,19 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
     public TableOperation createOperation()
     {
         return new AbstractTableOperation() {
+        	
+        	private String toStringVal;
 
             @Override
             public OperationProgress getProgress()
             {
+            	StringBuffer temp = new StringBuffer();
+            	temp.append("CompactionCursor.createOperation on " + controller.realm.metadata() + " with [");
+            	for (SSTableReader curr : sstables) {
+            		temp.append(curr.getFilename() + ", ");
+            	}
+            	temp.append("]");
+            	toStringVal = temp.toString();
                 return new OperationProgress(controller.realm.metadata(),
                                              type,
                                              bytesRead(),
@@ -214,6 +223,10 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
             public boolean isGlobal()
             {
                 return false;
+            }
+            
+            public String toString() {
+            	return "CompactionCursor:TableOperation" + toStringVal;
             }
         };
     }
@@ -286,3 +299,4 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
         return String.format("%s: %s, (%d/%d)", type, metadata(), bytesRead(), totalBytes());
     }
 }
+

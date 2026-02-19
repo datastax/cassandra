@@ -38,8 +38,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import javax.management.openmbean.CompositeData;
@@ -2796,7 +2794,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         longRunningSerializedOperationsLock.lock();
         try
         {
-            logger.trace("Cancelling in-progress compactions for {}", metadata.name);
+            logger.debug("runWithCompactionsDisabled:Cancelling in-progress compactions for {}", metadata.name);
             Iterable<ColumnFamilyStore> toInterruptFor = concatWith(interruptIndexes, interruptViews);
             try (CompactionManager.CompactionPauser pause = CompactionManager.instance.pauseGlobalCompaction();
                  CompactionManager.CompactionPauser pausedStrategies = pauseCompactionStrategies(toInterruptFor))
@@ -2806,10 +2804,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 CompactionManager.instance.waitForCessation(toInterruptFor, sstablesPredicate);
 
                 // doublecheck that we finished, instead of timing out
-                if (!allCompactionsFinished(toInterruptFor, sstablesPredicate))
+                if (!allCompactionsFinished(toInterruptFor, sstablesPredicate)) {
+                	logger.debug("runWithCompactionsDisabled:did not successfully cancel all compactions");
                     return null;
+                }
 
-                logger.trace("Compactions successfully cancelled");
+                logger.debug("runWithCompactionsDisabled:Compactions successfully cancelled");
 
                 // run our task
                 try
@@ -2851,9 +2851,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             for (ColumnFamilyStore cfs : toPause)
             {
+            	logger.debug("pauseCompactionStrategies: processing " + cfs);
                 successfullyPaused.ensureCapacity(successfullyPaused.size() + 1); // to avoid OOM:ing after pausing the strategies
-                cfs.getCompactionStrategy().pause();
+                cfs.getCompactionStrategy().pause();                
                 successfullyPaused.add(cfs);
+                logger.debug("pauseCompactionStrategies: successfully paused " + cfs);
             }
             return () -> maybeFail(resumeAll(null, toPause));
         }
@@ -3642,7 +3644,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      * Mutates sstable repairedAt times and notifies listeners of the change with the writeLock held. Prevents races
      * with other processes between when the metadata is changed and when sstables are moved between strategies.
      */
-    public int mutateRepaired(@Nullable final ReentrantReadWriteLock.WriteLock writeLock,
+    public int mutateRepaired(final ReentrantReadWriteLock.WriteLock writeLock,
                               Collection<SSTableReader> sstables,
                               long repairedAt,
                               UUID pendingRepair,
@@ -3682,7 +3684,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return Sets.filter(data.getLiveSSTables(), pendingRepairPredicate(sessionID));
     }
 
-    public static Predicate<SSTableReader> pendingRepairPredicate(@Nonnull UUID sessionID)
+    public static Predicate<SSTableReader> pendingRepairPredicate(UUID sessionID)
     {
         return sstable -> sstable.getPendingRepair() != null && sessionID.equals(sstable.getPendingRepair());
     }
@@ -3776,3 +3778,4 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
     }
 }
+

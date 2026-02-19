@@ -115,14 +115,18 @@ public class PendingAntiCompaction
 
         public boolean apply(SSTableReader sstable)
         {
-            if (!sstable.intersects(ranges))
+            if (!sstable.intersects(ranges)) {
+            	logger.debug("PendingAnticompaction.AntiCompactionPredicate.apply - table of " + sstable.getFilename() + " did not intersect on ranges, returning false");
                 return false;
+            }
 
             StatsMetadata metadata = sstable.getSSTableMetadata();
 
             // exclude repaired sstables
-            if (metadata.repairedAt != UNREPAIRED_SSTABLE)
+            if (metadata.repairedAt != UNREPAIRED_SSTABLE) {
+            	logger.debug("PendingAnticompaction.AntiCompactionPredicate.apply - metadata from " + sstable.getFilename() + " was not unrepaired_sstable, returning false");
                 return false;
+            }
 
             if (!sstable.descriptor.version.hasPendingRepair())
             {
@@ -136,17 +140,21 @@ public class PendingAntiCompaction
             // non-finalized sessions for a later error message
             if (metadata.pendingRepair != NO_PENDING_REPAIR)
             {
+            	logger.debug("PendingAnticompaction.AntiCompactionPredicate.apply - metadata from " + sstable.getFilename() + " was not in pending repair");
                 if (!ActiveRepairService.instance.consistent.local.isSessionFinalized(metadata.pendingRepair))
                 {
+                	logger.debug("PendingAnticompaction.apply - metadata from " + sstable.getFilename() + " session is not finalized - throwing exception ");
                     String message = String.format("Prepare phase for incremental repair session %s has failed because it encountered " +
                                                    "intersecting sstables belonging to another incremental repair session (%s). This is " +
                                                    "caused by starting an incremental repair session before a previous one has completed. " +
                                                    "Check nodetool repair_admin for hung sessions and fix them.", prsid, metadata.pendingRepair);
                     throw new SSTableAcquisitionException(message);
                 }
+                logger.debug("PendingAnticompaction.AntiCompactionPredicate.apply - metadata from " + sstable.getFilename() + " was not in pending repair - session is finalized - returning false");
                 return false;
             }
             Collection<AbstractTableOperation.OperationProgress> ops = CompactionManager.instance.active.getOperationsForSSTable(sstable, OperationType.ANTICOMPACTION);
+            logger.debug("PendingAnticompaction.AntiCompactionPredicate.apply - ops is " + ops);            
             if (ops != null && !ops.isEmpty())
             {
                 // todo: start tracking the parent repair session id that created the anticompaction to be able to give a better error messsage here:
@@ -160,8 +168,10 @@ public class PendingAntiCompaction
                 {
                     sb.append(op.operationId() == null ? "no compaction id" : op.operationId()).append(':').append(op.sstables()).append(',');
                 }
+                logger.debug("PendingAnticompaction.AntiCompactionPredicate.apply - getting ready to return false bassed on " + sb.toString());
                 throw new SSTableAcquisitionException(sb.toString());
             }
+            logger.debug("PendingAnticompaction.AntiCompactionPredicate.apply - no conditions met - returning true");
             return true;
         }
     }
@@ -218,11 +228,12 @@ public class PendingAntiCompaction
 
         public AcquireResult call()
         {
-            logger.debug("acquiring sstables for pending anti compaction on session {}", sessionID);
             // try to modify after cancelling running compactions. This will attempt to cancel in flight compactions including the given sstables for
             // up to a minute, after which point, null will be returned
             long start = System.currentTimeMillis();
             long delay = TimeUnit.SECONDS.toMillis(acquireRetrySeconds);
+            logger.debug("acquiring sstables for pending anti compaction on session {} - see delay value of {}", sessionID, delay);
+
             // Note that it is `predicate` throwing SSTableAcquisitionException if it finds a conflicting sstable
             // and we only retry when runWithCompactionsDisabled throws when uses the predicate, not when acquireTuple is.
             // This avoids the case when we have an sstable [0, 100] and a user starts a repair on [0, 50] and then [51, 100] before
@@ -278,8 +289,18 @@ public class PendingAntiCompaction
 
         private static boolean shouldAbort(AcquireResult result)
         {
+        	logger.info("PendingAnticompaction.shouldAbort - entered with result=" + result);
             if (result == null)
                 return true;
+            
+            logger.info("PendingAnticompaction.shouldAbort - entered with result.refs=" + result.refs);
+            
+            if (result.refs != null) {
+            	for (SSTableReader reader : result.refs) {
+            		logger.info("PendingAnticompaction.shouldAbort - see reader of " + reader.getFilename() + " with " +
+            			reader.getPendingRepair() + " and " + reader.getRepairedAt());
+            	}
+            }
 
             // sstables in the acquire result are now marked compacting and are locked to this anti compaction. If any
             // of them are marked repaired or pending repair, acquisition raced with another pending anti-compaction, or
@@ -389,3 +410,4 @@ public class PendingAntiCompaction
         return new AcquisitionCallback(prsId, tokenRanges, isCancelled);
     }
 }
+
