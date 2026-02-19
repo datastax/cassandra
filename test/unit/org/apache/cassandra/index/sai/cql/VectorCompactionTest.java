@@ -251,7 +251,7 @@ abstract public class VectorCompactionTest extends VectorTester
 
     public void testZeroOrOneToManyCompactionInternal(int vectorsPerSstable, int sstables)
     {
-        createTable();
+        var indexName = createTableAndReturnIndexName();
         disableCompaction();
 
         insertZeroOrOneToManyRows(vectorsPerSstable, sstables);
@@ -259,6 +259,8 @@ abstract public class VectorCompactionTest extends VectorTester
         validateQueries();
         compact();
         validateQueries();
+
+        validatePostingsStructureAndOrdinalToVectorMapping(indexName, V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, vectorsPerSstable * sstables);
     }
 
     private void insertZeroOrOneToManyRows(int vectorsPerSstable, int sstables)
@@ -267,7 +269,7 @@ abstract public class VectorCompactionTest extends VectorTester
         double duplicateChance = R.nextDouble() * 0.2;
         int j = 0;
         boolean nullInserted = false;
-        
+
         for (int i = 0; i < sstables; i++)
         {
             var vectorsInserted = new ArrayList<Vector<Float>>();
@@ -362,30 +364,40 @@ abstract public class VectorCompactionTest extends VectorTester
                                                .sstable()
                                                .iterator(primaryKey.partitionKey(), Slices.ALL, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
                         {
+                            int rowId = Math.toIntExact(i - segment.metadata.segmentRowIdOffset);
                             assertTrue(sstableIter.hasNext());
                             var next = (Row) sstableIter.next();
                             var vectorData = next.getCell(columnMetadata);
                             float[] vector = ((VectorType<?>) columnMetadata.type).composeAsFloat(vectorData.buffer());
-                            VectorFloat<?> vectorFloat = vts.createFloatVector(vector);
-                            int ordinal = ordinalsView.getOrdinalForRowId(Math.toIntExact(i - segment.metadata.segmentRowIdOffset));
-                            // Compare using cosine to ignore magnitude
-                            float sim = view.rerankerFor(vectorFloat, VectorSimilarityFunction.COSINE).similarityTo(ordinal);
-                            assertEquals(1.0f, sim, 0.001f);
-
-                            if (searcher.graph.getCompressedVectors() != null)
+                            if (vector == null)
                             {
-                                // Compare using cosine to ignore magnitude
-                                float quantizedSim = searcher.graph.getCompressedVectors()
-                                                     .scoreFunctionFor(vectorFloat, VectorSimilarityFunction.COSINE)
-                                                     .similarityTo(ordinal);
-                                // Note that this tolerance failed at 0.001f, but passes at 0.01f. Assuming this is
-                                // reasonable for now.
-                                assertEquals(1.0f, quantizedSim, 0.01f);
+                                assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, searcher.getPostingsStructure());
+                                int ordinal = ordinalsView.getOrdinalForRowId(rowId);
+                                assertTrue("Got " + ordinal, ordinal < 0);
                             }
                             else
                             {
-                                // We should only hit this case when we don't have enough rows to build a PQ.
-                                assertTrue("Found " + numRows + " but no PQ", MIN_PQ_ROWS > numRows);
+                                VectorFloat<?> vectorFloat = vts.createFloatVector(vector);
+                                int ordinal = ordinalsView.getOrdinalForRowId(rowId);
+                                // Compare using cosine to ignore magnitude
+                                float sim = view.rerankerFor(vectorFloat, VectorSimilarityFunction.COSINE).similarityTo(ordinal);
+                                assertEquals(1.0f, sim, 0.001f);
+
+                                if (searcher.graph.getCompressedVectors() != null)
+                                {
+                                    // Compare using cosine to ignore magnitude
+                                    float quantizedSim = searcher.graph.getCompressedVectors()
+                                                                       .scoreFunctionFor(vectorFloat, VectorSimilarityFunction.COSINE)
+                                                                       .similarityTo(ordinal);
+                                    // Note that this tolerance failed at 0.001f, but passes at 0.01f. Assuming this is
+                                    // reasonable for now.
+                                    assertEquals(1.0f, quantizedSim, 0.01f);
+                                }
+                                else
+                                {
+                                    // We should only hit this case when we don't have enough rows to build a PQ.
+                                    assertTrue("Found " + numRows + " but no PQ", MIN_PQ_ROWS > numRows);
+                                }
                             }
                         }
                     }
