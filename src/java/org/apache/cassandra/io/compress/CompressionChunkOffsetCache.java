@@ -159,6 +159,10 @@ public class CompressionChunkOffsetCache
         }
     }
 
+    /**
+     * A cached block of chunk offsets. It owns off-heap buffer and is reference-counted to ensure the memory
+     * is released only after eviction and last user release.
+     */
     public static class OffsetsBlock
     {
         private static final AtomicIntegerFieldUpdater<OffsetsBlock> referencesUpdater = AtomicIntegerFieldUpdater.newUpdater(OffsetsBlock.class, "references");
@@ -175,6 +179,11 @@ public class CompressionChunkOffsetCache
             NATIVE_MEMORY_USAGE.addAndGet(capacity);
         }
 
+        /**
+         * Increment the reference count if the block has not been released.
+         *
+         * @return true if the reference was acquired; false if already released
+         */
         boolean ref()
         {
             int refCount;
@@ -190,6 +199,9 @@ public class CompressionChunkOffsetCache
             return true;
         }
 
+        /**
+         * Decrement the reference count and free off-heap memory when it reaches zero.
+         */
         void release()
         {
             if (referencesUpdater.decrementAndGet(this) == 0)
@@ -199,24 +211,31 @@ public class CompressionChunkOffsetCache
             }
         }
 
+        /**
+         * @return off-heap capacity of this block in bytes
+         */
         public int capacity()
         {
             return capacity;
         }
 
+        /**
+         * @return number of chunk offsets stored in this block
+         */
         public int count()
         {
             return capacity / Long.BYTES;
         }
 
+        /**
+         * Return the chunk offset at the given index within this block. Must be called after successful {@link #ref()}.
+         *
+         * @param index offset index within this block
+         * @return chunk offset value
+         */
         public long getLongAtIndex(int index)
         {
             return offsetsBuffer.getLong(index * Long.BYTES);
-        }
-
-        public ByteBuffer buffer()
-        {
-            return offsetsBuffer;
         }
     }
 }
