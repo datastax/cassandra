@@ -1708,6 +1708,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     {
         long start = nanoTime();
+        metric.writeRequests.inc();
         OpOrder.Group opGroup = context.getGroup();
         CommitLogPosition commitLogPosition = context.getPosition();
         try
