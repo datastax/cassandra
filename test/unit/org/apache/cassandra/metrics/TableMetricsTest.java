@@ -453,7 +453,8 @@ public class TableMetricsTest
         
         // Verify that INSERT with NULL values don't increment deleteRequests
         session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (8, 'val8', null)", KEYSPACE, TABLE));
-        
+        assertEquals(7, cfs.metric.deleteRequests.getCount());
+
         // Test BATCH with multiple DELETE statements
         String batchQuery = String.format(
             "BEGIN BATCH " +
@@ -484,7 +485,7 @@ public class TableMetricsTest
         // Only the DELETE statement in the mixed batch should increment the counter
         assertEquals(10, cfs.metric.deleteRequests.getCount());
 
-        // Test range deletion (uses addUpdateForKey with Slice parameter - line 121 in DeleteStatement)
+        // Test range deletion
         // Insert data with multiple clustering columns
         for (int i = 13; i < 20; i++)
             session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (13, 'val%d', 'data%d')", KEYSPACE, TABLE, i, i));
@@ -502,7 +503,7 @@ public class TableMetricsTest
         // Execute multiple partition deletes
         session.execute(String.format("DELETE FROM %s.%s WHERE id in (20,21,22,24,25)", KEYSPACE, TABLE));
 
-        assertEquals(16, cfs.metric.deleteRequests.getCount());
+        assertEquals(12, cfs.metric.deleteRequests.getCount());
 
         //Test delete of multiple clustering keys
         for (int i = 25; i < 30; i++)
@@ -511,7 +512,7 @@ public class TableMetricsTest
         // Execute multiple clustering keys deletes
         session.execute(String.format("DELETE FROM %s.%s WHERE id = 25 and val1 in ('val25', 'val26', 'val27')", KEYSPACE, TABLE));
 
-        assertEquals(19, cfs.metric.deleteRequests.getCount());
+        assertEquals(13, cfs.metric.deleteRequests.getCount());
 
         // Test multiple slices scenario - create a table with composite clustering key
         String multiSliceTable = "multi_slice_test";
@@ -522,26 +523,29 @@ public class TableMetricsTest
         
         // Insert test data
         for (int i = 0; i < 5; i++)
+        {
             for (int j = 0; j < 10; j++)
+            {
                 session.execute(String.format("INSERT INTO %s.%s (id, ck1, ck2, val) VALUES (100, 'ck%d', %d, 'data')", KEYSPACE, multiSliceTable, i, j));
-        
+            }
+        }
+
         // Test 1: Execute a delete with IN on first clustering column and range on second clustering column
         // This creates multiple slices: one slice per value in the IN clause
         // DELETE WHERE id = 100 AND ck1 IN ('ck0', 'ck1', 'ck2') AND ck2 > 3 AND ck2 < 7
         session.execute(String.format("DELETE FROM %s.%s WHERE id = 100 AND ck1 IN ('ck0', 'ck1', 'ck2') AND ck2 > 3 AND ck2 < 7", KEYSPACE, multiSliceTable));
-        
-        // Should increment by 3 (one per value in IN clause, each creating a slice)
-        assertEquals(3, multiSliceCfs.metric.deleteRequests.getCount());
-        
+
+        // Should increment by 1
+        assertEquals(1, multiSliceCfs.metric.deleteRequests.getCount());
+
         // Test 2: Execute a delete with IN on both clustering columns (specific clustering keys, not slices)
         // This creates multiple specific deletes: one per combination of clustering key values
         // DELETE WHERE id = 100 AND ck1 IN ('ck3', 'ck4') AND ck2 IN (5, 6, 7)
         session.execute(String.format("DELETE FROM %s.%s WHERE id = 100 AND ck1 IN ('ck3', 'ck4') AND ck2 IN (5, 6, 7)", KEYSPACE, multiSliceTable));
-        
-        // Should increment by 6 (2 values for ck1 * 3 values for ck2 = 6 combinations)
-        // Total count: 3 (from test 1) + 6 (from test 2) = 9
-        assertEquals(9, multiSliceCfs.metric.deleteRequests.getCount());
-        
+
+        // Should increment by 1 (just once for the DELETE statement regardless of the number of rows that get deleted)
+        assertEquals(2, multiSliceCfs.metric.deleteRequests.getCount());
+
         // Clean up
         session.execute(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, multiSliceTable));
     }

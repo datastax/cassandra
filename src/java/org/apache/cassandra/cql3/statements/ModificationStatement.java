@@ -743,9 +743,11 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                           int nowInSeconds,
                           long queryStartNanoTime)
     {
-        // Flag to check and track DELETE metrics
-        boolean isDelete = type == StatementType.DELETE;
-        ColumnFamilyStore cfs = isDelete ? Keyspace.openAndGetStore(metadata) : null;
+        if (type == StatementType.DELETE)
+        {
+            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
+            cfs.metric.deleteRequests.inc();
+        }
 
         if (hasSlices())
         {
@@ -773,10 +775,6 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
 
                 for (Slice slice : slices)
                 {
-                    if (isDelete)
-                    {
-                        cfs.metric.deleteRequests.inc();
-                    }
                     addUpdateForKey(updateBuilder, slice, params);
                 }
             }
@@ -800,10 +798,6 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
 
                 if (!restrictions.hasClusteringColumnsRestrictions())
                 {
-                    if (isDelete)
-                    {
-                        cfs.metric.deleteRequests.inc();
-                    }
                     addUpdateForKey(updateBuilder, Clustering.EMPTY, params);
                 }
                 else
@@ -811,10 +805,6 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                     for (Clustering<?> clustering : clusterings)
                     {
                         clustering.validate();
-                        if (isDelete)
-                        {
-                            cfs.metric.deleteRequests.inc();
-                        }
                         addUpdateForKey(updateBuilder, clustering, params);
                     }
                 }
