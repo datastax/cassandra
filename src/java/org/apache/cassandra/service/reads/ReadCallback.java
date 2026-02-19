@@ -145,14 +145,24 @@ implements RequestCallback<ReadResponse>
             long timeoutMillis = TimeUnit.MILLISECONDS.convert(
             command.getTimeout(TimeUnit.NANOSECONDS), TimeUnit.NANOSECONDS);
 
-            for (Map.Entry<InetAddressAndPort, RequestFailureReason> entry : failureReasonByEndpoint.entrySet())
-            {
-                logger.trace(
-                "Failure: replica={}, reason={}, received={}/{}, timeout={}ms, elapsed={}ms, available={}ms",
-                entry.getKey().getHostAddress(true), entry.getValue(),
-                received, blockFor, timeoutMillis, elapsedMillis,
-                timeoutMillis - elapsedMillis);
+            if (!failureReasonByEndpoint.isEmpty()) {
+                for (Map.Entry<InetAddressAndPort, RequestFailureReason> entry : failureReasonByEndpoint.entrySet())
+                {
+                    logger.trace(
+                    "Failure: replica={}, reason={}, received={}/{}, timeout={}ms, elapsed={}ms, available={}ms",
+                    entry.getKey().getHostAddress(true), entry.getValue(),
+                    received, blockFor, timeoutMillis, elapsedMillis,
+                    timeoutMillis - elapsedMillis);
+                }
             }
+            else
+            {
+                logger.trace("Timeout: received={}/{}, timeout={}ms, elapsed={}ms, available={}ms, waiting for replicas={}",
+                             received, blockFor, timeoutMillis, elapsedMillis,
+                             timeoutMillis - elapsedMillis,
+                             replicaPlan().contacts());
+            }
+
         }
         else if (logger.isDebugEnabled())
         {
