@@ -21,9 +21,9 @@ package org.apache.cassandra.io.sstable.format;
 import java.io.FileNotFoundException;
 import java.io.IOError;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -41,11 +41,11 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 
-import static org.apache.cassandra.io.util.File.WriteMode.APPEND;
-import static org.apache.cassandra.io.util.File.WriteMode.OVERWRITE;
+import static java.nio.file.StandardOpenOption.CREATE;
+import static java.nio.file.StandardOpenOption.SYNC;
+import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
 
 public class TOCComponent
 {
@@ -102,35 +102,16 @@ public class TOCComponent
 
         if (tocFile.exists())
             componentNames.addAll(FileUtils.readLines(tocFile));
-    }
 
-    /**
-     * Write TOC file with given components and write mode
-     */
-    public static void writeTOC(File tocFile, Collection<Component> components, File.WriteMode writeMode)
-    {
-        try (FileOutputStreamPlus out = tocFile.newOutputStream(writeMode);
-             PrintWriter w = new PrintWriter(out))
+        try
         {
-            for (Component component : components)
-                w.println(component.name);
-            w.flush();
-            out.sync();
+            FileUtils.write(tocFile, new ArrayList<>(componentNames), CREATE, TRUNCATE_EXISTING, SYNC);
         }
-        catch (IOException e)
+        catch (RuntimeException ex)
         {
-            throw new FSWriteError(e, tocFile);
+            throw new RuntimeException("Exception occurred while writing to " + tocFile,
+                                       ex.getCause() != null ? ex.getCause() : ex);
         }
-    }
-
-    /**
-     * Appends new component names to the TOC component.
-     */
-    @SuppressWarnings("resource")
-    public static void appendTOC(Descriptor descriptor, Collection<Component> components)
-    {
-        File tocFile = descriptor.fileFor(Components.TOC);
-        writeTOC(tocFile, components, APPEND);
     }
 
     /**
@@ -148,7 +129,7 @@ public class TOCComponent
             try
             {
                 // Try loading TOC first without discovering components or checking file existence.
-                return TOCComponent.loadTOC(descriptor, false);
+                return loadTOC(descriptor, false);
             }
             catch (FileNotFoundException | NoSuchFileException e)
             {
@@ -157,7 +138,7 @@ public class TOCComponent
                 // Try loading TOC again after discovering components, still without existence checks
                 try
                 {
-                    return TOCComponent.loadTOC(descriptor, false);
+                    return loadTOC(descriptor, false);
                 }
                 catch (FileNotFoundException | NoSuchFileException e2)
                 {
@@ -167,7 +148,7 @@ public class TOCComponent
                         return components; // sstable doesn't exist yet
 
                     components.add(Components.TOC);
-                    TOCComponent.appendTOC(descriptor, components);
+                    updateTOC(descriptor, components);
                     return components;
                 }
             }
@@ -186,7 +167,7 @@ public class TOCComponent
             return components; // sstable doesn't exist yet
 
         components.add(Components.TOC);
-        TOCComponent.updateTOC(descriptor, components);
+        updateTOC(descriptor, components);
         return components;
     }
 
@@ -195,6 +176,9 @@ public class TOCComponent
      */
     public static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
     {
+        if (components.isEmpty())
+            return;
+
         File tocFile = descriptor.fileFor(Components.TOC);
         // As this method *re*-write the TOC (and is currently only called by "unregisterComponents"), it should only
         // be called in contexts where the TOC is expected to exist. If it doesn't, there is probably something
@@ -208,13 +192,22 @@ public class TOCComponent
             logger.warn("Was asked to 'rewrite' TOC file {} for sstable {}, but it does not exists. The file will be created but this is unexpected. The components to 'overwrite' are: {}", tocFile, descriptor, components, new RuntimeException());
         }
 
-        writeTOC(tocFile, components, OVERWRITE);
+        Set<String> componentNames = new TreeSet<>(Collections2.transform(components, Component::name));
+        try
+        {
+            FileUtils.write(tocFile, new ArrayList<>(componentNames), CREATE, TRUNCATE_EXISTING, SYNC);
+        }
+        catch (RuntimeException ex)
+        {
+            throw new RuntimeException("Exception occurred while writing to " + tocFile,
+                                       ex.getCause() != null ? ex.getCause() : ex);
+        }
     }
 
     public static void maybeAdd(Descriptor descriptor, Component component) throws IOException
     {
-        Set<Component> toc = TOCComponent.loadOrCreate(descriptor);
+        Set<Component> toc = loadOrCreate(descriptor);
         if (!toc.isEmpty() && toc.add(component))
-            TOCComponent.rewriteTOC(descriptor, toc);
+            rewriteTOC(descriptor, toc);
     }
 }
