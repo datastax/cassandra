@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.stream.Collectors;
 
@@ -341,71 +342,98 @@ abstract public class VectorCompactionTest extends VectorTester
         var columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(columnMetadata));
         for (var index : indexes)
         {
-            for (var segment : index.getSegments())
-            {
-                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
-                assertEquals(expectedStructure, searcher.getPostingsStructure());
+            boolean isMissingRows = index.getRowCount() < index.getSSTable().getTotalRows();
 
-                // Validate that the vectors in the sstable row correctly match the vectors in the graph by grabbing
-                // the vector, creating a score function for the vector, converting its row id into an ordinal, and
-                // then assert that the sstable's vector is similar to the graph's vector within an epsilon.
-                assertNotNull(segment.sstableContext);
-                assertNotNull(segment.sstableContext.primaryKeyMapFactory());
-                try (var view = searcher.graph.getView();
-                     var ordinalsView = searcher.graph.getOrdinalsView();
-                     var pkm = segment.sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
+            // We don't have enough rows to get segments, the assertions are simplified if we know the sstable has
+            // just one segment.
+            assertEquals(1, index.getSegments().size());
+            var segment = index.getSegments().get(0);
+
+            var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+
+            // We track nulls so that we can verify the postring structure matches.
+            boolean nullValueObserved = false;
+
+            // Validate that the vectors in the sstable row correctly match the vectors in the graph by grabbing
+            // the vector, creating a score function for the vector, converting its row id into an ordinal, and
+            // then assert that the sstable's vector is similar to the graph's vector within an epsilon.
+            assertNotNull(segment.sstableContext);
+            assertNotNull(segment.sstableContext.primaryKeyMapFactory());
+            try (var view = searcher.graph.getView();
+                 var ordinalsView = searcher.graph.getOrdinalsView();
+                 var pkm = segment.sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
+            {
+                assertNotNull(segment.metadata);
+                var vectorsSet = new HashSet<VectorFloat<?>>();
+                for (long i = segment.metadata.minSSTableRowId; i <= segment.metadata.maxSSTableRowId; i++)
                 {
-                    assertNotNull(segment.metadata);
-                    for (long i = segment.metadata.minSSTableRowId; i <= segment.metadata.maxSSTableRowId; i++)
+                    var primaryKey = pkm.primaryKeyFromRowId(i);
+                    assertTrue("The subsequent logic assumes that we have no clustering columns", primaryKey.hasEmptyClustering());
+                    try (var sstableIter = segment.sstableContext
+                                           .sstable()
+                                           .iterator(primaryKey.partitionKey(), Slices.ALL, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
                     {
-                        var primaryKey = pkm.primaryKeyFromRowId(i);
-                        assertTrue("The subsequent logic assumes that we have no clustering columns", primaryKey.hasEmptyClustering());
-                        try (var sstableIter = segment.sstableContext
-                                               .sstable()
-                                               .iterator(primaryKey.partitionKey(), Slices.ALL, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
+                        int rowId = Math.toIntExact(i - segment.metadata.segmentRowIdOffset);
+                        assertTrue(sstableIter.hasNext());
+                        var next = (Row) sstableIter.next();
+                        var vectorData = next.getCell(columnMetadata);
+                        float[] vector = ((VectorType<?>) columnMetadata.type).composeAsFloat(vectorData.buffer());
+                        if (vector == null)
                         {
-                            int rowId = Math.toIntExact(i - segment.metadata.segmentRowIdOffset);
-                            assertTrue(sstableIter.hasNext());
-                            var next = (Row) sstableIter.next();
-                            var vectorData = next.getCell(columnMetadata);
-                            float[] vector = ((VectorType<?>) columnMetadata.type).composeAsFloat(vectorData.buffer());
-                            if (vector == null)
+                            nullValueObserved = true;
+                            assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, searcher.getPostingsStructure());
+                            int ordinal = ordinalsView.getOrdinalForRowId(rowId);
+                            assertTrue("Got " + ordinal, ordinal < 0);
+                        }
+                        else
+                        {
+                            VectorFloat<?> vectorFloat = vts.createFloatVector(vector);
+                            vectorsSet.add(vectorFloat);
+                            int ordinal = ordinalsView.getOrdinalForRowId(rowId);
+                            // Compare using cosine to ignore magnitude
+                            float sim = view.rerankerFor(vectorFloat, VectorSimilarityFunction.COSINE).similarityTo(ordinal);
+                            assertEquals(1.0f, sim, 0.001f);
+
+                            if (searcher.graph.getCompressedVectors() != null)
                             {
-                                assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, searcher.getPostingsStructure());
-                                int ordinal = ordinalsView.getOrdinalForRowId(rowId);
-                                assertTrue("Got " + ordinal, ordinal < 0);
+                                // Compare using cosine to ignore magnitude
+                                float quantizedSim = searcher.graph.getCompressedVectors()
+                                                                   .scoreFunctionFor(vectorFloat, VectorSimilarityFunction.COSINE)
+                                                                   .similarityTo(ordinal);
+                                // Note that this tolerance failed at 0.001f, but passes at 0.01f. Assuming this is
+                                // reasonable for now.
+                                assertEquals(1.0f, quantizedSim, 0.01f);
                             }
                             else
                             {
-                                VectorFloat<?> vectorFloat = vts.createFloatVector(vector);
-                                int ordinal = ordinalsView.getOrdinalForRowId(rowId);
-                                // Compare using cosine to ignore magnitude
-                                float sim = view.rerankerFor(vectorFloat, VectorSimilarityFunction.COSINE).similarityTo(ordinal);
-                                assertEquals(1.0f, sim, 0.001f);
-
-                                if (searcher.graph.getCompressedVectors() != null)
-                                {
-                                    // Compare using cosine to ignore magnitude
-                                    float quantizedSim = searcher.graph.getCompressedVectors()
-                                                                       .scoreFunctionFor(vectorFloat, VectorSimilarityFunction.COSINE)
-                                                                       .similarityTo(ordinal);
-                                    // Note that this tolerance failed at 0.001f, but passes at 0.01f. Assuming this is
-                                    // reasonable for now.
-                                    assertEquals(1.0f, quantizedSim, 0.01f);
-                                }
-                                else
-                                {
-                                    // We should only hit this case when we don't have enough rows to build a PQ.
-                                    assertTrue("Found " + numRows + " but no PQ", MIN_PQ_ROWS > numRows);
-                                }
+                                // We should only hit this case when we don't have enough rows to build a PQ.
+                                assertTrue("Found " + numRows + " but no PQ", MIN_PQ_ROWS > numRows);
                             }
                         }
                     }
                 }
-                catch (IOException e)
+
+                assertEquals(vectorsSet.size(), searcher.graph.size());
+
+                // When we have a row with a null vector, it is valid for the missing row vector(s) to be at the
+                // start or end of the sstable, and in that case, we actually skip them within the segment.
+                if (!nullValueObserved && isMissingRows)
                 {
-                    throw new RuntimeException(e);
+                    // This logic somewhat duplicates the code that creates the structure, but it's our best bet
+                    // when we have this case of a missing vector outside the segment bounds.
+                    var struct = V5VectorPostingsWriter.tooManyOrdinalMappingHoles(searcher.graph.size(), numRows)
+                                 ? V5VectorPostingsWriter.Structure.ONE_TO_MANY
+                                 : V5VectorPostingsWriter.Structure.ONE_TO_ONE;
+                    assertEquals(struct, searcher.getPostingsStructure());
                 }
+                else
+                {
+                    assertEquals(expectedStructure, searcher.getPostingsStructure());
+                }
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
             }
         }
     }
