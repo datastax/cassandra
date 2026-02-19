@@ -57,16 +57,18 @@ public class CompressionChunkOffsetsBench
     @State(Scope.Benchmark)
     public static class BenchmarkState
     {
-        @Param({ "IN_MEMORY", "ON_DISK", "ON_DISK_WITH_CACHE"})
+        @Param({ "IN_MEMORY", "ON_DISK"})
         public String mode;
 
         @Param({ "1000000"})
         public int chunkCount;
 
+        @Param({ "0", "256"})
+        public int cacheSizeMb;
+
         private static final int CHUNK_LENGTH = 16;
         private static final int COMPRESSED_LEN = 12;
         private static final int CHECKSUM_LEN = 4;
-        private static final int CACHE_SIZE_MB = 256;
         private static final int OFFSETS_TO_READ = 1024 * 512;
 
         private CompressionMetadata metadata;
@@ -78,7 +80,7 @@ public class CompressionChunkOffsetsBench
         public void setup() throws Exception
         {
             DatabaseDescriptor.toolInitialization();
-            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(CACHE_SIZE_MB);
+            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB.setInt(cacheSizeMb);
             CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(mode);
 
             metadataFile = createMetadataFile();
@@ -102,7 +104,7 @@ public class CompressionChunkOffsetsBench
         @Setup(Level.Iteration)
         public void prewarmCache()
         {
-            if (!CompressionChunkOffsets.Type.ON_DISK_WITH_CACHE.toString().equals(mode))
+            if (!(CompressionChunkOffsets.Type.ON_DISK.toString().equals(mode) && cacheSizeMb > 0))
                 return;
 
             for (long position : positions)

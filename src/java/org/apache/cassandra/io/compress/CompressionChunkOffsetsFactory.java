@@ -47,13 +47,12 @@ import static org.apache.cassandra.io.compress.CompressionMetadata.NATIVE_MEMORY
  * <p>
  * Based on {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_TYPE},
  * - When {@code IN_MEMORY} is selected, all offsets are loaded into off-heap memory.</li>
- * - When {@code ON_DISK} is selected, offsets are read directly from the compression info file.</li>
- * - When {@code ON_DISK_WITH_CACHE} is selected, offsets are read in blocks and cached.</li>
+ * - When {@code ON_DISK} is selected and cache size is non-positive, requested offsets are read directly from the compression info file.</li>
+ * - When {@code ON_DISK} is selected and cache size is postive, offsets are read from disk and cached in blocks </li>
  * </p>
  * Configs:
  * - {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_TYPE} - type of compression offset implementation
- * - {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB}: cache size for block caching.
- *       Non-positive value to disable caching and fallck back to {@link CompressionChunkOffsets.Type#ON_DISK}
+ * - {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB}: cache size for block caching. Non-positive value to disable caching.
  * <p>
  */
 public interface CompressionChunkOffsetsFactory
@@ -89,8 +88,6 @@ public interface CompressionChunkOffsetsFactory
             case IN_MEMORY:
                 return createInMemoryOffsets(indexFilePath, input, startIndex, endIndex, chunkCount, compressedFileLength);
             case ON_DISK:
-                return createOnDiskOffsets(indexFilePath, offsetsStart, startIndex, endIndex, chunkCount, compressedFileLength, readerType, null);
-            case ON_DISK_WITH_CACHE:
                 CompressionChunkOffsetCache cache = CompressionChunkOffsetCache.get();
                 return createOnDiskOffsets(indexFilePath, offsetsStart, startIndex, endIndex, chunkCount, compressedFileLength, readerType, cache);
             default:
@@ -140,10 +137,6 @@ public interface CompressionChunkOffsetsFactory
                 return new CompressionChunkOffsetsFactory.InMemoryCompressionChunkOffsets(memoryChunkOffsets, compressedFileLength);
             case ON_DISK:
                 // release IN_MEMORY offsets if ON_DISK is used
-                memoryChunkOffsets.close();
-                return createOnDiskOffsets(indexFilePath, offsetsStart, startIndex, endIndex, chunkCount, compressedFileLength, readerType, null);
-            case ON_DISK_WITH_CACHE:
-                // release IN_MEMORY offsets if ON_DISK_WITH_CACHE is used
                 memoryChunkOffsets.close();
                 CompressionChunkOffsetCache cache = CompressionChunkOffsetCache.get();
                 return createOnDiskOffsets(indexFilePath, offsetsStart, startIndex, endIndex, chunkCount, compressedFileLength, readerType, cache);

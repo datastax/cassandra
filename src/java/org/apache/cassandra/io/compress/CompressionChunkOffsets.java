@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.io.compress;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 /**
@@ -37,15 +38,13 @@ public interface CompressionChunkOffsets extends AutoCloseable
          */
         IN_MEMORY,
         /**
-         * Chunk offsets are read directly from the compression info file on-demand.
-         * This mode has worse latency due to disk accesses and it's for demostration only.
+         * When {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_CACHE_IN_MB} is configured, chunk offsets
+         * are read from the compression info file in blocks and cached in memory; otherwise requested chunk offset is
+         * read directly from the compression info file.
+         *
+         * The cache aims to balance memory usage and access latency.
          */
-        ON_DISK,
-        /**
-         * Chunk offsets are read from the compression info file in blocks and cached in memory.
-         * This mode aims to balance memory usage and access latency.
-         */
-        ON_DISK_WITH_CACHE
+        ON_DISK
     }
 
     /**
