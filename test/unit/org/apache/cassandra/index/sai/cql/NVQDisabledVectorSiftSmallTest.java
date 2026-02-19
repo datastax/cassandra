@@ -13,12 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.stream.Collectors;
 
 import org.junit.Before;
 import org.junit.runner.RunWith;
@@ -28,32 +25,16 @@ import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
 
 @RunWith(Parameterized.class)
-public class VectorCompaction2dTest extends VectorCompactionTest
+public class NVQDisabledVectorSiftSmallTest extends VectorSiftSmallTest
 {
-    @Override
-    public int dimension()
-    {
-        return 2;
-    }
 
-    @Parameterized.Parameter(0)
+    @Parameterized.Parameter
     public Version version;
 
-    @Parameterized.Parameter(1)
-    public boolean enableNVQ;
-
-    @Parameterized.Parameters(name = "{0} {1}")
+    @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
-        // See Version file for explanation of changes associated with each version
-        return Version.ALL.stream()
-                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
-                          .flatMap(vd -> {
-                              // NVQ is only relevant some of the time, but we always pass it so that the test
-                              // could be broken up into multiple tests, and would finish before timeouts.
-                              return Arrays.stream(new Boolean[]{ true, false }).map(b -> new Object[]{ vd, b });
-                          })
-                          .collect(Collectors.toList());
+        return allVersions();
     }
 
     @Before
@@ -63,8 +44,8 @@ public class VectorCompaction2dTest extends VectorCompactionTest
     }
 
     @Before
-    public void setEnableNVQ() throws Throwable
+    public void setEnableNVQ()
     {
-        SAIUtil.setEnableNVQ(enableNVQ);
+        SAIUtil.setEnableNVQ(false);
     }
 }

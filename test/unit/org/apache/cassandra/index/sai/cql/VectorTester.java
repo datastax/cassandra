@@ -37,7 +37,6 @@ import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -218,6 +217,40 @@ public class VectorTester extends SAITester
         {
             SAIUtil.setEnableNVQ(ENABLE_NVQ);
         }
+    }
+
+    /**
+     * Convenience method to create junit test parameters for specified versions which are NVQ-enabled.
+     * This will create * 1 parameter set for each version which is at or above
+     * {@link org.apache.cassandra.index.sai.disk.format.Version.JVECTOR_EARLIEST} <em>and</em> which supports
+     * NVQ directly.
+     *
+     * @return all versions at or above {@link org.apache.cassandra.index.sai.disk.format.Version.JVECTOR_EARLIEST}
+     * which also supports NVQ.
+     */
+    protected static Collection<Object[]> nvqEnabledVersions()
+    {
+        // See Version file for explanation of changes associated with each version
+        return Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(NVQUtil::versionSupportsNVQ)
+                          .map(v -> new Object[]{ v })
+                          .collect(Collectors.toList());
+    }
+
+    /**
+     * Convenience method to create junit test parameters for specified versions. This will create
+     * 1 parameter set for each version >= {@link org.apache.cassandra.index.sai.disk.format.Version.JVECTOR_EARLIEST}.
+     *
+     * @return all versions at or above {@link org.apache.cassandra.index.sai.disk.format.Version.JVECTOR_EARLIEST}.
+     */
+    protected static Collection<Object[]> allVersions()
+    {
+        // See Version file for explanation of changes associated with each version
+        return Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .map(v -> new Object[]{ v })
+                          .collect(Collectors.toList());
     }
 
     /**

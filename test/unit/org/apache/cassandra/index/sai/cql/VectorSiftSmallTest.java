@@ -32,7 +32,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
+import org.junit.Ignore;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.Timeout;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -45,9 +48,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-public class VectorSiftSmallTest extends VectorTester.Versioned
+
+@Ignore
+public class VectorSiftSmallTest extends VectorTester
 {
     private static final String DATASET = "siftsmall"; // change to "sift" for larger dataset. requires manual download
+    @Rule public Timeout timeout = new Timeout(180, TimeUnit.SECONDS);
 
     @Override
     public void setup() throws Throwable

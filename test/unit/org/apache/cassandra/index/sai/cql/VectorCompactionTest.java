@@ -22,11 +22,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.junit.Before;
 import org.junit.Ignore;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -44,43 +47,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 @Ignore
-@RunWith(Parameterized.class)
 abstract public class VectorCompactionTest extends VectorTester
 {
+    @Rule public final Timeout timeout = new Timeout(240, TimeUnit.SECONDS);
+
     // Subclasses must implement this to cover different dimensions
     abstract public int dimension();
-
-    @Parameterized.Parameter(0)
-    public Version version;
-
-    @Parameterized.Parameter(1)
-    public boolean enableNVQ;
-
-    @Parameterized.Parameters(name = "{0} {1}")
-    public static Collection<Object[]> data()
-    {
-        // See Version file for explanation of changes associated with each version
-        return Version.ALL.stream()
-                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
-                          .flatMap(vd -> {
-                              // NVQ is only relevant some of the time, but we always pass it so that the test
-                              // could be broken up into multiple tests, and would finish before timeouts.
-                              return Arrays.stream(new Boolean[]{ true, false }).map(b -> new Object[]{ vd, b });
-                          })
-                          .collect(Collectors.toList());
-    }
-
-    @Before
-    public void setCurrentVersion() throws Throwable
-    {
-        SAIUtil.setCurrentVersion(version);
-    }
-
-    @Before
-    public void setEnableNVQ() throws Throwable
-    {
-        SAIUtil.setEnableNVQ(enableNVQ);
-    }
 
     @Test
     public void testCompactionWithEnoughRowsForPQAndDeleteARow()
