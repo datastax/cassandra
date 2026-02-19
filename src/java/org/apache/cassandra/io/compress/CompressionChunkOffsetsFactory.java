@@ -382,7 +382,8 @@ public interface CompressionChunkOffsetsFactory
     class BlockCacheChunkOffsets extends OnDiskChunkOffsets
     {
         // Num of bytes per cache block. This value divides by 8 is the num of chunk offsets per cache block.
-        private static final int DEFAULT_BLOCK_BYTES = 64 * 1024;
+        private static final int DEFAULT_BLOCK_BYTES = Integer.parseInt(System.getProperty("cassandra.compression_chunk_offsets_block_size", "65536")); // 64 * 1024
+        // Used to retry fetching cache from disk when cache referencing races with concurrent cache eviction. This should be rare and 10 should be sufficient.
         private static final int MAX_RETIRES = 10;
 
         private final int offsetsPerBlock;
