@@ -365,6 +365,7 @@ abstract public class VectorCompactionTest extends VectorTester
             {
                 assertNotNull(segment.metadata);
                 var vectorsSet = new HashSet<VectorFloat<?>>();
+                boolean hasUniqueVectors = true;
                 for (long i = segment.metadata.minSSTableRowId; i <= segment.metadata.maxSSTableRowId; i++)
                 {
                     var primaryKey = pkm.primaryKeyFromRowId(i);
@@ -388,7 +389,7 @@ abstract public class VectorCompactionTest extends VectorTester
                         else
                         {
                             VectorFloat<?> vectorFloat = vts.createFloatVector(vector);
-                            vectorsSet.add(vectorFloat);
+                            hasUniqueVectors &= vectorsSet.add(vectorFloat);
                             int ordinal = ordinalsView.getOrdinalForRowId(rowId);
                             // Compare using cosine to ignore magnitude
                             float sim = view.rerankerFor(vectorFloat, VectorSimilarityFunction.COSINE).similarityTo(ordinal);
@@ -419,11 +420,9 @@ abstract public class VectorCompactionTest extends VectorTester
                 // start or end of the sstable, and in that case, we actually skip them within the segment.
                 if (!nullValueObserved && isMissingRows)
                 {
-                    // This logic somewhat duplicates the code that creates the structure, but it's our best bet
-                    // when we have this case of a missing vector outside the segment bounds.
-                    var struct = V5VectorPostingsWriter.tooManyOrdinalMappingHoles(searcher.graph.size(), numRows)
-                                 ? V5VectorPostingsWriter.Structure.ONE_TO_MANY
-                                 : V5VectorPostingsWriter.Structure.ONE_TO_ONE;
+                    var struct = hasUniqueVectors
+                                 ? V5VectorPostingsWriter.Structure.ONE_TO_ONE
+                                 : V5VectorPostingsWriter.Structure.ONE_TO_MANY;
                     assertEquals(struct, searcher.getPostingsStructure());
                 }
                 else
