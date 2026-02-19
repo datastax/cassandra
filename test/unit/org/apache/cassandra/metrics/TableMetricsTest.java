@@ -424,30 +424,38 @@ public class TableMetricsTest
         assertEquals(0, cfs.metric.writeRequests.getCount());
         assertEquals(0, cfs.metric.readRequests.getCount());
         
-        int numWrites = 10;
+        int numOperations = 5;
         
-        // Execute write operations
-        for (int i = 0; i < numWrites; i++)
+        // Execute INSERT operations
+        for (int i = 0; i < numOperations; i++)
             session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, '%s', '%s')",
                                         KEYSPACE, TABLE, i, "val" + i, "val" + i));
         
-        // Verify writeRequests counter is incremented
-        assertEquals(numWrites, cfs.metric.writeRequests.getCount());
+        // Verify writeRequests counter is incremented for inserts
+        assertEquals(numOperations, cfs.metric.writeRequests.getCount());
         assertEquals(0, cfs.metric.readRequests.getCount());
         
-        // Execute more writes
-        for (int i = 0; i < numWrites; i++)
-            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, '%s', '%s')",
-                                        KEYSPACE, TABLE, i + numWrites, "val" + i, "val" + i));
+        // Execute UPDATE operations
+        for (int i = 0; i < numOperations; i++)
+            session.execute(String.format("UPDATE %s.%s SET val2 = '%s' WHERE id = %d AND val1 = '%s'",
+                                        KEYSPACE, TABLE, "updated" + i, i, "val" + i));
         
-        // Verify counter continues to increment
-        assertEquals(numWrites * 2, cfs.metric.writeRequests.getCount());
+        // Verify counter increments for updates
+        assertEquals(numOperations * 2, cfs.metric.writeRequests.getCount());
+        
+        // Execute DELETE operations
+        for (int i = 0; i < numOperations; i++)
+            session.execute(String.format("DELETE FROM %s.%s WHERE id = %d AND val1 = '%s'",
+                                        KEYSPACE, TABLE, i, "val" + i));
+        
+        // Verify counter increments for deletes
+        assertEquals(numOperations * 3, cfs.metric.writeRequests.getCount());
         
         // Execute a read to verify writeRequests doesn't increment on reads
         session.execute(String.format("SELECT * FROM %s.%s WHERE id = 0 AND val1 = 'val0'", KEYSPACE, TABLE));
         
         // writeRequests should remain the same, readRequests should increment
-        assertEquals(numWrites * 2, cfs.metric.writeRequests.getCount());
+        assertEquals(numOperations * 3, cfs.metric.writeRequests.getCount());
         assertEquals(1, cfs.metric.readRequests.getCount());
     }
 
