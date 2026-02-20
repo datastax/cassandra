@@ -172,8 +172,8 @@ public class OutboundConnectionSettings
 
     public String toString()
     {
-        return String.format("peer: (%s, %s), framing: %s, encryption: %s",
-                             to, connectTo, framing, SocketFactory.encryptionOptionsSummary(encryption));
+        return String.format("from: %s peer: (%s, %s), framing: %s, encryption: %s",
+                             from, to, connectTo, framing, SocketFactory.encryptionOptionsSummary(encryption));
     }
 
     public OutboundConnectionSettings withAuthenticator(IInternodeAuthenticator authenticator)
