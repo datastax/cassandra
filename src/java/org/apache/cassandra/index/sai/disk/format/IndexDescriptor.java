@@ -33,12 +33,15 @@ import java.util.function.Consumer;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -53,7 +56,10 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.util.IOUtils;
@@ -84,22 +90,36 @@ public class IndexDescriptor
     // are per-sstable (`isRowAware`) and some are per-column (`hasTermsHistogram`).
 
     public final Descriptor descriptor;
+    public final boolean hasClustering;
     private final ComponentsBuildId emptyGroupMarker;
+    private final ClusteringComparator comparator;
 
     // The per-sstable components for this descriptor. This is never `null` in practice, but 1) it's a bit easier to
     // initialize it outsides of the ctor, and 2) it can actually change upon calls to `reload`.
     private IndexComponentsImpl perSSTable;
     private final Map<IndexContext, IndexComponentsImpl> perIndexes = Maps.newHashMap();
 
-    private IndexDescriptor(Descriptor descriptor)
+    private IndexDescriptor(Descriptor descriptor, ClusteringComparator comparator)
     {
         this.descriptor = descriptor;
         this.emptyGroupMarker = ComponentsBuildId.of(Version.current(descriptor.ksname), -1);
+        this.comparator = comparator;
+        this.hasClustering = comparator.size() > 0;
     }
 
+    @VisibleForTesting
     public static IndexDescriptor empty(Descriptor descriptor)
     {
-        IndexDescriptor created = new IndexDescriptor(descriptor);
+        IndexDescriptor created = new IndexDescriptor(descriptor, new ClusteringComparator());
+        // Some code assumes that you can always at least call `perSSTableComponents()` and not get `null`, so we
+        // set it to an empty group here.
+        created.perSSTable = created.createEmptyGroup(null);
+        return created;
+    }
+
+    public static IndexDescriptor empty(Descriptor descriptor, TableMetadata metadata)
+    {
+        IndexDescriptor created = new IndexDescriptor(descriptor, metadata.comparator);
         // Some code assumes that you can always at least call `perSSTableComponents()` and not get `null`, so we
         // set it to an empty group here.
         created.perSSTable = created.createEmptyGroup(null);
@@ -109,7 +129,8 @@ public class IndexDescriptor
     public static IndexDescriptor load(SSTableReader sstable, Set<IndexContext> indices)
     {
         SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable);
-        IndexDescriptor descriptor = new IndexDescriptor(sstable.descriptor);
+        IndexDescriptor descriptor = new IndexDescriptor(sstable.descriptor,
+                                                         sstable.metadata().comparator);
         descriptor.initialize(indices, discovered);
         return descriptor;
     }
@@ -129,7 +150,7 @@ public class IndexDescriptor
     private Set<IndexComponentType> expectedComponentsForVersion(Version version, @Nullable IndexContext context)
     {
         return context == null
-               ? version.onDiskFormat().perSSTableComponentTypes()
+               ? version.onDiskFormat().perSSTableComponentTypes(hasClustering)
                : version.onDiskFormat().perIndexComponentTypes(context);
     }
 
@@ -177,11 +198,11 @@ public class IndexDescriptor
      * Please note that the final sstable may not contain all of these components, as some may be empty or not written
      * due to the specific of the flush, but this should be a superset of the components written.
      */
-    public static Set<Component> componentsForNewlyFlushedSSTable(Collection<StorageAttachedIndex> indices, Version version)
+    public static Set<Component> componentsForNewlyFlushedSSTable(Collection<StorageAttachedIndex> indices, Version version, boolean hasClustering)
     {
         ComponentsBuildId buildId = ComponentsBuildId.forNewSSTable(version);
         Set<Component> components = new HashSet<>();
-        for (IndexComponentType component : buildId.version().onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType component : buildId.version().onDiskFormat().perSSTableComponentTypes(hasClustering))
             components.add(customComponentFor(buildId, component, null));
 
         for (StorageAttachedIndex index : indices)
@@ -192,7 +213,7 @@ public class IndexDescriptor
     /**
      * The set of per-index components _expected_ to be written for a newly flushed sstable for the provided index.
      * <p>
-     * This is a subset of {@link #componentsForNewlyFlushedSSTable(Collection, Version)} and has the same caveats.
+     * This is a subset of {@link #componentsForNewlyFlushedSSTable(Collection, Version, boolean)} and has the same caveats.
      */
     public static Set<Component> perIndexComponentsForNewlyFlushedSSTable(IndexContext context)
     {
@@ -263,6 +284,22 @@ public class IndexDescriptor
     public IndexComponents.ForWrite newPerSSTableComponentsForWrite()
     {
         return newComponentsForWrite(null, perSSTable);
+    }
+
+    private static RuntimeException handleFileHandleCleanup(Throwable t, @Nullable Throwables.DiscreteAction<?> cleanup)
+    {
+        if (cleanup != null)
+        {
+            try
+            {
+                cleanup.perform();
+            }
+            catch (Exception e)
+            {
+                return Throwables.unchecked(Throwables.merge(t, e));
+            }
+        }
+        return Throwables.unchecked(t);
     }
 
     public IndexComponents.ForWrite newPerIndexComponentsForWrite(IndexContext context)
@@ -400,6 +437,17 @@ public class IndexDescriptor
         }
 
         @Override
+        public boolean hasClustering()
+        {
+            return IndexDescriptor.this.hasClustering;
+        }
+
+        public ClusteringComparator comparator()
+        {
+            return IndexDescriptor.this.comparator;
+        }
+
+        @Override
         public Collection<IndexComponent.ForRead> all()
         {
             return Collections.unmodifiableCollection(components.values());
@@ -511,7 +559,7 @@ public class IndexDescriptor
         }
 
         @Override
-        public File tmpFileFor(String componentName) throws IOException
+        public File tmpFileFor(String componentName)
         {
             String name = context != null ? String.format("%s_%s_%s", buildId, context.getColumnName(), componentName)
                                           :  String.format("%s_%s", buildId, componentName);
@@ -616,12 +664,21 @@ public class IndexDescriptor
             }
 
             @Override
-            public FileHandle createFileHandle()
+            public FileHandle createFileHandle(Throwables.DiscreteAction<?> cleanup)
             {
-                try (var builder = StorageProvider.instance.fileHandleBuilderFor(this))
+                try (FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this))
                 {
-                    var b = builder.order(byteOrder());
+                    if (logger.isTraceEnabled())
+                    {
+                        logger.trace(logMessage("Opening {} file handle for {} ({})"),
+                                     file, FBUtilities.prettyPrintMemory(file.length()));
+                    }
+                    FileHandle.Builder b = builder.order(byteOrder());
                     return b.complete();
+                }
+                catch (Throwable t)
+                {
+                    throw handleFileHandleCleanup(t, cleanup);
                 }
             }
 
@@ -637,7 +694,7 @@ public class IndexDescriptor
             @Override
             public IndexInput openInput()
             {
-                return IndexFileUtils.instance.openBlockingInput(createFileHandle());
+                return IndexFileUtils.instance.openBlockingInput(createFileHandle(null));
             }
 
             @Override

@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.functional;
 import java.util.Set;
 
 import com.google.common.collect.Iterables;
+
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -52,7 +53,7 @@ public class GroupComponentsTest extends SAITester
         SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
 
         Set<Component> components = group.activeComponents(sstable);
-        assertEquals(Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes().size() + 1, components.size());
+        assertEquals(Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes(false).size() + 1, components.size());
 
         // index files are released but not removed
         cfs.invalidate(true, false);
@@ -77,7 +78,7 @@ public class GroupComponentsTest extends SAITester
 
         Set<Component> components = group.activeComponents(sstables.iterator().next());
 
-        assertEquals(Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes().size() + 1, components.size());
+        assertEquals(Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes(false).size() + 1, components.size());
     }
 
     @Test
@@ -96,7 +97,7 @@ public class GroupComponentsTest extends SAITester
 
         Set<Component> components = group.activeComponents(sstables.iterator().next());
 
-        assertEquals(Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes().size() +
+        assertEquals(Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes(false).size() +
                      Version.current(KEYSPACE).onDiskFormat().perIndexComponentTypes(indexContext).size(),
                      components.size());
     }

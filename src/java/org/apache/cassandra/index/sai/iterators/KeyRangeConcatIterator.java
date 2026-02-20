@@ -40,6 +40,7 @@ public class KeyRangeConcatIterator extends KeyRangeIterator
 {
     private final Iterator<KeyRangeIterator> ranges;
     private KeyRangeIterator currentRange;
+    public static final String MUST_BE_SORTED_ERROR = "RangeIterator must be sorted, previous max: %s, next min: %s";
     private final List<KeyRangeIterator> toRelease;
 
     protected KeyRangeConcatIterator(KeyRangeIterator.Builder.Statistics statistics, List<KeyRangeIterator> ranges)

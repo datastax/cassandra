@@ -82,6 +82,7 @@ public enum IndexComponentType
      * V1
      */
     OFFSETS_VALUES("OffsetsValues"),
+
     /**
      * An on-disk trie containing the primary keys used for looking up the rowId from a partition key
      *
@@ -100,6 +101,12 @@ public enum IndexComponentType
      * V2
      */
     PRIMARY_KEY_BLOCK_OFFSETS("PrimaryKeyBlockOffsets"),
+
+    /**
+     * An on-disk block-packed index containing the starting and ending rowIds for each partition.
+     */
+    PARTITION_SIZES("PartitionSizes"),
+
     /**
      * Stores per-sstable metadata.
      *
@@ -116,7 +123,32 @@ public enum IndexComponentType
     /**
      * Stores document length information for BM25 scoring
      */
-    DOC_LENGTHS("DocLengths");
+    DOC_LENGTHS("DocLengths"),
+
+    /**
+     * Prefix-compressed blocks of partition keys used for rowId to partition key lookups
+     * <p>
+     * V8
+     */
+    PARTITION_KEY_BLOCKS("PKBlocks"),
+    /**
+     * Encoded sequence of offsets to partition key blocks
+     * <p>
+     * V8
+     */
+    PARTITION_KEY_BLOCK_OFFSETS("PKBlockOffsets"),
+    /**
+     * Prefix-compressed blocks of clustering keys used for rowId to clustering key lookups
+     * <p>
+     * V8
+     */
+    CLUSTERING_KEY_BLOCKS("CKBlocks"),
+    /**
+     * Encoded sequence of offsets to clustering key blocks
+     * <p>
+     * V8
+     */
+    CLUSTERING_KEY_BLOCK_OFFSETS("CKBlockOffsets");
 
     public final String representation;
 

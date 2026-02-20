@@ -106,6 +106,109 @@ public abstract class AbstractBlockPackedReader implements LongArray
         return lastIndex >= valueCount;
     }
 
+    /**
+     * Find the row ID of the largest value less than or equal to the target value.
+     * This is the floor operation, complementary to ceilingRowId.
+     *
+     * @param targetValue Value to search for
+     * @return The row ID of the floor value, or -1 if the target is smaller than all values
+     */
+    public long floorRowId(long targetValue)
+    {
+        // Check if we're before the start of the array
+        if (targetValue < get(0))
+            return -1;
+
+        return findBlockRowIdForFloor(targetValue);
+    }
+
+    /**
+     * Find the block and row ID for floor operation.
+     * Similar to findBlockRowId but searches for the largest value <= target.
+     */
+    private long findBlockRowIdForFloor(long targetValue)
+    {
+        int blockIndex = binarySearchBlockMaxValues(targetValue);
+
+        // blockIndex is now the block that might contain our floor value
+        // Search for the floor value within the identified block
+        return findBlockRowIdForFloor(targetValue, blockIndex);
+    }
+
+    /**
+     * Binary search block max values to find the block containing the floor.
+     * Searches the last value of each block (block max) to determine which block
+     * could contain the largest value <= target.
+     *
+     * @return positive block index for exact match on block max, negative for non-exact match
+     */
+    private int binarySearchBlockMaxValues(long targetValue)
+    {
+        int min = binarySearchBlockMinValues(targetValue);
+        int max = min;
+        int highest = Math.toIntExact(blockBitsPerValue.length) - 1;
+        if (min < 0)
+            min = -min;
+        if (min > highest)
+            min--;
+        if (targetValue < delta(min, 0))
+            return Math.max(min - 1, 0);
+        {
+            // Check for duplicates in next blocks
+            while (min <= highest && delta(min, 0) <= targetValue)
+            {
+                max = min;
+                min++;
+            }
+        }
+        return max;
+    }
+
+    /**
+     * Find the floor row ID within a specific block.
+     */
+    private long findBlockRowIdForFloor(long targetValue, int blockIdx)
+    {
+        if (blockIdx < 0)
+            return -1; // Target is smaller than all values
+
+        // Calculate the global offset for the selected block
+        long offset = (long) blockIdx << blockShift;
+
+        // Search from start of block to the end of block
+        long high = Math.min(offset + blockSize - 1, valueCount - 1);
+        return binarySearchBlockForFloor(targetValue, offset, high);
+    }
+
+    /**
+     * Binary search for floor value between low and high indices.
+     *
+     * @return index of the largest value <= target, or -1 if all values > target
+     */
+    private long binarySearchBlockForFloor(long target, long low, long high)
+    {
+        long result = -1; // Track the best floor candidate found so far
+
+        while (low <= high)
+        {
+            long mid = low + ((high - low) >> 1);
+            long midVal = get(mid);
+
+            if (midVal <= target)
+            {
+                // This could be our floor, but there might be a larger one further right
+                result = mid;
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        return result;
+    }
+
     private long findBlockRowId(long targetValue)
     {
         // We keep track previous returned value in lastIndex, so searching backward will not return correct result.

@@ -48,7 +48,7 @@ import static org.apache.cassandra.io.util.FileUtils.closeQuietly;
 
 public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
 {
-    private static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = SAIUtil.currentVersion().onDiskFormat()
+    static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = SAIUtil.currentVersion().onDiskFormat()
                                                                               .newPrimaryKeyFactory(new ClusteringComparator(LongType.instance));
 
     protected long[] arr(long... longArray)
@@ -182,6 +182,10 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
         }
     }
 
+
+    //    protected static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = Version.current().onDiskFormat()
+    //                                                                                .newPrimaryKeyFactory(new ClusteringComparator(LongType.instance));
+    //
     /**
      * Generates a random list of primary keys with the given average number of partitions and rows per partition.
      * Partition keys and clusterings are generated in such a way that when combining two such lists generated with
