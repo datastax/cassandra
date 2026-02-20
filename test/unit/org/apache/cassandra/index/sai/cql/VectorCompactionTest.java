@@ -422,7 +422,9 @@ abstract public class VectorCompactionTest extends VectorTester
                 {
                     var struct = hasUniqueVectors
                                  ? V5VectorPostingsWriter.Structure.ONE_TO_ONE
-                                 : V5VectorPostingsWriter.Structure.ONE_TO_MANY;
+                                 : V5VectorPostingsWriter.tooManyOrdinalMappingHoles(searcher.graph.size(), numRows)
+                                   ? V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY
+                                   : V5VectorPostingsWriter.Structure.ONE_TO_MANY;
                     assertEquals(struct, searcher.getPostingsStructure());
                 }
                 else
