@@ -221,7 +221,7 @@ public class ColumnIdentifier implements IMeasurableMemory, Comparable<ColumnIde
     public long unsharedHeapSizeExcludingData()
     {
         return EMPTY_SIZE
-             + ObjectSizes.sizeOnHeapExcludingData(bytes)
+             + ObjectSizes.sizeOnHeapExcludingDataOf(bytes)
              + ObjectSizes.sizeOf(text);
     }
 
