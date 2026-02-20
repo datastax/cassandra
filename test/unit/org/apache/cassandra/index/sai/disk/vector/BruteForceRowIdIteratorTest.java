@@ -96,6 +96,12 @@ public class BruteForceRowIdIteratorTest
         }
 
         @Override
+        public void processNeighbors(int i, int i1, ScoreFunction scoreFunction, ImmutableGraphIndex.IntMarker intMarker, ImmutableGraphIndex.NeighborProcessor neighborProcessor)
+        {
+
+        }
+
+        @Override
         public int size()
         {
             throw new UnsupportedOperationException();
