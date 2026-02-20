@@ -112,6 +112,13 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         assert clusteringRowId < tokenArray.length();
         // Check if this is an exact match by comparing the clustering key
         Clustering<?> foundClustering = readClusteringKey(clusteringRowId);
+        if (foundClustering.isEmpty())
+        {
+            if (clusteringRowId == startOfNextPartition(rowId))
+                return -clusteringRowId - 1;
+            else
+                return startOfNextPartition(rowId) - 1;
+        }
         int cmp = clusteringComparator.compare(foundClustering, key.clustering());
         if (cmp == 0)
             return clusteringRowId;
