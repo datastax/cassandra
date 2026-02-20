@@ -837,6 +837,24 @@ public class DescribeStatementTest extends CQLTester
     }
 
     @Test
+    public void testDescribeTableWithNonDefaultSchemaType() throws Throwable
+    {
+        String table = createTable(KEYSPACE_PER_TEST, "CREATE TABLE %s (id int PRIMARY KEY, value text) with schema_type='collection';");
+
+        String expectedTableStmt = "CREATE TABLE " + KEYSPACE_PER_TEST + "." + table + " (\n" +
+                                   "    id int PRIMARY KEY,\n" +
+                                   "    value text\n" +
+                                   ") WITH " + tableParametersCql("COLLECTION");
+        String expectedKeyspaceStmt = "CREATE KEYSPACE " + KEYSPACE_PER_TEST +
+                                      " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}" +
+                                      "  AND durable_writes = true;";
+        assertRowsNet(executeDescribeNet("DESCRIBE KEYSPACE " + KEYSPACE_PER_TEST),
+                      row(KEYSPACE_PER_TEST, "keyspace", KEYSPACE_PER_TEST, expectedKeyspaceStmt),
+                      row(KEYSPACE_PER_TEST, "table", table, expectedTableStmt));
+
+    }
+
+    @Test
     public void testUsingReservedInCreateType() throws Throwable
     {
         String type = createType(KEYSPACE_PER_TEST, "CREATE TYPE %s (\"token\" text, \"desc\" text);");
@@ -1015,6 +1033,14 @@ public class DescribeStatementTest extends CQLTester
 
     private static String tableParametersCql()
     {
+        return tableParametersCql(null);
+    }
+
+    private static String tableParametersCql(String schemaType)
+    {
+        String schemaTypePart = "";
+        if (schemaType != null)
+            schemaTypePart = "    AND schema_type = '" + schemaType + "'\n";
         return "additional_write_policy = '99p'\n" +
                "    AND bloom_filter_fp_chance = 0.01\n" +
                "    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}\n" +
@@ -1024,6 +1050,7 @@ public class DescribeStatementTest extends CQLTester
                "    AND compression = {'chunk_length_in_kb': '16', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}\n" +
                "    AND memtable = {}\n" +
                "    AND crc_check_chance = 1.0\n" +
+               schemaTypePart +
                "    AND default_time_to_live = 0\n" +
                "    AND extensions = {}\n" +
                "    AND gc_grace_seconds = 864000\n" +
