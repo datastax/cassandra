@@ -80,7 +80,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
-import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
+import org.apache.cassandra.index.FeatureNeedsIndexUpgradeException;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.TargetParser;
@@ -100,6 +100,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
@@ -355,9 +356,20 @@ public class StorageAttachedIndex implements Index
         }
         else if (type.isVector())
         {
+            // The current version must support vectors.
             if (!Version.current(metadata.keyspace).onOrAfter(Version.JVECTOR_EARLIEST))
             {
-                throw new InvalidRequestException(vectorUnsupportedByVersionError(Version.current(metadata.keyspace)));
+                throw new InvalidRequestException(vectorUnsupportedByCurrentVersionError(Version.current(metadata.keyspace)));
+            }
+
+            // Also, any pre-existing indexes must be in a version compatible with vectors.
+            ColumnFamilyStore baseCfs = Schema.instance.getColumnFamilyStoreInstance(metadata.id);
+            StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
+            if (indexGroup != null)
+            {
+                Version version = indexGroup.getMinVersion();
+                if (!version.onOrAfter(Version.JVECTOR_EARLIEST))
+                    throw new InvalidRequestException(vectorUnsupportedByExistingVersionError(version));
             }
 
             if (type.valueLengthIfFixed() == 4 && config.getSimilarityFunction() == VectorSimilarityFunction.COSINE)
@@ -454,9 +466,25 @@ public class StorageAttachedIndex implements Index
             return CompletableFuture.completedFuture(null);
         }
 
-        if (indexContext.isVector() && indexContext.version().compareTo(Version.JVECTOR_EARLIEST) < 0)
+        StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
+        assert indexGroup != null;
+
+        // verify the compatibility of the on-disk format version with the vector index
+        if (indexContext.isVector())
         {
-            throw new FeatureNeedsIndexRebuildException(vectorUnsupportedByVersionError(indexContext.version()));
+            // The current version must support vectors
+            Version currentVersion = indexContext.version();
+            if (currentVersion.compareTo(Version.JVECTOR_EARLIEST) < 0)
+            {
+                throw new FeatureNeedsIndexUpgradeException(vectorUnsupportedByCurrentVersionError(currentVersion));
+            }
+
+            // Also, any pre-existing indexes must be in a version compatible with vectors
+            Version minVersion = indexGroup.getMinVersion();
+            if (minVersion.compareTo(Version.JVECTOR_EARLIEST) < 0)
+            {
+                throw new FeatureNeedsIndexUpgradeException(vectorUnsupportedByExistingVersionError(minVersion));
+            }
         }
 
         // stop in-progress compaction tasks to prevent compacted sstables not being indexed.
@@ -477,7 +505,6 @@ public class StorageAttachedIndex implements Index
         // From now on, all memtable will have attached memtable index. It is now safe to flush indexes directly from flushing Memtables.
         canFlushFromMemtableIndex = true;
 
-        StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
         List<SSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, indexGroup, validate);
 
         if (nonIndexed.isEmpty())
@@ -502,12 +529,26 @@ public class StorageAttachedIndex implements Index
     }
 
     @VisibleForTesting
-    public static String vectorUnsupportedByVersionError(Version currentVersion)
+    public static String vectorUnsupportedByCurrentVersionError(Version currentVersion)
     {
         return String.format("The current configured on-disk format version %s does not support vector indexes. " +
                              "The minimum version that supports vectors is %s. " +
                              "The on-disk format version can be set via the -D%s system property.",
                              currentVersion,
+                             Version.JVECTOR_EARLIEST,
+                             CassandraRelevantProperties.SAI_CURRENT_VERSION.name());
+    }
+
+    @VisibleForTesting
+    public static String vectorUnsupportedByExistingVersionError(Version existingVersion)
+    {
+        return String.format("The current sstables have other indexes using the on-disk format version %s, " +
+                             "which is not compatible with vector indexes. " +
+                             "The minimum version that supports vectors is %s. " +
+                             "The on-disk format version can be set via the -D%s system property, " +
+                             "and the indexes on the sstables can be upgraded via nodetool upgradesstables." +
+                             "Then it will be needed to rebuild the index after the upgrade.",
+                             existingVersion,
                              Version.JVECTOR_EARLIEST,
                              CassandraRelevantProperties.SAI_CURRENT_VERSION.name());
     }

@@ -26,7 +26,7 @@ import com.google.common.primitives.Ints;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
-import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
+import org.apache.cassandra.index.FeatureNeedsIndexUpgradeException;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -86,7 +86,7 @@ public enum RequestFailureReason
         exceptionToReasonMap.put(UnknownColumnException.class, UNKNOWN_COLUMN);
         exceptionToReasonMap.put(UnknownTableException.class, UNKNOWN_TABLE);
         exceptionToReasonMap.put(IndexBuildInProgressException.class, INDEX_BUILD_IN_PROGRESS);
-        exceptionToReasonMap.put(FeatureNeedsIndexRebuildException.class, FEATURE_NEEDS_INDEX_REBUILD);
+        exceptionToReasonMap.put(FeatureNeedsIndexUpgradeException.class, FEATURE_NEEDS_INDEX_REBUILD);
 
         if (exceptionToReasonMap.size() != reasons.length-2)
             throw new RuntimeException("A new RequestFailureReasons was probably added and you may need to update the exceptionToReasonMap");
