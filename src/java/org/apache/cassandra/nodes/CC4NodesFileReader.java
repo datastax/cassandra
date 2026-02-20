@@ -84,7 +84,8 @@ final class CC4NodesFileReader
     /**
      * Try to read local node info from CC4's file-based store.
      *
-     * @return a CC5 {@link LocalInfo} populated from CC4 data, or null if the file doesn't exist or is unreadable
+     * @return a CC5 {@link LocalInfo} populated from CC4 data, or null if the CC4 nodes directory or local file doesn't exist
+     * @throws RuntimeException if the CC4 local file exists but cannot be read or parsed
      */
     static LocalInfo tryReadLocalInfo()
     {
@@ -121,15 +122,16 @@ final class CC4NodesFileReader
         }
         catch (Exception e)
         {
-            logger.warn("Failed to read CC4 local metadata from {}, will generate new node identity", localPath, e);
-            return null;
+            throw new RuntimeException("Failed to read CC4 local metadata from " + localPath +
+                                       "; aborting upgrade to prevent generating a new node identity", e);
         }
     }
 
     /**
      * Try to read peer info from CC4's file-based store.
      *
-     * @return a stream of CC5 {@link PeerInfo} objects, or an empty stream if the file doesn't exist or is unreadable
+     * @return a stream of CC5 {@link PeerInfo} objects, or an empty stream if the CC4 nodes directory or peers file doesn't exist
+     * @throws RuntimeException if the CC4 peers file exists but cannot be read or parsed
      */
     static Stream<PeerInfo> tryReadPeers()
     {
@@ -165,8 +167,32 @@ final class CC4NodesFileReader
         }
         catch (Exception e)
         {
-            logger.warn("Failed to read CC4 peers metadata from {}", peersPath, e);
-            return Stream.empty();
+            throw new RuntimeException("Failed to read CC4 peers metadata from " + peersPath +
+                                       "; aborting upgrade", e);
+        }
+    }
+
+    /**
+     * Renames the CC4 nodes directory to {@code nodes.migrated} so subsequent restarts
+     * do not attempt migration again.
+     */
+    static void archiveCC4NodesDirectory()
+    {
+        Path nodesDir = getCC4NodesDirectory();
+        if (nodesDir == null)
+            return;
+
+        Path archivedDir = nodesDir.resolveSibling("nodes.migrated");
+        try
+        {
+            Files.move(nodesDir, archivedDir, StandardCopyOption.ATOMIC_MOVE);
+            logger.info("Archived CC4 nodes directory from {} to {}", nodesDir, archivedDir);
+        }
+        catch (IOException e)
+        {
+            logger.warn("Failed to archive CC4 nodes directory from {} to {}; " +
+                         "migration will be attempted again on next restart but is idempotent",
+                         nodesDir, archivedDir, e);
         }
     }
 
@@ -208,7 +234,8 @@ final class CC4NodesFileReader
         }
         catch (IOException e)
         {
-            logger.warn("Failed to recover CC4 transaction from {}", backupPath, e);
+            throw new RuntimeException("Failed to recover CC4 transaction from " + backupPath +
+                                       "; aborting upgrade because node metadata may be in an inconsistent state", e);
         }
     }
 
@@ -297,7 +324,9 @@ final class CC4NodesFileReader
             }
             catch (ClassNotFoundException e)
             {
-                logger.warn("Unknown CC4 partitioner class: {}", cc4.partitioner);
+                logger.error("Unknown CC4 partitioner class '{}', falling back to configured partitioner '{}'",
+                             cc4.partitioner, DatabaseDescriptor.getPartitioner().getClass().getName());
+                info.setPartitionerClass(DatabaseDescriptor.getPartitioner().getClass());
             }
         }
         return info;

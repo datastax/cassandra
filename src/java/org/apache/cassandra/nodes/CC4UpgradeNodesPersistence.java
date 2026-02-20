@@ -47,6 +47,7 @@ public class CC4UpgradeNodesPersistence extends NodesPersistence
             saveLocal(migrated);
             return migrated;
         }
+        logger.debug("No CC4 local metadata found to migrate");
         return null;
     }
 
@@ -60,6 +61,9 @@ public class CC4UpgradeNodesPersistence extends NodesPersistence
             for (PeerInfo peer : migrated)
                 savePeer(peer);
         }
+
+        CC4NodesFileReader.archiveCC4NodesDirectory();
+
         return migrated.stream();
     }
 }

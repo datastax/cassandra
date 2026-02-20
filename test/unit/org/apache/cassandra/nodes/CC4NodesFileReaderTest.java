@@ -51,6 +51,7 @@ import org.apache.cassandra.utils.CassandraVersion;
 import org.msgpack.jackson.dataformat.MessagePackFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class CC4NodesFileReaderTest extends CQLTester
 {
@@ -187,16 +188,18 @@ public class CC4NodesFileReaderTest extends CQLTester
     public void testTryReadLocalInfoCorruptFile() throws Exception
     {
         Files.write(nodesDir.resolve("local"), new byte[]{ 0x00, 0x01, 0x02 });
-        LocalInfo info = CC4NodesFileReader.tryReadLocalInfo();
-        assertThat(info).isNull();
+        assertThatThrownBy(CC4NodesFileReader::tryReadLocalInfo)
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("Failed to read CC4 local metadata");
     }
 
     @Test
     public void testTryReadPeersCorruptFile() throws Exception
     {
         Files.write(nodesDir.resolve("peers"), new byte[]{ 0x00, 0x01, 0x02 });
-        List<PeerInfo> peers = CC4NodesFileReader.tryReadPeers().collect(Collectors.toList());
-        assertThat(peers).isEmpty();
+        assertThatThrownBy(CC4NodesFileReader::tryReadPeers)
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("Failed to read CC4 peers metadata");
     }
 
     @Test
@@ -305,6 +308,25 @@ public class CC4NodesFileReaderTest extends CQLTester
         assertThat(rec).isNotNull();
         assertThat(rec.position).isEqualTo(new CommitLogPosition(segmentId, position));
         assertThat(rec.truncatedAt).isEqualTo(truncatedAt);
+    }
+
+    @Test
+    public void testArchiveCC4NodesDirectory() throws Exception
+    {
+        UUID hostId = UUID.randomUUID();
+        Map<String, Object> cc4Local = new LinkedHashMap<>();
+        cc4Local.put("host_id", serializeUUID(hostId));
+        cc4Local.put("data_center", "dc1");
+        cc4Local.put("rack", "rack1");
+        writeMsgpack(nodesDir.resolve("local"), cc4Local);
+
+        assertThat(CC4NodesFileReader.hasCC4NodesDirectory()).isTrue();
+
+        CC4NodesFileReader.archiveCC4NodesDirectory();
+
+        assertThat(CC4NodesFileReader.hasCC4NodesDirectory()).isFalse();
+        assertThat(Files.isDirectory(tempDir.resolve("nodes.migrated"))).isTrue();
+        assertThat(Files.exists(tempDir.resolve("nodes.migrated").resolve("local"))).isTrue();
     }
 
     // ---- Helpers to write CC4-format msgpack data ----
