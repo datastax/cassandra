@@ -265,6 +265,14 @@ public abstract class Controller
     static final boolean DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION = false;
 
     /**
+     * System property to control writing scaling parameters to JSON configuration file.
+     * When set to true (default), the controller will persist scaling parameters and flush size to disk.
+     * When set to false, persistence is disabled.
+     */
+    public static final String SCALING_PARAMETER_PERSISTENCE_PROPERTY = PREFIX + "scaling_parameter_persistence";
+    public static final boolean SCALING_PARAMETER_PERSISTENCE = Boolean.parseBoolean(System.getProperty(SCALING_PARAMETER_PERSISTENCE_PROPERTY, "true"));
+
+    /**
      * This property allows seperate defaults for vector and non-vector tables.  If this property is set to true
      * and the table has a {@link VectorType}, the "vector" defaults are used over the regular defaults.  For instance,
      * "-Dunified_compaction.vector_sstable_growth" will be used over "-Dunified_compaction.sstable_growth".
@@ -439,6 +447,12 @@ public abstract class Controller
 
     public static void storeOptions(TableMetadata metadata, int[] scalingParameters, long flushSizeBytes)
     {
+        if (!SCALING_PARAMETER_PERSISTENCE)
+        {
+            logger.debug("Scaling parameter persistence is disabled via {}. Skipping write to disk.", SCALING_PARAMETER_PERSISTENCE_PROPERTY);
+            return;
+        }
+
         if (SchemaConstants.isSystemKeyspace(metadata.keyspace))
             return;
         File f = getControllerConfigPath(metadata);
