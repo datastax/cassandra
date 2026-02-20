@@ -178,6 +178,15 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             if (key.isTokenOnly() || key.clustering().isEmpty())
                 return startOfNextPartition(rowId) - 1;
 
+            // If STATIC CLUSTERING, then rowID is the last row in the matching partition.
+            // Floor reverts to return the first row in the partition instead.
+            if (readClusteringKey(rowId).isEmpty())
+            {
+                long partitionId = partitionArray.get(rowId);
+                long thisPartitionRowId = partitionArray.ceilingRowId(partitionId);
+                return thisPartitionRowId;
+            }
+
             return rowId;
         }
 
