@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.graph.RemappedRandomAccessVectorValues;
 import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
@@ -158,6 +159,52 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     long getVectorSize()
     {
         return vectorSize;
+    }
+
+    /**
+     * When computing the ProductQuantization, we need a representation of these elements without holes. We do
+     * not care about the validity of the ordinal mapping in that case, so we simply remove the holes by either
+     * returning self if the mapping is already dense or returning a {@link RemappedRandomAccessVectorValues} that uses
+     * this backend internally. Both results are thread safe and both are lazy in that they leave vectors on disk until
+     * fetched. The choice to defer loading of FP vectors minimizes the time vectors will be resident in memory and
+     * allows for concurrent loading of vectors.
+     *
+     * @return a dense representation of this {@link RandomAccessVectorValues}. The resulting ordinal values are not
+     * guarnateed to be valid.
+     */
+    RandomAccessVectorValues removeHoles()
+    {
+        // todo test size() here!
+        // Range check on presentOrdinals is exclusive, so size() is the correct value.
+        if (presentOrdinals == null || presentOrdinals.contains(0, size()))
+            return this;
+
+        // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
+        var ordinalIter = presentOrdinals.getIntIterator();
+
+        // Because have holes in our ordinal mapping and refine assumes no holes, we cannot pass the
+        // vectorValues within the refine method. Instead, we build a list of vectors here.
+        var oldToNewMapping = new int[presentOrdinals.getCardinality()];
+        int i = 0;
+        while (ordinalIter.hasNext())
+            oldToNewMapping[i++] = ordinalIter.next();
+
+        assert i == oldToNewMapping.length : "Underfilled target array: " + i + " != " + oldToNewMapping.length;
+        assert !ordinalIter.hasNext() : "ordinalIter had more elements";
+
+        return new RemappedRandomAccessVectorValues(this, oldToNewMapping);
+    }
+
+    public void refreshReaders()
+    {
+        try
+        {
+            threadLocalRandomAccessReader.close();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

@@ -37,11 +37,14 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.io.util.File;
+import org.roaringbitmap.RoaringBitmap;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 public class OnDiskVectorValuesTest extends SAITester
 {
@@ -484,6 +487,488 @@ public class OnDiskVectorValuesTest extends SAITester
         for (int i = 0; i < expected.length; i++)
         {
             assertEquals("Mismatch at index " + i, expected[i], actual.get(i), 0.0001f);
+        }
+    }
+
+    @Test
+    public void testPresentOrdinalsWithGetVector() throws IOException
+    {
+        int dimension = 3;
+        int numVectors = 10;
+        float[][] vectors = new float[numVectors][dimension];
+
+        // Write vectors at all ordinals
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            for (int i = 0; i < numVectors; i++)
+            {
+                for (int j = 0; j < dimension; j++)
+                    vectors[i][j] = i * dimension + j;
+                writer.write(i, vts.createFloatVector(vectors[i]));
+            }
+        }
+
+        // Create bitmap with only some ordinals present
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        presentOrdinals.add(0);
+        presentOrdinals.add(2);
+        presentOrdinals.add(5);
+        presentOrdinals.add(9);
+
+        // Read with presentOrdinals bitmap
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            assertEquals(numVectors, reader.size());
+            
+            // Present ordinals should return vectors
+            assertNotNull(reader.getVector(0));
+            assertVectorEquals(vectors[0], reader.getVector(0));
+            assertNotNull(reader.getVector(2));
+            assertVectorEquals(vectors[2], reader.getVector(2));
+            assertNotNull(reader.getVector(5));
+            assertVectorEquals(vectors[5], reader.getVector(5));
+            assertNotNull(reader.getVector(9));
+            assertVectorEquals(vectors[9], reader.getVector(9));
+            
+            // Non-present ordinals should return null
+            assertNull(reader.getVector(1));
+            assertNull(reader.getVector(3));
+            assertNull(reader.getVector(4));
+            assertNull(reader.getVector(6));
+            assertNull(reader.getVector(7));
+            assertNull(reader.getVector(8));
+        }
+    }
+
+    @Test
+    public void testPresentOrdinalsEmpty() throws IOException
+    {
+        int dimension = 3;
+        
+        // Write some vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            writer.write(0, vts.createFloatVector(new float[]{1.0f, 2.0f, 3.0f}));
+            writer.write(1, vts.createFloatVector(new float[]{4.0f, 5.0f, 6.0f}));
+        }
+
+        // Create empty bitmap
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+
+        // All getVector calls should return null
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            assertNull(reader.getVector(0));
+            assertNull(reader.getVector(1));
+        }
+    }
+
+    @Test
+    public void testPresentOrdinalsSingleElement() throws IOException
+    {
+        int dimension = 4;
+        float[] data = {1.0f, 2.0f, 3.0f, 4.0f};
+        
+        // Write multiple vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            writer.write(0, vts.createFloatVector(new float[]{0.0f, 0.0f, 0.0f, 0.0f}));
+            writer.write(1, vts.createFloatVector(data));
+            writer.write(2, vts.createFloatVector(new float[]{8.0f, 9.0f, 10.0f, 11.0f}));
+        }
+
+        // Bitmap with only ordinal 1
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        presentOrdinals.add(1);
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            assertNull(reader.getVector(0));
+            assertNotNull(reader.getVector(1));
+            assertVectorEquals(data, reader.getVector(1));
+            assertNull(reader.getVector(2));
+        }
+    }
+
+    @Test
+    public void testRemoveHolesWithNullBitmap() throws IOException
+    {
+        int dimension = 3;
+        int numVectors = 5;
+        
+        // Write dense vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            for (int i = 0; i < numVectors; i++)
+            {
+                float[] data = {i, i + 1, i + 2};
+                writer.write(i, vts.createFloatVector(data));
+            }
+        }
+
+        // No bitmap means no holes
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, null))
+        {
+            RandomAccessVectorValues result = reader.removeHoles();
+            assertSame("Should return self when no holes", reader, result);
+        }
+    }
+
+    @Test
+    public void testRemoveHolesWithDenseBitmap() throws IOException
+    {
+        int dimension = 3;
+        int numVectors = 5;
+        
+        // Write vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            for (int i = 0; i < numVectors; i++)
+            {
+                float[] data = {i, i + 1, i + 2};
+                writer.write(i, vts.createFloatVector(data));
+            }
+        }
+
+        // Dense bitmap (all ordinals present)
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        for (int i = 0; i < numVectors; i++)
+            presentOrdinals.add(i);
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            RandomAccessVectorValues result = reader.removeHoles();
+            assertSame("Should return self when bitmap is dense", reader, result);
+        }
+    }
+
+    @Test
+    public void testRemoveHolesWithSparseOrdinals() throws IOException
+    {
+        int dimension = 3;
+        int numVectors = 10;
+        float[][] vectors = new float[numVectors][dimension];
+        
+        // Write vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            for (int i = 0; i < numVectors; i++)
+            {
+                for (int j = 0; j < dimension; j++)
+                    vectors[i][j] = i * 10 + j;
+                writer.write(i, vts.createFloatVector(vectors[i]));
+            }
+        }
+
+        // Sparse bitmap with holes
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        presentOrdinals.add(1);
+        presentOrdinals.add(3);
+        presentOrdinals.add(7);
+        presentOrdinals.add(9);
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            RandomAccessVectorValues result = reader.removeHoles();
+            
+            // Result should be a RemappedRandomAccessVectorValues
+            assertTrue("Should return RemappedRandomAccessVectorValues when there are holes", 
+                       result.getClass().getName().contains("Remapped"));
+            
+            // Should have exactly the number of present ordinals
+            assertEquals(4, result.size());
+            
+            // Verify remapped vectors are correct
+            // Old ordinal 1 -> new ordinal 0
+            assertVectorEquals(vectors[1], result.getVector(0));
+            // Old ordinal 3 -> new ordinal 1
+            assertVectorEquals(vectors[3], result.getVector(1));
+            // Old ordinal 7 -> new ordinal 2
+            assertVectorEquals(vectors[7], result.getVector(2));
+            // Old ordinal 9 -> new ordinal 3
+            assertVectorEquals(vectors[9], result.getVector(3));
+        }
+    }
+
+    @Test
+    public void testRemoveHolesWithEdgeCases() throws IOException
+    {
+        int dimension = 4;
+        int numVectors = 20;
+        
+        // Write vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            for (int i = 0; i < numVectors; i++)
+            {
+                float[] data = new float[dimension];
+                for (int j = 0; j < dimension; j++)
+                    data[j] = i + j * 0.1f;
+                writer.write(i, vts.createFloatVector(data));
+            }
+        }
+
+        // Bitmap with first and last ordinals only
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        presentOrdinals.add(0);
+        presentOrdinals.add(numVectors - 1);
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            RandomAccessVectorValues result = reader.removeHoles();
+            
+            assertEquals(2, result.size());
+            
+            // Verify boundary vectors
+            VectorFloat<?> first = result.getVector(0);
+            assertNotNull(first);
+            assertEquals(0.0f, first.get(0), 0.0001f);
+            
+            VectorFloat<?> last = result.getVector(1);
+            assertNotNull(last);
+            assertEquals(numVectors - 1, last.get(0), 0.0001f);
+        }
+    }
+
+    @Test
+    public void testRemoveHolesConsecutiveOrdinals() throws IOException
+    {
+        int dimension = 3;
+        int numVectors = 10;
+        
+        // Write vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            for (int i = 0; i < numVectors; i++)
+            {
+                float[] data = {i, i + 1, i + 2};
+                writer.write(i, vts.createFloatVector(data));
+            }
+        }
+
+        // Bitmap with consecutive ordinals in the middle
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        presentOrdinals.add(3);
+        presentOrdinals.add(4);
+        presentOrdinals.add(5);
+        presentOrdinals.add(6);
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            RandomAccessVectorValues result = reader.removeHoles();
+            
+            assertEquals(4, result.size());
+            
+            // Verify consecutive mapping
+            for (int i = 0; i < 4; i++)
+            {
+                VectorFloat<?> vector = result.getVector(i);
+                assertNotNull(vector);
+                assertEquals(3 + i, vector.get(0), 0.0001f);
+            }
+        }
+    }
+
+    @Test
+    public void testCopyWithPresentOrdinals() throws IOException
+    {
+        int dimension = 3;
+        float[] data = {1.0f, 2.0f, 3.0f};
+        
+        // Write vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            writer.write(0, vts.createFloatVector(data));
+            writer.write(1, vts.createFloatVector(new float[]{4.0f, 5.0f, 6.0f}));
+        }
+
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        presentOrdinals.add(0);
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            RandomAccessVectorValues copy = reader.copy();
+            assertSame("Copy should be same instance", reader, copy);
+            
+            // Both should respect presentOrdinals
+            assertNotNull(reader.getVector(0));
+            assertNotNull(copy.getVector(0));
+            assertVectorEquals(data, reader.getVector(0));
+            assertVectorEquals(data, copy.getVector(0));
+            
+            assertNull(reader.getVector(1));
+            assertNull(copy.getVector(1));
+        }
+    }
+
+    @Test
+    public void testConcurrentReadsWithPresentOrdinals() throws Exception
+    {
+        int dimension = 4;
+        int numVectors = 50;
+        float[][] vectors = new float[numVectors][dimension];
+
+        // Write vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            for (int i = 0; i < numVectors; i++)
+            {
+                for (int j = 0; j < dimension; j++)
+                    vectors[i][j] = i + j * 0.1f;
+                writer.write(i, vts.createFloatVector(vectors[i]));
+            }
+        }
+
+        // Create bitmap with every other ordinal
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        for (int i = 0; i < numVectors; i += 2)
+            presentOrdinals.add(i);
+
+        int numThreads = 10;
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        AtomicInteger errorCount = new AtomicInteger(0);
+        List<Future<?>> futures = new ArrayList<>();
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            for (int t = 0; t < numThreads; t++)
+            {
+                futures.add(executor.submit(() -> {
+                    try
+                    {
+                        startLatch.await();
+                        
+                        // Each thread reads all ordinals
+                        for (int i = 0; i < numVectors; i++)
+                        {
+                            VectorFloat<?> vector = reader.getVector(i);
+                            if (i % 2 == 0)
+                            {
+                                // Should be present
+                                if (vector == null)
+                                    errorCount.incrementAndGet();
+                                else
+                                {
+                                    for (int j = 0; j < dimension; j++)
+                                    {
+                                        float expected = i + j * 0.1f;
+                                        if (Math.abs(vector.get(j) - expected) > 0.0001f)
+                                            errorCount.incrementAndGet();
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                // Should be null
+                                if (vector != null)
+                                    errorCount.incrementAndGet();
+                            }
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        errorCount.incrementAndGet();
+                        throw new RuntimeException(e);
+                    }
+                }));
+            }
+
+            startLatch.countDown();
+            
+            for (Future<?> future : futures)
+                future.get(10, TimeUnit.SECONDS);
+        }
+        finally
+        {
+            executor.shutdown();
+        }
+
+        assertEquals("No errors should occur during concurrent reads with presentOrdinals", 0, errorCount.get());
+    }
+
+    @Test
+    public void testPresentOrdinalsWithLargeGaps() throws IOException
+    {
+        int dimension = 3;
+        int maxOrdinal = 1000;
+        
+        // Write vectors at sparse ordinals
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            for (int i = 0; i <= maxOrdinal; i++)
+            {
+                float[] data = {i, i + 1, i + 2};
+                writer.write(i, vts.createFloatVector(data));
+            }
+        }
+
+        // Bitmap with very sparse ordinals
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        presentOrdinals.add(0);
+        presentOrdinals.add(100);
+        presentOrdinals.add(500);
+        presentOrdinals.add(1000);
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            // Verify present ordinals
+            assertNotNull(reader.getVector(0));
+            assertNotNull(reader.getVector(100));
+            assertNotNull(reader.getVector(500));
+            assertNotNull(reader.getVector(1000));
+            
+            // Verify some gaps
+            assertNull(reader.getVector(1));
+            assertNull(reader.getVector(50));
+            assertNull(reader.getVector(250));
+            assertNull(reader.getVector(999));
+            
+            // Test removeHoles with large gaps
+            RandomAccessVectorValues result = reader.removeHoles();
+            assertEquals(4, result.size());
+            
+            // Verify remapped vectors
+            VectorFloat<?> v0 = result.getVector(0);
+            assertEquals(0.0f, v0.get(0), 0.0001f);
+            
+            VectorFloat<?> v1 = result.getVector(1);
+            assertEquals(100.0f, v1.get(0), 0.0001f);
+            
+            VectorFloat<?> v2 = result.getVector(2);
+            assertEquals(500.0f, v2.get(0), 0.0001f);
+            
+            VectorFloat<?> v3 = result.getVector(3);
+            assertEquals(1000.0f, v3.get(0), 0.0001f);
+        }
+    }
+
+    @Test
+    public void testSizeWithPresentOrdinals() throws IOException
+    {
+        int dimension = 3;
+        int numVectors = 20;
+        
+        // Write vectors
+        try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
+        {
+            for (int i = 0; i < numVectors; i++)
+            {
+                float[] data = {i, i + 1, i + 2};
+                writer.write(i, vts.createFloatVector(data));
+            }
+        }
+
+        // Bitmap doesn't affect size() - it's based on file size
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        presentOrdinals.add(0);
+        presentOrdinals.add(5);
+        presentOrdinals.add(10);
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
+        {
+            // size() returns file-based size, not bitmap cardinality
+            assertEquals(numVectors, reader.size());
         }
     }
 }
