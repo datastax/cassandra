@@ -94,7 +94,7 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponentType.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
+        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset, false);
         features = rawGraph.getFeatureSet();
         graph = rawGraph;
         usesNVQ = features.contains(FeatureId.NVQ_VECTORS);
@@ -122,7 +122,7 @@ public class CassandraDiskAnn
             }
 
             VectorCompression.CompressionType compressionType = VectorCompression.CompressionType.values()[reader.readByte()];
-            if (features.contains(FeatureId.FUSED_ADC))
+            if (features.contains(FeatureId.FUSED_PQ))
             {
                 assert compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
                 compressedVectors = null;
@@ -238,9 +238,7 @@ public class CassandraDiskAnn
         {
             var view = (ImmutableGraphIndex.ScoringView) searcher.getView();
             SearchScoreProvider ssp;
-            // FusedADC can no longer be written due to jvector upgrade. However, it's possible these index files
-            // still exist, so we have to support them.
-            if (features.contains(FeatureId.FUSED_ADC))
+            if (features.contains(FeatureId.FUSED_PQ))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
                 var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);

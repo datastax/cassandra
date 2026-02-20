@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.NoSuchElementException;
+import java.util.function.Function;
 
 import org.junit.Test;
 
@@ -93,6 +94,12 @@ public class BruteForceRowIdIteratorTest
         public NodesIterator getNeighborsIterator(int i, int i1)
         {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void processNeighbors(int i, int i1, ScoreFunction scoreFunction, ImmutableGraphIndex.IntMarker intMarker, ImmutableGraphIndex.NeighborProcessor neighborProcessor)
+        {
+
         }
 
         @Override

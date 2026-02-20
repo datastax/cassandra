@@ -37,7 +37,6 @@ import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -47,7 +46,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
-import org.apache.cassandra.index.sai.disk.vector.NVQUtil;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -192,19 +191,26 @@ public class VectorTester extends SAITester
         @Parameterized.Parameter(1)
         public boolean ENABLE_NVQ;
 
-        @Parameterized.Parameters(name = "{0} {1}")
+        @Parameterized.Parameter(2)
+        public boolean ENABLE_FUSED;
+
+        @Parameterized.Parameters(name = "{0} {1} {2}")
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
             return Version.ALL.stream()
                               .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
                               .flatMap(v -> {
-                                  var enableNVQ = NVQUtil.versionSupportsNVQ(v)
-                                              ? new Boolean[]{ true, false }
-                                              : new Boolean[]{ false };
-                                  return Arrays.stream(enableNVQ).map(b -> new Object[]{ v, b });
-                              })
-                              .collect(Collectors.toList());
+                                  var enableNVQ = JVectorVersionUtil.versionSupportsNVQ(v)
+                                                  ? new Boolean[]{ true, false }
+                                                  : new Boolean[]{ false };
+                                  var enableFused = JVectorVersionUtil.versionSupportsFused(v)
+                                                    ? new Boolean[]{ true, false }
+                                                    : new Boolean[]{ false };
+                                  return Arrays.stream(enableNVQ).flatMap(nvq ->
+                                      Arrays.stream(enableFused).map(fused -> new Object[]{ v, nvq, fused })
+                                  );
+                              }).collect(Collectors.toList());
         }
 
         @Before
@@ -217,6 +223,12 @@ public class VectorTester extends SAITester
         public void setEnableNVQ()
         {
             SAIUtil.setEnableNVQ(ENABLE_NVQ);
+        }
+
+        @Before
+        public void setEnableFused()
+        {
+            SAIUtil.setEnableFused(ENABLE_FUSED);
         }
     }
 
