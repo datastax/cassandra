@@ -137,58 +137,6 @@ public class VectorPostingsMarshallerTest
     }
 
     @Test
-    public void testExtractOrdinalFromMapEntry() throws IORuntimeException
-    {
-        // Create a ChronicleMap to test extractOrdinal
-        try (ChronicleMap<Integer, CompactionVectorPostings> map = ChronicleMapBuilder
-                .of(Integer.class, CompactionVectorPostings.class)
-                .entries(10)
-                .averageValueSize(100)
-                .valueMarshaller(marshaller)
-                .create())
-        {
-            int key = 1;
-            int ordinal = 123;
-            int rowId = 456;
-            CompactionVectorPostings postings = new CompactionVectorPostings(ordinal, rowId);
-            
-            map.put(key, postings);
-
-            // Extract ordinal using the optimized method
-            map.forEachEntry(entry -> {
-                int extractedOrdinal = Marshaller.extractOrdinal(entry);
-                assertEquals(ordinal, extractedOrdinal);
-            });
-        }
-    }
-
-    @Test
-    public void testExtractOrdinalWithMultiplePostings() throws IORuntimeException
-    {
-        // Test extractOrdinal with multiple postings
-        try (ChronicleMap<Integer, CompactionVectorPostings> map = ChronicleMapBuilder
-                .of(Integer.class, CompactionVectorPostings.class)
-                .entries(10)
-                .averageValueSize(100)
-                .valueMarshaller(marshaller)
-                .create())
-        {
-            int key = 2;
-            int ordinal = 999;
-            List<Integer> rowIds = List.of(100, 200, 300);
-            CompactionVectorPostings postings = new CompactionVectorPostings(ordinal, rowIds);
-            
-            map.put(key, postings);
-
-            // Extract ordinal using the optimized method
-            map.forEachEntry(entry -> {
-                int extractedOrdinal = Marshaller.extractOrdinal(entry);
-                assertEquals(ordinal, extractedOrdinal);
-            });
-        }
-    }
-
-    @Test
     public void testRecordExtraOrdinalsWithSinglePosting()
     {
         // Test recordExtraOrdinals with a single posting (should not add anything to extraOrdinals)

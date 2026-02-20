@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.graph.RemappedRandomAccessVectorValues;
 import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
@@ -26,6 +27,7 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.roaringbitmap.RoaringBitmap;
 
 /**
  * Reads vectors from a file indexed by ordinal position.
@@ -50,6 +52,7 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     private final ExplicitThreadLocal<RandomAccessReader> threadLocalRandomAccessReader;
     private final int dimension;
     private final long vectorSize;
+    private final RoaringBitmap presentOrdinals;
 
     /**
      * Creates a new reader for vectors of the specified dimension.
@@ -59,9 +62,22 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
      */
     public OnDiskVectorValues(File file, int dimension)
     {
+        this(file, dimension, null);
+    }
+
+    /**
+     * Creates a new reader for vectors of the specified dimension with a BitSet indicating which ordinals have vectors.
+     *
+     * @param file the file containing vectors written by VectorByOrdinalWriter
+     * @param dimension the dimension of vectors in the file
+     * @param presentOrdinals BitSet indicating which ordinals have vectors, or null if all ordinals have vectors
+     */
+    public OnDiskVectorValues(File file, int dimension, RoaringBitmap presentOrdinals)
+    {
         this.threadLocalRandomAccessReader = ExplicitThreadLocal.withInitial(() -> RandomAccessReader.open(file));
         this.dimension = dimension;
         this.vectorSize = (long) dimension * Float.BYTES;
+        this.presentOrdinals = presentOrdinals;
     }
 
     /**
@@ -87,12 +103,15 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
      * Reads and returns the vector at the specified ordinal position.
      *
      * @param ordinal the ordinal position to read from
-     * @return the vector at the specified position
+     * @return the vector at the specified position, or null if no vector was written at this ordinal
      * @throws RuntimeException if an I/O error occurs
      */
     @Override
     public VectorFloat<?> getVector(int ordinal)
     {
+        if (presentOrdinals != null && !presentOrdinals.contains(ordinal))
+            return null;
+
         try
         {
             var reader = threadLocalRandomAccessReader.get();
@@ -140,6 +159,52 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     long getVectorSize()
     {
         return vectorSize;
+    }
+
+    /**
+     * When computing the ProductQuantization, we need a representation of these elements without holes. We do
+     * not care about the validity of the ordinal mapping in that case, so we simply remove the holes by either
+     * returning self if the mapping is already dense or returning a {@link RemappedRandomAccessVectorValues} that uses
+     * this backend internally. Both results are thread safe and both are lazy in that they leave vectors on disk until
+     * fetched. The choice to defer loading of FP vectors minimizes the time vectors will be resident in memory and
+     * allows for concurrent loading of vectors.
+     *
+     * @return a dense representation of this {@link RandomAccessVectorValues}. The resulting ordinal values are not
+     * guarnateed to be valid.
+     */
+    RandomAccessVectorValues removeHoles()
+    {
+        // todo test size() here!
+        // Range check on presentOrdinals is exclusive, so size() is the correct value.
+        if (presentOrdinals == null || presentOrdinals.contains(0, size()))
+            return this;
+
+        // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
+        var ordinalIter = presentOrdinals.getIntIterator();
+
+        // Because have holes in our ordinal mapping and refine assumes no holes, we cannot pass the
+        // vectorValues within the refine method. Instead, we build a list of vectors here.
+        var oldToNewMapping = new int[presentOrdinals.getCardinality()];
+        int i = 0;
+        while (ordinalIter.hasNext())
+            oldToNewMapping[i++] = ordinalIter.next();
+
+        assert i == oldToNewMapping.length : "Underfilled target array: " + i + " != " + oldToNewMapping.length;
+        assert !ordinalIter.hasNext() : "ordinalIter had more elements";
+
+        return new RemappedRandomAccessVectorValues(this, oldToNewMapping);
+    }
+
+    public void refreshReaders()
+    {
+        try
+        {
+            threadLocalRandomAccessReader.close();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

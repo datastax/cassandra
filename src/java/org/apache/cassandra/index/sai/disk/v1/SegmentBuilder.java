@@ -38,7 +38,7 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.quantization.VectorCompressor;
+import io.github.jbellis.jvector.quantization.ProductQuantization;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -246,22 +246,21 @@ public abstract class SegmentBuilder
         }
     }
 
-    public static class VectorOffHeapSegmentBuilder extends SegmentBuilder
+    public static class VectorSegmentBuilder extends SegmentBuilder
     {
         private final CompactionGraph graphIndex;
 
-        public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components,
-                                           long rowIdOffset,
-                                           long keyCount,
-                                           VectorCompressor<?> compressor,
-                                           boolean unitVectors,
-                                           boolean allRowsHaveVectors,
-                                           NamedMemoryLimiter limiter)
+        public VectorSegmentBuilder(IndexComponents.ForWrite components,
+                                    long rowIdOffset,
+                                    long keyCount,
+                                    ProductQuantization compressor,
+                                    boolean allRowsHaveVectors,
+                                    NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
             try
             {
-                graphIndex = new CompactionGraph(components, compressor, unitVectors, keyCount, allRowsHaveVectors);
+                graphIndex = new CompactionGraph(components, compressor, keyCount, allRowsHaveVectors);
             }
             catch (IOException e)
             {
@@ -291,17 +290,14 @@ public abstract class SegmentBuilder
             // CompactionGraph splits adding a node into two parts:
             // (1) maybeAddVector, which must be done serially because it writes to disk incrementally
             // (2) addGraphNode, which may be done asynchronously
-            CompactionGraph.InsertionResult result;
-            try
-            {
-                result = graphIndex.maybeAddVector(terms.get(0), segmentRowId);
-            }
-            catch (IOException e)
-            {
-                throw new UncheckedIOException(e);
-            }
+            CompactionGraph.InsertionResult result = graphIndex.maybeAddVector(terms.get(0), segmentRowId);
             if (result.vector == null)
                 return result.bytesUsed;
+
+            // We accumulate vectors until we can build or refine a product quantization. So until we have
+            // enough vectors, we defer adding vectors to the graph.
+            if (graphIndex.graphBuilderNeedsInitialization())
+                return graphIndex.maybeInitializeGraphBuilder(false, compactionExecutor);
 
             updatesInFlight.incrementAndGet();
             compactionExecutor.submit(() -> {
@@ -336,7 +332,7 @@ public abstract class SegmentBuilder
         {
             if (graphIndex.isEmpty())
                 return;
-            var componentsMetadata = graphIndex.flush();
+            var componentsMetadata = graphIndex.flush(compactionExecutor);
             metadataBuilder.setComponentsMetadata(componentsMetadata);
         }
 
