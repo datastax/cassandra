@@ -265,7 +265,10 @@ public enum CassandraRelevantProperties
      * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
      * with vnodes.
      */
-    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false");
+    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false"),
+
+    /** How often a role's password can be changed */
+    ROLE_PASSWORD_UPDATE_MIN_INTERVAL_MS("cassandra.role_password_update_min_interval_in_ms", "5000");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
