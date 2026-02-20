@@ -419,44 +419,179 @@ public class TableMetricsTest
     public void testWriteRequestsCounter()
     {
         ColumnFamilyStore cfs = recreateTable();
-        
+
         // Verify initial state
         assertEquals(0, cfs.metric.writeRequests.getCount());
         assertEquals(0, cfs.metric.readRequests.getCount());
-        
+
         int numOperations = 5;
-        
+
         // Execute INSERT operations
         for (int i = 0; i < numOperations; i++)
             session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, '%s', '%s')",
-                                        KEYSPACE, TABLE, i, "val" + i, "val" + i));
-        
+                    KEYSPACE, TABLE, i, "val" + i, "val" + i));
+
         // Verify writeRequests counter is incremented for inserts
         assertEquals(numOperations, cfs.metric.writeRequests.getCount());
         assertEquals(0, cfs.metric.readRequests.getCount());
-        
+
         // Execute UPDATE operations
         for (int i = 0; i < numOperations; i++)
             session.execute(String.format("UPDATE %s.%s SET val2 = '%s' WHERE id = %d AND val1 = '%s'",
-                                        KEYSPACE, TABLE, "updated" + i, i, "val" + i));
-        
+                    KEYSPACE, TABLE, "updated" + i, i, "val" + i));
+
         // Verify counter increments for updates
         assertEquals(numOperations * 2, cfs.metric.writeRequests.getCount());
-        
+
         // Execute DELETE operations
         for (int i = 0; i < numOperations; i++)
             session.execute(String.format("DELETE FROM %s.%s WHERE id = %d AND val1 = '%s'",
-                                        KEYSPACE, TABLE, i, "val" + i));
-        
+                    KEYSPACE, TABLE, i, "val" + i));
+
         // Verify counter increments for deletes
         assertEquals(numOperations * 3, cfs.metric.writeRequests.getCount());
-        
+
         // Execute a read to verify writeRequests doesn't increment on reads
         session.execute(String.format("SELECT * FROM %s.%s WHERE id = 0 AND val1 = 'val0'", KEYSPACE, TABLE));
-        
+
         // writeRequests should remain the same, readRequests should increment
         assertEquals(numOperations * 3, cfs.metric.writeRequests.getCount());
         assertEquals(1, cfs.metric.readRequests.getCount());
+    }
+
+    @Test
+    public void testDeleteRequestsMetric()
+    {
+        ColumnFamilyStore cfs = recreateTable();
+
+        // Initially, deleteRequests should be 0
+        assertEquals(0, cfs.metric.deleteRequests.getCount());
+
+        // Insert some data first
+        for (int i = 0; i < 10; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, '%s', '%s')", KEYSPACE, TABLE, i, "val" + i, "val" + i));
+
+        // Verify deleteRequests is still 0 after inserts
+        assertEquals(0, cfs.metric.deleteRequests.getCount());
+
+        // Execute DELETE statements
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 0 AND val1 = 'val0'", KEYSPACE, TABLE));
+        assertEquals(1, cfs.metric.deleteRequests.getCount());
+
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 1 AND val1 = 'val1'", KEYSPACE, TABLE));
+        assertEquals(2, cfs.metric.deleteRequests.getCount());
+
+        // Execute a partition deletion
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 2", KEYSPACE, TABLE));
+        assertEquals(3, cfs.metric.deleteRequests.getCount());
+
+        // Execute multiple deletes
+        for (int i = 3; i < 7; i++)
+            session.execute(String.format("DELETE FROM %s.%s WHERE id = %d AND val1 = 'val%d'", KEYSPACE, TABLE, i, i));
+
+        assertEquals(7, cfs.metric.deleteRequests.getCount());
+
+        // Verify that UPDATE statements don't increment deleteRequests
+        session.execute(String.format("UPDATE %s.%s SET val2 = 'updated' WHERE id = 7 AND val1 = 'val7'", KEYSPACE, TABLE));
+        assertEquals(7, cfs.metric.deleteRequests.getCount());
+
+        // Verify that INSERT with NULL values don't increment deleteRequests
+        session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (8, 'val8', null)", KEYSPACE, TABLE));
+        assertEquals(7, cfs.metric.deleteRequests.getCount());
+
+        // Test BATCH with multiple DELETE statements
+        String batchQuery = String.format(
+        "BEGIN BATCH " +
+        "DELETE FROM %s.%s WHERE id = 8 AND val1 = 'val8'; " +
+        "DELETE FROM %s.%s WHERE id = 9 AND val1 = 'val9'; " +
+        "APPLY BATCH",
+        KEYSPACE, TABLE, KEYSPACE, TABLE);
+
+        session.execute(batchQuery);
+
+        // Each DELETE in the batch should increment the counter
+        assertEquals(9, cfs.metric.deleteRequests.getCount());
+
+        // Test mixed BATCH with DELETE, UPDATE, and INSERT
+        session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (10, 'val10', 'val10')", KEYSPACE, TABLE));
+        session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (11, 'val11', 'val11')", KEYSPACE, TABLE));
+
+        String mixedBatchQuery = String.format(
+        "BEGIN BATCH " +
+        "DELETE FROM %s.%s WHERE id = 10; " +
+        "UPDATE %s.%s SET val2 = 'updated' WHERE id = 11 AND val1 = 'val11'; " +
+        "INSERT INTO %s.%s (id, val1, val2) VALUES (12, 'val12', 'val12'); " +
+        "APPLY BATCH",
+        KEYSPACE, TABLE, KEYSPACE, TABLE, KEYSPACE, TABLE);
+
+        session.execute(mixedBatchQuery);
+
+        // Only the DELETE statement in the mixed batch should increment the counter
+        assertEquals(10, cfs.metric.deleteRequests.getCount());
+
+        // Test range deletion
+        // Insert data with multiple clustering columns
+        for (int i = 13; i < 20; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (13, 'val%d', 'data%d')", KEYSPACE, TABLE, i, i));
+
+        // Execute a range deletion - deletes multiple rows with same partition key but different clustering keys
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 13 AND val1 > 'val15' AND val1 < 'val19'", KEYSPACE, TABLE));
+
+        // Range deletion should increment the counter once
+        assertEquals(11, cfs.metric.deleteRequests.getCount());
+
+        //Test delete of multiple partition keys
+        for (int i = 20; i < 25; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, 'val%d', 'data%d')", KEYSPACE, TABLE, i, i, i));
+
+        // Execute multiple partition deletes
+        session.execute(String.format("DELETE FROM %s.%s WHERE id in (20,21,22,24,25)", KEYSPACE, TABLE));
+
+        assertEquals(12, cfs.metric.deleteRequests.getCount());
+
+        //Test delete of multiple clustering keys
+        for (int i = 25; i < 30; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (25, 'val%d', 'data%d')", KEYSPACE, TABLE, i, i));
+
+        // Execute multiple clustering keys deletes
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 25 and val1 in ('val25', 'val26', 'val27')", KEYSPACE, TABLE));
+
+        assertEquals(13, cfs.metric.deleteRequests.getCount());
+
+        // Test multiple slices scenario - create a table with composite clustering key
+        String multiSliceTable = "multi_slice_test";
+        session.execute(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, multiSliceTable));
+        session.execute(String.format("CREATE TABLE %s.%s (id int, ck1 text, ck2 int, val text, PRIMARY KEY(id, ck1, ck2))", KEYSPACE, multiSliceTable));
+
+        ColumnFamilyStore multiSliceCfs = ColumnFamilyStore.getIfExists(KEYSPACE, multiSliceTable);
+
+        // Insert test data
+        for (int i = 0; i < 5; i++)
+        {
+            for (int j = 0; j < 10; j++)
+            {
+                session.execute(String.format("INSERT INTO %s.%s (id, ck1, ck2, val) VALUES (100, 'ck%d', %d, 'data')", KEYSPACE, multiSliceTable, i, j));
+            }
+        }
+
+        // Test 1: Execute a delete with IN on first clustering column and range on second clustering column
+        // This creates multiple slices: one slice per value in the IN clause
+        // DELETE WHERE id = 100 AND ck1 IN ('ck0', 'ck1', 'ck2') AND ck2 > 3 AND ck2 < 7
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 100 AND ck1 IN ('ck0', 'ck1', 'ck2') AND ck2 > 3 AND ck2 < 7", KEYSPACE, multiSliceTable));
+
+        // Should increment by 1
+        assertEquals(1, multiSliceCfs.metric.deleteRequests.getCount());
+
+        // Test 2: Execute a delete with IN on both clustering columns (specific clustering keys, not slices)
+        // This creates multiple specific deletes: one per combination of clustering key values
+        // DELETE WHERE id = 100 AND ck1 IN ('ck3', 'ck4') AND ck2 IN (5, 6, 7)
+        session.execute(String.format("DELETE FROM %s.%s WHERE id = 100 AND ck1 IN ('ck3', 'ck4') AND ck2 IN (5, 6, 7)", KEYSPACE, multiSliceTable));
+
+        // Should increment by 1 (just once for the DELETE statement regardless of the number of rows that get deleted)
+        assertEquals(2, multiSliceCfs.metric.deleteRequests.getCount());
+
+        // Clean up
+        session.execute(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, multiSliceTable));
     }
 
     @AfterClass
