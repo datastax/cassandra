@@ -19,8 +19,10 @@ package org.apache.cassandra.index.sai.disk.vector;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.disk.format.Version;
 
-public class NVQUtil
+public class JVectorVersionUtil
 {
+    /** Whether to fuse quantized vectors into the graph when writing indexes, assuming all other conditions are met */
+    public static final boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
     public static final boolean ENABLE_NVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean();
     public static final int NUM_SUB_VECTORS = CassandraRelevantProperties.SAI_VECTOR_NVQ_NUM_SUB_VECTORS.getInt();
 
@@ -40,5 +42,22 @@ public class NVQUtil
     public static boolean versionSupportsNVQ(Version version)
     {
         return version.onDiskFormat().jvectorFileFormatVersion() >= 4;
+    }
+
+    /**
+     * Decide whether to attempt to write the quantized vectors as fused parts of the graph. Note that this method
+     * does not take into account whether the graph has enough information to build a quantization, as that depends on
+     * external factors.
+     * @param version the SAI on disk format to use when writing to disk
+     * @return true if conditions are met, false otherwise
+     */
+    public static boolean shouldWriteFused(Version version)
+    {
+        return ENABLE_FUSED && versionSupportsFused(version);
+    }
+
+    public static boolean versionSupportsFused(Version version)
+    {
+        return version.onDiskFormat().jvectorFileFormatVersion() >= 6;
     }
 }
