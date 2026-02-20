@@ -99,7 +99,8 @@ public class V2VectorIndexSearcher extends IndexSearcher
     @VisibleForTesting
     public static double BRUTE_FORCE_EXPENSE_FACTOR = DatabaseDescriptor.getAnnBruteForceExpenseFactor();
 
-    protected final CassandraDiskAnn graph;
+    @VisibleForTesting
+    public final CassandraDiskAnn graph;
     private final PrimaryKey.Factory keyFactory;
     private final PairedSlidingWindowReservoir expectedActualNodesVisited = new PairedSlidingWindowReservoir(20);
     private final ThreadLocal<SparseBits> cachedBits;
