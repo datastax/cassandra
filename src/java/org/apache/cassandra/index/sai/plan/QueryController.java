@@ -32,7 +32,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
+import org.apache.cassandra.index.FeatureNeedsIndexUpgradeException;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -610,7 +610,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // will fail when flushed.
         if (orderer.isBM25() && !orderer.context.version().onOrAfter(Version.BM25_EARLIEST))
         {
-            throw new FeatureNeedsIndexRebuildException(String.format(INDEX_VERSION_DOES_NOT_SUPPORT_BM25,
+            throw new FeatureNeedsIndexUpgradeException(String.format(INDEX_VERSION_DOES_NOT_SUPPORT_BM25,
                                                                       orderer.context.getIndexName()));
         }
 

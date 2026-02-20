@@ -60,7 +60,6 @@ import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.ReadFailureException;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -95,7 +94,6 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
@@ -420,39 +418,64 @@ public class SAITester extends CQLTester
         return true;
     }
 
-    protected void verifySAIVersionInUse(Version expectedVersion)
+    protected void verifySAIVersionInUse(Version... expectedVersions)
     {
-        verifySAIVersionInUse(expectedVersion, KEYSPACE, currentTable());
+        verifySAIVersionInUse(KEYSPACE, currentTable(), expectedVersions);
     }
 
-    protected void verifySAIVersionInUse(Version expectedVersion, String keyspace, String table)
+    protected void verifySAIVersionInUse(String keyspace, String table, Version... expectedVersions)
     {
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+        Assert.assertNotNull(group);
+        Set<Version> versions = Set.copyOf(Arrays.asList(expectedVersions)); // there might be duplicate expected versions
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
+            verifySAIVersionInUse(cfs, group, sstable, versions);
+        }
+    }
 
-            assertEquals(expectedVersion, indexDescriptor.perSSTableComponents().version());
-            SSTableContext ssTableContext = group.sstableContextManager().getContext(sstable);
-            // This is to make sure the context uses the actual files we think
-            assertEquals(expectedVersion, ssTableContext.usedPerSSTableComponents().version());
+    private void verifySAIVersionInUse(ColumnFamilyStore cfs,
+                                       StorageAttachedIndexGroup group,
+                                       SSTableReader sstable,
+                                       Set<Version> expectedVersions)
+    {
+        Set<Version> foundVersions = new HashSet<>();
 
-            for (IndexContext indexContext : getIndexContexts(keyspace, table))
+        IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
+        Version perSSTableVersion = indexDescriptor.perSSTableComponents().version();
+        foundVersions.add(perSSTableVersion);
+        Assertions.assertThat(perSSTableVersion).isIn(expectedVersions);
+
+        // This is to make sure the context uses the actual files we think
+        SSTableContext ssTableContext = group.sstableContextManager().getContext(sstable);
+        perSSTableVersion = ssTableContext.usedPerSSTableComponents().version();
+        Assertions.assertThat(perSSTableVersion).isIn(expectedVersions);
+
+        for (IndexContext indexContext : getIndexContexts(cfs.keyspace.getName(), cfs.name))
+        {
+            Version perIndexVersion = indexDescriptor.perIndexComponents(indexContext).version();
+            Assertions.assertThat(perIndexVersion).isIn(expectedVersions);
+
+            // Make sure the per-index version is the same as the per-sstable version.
+            if (!perIndexVersion.equals(perSSTableVersion))
+                Assert.fail("Per-index version " + perIndexVersion +
+                            " is not compatible with per-sstable version " + perSSTableVersion);
+
+            for (SSTableIndex sstableIndex : indexContext.getView())
             {
-                assertEquals(indexDescriptor.perIndexComponents(indexContext).version(), expectedVersion);
+                if (sstableIndex.isEmpty())
+                    continue;
 
-                for (SSTableIndex sstableIndex : indexContext.getView())
-                {
-                    if (sstableIndex.isEmpty())
-                        continue;
-
-                    // Make sure the index does use components of the proper version.
-                    assertEquals(sstableIndex.usedPerIndexComponents().version(), expectedVersion);
-                }
+                // Make sure the index does use components of the proper version.
+                perIndexVersion = sstableIndex.usedPerIndexComponents().version();
+                foundVersions.add(perIndexVersion);
+                Assertions.assertThat(perIndexVersion).isIn(expectedVersions);
             }
         }
+
+        Assertions.assertThat(foundVersions).isEqualTo(expectedVersions);
     }
 
     /**
@@ -611,9 +634,14 @@ public class SAITester extends CQLTester
 
     protected void upgradeSSTables()
     {
+        upgradeSSTables(KEYSPACE, currentTable());
+    }
+
+    protected void upgradeSSTables(String keyspace, String table)
+    {
         try
         {
-            StorageService.instance.upgradeSSTables(KEYSPACE, false, currentTable());
+            StorageService.instance.upgradeSSTables(keyspace, false, table);
         }
         catch (Throwable e)
         {

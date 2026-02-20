@@ -29,7 +29,7 @@ import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.distributed.test.sai.SAIUtil;
 import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
+import org.apache.cassandra.index.FeatureNeedsIndexUpgradeException;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.assertj.core.api.Assertions;
 
@@ -117,7 +117,7 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
         {
             // The on-disk format version in node 2 is too old to support indexes on vector columns.
             cluster.setUncaughtExceptionsFilter((i, t) -> i == 2 &&
-                                                          t.getClass().getName().contains(FeatureNeedsIndexRebuildException.class.getName()) &&
+                                                          t.getClass().getName().contains(FeatureNeedsIndexUpgradeException.class.getName()) &&
                                                           t.getMessage().contains("does not support vector indexes"));
             cluster.schemaChange(createIndexQuery);
             SAIUtil.assertIndexBuildFailed(cluster.get(1), cluster.get(2), keyspace, "ann_idx");

@@ -22,16 +22,20 @@ import org.apache.cassandra.exceptions.UncheckedInternalRequestExecutionExceptio
 /**
  * Thrown if a secondary index is still in an old version that doesn't support the requested feature.
  * </p>
- * Users hitting this exception should probably rebuild their index to a newer version.
+ * Users hitting this exception should probably upgrade their sstables so their indexes are upgraded to a newer version.
+ * </p>
+ * If this error is hit by during an index build, when the index has been recorded in the schema, and before it's marked
+ * as queryable, it means that the index also needs to be rebuilt after upgrading the sstables, so it gets marked as
+ * queryable.
  */
-public final class FeatureNeedsIndexRebuildException extends UncheckedInternalRequestExecutionException
+public final class FeatureNeedsIndexUpgradeException extends UncheckedInternalRequestExecutionException
 {
     /**
-     * Creates a new {@link FeatureNeedsIndexRebuildException} for the specified message.
+     * Creates a new {@link FeatureNeedsIndexUpgradeException} for the specified message.
      *
      * @param message the explanation of the error
      */
-    public FeatureNeedsIndexRebuildException(String message)
+    public FeatureNeedsIndexUpgradeException(String message)
     {
         super(RequestFailureReason.FEATURE_NEEDS_INDEX_REBUILD, message);
     }

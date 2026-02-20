@@ -41,7 +41,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
+import org.apache.cassandra.index.FeatureNeedsIndexUpgradeException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -189,7 +189,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         }
         if (docLengthsMeta == null)
         {
-            throw new FeatureNeedsIndexRebuildException(String.format(QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25,
+            throw new FeatureNeedsIndexUpgradeException(String.format(QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25,
                                                                       indexContext.getIndexName()));
         }
 
@@ -254,7 +254,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         if (!orderer.isBM25())
             return super.orderResultsBy(reader, queryContext, keys, orderer, limit);
-        
+
         if (docLengthsMeta == null)
         {
             throw new InvalidRequestException(String.format(QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25,

@@ -527,4 +527,26 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         indices.forEach(StorageAttachedIndex::makeIndexNonQueryable);
         onSSTableChanged(baseCfs.getLiveSSTables(), Collections.emptySet(), indices, false);
     }
+
+    /**
+     * @return the minimum index version among all the per-sstable index components of this group,
+     * or the current version if there are no sstable indexes.
+     */
+    public Version getMinVersion()
+    {
+        StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
+        assert indexGroup != null;
+        Version minVersion = null;
+        for (SSTableReader sstable : baseCfs.getLiveSSTables())
+        {
+            IndexDescriptor indexDescriptor = indexGroup.descriptorFor(sstable);
+            if (indexDescriptor != null)
+            {
+                Version version = indexDescriptor.perSSTableComponents().version();
+                if (minVersion == null || version.compareTo(minVersion) < 0)
+                    minVersion = version;
+            }
+        }
+        return minVersion == null ? Version.current(baseCfs.metadata.keyspace) : minVersion;
+    }
 }

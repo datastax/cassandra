@@ -1292,8 +1292,12 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals(rowCount, rows.all().size());
     }
 
+    /**
+     * Tests that we can rebuild and reload in place to a newer version only after upgrading sstables.
+     * More exhaustive testing is done in {@link CreateIndexWithNewVersionTest}.
+     */
     @Test
-    public void verifyCanRebuildAndReloadInPlaceToNewerVersion()
+    public void verifyCanRebuildAndReloadInPlaceToNewerVersionOnlyAfterSSTsbleUpgrade()
     {
         Version current = Version.current(KEYSPACE);
         try
@@ -1311,24 +1315,32 @@ public class NativeIndexDDLTest extends SAITester
             flush();
 
             // Sanity check first
-            ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
-            assertEquals(rowCount, rows.all().size());
-            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
-            assertEquals(rowCount, rows.all().size());
-
+            Runnable queryTester = () -> {
+                ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+                assertEquals(rowCount, rows.all().size());
+                rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
+                assertEquals(rowCount, rows.all().size());
+            };
+            queryTester.run();
             verifySAIVersionInUse(Version.AA);
 
             SAIUtil.setCurrentVersion(current);
 
+            // The queries should still work, but the version should not have changed.
             rebuildTableIndexes();
             reloadSSTableIndexInPlace();
+            queryTester.run();
+            verifySAIVersionInUse(Version.AA);
 
-            // This should still work
-            rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
-            assertEquals(rowCount, rows.all().size());
-            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
-            assertEquals(rowCount, rows.all().size());
+            // Now upgrade sstables and try again
+            upgradeSSTables();
+            queryTester.run();
+            verifySAIVersionInUse(current);
 
+            // Rebuild once again
+            rebuildTableIndexes();
+            reloadSSTableIndexInPlace();
+            queryTester.run();
             verifySAIVersionInUse(current);
         }
         finally
