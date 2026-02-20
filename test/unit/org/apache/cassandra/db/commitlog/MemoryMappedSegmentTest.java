@@ -74,6 +74,6 @@ public class MemoryMappedSegmentTest
 
     private MemoryMappedSegment memoryMappedSegment()
     {
-        return Mockito.spy(new MemoryMappedSegment(CommitLog.instance, CommitLog.instance.getSegmentManager()));
+        return Mockito.spy(new MemoryMappedSegment((CommitLog) CommitLog.instance, CommitLog.instance.getSegmentManager()));
     }
 }

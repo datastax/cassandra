@@ -530,14 +530,14 @@ public abstract class CommitLogTest
                       .clustering("bytes")
                       .add("val", ByteBuffer.allocate(1 + getMaxRecordDataSize()))
                       .build();
-        long cnt = CommitLog.instance.metrics.oversizedMutations.getCount();
+        long cnt = CommitLog.instance.metrics().oversizedMutations.getCount();
         try
         {
             CommitLog.instance.add(rm);
         }
         catch (MutationExceededMaxSizeException e)
         {
-            Assert.assertEquals(cnt + 1, CommitLog.instance.metrics.oversizedMutations.getCount());
+            Assert.assertEquals(cnt + 1, CommitLog.instance.metrics().oversizedMutations.getCount());
             throw e;
         }
         throw new AssertionError("mutation larger than limit was accepted");
@@ -909,7 +909,7 @@ public abstract class CommitLogTest
         int cells;
         int skipped;
 
-        SimpleCountingReplayer(CommitLog commitLog, CommitLogPosition filterPosition, TableMetadata metadata)
+        SimpleCountingReplayer(ICommitLog commitLog, CommitLogPosition filterPosition, TableMetadata metadata)
         {
             super(commitLog, filterPosition, Collections.emptyMap(), ReplayFilter.create());
             this.filterPosition = filterPosition;

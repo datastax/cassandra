@@ -108,7 +108,7 @@ public class CommitLogUpgradeTestMaker
 
     public void makeLog() throws IOException, InterruptedException
     {
-        CommitLog commitLog = CommitLog.instance;
+        CommitLog commitLog = (CommitLog) CommitLog.instance;
         System.out.format("\nUsing commit log size: %dmb, compressor: %s, encryption: %s, sync: %s, %s\n",
                           mb(DatabaseDescriptor.getCommitLogSegmentSize()),
                           commitLog.configuration.getCompressorName(),
