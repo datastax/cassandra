@@ -10,8 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM ubuntu:20.04
-MAINTAINER Apache Cassandra <dev@cassandra.apache.org>
+FROM ubuntu:22.04
+LABEL org.opencontainers.image.authors="Apache Cassandra <dev@cassandra.apache.org>"
 
 # CONTEXT is expected to be cassandra/.build
 
@@ -42,7 +42,7 @@ RUN echo 'Acquire::ftp::Timeout "60";' >> /etc/apt/apt.conf.d/80proxy.conf
 
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
-    apt-get install -y --no-install-recommends software-properties-common apt-utils
+    apt-get install -y --no-install-recommends software-properties-common apt-utils gpg-agent
 
 RUN export DEBIAN_FRONTEND=noninteractive && \
     add-apt-repository -y ppa:deadsnakes/ppa && \
@@ -52,8 +52,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
         python3.11 python3.11-venv python3.11-dev \
         virtualenv net-tools libev4 libev-dev wget gcc libxml2 libxslt1-dev \
         vim lsof sudo libjemalloc2 dumb-init locales rsync \
-        openjdk-8-jdk openjdk-11-jdk openjdk-17-jdk ant ant-optional
-
+        openjdk-8-jdk openjdk-11-jdk-headless openjdk-17-jdk-headless openjdk-21-jdk-headless ant ant-optional
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 2
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 3
@@ -62,17 +61,35 @@ RUN python3.8 -m pip install --upgrade pip
 # generate locales for the standard en_US.UTF8 value we use for testing
 RUN locale-gen en_US.UTF-8
 
-# as we only need the requirements.txt file from the dtest repo, let's just get it from GitHub as a raw asset
+# as we only need the requirements.txt file from the dtest repo, let's just get it (uncached) from GitHub as a raw asset
 # so we can avoid needing to clone the entire repo just to get this file
-RUN curl https://raw.githubusercontent.com/apache/cassandra-dtest/trunk/requirements.txt --output /opt/requirements.txt
+RUN curl https://raw.githubusercontent.com/apache/cassandra-dtest/trunk/requirements.txt?$(date +%s) --output /opt/requirements.txt
 RUN chmod 0644 /opt/requirements.txt
 
 # now setup python via virtualenv with all of the python dependencies we need according to requirements.txt
 RUN pip3 install virtualenv virtualenv-clone
 RUN pip3 install --upgrade wheel
 
-# make Java 8 the default executable (we use to run all tests against Java 8)
-RUN update-java-alternatives --set java-1.8.0-openjdk-$(dpkg --print-architecture)
+# Download and install OpenJDK 22.0.2 for the current architecture
+RUN sh -c '\
+    JDK_OS=linux ;\
+    JDK_TAR="openjdk-22.0.2_${JDK_OS}-$(uname -m | sed "s/x86_64/x64/")_bin.tar.gz" ;\
+    JDK_VERSION_SHAS="133c8b65113304904cdef7c9103274d141cfb64b191ff48ceb6528aca25c67b1 25fba2bd5585e1e9923134dc827f2bd5a2beaca3d242ae00b7e68c152faf7ba6" ;\
+    curl -L --fail --silent --retry 2 --retry-delay 5 --max-time 3600 "https://download.java.net/java/GA/jdk22.0.2/c9ecb94cd31b495da20a27d4581645e8/9/GPL/${JDK_TAR}" -o $JDK_TAR ;\
+    JDK_SHA="$(sha256sum $JDK_TAR | cut -d" " -f2)" ;\
+    echo "$JDK_VERSION_SHAS" | sed "s/ /\n/g" | grep -q "$JDK_SHA" || { echo "SHA256 mismatch for $JDK_TAR $JDK_SHA"; exit 1; } ;\
+    mkdir -p /usr/lib/jvm/java-22-openjdk-$(dpkg --print-architecture) ;\
+    tar -C /usr/lib/jvm/java-22-openjdk-$(dpkg --print-architecture) --strip-components=1 -xzf $JDK_TAR ;\
+    chmod -R a+rX /usr/lib/jvm/java-22-openjdk-$(dpkg --print-architecture) ;\
+    rm $JDK_TAR'
+
+# Add OpenJDK 22 to update-alternatives
+RUN update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-22-openjdk-$(dpkg --print-architecture)/bin/java 1
+RUN update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-22-openjdk-$(dpkg --print-architecture)/bin/javac 1
+
+# make Java 11 the default executable
+RUN update-alternatives --set java /usr/lib/jvm/java-11-openjdk-$(dpkg --print-architecture)/bin/java
+RUN update-alternatives --set javac /usr/lib/jvm/java-11-openjdk-$(dpkg --print-architecture)/bin/javac
 
 # enable legacy TLSv1 and TLSv1.1 (CASSANDRA-16848)
 RUN find /etc -type f -name java.security -exec sed -i 's/TLSv1, TLSv1.1//' {} \;
@@ -87,7 +104,7 @@ RUN chmod 0440 /etc/sudoers.d/build
 # switch to the cassandra user
 RUN mkdir -p ${BUILD_HOME} && chmod a+rwx ${BUILD_HOME}
 USER cassandra-tmp
-ENV HOME ${BUILD_HOME}
+ENV HOME=${BUILD_HOME}
 WORKDIR ${BUILD_HOME}
 
 ENV ANT_HOME=/usr/share/ant
