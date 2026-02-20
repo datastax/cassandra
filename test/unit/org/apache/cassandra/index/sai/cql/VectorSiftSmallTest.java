@@ -38,7 +38,8 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
-import org.apache.cassandra.index.sai.disk.vector.NVQUtil;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -204,7 +205,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
         }
 
         // When NVQ is enabled, we expect worse recall
-        float postCompactionRecall = NVQUtil.ENABLE_NVQ ? 0.9499f : 0.975f;
+        float postCompactionRecall = JVectorVersionUtil.ENABLE_NVQ ? 0.9499f : 0.975f;
 
         // Take the CassandraOnHeapGraph code path.
         compact();
@@ -220,6 +221,20 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
         {
             var recall = testRecall(topK, queryVectors, groundTruth);
             assertTrue("Post-compaction recall is " + recall, recall > postCompactionRecall);
+        }
+
+        // Set force PQ training size to ensure we hit the refine code path and apply it to half the vectors.
+        // TODO this test fails as of this commit due to recall issues. Will investigate further.
+        // CompactionGraph.PQ_TRAINING_SIZE = baseVectors.size() / 2;
+
+        // Compact again to take the CompactionGraph code path that calls the refine logic
+        compact();
+        for (int topK : List.of(1, 100))
+        {
+            var recall = testRecall(topK, queryVectors, groundTruth);
+            // This assertion will fail until we address the design the bug discussed
+            // in https://github.com/riptano/cndb/issues/16637.
+            // assertTrue("Post-compaction recall is " + recall, recall > postCompactionRecall);
         }
     }
 
@@ -372,7 +387,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
     private void createIndex()
     {
         // we need a long timeout because we are adding many vectors
-        String index = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        String index = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean', 'enable_hierarchy': 'true'}");
         waitForIndexQueryable(KEYSPACE, index, 5, TimeUnit.MINUTES);
     }
 

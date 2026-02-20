@@ -23,8 +23,8 @@ import java.util.regex.Pattern;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 
 import org.slf4j.Logger;
@@ -39,6 +39,7 @@ import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v7.V7OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v8.V8OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -75,10 +76,12 @@ public class Version implements Comparable<Version>
     public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
     // total terms count serialization in index metadata, enables ANN_USE_SYNTHETIC_SCORE by default
     public static final Version ED = new Version("ed", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ed"));
+    // jvector file format version 6 (skipped 5)
+    public static final Version FA = new Version("fa", V8OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "fa"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version, so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(ED, EC, EB, DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(FA, ED, EC, EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
@@ -130,7 +133,10 @@ public class Version implements Comparable<Version>
      * Calculates the maximum allowed length for SAI index names to ensure generated filenames
      * do not exceed the system's filename length limit (defined in {@link SchemaConstants#FILENAME_LENGTH}).
      * This accounts for all additional components in the filename.
+     * It is only used to validate that {@link SchemaConstants#INDEX_NAME_LENGTH}
+     * is not bigger than the actual acceptable length.
      */
+    @VisibleForTesting
     public static int calculateIndexNameAllowedLength(String keyspace)
     {
         int addedLength = getAddedLengthFromDescriptorAndVersion(keyspace);
@@ -153,7 +159,7 @@ public class Version implements Comparable<Version>
         int addedLength = SAI_DESCRIPTOR.length()
                           + versionNameLength
                           + generationLength
-                          + IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS.representation.length()
+                          + calculateMaxComponentRepresentationLength()
                           + SAI_SEPARATOR.length() * 3
                           + EXTENSION.length();
 
@@ -166,6 +172,14 @@ public class Version implements Comparable<Version>
                        + tableIdLength
                        + separatorLength * 3;
         return addedLength;
+    }
+
+    private static int calculateMaxComponentRepresentationLength()
+    {
+        int maxLength = 0;
+        for (IndexComponentType component : IndexComponentType.values())
+            maxLength = Math.max(maxLength, component.representation.length());
+        return maxLength;
     }
 
     @Override

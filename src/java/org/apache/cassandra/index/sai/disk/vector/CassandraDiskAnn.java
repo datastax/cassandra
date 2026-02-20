@@ -33,7 +33,6 @@ import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
-import io.github.jbellis.jvector.quantization.BQVectors;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
@@ -95,7 +94,7 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponentType.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
+        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset, false);
         features = rawGraph.getFeatureSet();
         graph = rawGraph;
         usesNVQ = features.contains(FeatureId.NVQ_VECTORS);
@@ -123,7 +122,7 @@ public class CassandraDiskAnn
             }
 
             VectorCompression.CompressionType compressionType = VectorCompression.CompressionType.values()[reader.readByte()];
-            if (features.contains(FeatureId.FUSED_ADC))
+            if (features.contains(FeatureId.FUSED_PQ))
             {
                 assert compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
                 compressedVectors = null;
@@ -139,14 +138,6 @@ public class CassandraDiskAnn
                 {
                     compressedVectors = PQVectors.load(reader, reader.getFilePointer());
                     pq = ((PQVectors) compressedVectors).getCompressor();
-                    compression = new VectorCompression(compressionType,
-                                                        compressedVectors.getOriginalSize(),
-                                                        compressedVectors.getCompressedSize());
-                }
-                else if (compressionType == VectorCompression.CompressionType.BINARY_QUANTIZATION)
-                {
-                    compressedVectors = BQVectors.load(reader, reader.getFilePointer());
-                    pq = null;
                     compression = new VectorCompression(compressionType,
                                                         compressedVectors.getOriginalSize(),
                                                         compressedVectors.getCompressedSize());
@@ -193,7 +184,15 @@ public class CassandraDiskAnn
 
     public long ramBytesUsed()
     {
-        return graph.ramBytesUsed();
+        return graph.ramBytesUsed() + compressedVectorBytes();
+    }
+
+    private long compressedVectorBytes()
+    {
+        // compressedVectors counts the pq internally, so only count pq if compressedVectors is null.
+        return compressedVectors == null
+               ? pq == null ? 0 : pq.ramBytesUsed()
+               : compressedVectors.ramBytesUsed();
     }
 
     public int size()
@@ -239,9 +238,7 @@ public class CassandraDiskAnn
         {
             var view = (ImmutableGraphIndex.ScoringView) searcher.getView();
             SearchScoreProvider ssp;
-            // FusedADC can no longer be written due to jvector upgrade. However, it's possible these index files
-            // still exist, so we have to support them.
-            if (features.contains(FeatureId.FUSED_ADC))
+            if (features.contains(FeatureId.FUSED_PQ))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
                 var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);

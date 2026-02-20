@@ -210,6 +210,8 @@ public class TableMetrics
     public final Counter readRequests;
     /** The number of range read requests, including those dropped due to timeouts */
     public final Counter rangeRequests;
+    /** The number of write requests in storage layer, including errors */
+    public final Counter writeRequests;
     /** The number of delete requests */
     public final Counter deleteRequests;
     /** Estimated number of tasks pending for this table */
@@ -790,6 +792,7 @@ public class TableMetrics
 
         readRequests = createTableCounter("ReadRequests");
         rangeRequests = createTableCounter("RangeRequests");
+        writeRequests = createTableCounter("WriteRequests");
         deleteRequests = createTableCounter("DeleteRequests");
 
         pendingFlushes = createTableCounter("PendingFlushes");

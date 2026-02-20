@@ -443,12 +443,30 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.vector_flush_threshold_max_rows", "-1"),
     // Use non-positive value to disable it. Period in millis to trigger a flush for SAI vector memtable index.
     SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
+    // Whether compaction should build vector indexes using a fused graph, aka a graph where the quantized vectors
+    // are stored inline with a graph node. Feature is still experimental, so defaults to false.
+    SAI_VECTOR_ENABLE_FUSED("cassandra.sai.vector.enable_fused", "false"),
     // Use nvq when building graphs in compaction. Disabled by default for now. Enabling will reduce recall slightly
     // while also reducing the storage footprint.
     SAI_VECTOR_ENABLE_NVQ("cassandra.sai.vector.enable_nvq", "false"),
     // NVQ number of subvectors. This isn't really expected to change much so we're only exposing
     // it as a global variable in case it's needed.
     SAI_VECTOR_NVQ_NUM_SUB_VECTORS("cassandra.sai.vector.nvq_num_sub_vectors", "2"),
+    // The allowed ratio of extra rows (that map to "holes" in the ordinal space) to total rows indexed in the graph
+    // Higher percentages will result in more memory utilized to store the extra postings mappings and larger graph
+    // file sizes to store the empty nodes.
+    SAI_VECTOR_ORDINAL_HOLE_DENSITY_LIMIT("cassandra.sai.vector.ordinal_hole_density_limit", "0.01"),
+    // When building a compaction graph, encode layer 0 nodes in parallel and subsequently use async io for writes.
+    // This feature is experimental, so defaults to false.
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED("cassandra.sai.vector.encode_and_write_graph_in_parallel.enabled", "false"),
+    // When parallel graph encoding is enabled, the number of threads to use for encoding. Defaults to 0, meaning
+    // use all available processors as reported by the JVM.
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_NUM_THREADS("cassandra.sai.vector.encode_and_write_graph_in_parallel.num_threads", "0"),
+    // When parallel graph encoding is enabled, whether to use director buffers. Defaults to false, meaning heap
+    // buffers are used. A buffer will be allocated per encoding thread. The size of each buffer is the size
+    // of the encoded graph node at layer 0, which varies based on graph feature settings.
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS("cassandra.sai.vector.encode_and_write_graph_in_parallel.use_direct_buffers", "false"),
+
     /**
      * Whether to disable auto-compaction
      */

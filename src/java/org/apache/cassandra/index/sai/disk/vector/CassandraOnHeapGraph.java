@@ -25,12 +25,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.function.IntUnaryOperator;
 import java.util.function.ToIntFunction;
 
@@ -41,17 +43,19 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
+import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
-import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
+import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
@@ -89,6 +93,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionT
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
@@ -96,7 +101,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.StringHelper;
 
-import static org.apache.cassandra.index.sai.disk.vector.NVQUtil.NUM_SUB_VECTORS;
+import static org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil.NUM_SUB_VECTORS;
 
 public class CassandraOnHeapGraph<T> implements Accountable
 {
@@ -166,7 +171,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         allVectorsAreUnitLength = true;
 
         // NVQ is only written during compaction to save on compute costs
-        writeNvq = NVQUtil.shouldWriteNVQ(dimension, context.version()) && !forSearching;
+        writeNvq = JVectorVersionUtil.shouldWriteNVQ(dimension, context.version()) && !forSearching;
 
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         // This is only a warning since it's not a fatal error to write without hierarchy
@@ -449,36 +454,24 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         OrdinalMapper ordinalMapper = remappedPostings.ordinalMapper;
 
-        // Write the NVQ feature. We could compute this at insert time, but because the graph allows for parallel
-        // insertions, it would be a bit more complicated. All vectors are in memory, so the computation to build the
-        // mean vector should be pretty fast, and this path is only used when we don't have an existing
-        // ProductQuantization or when we're using BQ.
-        NVQuantization nvq = writeNvq ? NVQuantization.compute(vectorValues, NUM_SUB_VECTORS) : null;
-
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
         var indexFile = termsDataComponent.file();
         long termsOffset = SAICodecUtils.headerSize();
         if (indexFile.exists())
             termsOffset += indexFile.length();
         try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
-             var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
-             var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
-                               .withStartOffset(termsOffset)
-                               .withVersion(perIndexComponents.version().onDiskFormat().jvectorFileFormatVersion())
-                               .withMapper(ordinalMapper)
-                               .with(nvq != null ? new NVQ(nvq) : new InlineVectors(vectorValues.dimension()))
-                               .build())
+             var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true))
         {
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
-            indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
-            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()), perIndexComponents.version());
-            assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
+
+            // Write fused unless we don't meet some criteria (will be determined in the writePQ method)
+            boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(perIndexComponents.version());
 
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
-            long pqPosition = writePQ(pqOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context());
-            long pqLength = pqPosition - pqOffset;
+            var compressor = writePQ(pqOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context(), writeFusedPQ);
+            long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
@@ -497,23 +490,48 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
             long postingsLength = postingsPosition - postingsOffset;
 
-            // write the graph
-            var start = System.nanoTime();
-            var supplier = nvq != null
-                            ? Feature.singleStateFactory(FeatureId.NVQ_VECTORS, nodeId -> new NVQ.State(nvq.encode(vectorValues.getVector(nodeId))))
-                            : Feature.singleStateFactory(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
-            indexWriter.write(supplier);
-            SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
-            logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
-            long termsLength = indexWriter.getOutput().position() - termsOffset;
+            // Write the NVQ feature. We could compute this at insert time, but because the graph allows for parallel
+            // insertions, it would be a bit more complicated. All vectors are in memory, so the computation to build the
+            // mean vector should be pretty fast, and this path is only used when we don't have an existing
+            // ProductQuantization.
+            NVQuantization nvq = writeNvq ? NVQuantization.compute(vectorValues, NUM_SUB_VECTORS) : null;
 
-            // write remaining footers/checksums
-            SAICodecUtils.writeFooter(pqOutput);
-            SAICodecUtils.writeFooter(postingsOutput);
+            try (var indexWriter = createIndexWriter(indexFile, termsOffset, perIndexComponents.context(), ordinalMapper, compressor, nvq);
+                 var view = builder.getGraph().getView())
+            {
+                indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
+                SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()), perIndexComponents.version());
+                assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
 
-            // add components to the metadata map
-            return createMetadataMap(termsOffset, termsLength, postingsOffset, postingsLength, pqOffset, pqLength);
+                // write the graph
+                var start = System.nanoTime();
+                indexWriter.write(suppliers(view, compressor, nvq, writeFusedPQ));
+                SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
+                logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
+                long termsLength = indexWriter.getOutput().position() - termsOffset;
+
+                // write remaining footers/checksums
+                SAICodecUtils.writeFooter(pqOutput);
+                SAICodecUtils.writeFooter(postingsOutput);
+
+                // add components to the metadata map
+                return createMetadataMap(termsOffset, termsLength, postingsOffset, postingsLength, pqOffset, pqLength);
+            }
         }
+    }
+
+    private OnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, VectorCompressor<?> compressor, NVQuantization nvq) throws IOException
+    {
+        var indexWriterBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
+            .withStartOffset(termsOffset)
+            .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
+            .withMapper(ordinalMapper)
+            .with(nvq != null ? new NVQ(nvq) : new InlineVectors(vectorValues.dimension()));
+
+        if (compressor instanceof ProductQuantization && JVectorVersionUtil.shouldWriteFused(context.version()))
+            indexWriterBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
+
+        return indexWriterBuilder.build();
     }
 
     static SegmentMetadata.ComponentMetadataMap createMetadataMap(long termsOffset, long termsLength, long postingsOffset, long postingsLength, long pqOffset, long pqLength)
@@ -524,6 +542,35 @@ public class CassandraOnHeapGraph<T> implements Accountable
         Map<String, String> vectorConfigs = Map.of("SEGMENT_ID", ByteBufferUtil.bytesToHex(ByteBuffer.wrap(StringHelper.randomId())));
         metadataMap.put(IndexComponentType.PQ, -1, pqOffset, pqLength, vectorConfigs);
         return metadataMap;
+    }
+
+    private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(ImmutableGraphIndex.View view, VectorCompressor<?> compressor, NVQuantization nvq, boolean writeFusedPQ)
+    {
+        var features = new EnumMap<FeatureId, IntFunction<Feature.State>>(FeatureId.class);
+
+        // We either write NVQ or inline (full precision) vectors in the graph. nvq is null when it is not enabled.
+        if (nvq != null)
+            features.put(FeatureId.NVQ_VECTORS, nodeId -> new NVQ.State(nvq.encode(vectorValues.getVector(nodeId))));
+        else
+            features.put(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
+
+        if (compressor instanceof ProductQuantization && writeFusedPQ)
+        {
+            // This block is an extension of an already present design that limits the PQ computation and encoding
+            // to one index at a time -- goal during flush is to evict from memory ASAP so better to do the PQ build
+            // (in parallel) one at a time. We have https://github.com/riptano/cndb/issues/12110 to encode the
+            // PQ iteratively, but since that isn't implemented, we keep the same, fairly brittle pattern.
+            final PQVectors pqVectors;
+            synchronized (CassandraOnHeapGraph.class)
+            {
+                // Note: the features implementation expects the pqVectors to be addressable on their old ordinal
+                // index, so we use the original vectorValues as the source without performing any remapping.
+                pqVectors = (PQVectors) compressor.encodeAll(vectorValues);
+            }
+            features.put(FeatureId.FUSED_PQ, nodeId -> new FusedPQ.State(view, pqVectors::get, nodeId));
+        }
+
+        return features;
     }
 
     /**
@@ -578,42 +625,43 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
-    private long writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext) throws IOException
+    private VectorCompressor<?> writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext, boolean writeFusedPQ) throws IOException
     {
         var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
 
         // Build encoder and compress vectors
-        VectorCompressor<?> compressor; // will be null if we can't compress
+        VectorCompressor<?> compressor = null; // will be null if we can't compress
         CompressedVectors cv = null;
         // limit the PQ computation and encoding to one index at a time -- goal during flush is to
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
         {
-            // build encoder (expensive for PQ, cheaper for BQ)
+            // build encoder (expensive for PQ)
             if (preferredCompression.type == CompressionType.PRODUCT_QUANTIZATION)
             {
                 var pqi = getPqIfPresent(indexContext, preferredCompression::equals);
                 compressor = computeOrRefineFrom(pqi, preferredCompression);
             }
-            else
-            {
-                assert preferredCompression.type == CompressionType.BINARY_QUANTIZATION : preferredCompression.type;
-                compressor = BinaryQuantization.compute(vectorValues);
-            }
             assert !vectorValues.isValueShared();
             // encode (compress) the vectors to save
-            if (compressor != null)
+            if (compressor != null && !writeFusedPQ)
                 cv = compressor.encodeAll(new RemappedVectorValues(remapped, remapped.maxNewOrdinal, vectorValues));
         }
 
         var actualType = compressor == null ? CompressionType.NONE : preferredCompression.type;
         writePqHeader(writer, allVectorsAreUnitLength, actualType, indexContext.version());
         if (actualType == CompressionType.NONE)
-            return writer.position();
+            return null;
+
+        if (writeFusedPQ)
+        {
+            compressor.write(writer, indexContext.version().onDiskFormat().jvectorFileFormatVersion());
+            return compressor;
+        }
 
         // save (outside the synchronized block, this is io-bound not CPU)
         cv.write(writer, indexContext.version().onDiskFormat().jvectorFileFormatVersion());
-        return writer.position();
+        return null; // Don't need compressor in this case
     }
 
     static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type, Version version)

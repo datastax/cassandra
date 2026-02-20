@@ -18,9 +18,11 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.stream.Collectors;
 
@@ -31,19 +33,35 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 @Ignore
 @RunWith(Parameterized.class)
 abstract public class VectorCompactionTest extends VectorTester
 {
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
     // Subclasses must implement this to cover different dimensions
     abstract public int dimension();
 
@@ -169,7 +187,7 @@ abstract public class VectorCompactionTest extends VectorTester
     // Exercise the one-to-many path in compaction
     public void testOneToManyCompactionInternal(int vectorsPerSstable, int sstables)
     {
-        createTable();
+        var index = createTableAndReturnIndexName();
 
         disableCompaction();
 
@@ -179,6 +197,12 @@ abstract public class VectorCompactionTest extends VectorTester
         validateQueries();
         compact();
         validateQueries();
+
+        // ONE_TO_MANY is version dependent, so we need to branch based on which version we're writing
+        var expectedStructure = V5OnDiskFormat.writeV5VectorPostings(version)
+                                ? V5VectorPostingsWriter.Structure.ONE_TO_MANY
+                                : V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY;
+        validatePostingsStructureAndOrdinalToVectorMapping(index, expectedStructure, vectorsPerSstable * sstables);
     }
 
     @Test
@@ -187,6 +211,33 @@ abstract public class VectorCompactionTest extends VectorTester
         int sstables = 2;
         testOneToManyCompactionInternal(10, sstables);
         testOneToManyCompactionHolesInternal(MIN_PQ_ROWS, sstables);
+    }
+
+    @Test
+    public void testOneToOneCompaction()
+    {
+        for (int sstables = 2; sstables <= 3; sstables++)
+        {
+            testOneToOneCompactionInternal(10, sstables);
+            testOneToOneCompactionInternal(MIN_PQ_ROWS, sstables);
+        }
+    }
+
+    // Exercise the one-to-one path in compaction where each row has exactly one unique vector
+    public void testOneToOneCompactionInternal(int vectorsPerSstable, int sstables)
+    {
+        var indexName = createTableAndReturnIndexName();
+
+        disableCompaction();
+
+        insertOneToOneRows(vectorsPerSstable, sstables);
+
+        // queries should behave sanely before and after compaction
+        validateQueries();
+        compact();
+        validateQueries();
+
+        validatePostingsStructureAndOrdinalToVectorMapping(indexName, V5VectorPostingsWriter.Structure.ONE_TO_ONE, vectorsPerSstable * sstables);
     }
 
     @Test
@@ -201,7 +252,7 @@ abstract public class VectorCompactionTest extends VectorTester
 
     public void testZeroOrOneToManyCompactionInternal(int vectorsPerSstable, int sstables)
     {
-        createTable();
+        var indexName = createTableAndReturnIndexName();
         disableCompaction();
 
         insertZeroOrOneToManyRows(vectorsPerSstable, sstables);
@@ -209,6 +260,8 @@ abstract public class VectorCompactionTest extends VectorTester
         validateQueries();
         compact();
         validateQueries();
+
+        validatePostingsStructureAndOrdinalToVectorMapping(indexName, V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, vectorsPerSstable * sstables);
     }
 
     private void insertZeroOrOneToManyRows(int vectorsPerSstable, int sstables)
@@ -217,7 +270,7 @@ abstract public class VectorCompactionTest extends VectorTester
         double duplicateChance = R.nextDouble() * 0.2;
         int j = 0;
         boolean nullInserted = false;
-        
+
         for (int i = 0; i < sstables; i++)
         {
             var vectorsInserted = new ArrayList<Vector<Float>>();
@@ -254,20 +307,136 @@ abstract public class VectorCompactionTest extends VectorTester
 
     public void testOneToManyCompactionHolesInternal(int vectorsPerSstable, int sstables)
     {
-        createTable();
+        var indexName = createTableAndReturnIndexName();
 
         disableCompaction();
 
         insertOneToManyRows(vectorsPerSstable, sstables);
 
-        // this should be done after writing data so that we exercise the "we thought we were going to use the
-        // one-to-many-path but there were too many holes so we changed plans" code path
-        V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 0.0;
+        double originalGlobalHolesAllowed = V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED;
+        try
+        {
+            // this should be done after writing data so that we exercise the "we thought we were going to use the
+            // one-to-many-path but there were too many holes so we changed plans" code path
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 0.0;
 
-        // queries should behave sanely before and after compaction
-        validateQueries();
-        compact();
-        validateQueries();
+            // queries should behave sanely before and after compaction
+            validateQueries();
+            compact();
+            validateQueries();
+
+            validatePostingsStructureAndOrdinalToVectorMapping(indexName, V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, vectorsPerSstable * sstables);
+        }
+        finally
+        {
+            V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = originalGlobalHolesAllowed;
+        }
+    }
+
+    private void validatePostingsStructureAndOrdinalToVectorMapping(String indexName, V5VectorPostingsWriter.Structure expectedStructure, int numRows)
+    {
+        // Validate that we have the expected structure for all the sstables-segment indexes.
+        var sai = (StorageAttachedIndex) Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).getIndexManager().getIndexByName(indexName);
+        var indexes = sai.getIndexContext().getView().getIndexes();
+        var columnMetadata = sai.getIndexContext().getDefinition();
+        var columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(columnMetadata));
+        for (var index : indexes)
+        {
+            boolean isMissingRows = index.getRowCount() < index.getSSTable().getTotalRows();
+
+            // We don't have enough rows to get segments, the assertions are simplified if we know the sstable has
+            // just one segment.
+            assertEquals(1, index.getSegments().size());
+            var segment = index.getSegments().get(0);
+
+            var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+
+            // We track nulls so that we can verify the postring structure matches.
+            boolean nullValueObserved = false;
+
+            // Validate that the vectors in the sstable row correctly match the vectors in the graph by grabbing
+            // the vector, creating a score function for the vector, converting its row id into an ordinal, and
+            // then assert that the sstable's vector is similar to the graph's vector within an epsilon.
+            assertNotNull(segment.sstableContext);
+            assertNotNull(segment.sstableContext.primaryKeyMapFactory());
+            try (var view = searcher.graph.getView();
+                 var ordinalsView = searcher.graph.getOrdinalsView();
+                 var pkm = segment.sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
+            {
+                assertNotNull(segment.metadata);
+                var vectorsSet = new HashSet<VectorFloat<?>>();
+                boolean hasUniqueVectors = true;
+                for (long i = segment.metadata.minSSTableRowId; i <= segment.metadata.maxSSTableRowId; i++)
+                {
+                    var primaryKey = pkm.primaryKeyFromRowId(i);
+                    assertTrue("The subsequent logic assumes that we have no clustering columns", primaryKey.hasEmptyClustering());
+                    try (var sstableIter = segment.sstableContext
+                                           .sstable()
+                                           .iterator(primaryKey.partitionKey(), Slices.ALL, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
+                    {
+                        int rowId = Math.toIntExact(i - segment.metadata.segmentRowIdOffset);
+                        assertTrue(sstableIter.hasNext());
+                        var next = (Row) sstableIter.next();
+                        var vectorData = next.getCell(columnMetadata);
+                        float[] vector = ((VectorType<?>) columnMetadata.type).composeAsFloat(vectorData.buffer());
+                        if (vector == null)
+                        {
+                            nullValueObserved = true;
+                            assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, searcher.getPostingsStructure());
+                            int ordinal = ordinalsView.getOrdinalForRowId(rowId);
+                            assertTrue("Got " + ordinal, ordinal < 0);
+                        }
+                        else
+                        {
+                            VectorFloat<?> vectorFloat = vts.createFloatVector(vector);
+                            hasUniqueVectors &= vectorsSet.add(vectorFloat);
+                            int ordinal = ordinalsView.getOrdinalForRowId(rowId);
+                            // Compare using cosine to ignore magnitude
+                            float sim = view.rerankerFor(vectorFloat, VectorSimilarityFunction.COSINE).similarityTo(ordinal);
+                            assertEquals(1.0f, sim, 0.001f);
+
+                            if (searcher.graph.getCompressedVectors() != null)
+                            {
+                                // Compare using cosine to ignore magnitude
+                                float quantizedSim = searcher.graph.getCompressedVectors()
+                                                                   .scoreFunctionFor(vectorFloat, VectorSimilarityFunction.COSINE)
+                                                                   .similarityTo(ordinal);
+                                // Note that this tolerance failed at 0.001f, but passes at 0.01f. Assuming this is
+                                // reasonable for now.
+                                assertEquals(1.0f, quantizedSim, 0.01f);
+                            }
+                            else
+                            {
+                                // We should only hit this case when we don't have enough rows to build a PQ.
+                                assertTrue("Found " + numRows + " but no PQ", MIN_PQ_ROWS > numRows);
+                            }
+                        }
+                    }
+                }
+
+                assertEquals(vectorsSet.size(), searcher.graph.size());
+
+                // When we have a row with a null vector, it is valid for the missing row vector(s) to be at the
+                // start or end of the sstable, and in that case, we actually skip them within the segment.
+                if (!nullValueObserved && isMissingRows)
+                {
+                    var struct = hasUniqueVectors
+                                 ? V5VectorPostingsWriter.Structure.ONE_TO_ONE
+                                 : V5VectorPostingsWriter.tooManyOrdinalMappingHoles(searcher.graph.size(), numRows)
+                                   ? V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY
+                                   : V5VectorPostingsWriter.Structure.ONE_TO_MANY;
+                    assertEquals(struct, searcher.getPostingsStructure());
+                }
+                else
+                {
+                    assertEquals(expectedStructure, searcher.getPostingsStructure());
+                }
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     private void insertOneToManyRows(int vectorsPerSstable, int sstables)
@@ -299,10 +468,34 @@ abstract public class VectorCompactionTest extends VectorTester
         }
     }
 
+    private void insertOneToOneRows(int vectorsPerSstable, int sstables)
+    {
+        var vectors = new HashSet<Vector<Float>>();
+        int j = 0;
+        for (int i = 0; i < sstables; i++)
+        {
+            for (int k = 0; k < vectorsPerSstable; k++)
+            {
+                Vector<Float> v;
+                do
+                {
+                    v = randomVectorBoxed(dimension()); // ensure no duplicates
+                } while (!vectors.add(v));
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", j++, v);
+            }
+            flush();
+        }
+    }
+
     private void createTable()
     {
+        createTableAndReturnIndexName();
+    }
+
+    private String createTableAndReturnIndexName()
+    {
         createTable("CREATE TABLE %s (pk int, v vector<float, " + dimension() + ">, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        return createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
     }
 
     private void validateQueries()

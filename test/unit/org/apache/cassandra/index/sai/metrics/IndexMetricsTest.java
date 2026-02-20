@@ -23,6 +23,8 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.utils.Throwables;
 
 import javax.management.ObjectName;
@@ -179,6 +181,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
             // Test all Counter metrics
             assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCount", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "CompactionCount", table, index);
+            assertMetricExistsIfEnabled(metricsEnabled, "CompactionTermsProcessedCount", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushErrors", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentFlushErrors", table, index);
             assertMetricExistsIfEnabled(metricsEnabled, "QueriesCount", table, index);
@@ -296,5 +299,147 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
         // Verify the memtable index flush error metric is incremented
         assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushErrors", KEYSPACE, table, index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testIndexFileCacheBytesIncludesAllComponents() throws Throwable
+    {
+        // Create a table with a vector index to ensure we have pq and compressedVectors
+        String table = createTable("CREATE TABLE %s (id INT PRIMARY KEY, v1 VECTOR<FLOAT, 1536>)");
+        String index = createIndex("CREATE CUSTOM INDEX ON %s (v1) USING 'StorageAttachedIndex'");
+
+        // Disable compaction so we can manually control it
+        disableCompaction();
+
+        // Insert some data to populate the index
+        int rowCount = CassandraOnHeapGraph.MIN_PQ_ROWS + 1;
+
+        // Create 4 sstables that do not individually have enough vectors for a PQ, but will together
+        for (int i = 0; i < rowCount; i++)
+        {
+            if (i % (rowCount / 4) == 0)
+                flush();
+            execute("INSERT INTO %s (id, v1) VALUES (?, ?)", i, randomVectorBoxed(1536));
+        }
+
+        // Wait for the index to be queryable
+        waitForTableIndexesQueryable();
+
+        // Verify that IndexFileCacheBytes metric exists and is greater than zero
+        // This metric should now include graph.ramBytesUsed() + pq.ramBytesUsed() + compressedVectors.ramBytesUsed()
+        ObjectName metricName = objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics");
+
+        int bytesPerVector = VectorSourceModel.OTHER.compressionProvider.apply(1536).getCompressedSize();
+        long minPQBytesExpected = bytesPerVector * (long) rowCount;
+
+        // Because we flush half way, we don't have enough vectors for a PQ in either segment
+        long bytesAfterFlush = (long) getMetricValue(metricName);
+        assertTrue("Expected fewer than " + minPQBytesExpected + " bytes but got " + bytesAfterFlush,
+                   minPQBytesExpected >= bytesAfterFlush);
+
+        compact();
+        waitForIndexCompaction(KEYSPACE, table, index);
+
+        // Verify that the bytes contains the compression size. Note that the PQ vectors dominates the memory
+        // consumption significatly, which is what makes this test valid. The test fails if we remove the
+        // compressed vector accounting logic from the CassandraDiskAnn.ramBytesUsed() method.
+        long bytesAfterCompaction = (long) getMetricValue(objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics"));
+        assertTrue("Expected at least " + minPQBytesExpected + " bytes but got " + bytesAfterCompaction,
+                   bytesAfterCompaction >= minPQBytesExpected);
+
+        // Drop the index and confirm the metric is no longer reported.
+        dropIndex("DROP INDEX %s." + index);
+        assertFalse(isMetricPresent(objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testCompactionTermsProcessedCount()
+    {
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        // Initially, the counter should be 0
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Insert rows and flush to create an SSTable
+        int rowCount = 10;
+        for (int i = 0; i < rowCount; i++)
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, ?, '0')", Integer.toString(i), i);
+
+        flush(KEYSPACE, table);
+
+        // Counter should still be 0 after flush (no compaction yet)
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Insert more rows and flush to create another SSTable
+        for (int i = rowCount; i < rowCount * 2; i++)
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, ?, '0')", Integer.toString(i), i);
+
+        flush(KEYSPACE, table);
+
+        // Counter should still be 0 after the second flush (no compaction yet)
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Trigger compaction
+        compact(KEYSPACE, table);
+
+        // Wait for index compaction to complete
+        waitForIndexCompaction(KEYSPACE, table, index);
+
+        // After compaction, the counter should reflect the number of terms processed
+        // Each row has one term (v1 value), so we expect rowCount * 2 terms
+        long termsProcessed = (Long) getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics"));
+        assertEquals(rowCount * 2, termsProcessed);
+
+        // Verify compaction count was also incremented
+        assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testCompactionTermsProcessedCountWithAnalyzer()
+    {
+        // Test with an analyzer that tokenizes text into multiple terms
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 TEXT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex' " +
+                                   "WITH OPTIONS = {'index_analyzer': 'standard'}");
+
+        // Initially, the counter should be 0
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Insert rows with text that will be tokenized into multiple terms
+        // "apple orange banana" -> 3 terms
+        // "hello world" -> 2 terms
+        // "test data" -> 2 terms
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 'apple orange banana', '0')");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 'hello world', '0')");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('3', 'test data', '0')");
+
+        flush(KEYSPACE, table);
+
+        // Counter should still be 0 after flush (no compaction yet)
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Insert more rows and flush to create another SSTable
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('4', 'quick brown fox', '0')");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('5', 'lazy dog', '0')");
+
+        flush(KEYSPACE, table);
+
+        // Trigger compaction
+        compact(KEYSPACE, table);
+
+        // Wait for index compaction to complete
+        waitForIndexCompaction(KEYSPACE, table, index);
+
+        // After compaction, the counter should reflect all tokenized terms
+        // Expected: 3 + 2 + 2 + 3 + 2 = 12 terms
+        long termsProcessed = (Long) getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics"));
+        assertEquals("Expected terms processed to be 12 (tokenized terms) but was " + termsProcessed,
+                   12, termsProcessed);
+
+        // Verify compaction count was also incremented
+        assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
     }
 }

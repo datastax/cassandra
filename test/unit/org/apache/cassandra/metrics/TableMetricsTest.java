@@ -416,6 +416,50 @@ public class TableMetricsTest
 
 
     @Test
+    public void testWriteRequestsCounter()
+    {
+        ColumnFamilyStore cfs = recreateTable();
+
+        // Verify initial state
+        assertEquals(0, cfs.metric.writeRequests.getCount());
+        assertEquals(0, cfs.metric.readRequests.getCount());
+
+        int numOperations = 5;
+
+        // Execute INSERT operations
+        for (int i = 0; i < numOperations; i++)
+            session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, '%s', '%s')",
+                                        KEYSPACE, TABLE, i, "val" + i, "val" + i));
+
+        // Verify writeRequests counter is incremented for inserts
+        assertEquals(numOperations, cfs.metric.writeRequests.getCount());
+        assertEquals(0, cfs.metric.readRequests.getCount());
+
+        // Execute UPDATE operations
+        for (int i = 0; i < numOperations; i++)
+            session.execute(String.format("UPDATE %s.%s SET val2 = '%s' WHERE id = %d AND val1 = '%s'",
+                                        KEYSPACE, TABLE, "updated" + i, i, "val" + i));
+
+        // Verify counter increments for updates
+        assertEquals(numOperations * 2, cfs.metric.writeRequests.getCount());
+
+        // Execute DELETE operations
+        for (int i = 0; i < numOperations; i++)
+            session.execute(String.format("DELETE FROM %s.%s WHERE id = %d AND val1 = '%s'",
+                                        KEYSPACE, TABLE, i, "val" + i));
+
+        // Verify counter increments for deletes
+        assertEquals(numOperations * 3, cfs.metric.writeRequests.getCount());
+
+        // Execute a read to verify writeRequests doesn't increment on reads
+        session.execute(String.format("SELECT * FROM %s.%s WHERE id = 0 AND val1 = 'val0'", KEYSPACE, TABLE));
+
+        // writeRequests should remain the same, readRequests should increment
+        assertEquals(numOperations * 3, cfs.metric.writeRequests.getCount());
+        assertEquals(1, cfs.metric.readRequests.getCount());
+    }
+
+    @Test
     public void testDeleteRequestsMetric()
     {
         ColumnFamilyStore cfs = recreateTable();

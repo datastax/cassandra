@@ -2252,7 +2252,7 @@ abstract public class Plan
         /** Cost to get a scored key from DiskANN (~rerank cost). Affected by cache hit rate */
         public final static double ANN_SCORED_KEY_COST = 15;
 
-        /** Cost to perform a coarse (PQ or BQ) in-memory similarity computation */
+        /** Cost to perform a coarse (PQ) in-memory similarity computation */
         public final static double ANN_SIMILARITY_COST = 0.5;
 
         /** Cost to load the neighbor list for a DiskANN node. Affected by cache hit rate */

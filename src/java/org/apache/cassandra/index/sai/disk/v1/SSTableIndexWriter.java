@@ -31,11 +31,9 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -49,6 +47,7 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
+import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -66,6 +65,7 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext indexContext;
+    private final IndexMetrics indexMetrics;
     private final int nowInSec = FBUtilities.nowInSeconds();
     private final NamedMemoryLimiter limiter;
     private final BooleanSupplier isIndexDropped;
@@ -84,6 +84,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.perIndexComponents = perIndexComponents;
         this.indexContext = perIndexComponents.context();
         Preconditions.checkNotNull(indexContext, "Provided components %s are the per-sstable ones, expected per-index ones", perIndexComponents);
+        this.indexMetrics = indexContext.getIndexMetrics().orElse(null);
         this.limiter = limiter;
         this.isIndexDropped = isIndexDropped;
         this.isIndexUnloaded = isIndexUnloaded;
@@ -273,7 +274,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (term.remaining() == 0 && TypeUtil.skipsEmptyValue(indexContext.getValidator()))
             return false;
 
-        long allocated = currentBuilder.analyzeAndAdd(term, type, key, sstableRowId);
+        long allocated = currentBuilder.analyzeAndAdd(term, type, key, sstableRowId, indexMetrics);
         limiter.increment(allocated);
         return true;
     }
@@ -379,9 +380,6 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         if (indexContext.isVector())
         {
-            int dimension = ((VectorType<?>) indexContext.getValidator()).dimension;
-            boolean bqPreferred = indexContext.getIndexWriterConfig().getSourceModel().compressionProvider.apply(dimension).type == CompressionType.BINARY_QUANTIZATION;
-
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
             var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
@@ -389,12 +387,10 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (pqi == null && !segments.isEmpty())
                 pqi = maybeReadPqFromLastSegment();
 
-            if ((bqPreferred || pqi != null) && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            if (pqi != null && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
             {
-                var compressor = bqPreferred ? new BinaryQuantization(dimension) : pqi.pq;
-                var unitVectors = bqPreferred ? false : pqi.unitVectors;
                 var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, allRowsHaveVectors, limiter);
             }
             else
             {
