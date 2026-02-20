@@ -477,8 +477,7 @@ public class Descriptor {
                     "incompatible sstable version (%s); you should have run upgradesstables before upgrading",
                     versionString);
 
-        File tableDirectory = parentOf(name, file);
-        return fromFilenameWithComponent(tableDirectory, name);
+        return new SSTableInfo(version, id, component);
     }
 
     /**
@@ -521,17 +520,10 @@ public class Descriptor {
                     tokens.get(1));
         }
 
-        String formatString = tokens.get(2);
-        SSTableFormat.Type format;
-        try {
-            format = SSTableFormat.Type.validate(formatString);
-        } catch (RuntimeException e) {
-            throw invalidSSTable(name, "unknown 'format' part (%s)", formatString);
-        }
+        SSTableFormat<?, ?> format = formatFromName(name, tokens);
+        Component component = Component.parse(tokens.get(3), format);
 
-        Component component = Component.parse(tokens.get(3));
-
-        Version version = format.info.getVersion(versionString);
+        Version version = format.getVersion(versionString);
         if (!version.isCompatible())
             throw invalidSSTable(name,
                     "incompatible sstable version (%s); you should have run upgradesstables before upgrading",
@@ -560,7 +552,7 @@ public class Descriptor {
         String table = tableDir.name().split("-")[0] + indexName;
         String keyspace = parentOf(name, tableDir).name();
 
-        return Pair.create(new Descriptor(version, tableDirectory, keyspace, table, id, format), component);
+        return Pair.create(new Descriptor(version, tableDirectory, keyspace, table, id), component);
     }
 
     private static class SSTableInfo {
