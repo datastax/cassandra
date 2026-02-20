@@ -186,6 +186,8 @@ public class NodesPersistence implements INodesPersistence
     public Stream<PeerInfo> loadPeers()
     {
         UntypedResultSet results = QueryProcessor.executeInternal("SELECT * FROM system." + PEERS_V2);
+        if (results == null || results.isEmpty())
+            return Stream.empty();
         return StreamSupport.stream(results.spliterator(), false).map(row -> {
             PeerInfo info = readCommonInfo(new PeerInfo(), row);
             info.setPeerAddressAndPort(readInetAddressAndPort(row, "peer", "peer_port", DatabaseDescriptor.getStoragePort()))
