@@ -220,9 +220,11 @@ public class Nodes
                 throw new RuntimeException("Failed to instantiate " + nodesPersistenceClassName, e);
             }
         }
-        return !DatabaseDescriptor.isDaemonInitialized() || NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.getBoolean()
-               ? INodesPersistence.NO_NODES_PERSISTENCE
-               : new NodesPersistence();
+        if (!DatabaseDescriptor.isDaemonInitialized() || NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.getBoolean())
+            return INodesPersistence.NO_NODES_PERSISTENCE;
+        if (CC4NodesFileReader.hasCC4NodesDirectory())
+            return new CC4UpgradeNodesPersistence();
+        return new NodesPersistence();
     }
 
     @VisibleForTesting
