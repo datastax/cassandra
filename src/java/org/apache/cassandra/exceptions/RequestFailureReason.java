@@ -48,7 +48,12 @@ public enum RequestFailureReason
     UNKNOWN_TABLE            (501),
     REMOTE_STORAGE_FAILURE   (502),
     INDEX_BUILD_IN_PROGRESS  (503),
-    FEATURE_NEEDS_INDEX_REBUILD(504); // The index uses an old version that doesn't support the requested feature
+    /**
+     * The index uses an old version that doesn't support the requested feature.
+     * The problematic old index version can be being used by either the entire index or only some sstables.
+     * Enabling the feature requires setting the right index version and running a sstable upgrade.
+     */
+    FEATURE_NEEDS_INDEX_REBUILD(504);
 
     public static final Serializer serializer = new Serializer();
 
