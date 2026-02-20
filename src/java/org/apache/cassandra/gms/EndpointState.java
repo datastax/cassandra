@@ -256,6 +256,8 @@ public class EndpointState
 
 class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
 {
+    private static final Logger logger = LoggerFactory.getLogger(EndpointStateSerializer.class);
+
     public void serialize(EndpointState epState, DataOutputPlus out, int version) throws IOException
     {
         /* serialize the HeartBeatState */
@@ -318,16 +320,30 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
     {
         assert version < MessagingService.VERSION_40 && !MessagingService.current_version_override;
         VersionedValue vv = state.getValue();
+        if (logger.isTraceEnabled())
+            logger.trace("Fetching the key from state {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
+        String[] values;
         switch (state.getKey())
         {
             case INTERNAL_ADDRESS_AND_PORT:
-                return Map.of(
-                        ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[0], vv.version),
-                        ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+                values = vv.value.split(":");
+                if (values.length > 1)
+                    return Map.of(ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version),
+                                  ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case NATIVE_ADDRESS_AND_PORT:
-                return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+                values = vv.value.split(":");
+                if (values.length > 1)
+                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case STATUS_WITH_PORT:
-                return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value.split("[:,]")[0], vv.version));
+                values = vv.value.split("[:,]");
+                if (values.length > 1)
+                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case DISK_USAGE:
                 return Map.of(ApplicationState.values()[21], state.getValue());
             case SSTABLE_VERSIONS:
@@ -353,6 +369,8 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
             for (Map.Entry<ApplicationState, VersionedValue> state : states.entrySet())
             {
                 VersionedValue vv = state.getValue();
+                if (logger.isTraceEnabled())
+                    logger.trace("Storing the key to state {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
                 switch (state.getKey().ordinal())
                 {
                     case 15: // NATIVE_TRANSPORT_PORT --> NATIVE_ADDRESS_AND_PORT

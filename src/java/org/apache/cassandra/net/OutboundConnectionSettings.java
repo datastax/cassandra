@@ -23,6 +23,9 @@ import java.util.Objects;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.channel.WriteBufferWaterMark;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.Config;
@@ -46,6 +49,8 @@ import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 @SuppressWarnings({ "WeakerAccess", "unused" })
 public class OutboundConnectionSettings
 {
+    private static final Logger logger = LoggerFactory.getLogger(OutboundConnectionSettings.class);
+
     private static final String INTRADC_TCP_NODELAY_PROPERTY = Config.PROPERTY_PREFIX + "otc_intradc_tcp_nodelay";
     /**
      * Enabled/disable TCP_NODELAY for intradc connections. Defaults to enabled.
@@ -527,6 +532,7 @@ public class OutboundConnectionSettings
 
     private static InetAddressAndPort maybeWithSecurePort(InetAddressAndPort address, int messagingVersion, boolean isEncrypted)
     {
+        logger.debug("Selecting port for a connection to {}, encrypted: {}, messaging version: {}", address.address, isEncrypted, messagingVersion);
         if (!isEncrypted || messagingVersion >= VERSION_40)
             return address;
 
@@ -538,6 +544,7 @@ public class OutboundConnectionSettings
         // Also as of 4.0 we will propagate the "regular" port (which will support both SSL and non-SSL) via gossip so
         // for SSL and version 4.0 always connect to the gossiped port because if SSL is enabled it should ALWAYS
         // listen for SSL on the "regular" port.
+        logger.debug("Decided to use ssl storage port for connection to {}", address.address);
         return address.withPort(DatabaseDescriptor.getSSLStoragePort());
     }
 
