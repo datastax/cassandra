@@ -27,6 +27,10 @@ Merged from 4.0:
  * Fix a race condition where a keyspace can be oopened while it is being removed (CASSANDRA-17658)
 
 
+4.0.17
+ * Tighten up permission on system keyspaces (CASSANDRA-20040)
+
+
 4.0.12
  * Migrate Python optparse to argparse (CASSANDRA-17914)
 Merged from 3.11:

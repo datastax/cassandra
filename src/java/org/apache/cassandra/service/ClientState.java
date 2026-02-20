@@ -22,6 +22,7 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
@@ -403,9 +404,12 @@ public class ClientState
 
         preventSystemKSSchemaModification(keyspace, resource, perm);
 
+        // Some system data is always readable
         if ((perm == Permission.SELECT) && READABLE_SYSTEM_RESOURCES.contains(resource))
             return;
 
+        // Modifications to any resource upon which the authenticator, authorizer or role manager depend should not be
+        // be performed by users
         if (PROTECTED_AUTH_RESOURCES.contains(resource))
             if ((perm == Permission.CREATE) || (perm == Permission.ALTER) || (perm == Permission.DROP))
                 throw new UnauthorizedException(String.format("%s schema is protected", resource));
@@ -421,6 +425,24 @@ public class ClientState
         if(resource instanceof FunctionResource && resource.hasParent())
             if (((FunctionResource)resource).getKeyspace().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
                 return;
+
+        if (resource instanceof DataResource && !(user.isSuper() || user.isSystem()))
+        {
+            DataResource dataResource = (DataResource)resource;
+            if (!dataResource.isRootLevel())
+            {
+                String keyspace = dataResource.getKeyspace();
+                // A user may have permissions granted on ALL KEYSPACES, but this should exclude system keyspaces. Any
+                // permission on those keyspaces or their tables must be granted to the user either explicitly or
+                // transitively. The set of grantable permissions for system keyspaces is further limited,
+                // see the Permission enum for details.
+                if (SchemaConstants.isSystemKeyspace(keyspace))
+                {
+                    ensurePermissionOnResourceChain(perm, Resources.chain(dataResource, IResource::hasParent));
+                    return;
+                }
+            }
+        }
 
         ensurePermissionOnResourceChain(perm, resource);
     }
@@ -444,7 +466,13 @@ public class ClientState
 
     private void ensurePermissionOnResourceChain(Permission perm, IResource resource)
     {
-        for (IResource r : Resources.chain(resource))
+        ensurePermissionOnResourceChain(perm, Resources.chain(resource));
+    }
+
+    private void ensurePermissionOnResourceChain(Permission perm, List<? extends IResource> resources)
+    {
+        IResource resource = resources.get(0);
+        for (IResource r : resources)
             if (authorize(r).contains(perm))
                 return;
 
