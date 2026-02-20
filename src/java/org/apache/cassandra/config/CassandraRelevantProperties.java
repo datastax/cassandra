@@ -453,6 +453,15 @@ public enum CassandraRelevantProperties
     // Higher percentages will result in more memory utilized to store the extra postings mappings and larger graph
     // file sizes to store the empty nodes.
     SAI_VECTOR_ORDINAL_HOLE_DENSITY_LIMIT("cassandra.sai.vector.ordinal_hole_density_limit", "0.01"),
+
+    /**
+     * Number of threads to use for asynchronous vector index building during compaction.
+     * - Default: all available processors (for dedicated compactors)
+     * - Can be set to 1 for shared compactors to limit resource usage
+     * - Can be set to 0 to disable async processing (synchronous mode)
+     */
+    SAI_VECTOR_INDEX_BUILD_THREADS("cassandra.sai.vector_index_build_threads", String.valueOf(Runtime.getRuntime().availableProcessors())),
+
     /**
      * Whether to disable auto-compaction
      */

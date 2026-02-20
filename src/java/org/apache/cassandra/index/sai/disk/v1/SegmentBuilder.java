@@ -39,8 +39,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.quantization.VectorCompressor;
-import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
+import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -81,12 +82,49 @@ public abstract class SegmentBuilder
 {
     private static final Logger logger = LoggerFactory.getLogger(SegmentBuilder.class);
 
-    /** for parallelism within a single compaction */
-    public static final ExecutorService compactionExecutor = new DebuggableThreadPoolExecutor(Runtime.getRuntime().availableProcessors(),
-                                                                                              1,
-                                                                                              TimeUnit.MINUTES,
-                                                                                              new ArrayBlockingQueue<>(10 * Runtime.getRuntime().availableProcessors()),
-                                                                                              new NamedThreadFactory("SegmentBuilder", Thread.MIN_PRIORITY));
+    /**
+     * Thread pool for async vector index building during compaction.
+     * When thread count is 0 or less, executor is null and operations are synchronous.
+     */
+    @VisibleForTesting
+    public static volatile ExecutorService compactionExecutor = createCompactionExecutor();
+
+    /**
+     * Creates an executor for async vector index building during compaction.
+     * The queue size is calculated as 10 * threadPoolSize. This provides sufficient
+     * buffering to prevent blocking while allowing backpressure when the queue fills.
+     *
+     * @return an {@link ExecutorService} or {@code null} if threads <= 0
+     */
+    @VisibleForTesting
+    @Nullable
+    public static ExecutorService createCompactionExecutor()
+    {
+        int threads = CassandraRelevantProperties.SAI_VECTOR_INDEX_BUILD_THREADS.getInt();
+        
+        if (threads <= 0)
+        {
+            logger.info("Vector index building will run synchronously (SAI_VECTOR_INDEX_BUILD_THREADS={})", threads);
+            return null;
+        }
+
+        logger.info("Creating vector index building thread pool with {} threads", threads);
+        return new JMXEnabledThreadPoolExecutor(
+        threads,
+        threads,
+        1,
+        TimeUnit.MINUTES,
+        new ArrayBlockingQueue<>(10 * threads),
+        new NamedThreadFactory("VectorIndexBuild", Thread.MIN_PRIORITY),
+        "request");
+    }
+
+    @VisibleForTesting
+    @Nullable
+    public static ExecutorService getCompactionExecutor()
+    {
+        return compactionExecutor;
+    }
 
     // Served as safe net in case memory limit is not triggered or when merger merges small segments..
     public static final long LAST_VALID_SEGMENT_ROW_ID = ((long)Integer.MAX_VALUE / 2) - 1L;
@@ -132,7 +170,6 @@ public abstract class SegmentBuilder
     protected final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
     protected AtomicReference<Throwable> asyncThrowable = new AtomicReference<>();
 
-
     public boolean requiresFlush()
     {
         return false;
@@ -153,7 +190,8 @@ public abstract class SegmentBuilder
             this.buffer = new byte[typeSize];
             this.indexWriterConfig = indexWriterConfig;
             totalBytesAllocated = kdTreeRamBuffer.ramBytesUsed();
-            totalBytesAllocatedConcurrent.add(totalBytesAllocated);}
+            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+        }
 
         public boolean isEmpty()
         {
@@ -280,7 +318,21 @@ public abstract class SegmentBuilder
         @Override
         protected long addInternal(List<ByteBuffer> terms, int segmentRowId)
         {
-            throw new UnsupportedOperationException();
+            assert terms.size() == 1;
+
+            CompactionGraph.InsertionResult result;
+            try
+            {
+                result = graphIndex.maybeAddVector(terms.get(0), segmentRowId);
+            }
+            catch (IOException e)
+            {
+                throw new UncheckedIOException(e);
+            }
+            if (result.vector == null)
+                return result.bytesUsed;
+
+            return result.bytesUsed + graphIndex.addGraphNode(result);
         }
 
         @Override
@@ -303,8 +355,12 @@ public abstract class SegmentBuilder
             if (result.vector == null)
                 return result.bytesUsed;
 
+            ExecutorService executor = getCompactionExecutor();
+            assert executor != null : "addInternalAsync should not be called when supportsAsyncAdd() returns false";
+
+            // Async mode - submit to thread pool
             updatesInFlight.incrementAndGet();
-            compactionExecutor.submit(() -> {
+            executor.submit(() -> {
                 try
                 {
                     long bytesAdded = result.bytesUsed + graphIndex.addGraphNode(result);
@@ -313,19 +369,21 @@ public abstract class SegmentBuilder
                 }
                 catch (Throwable th)
                 {
-                    asyncThrowable.compareAndExchange(null, th);
+                    asyncThrowable.compareAndSet(null, th);
                 }
                 finally
                 {
                     updatesInFlight.decrementAndGet();
                 }
             });
+
             // bytes allocated will be approximated immediately as the average of recently added terms,
             // rather than waiting until the async update completes to get the exact value.  The latter could
             // result in a dangerously large discrepancy between the amount of memory actually consumed
             // and the amount the limiter knows about if the queue depth grows.
             busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
-            if (asyncThrowable.get() != null) {
+            if (asyncThrowable.get() != null)
+            {
                 throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
             }
             return (long) termSizeReservoir.getMean();
@@ -343,7 +401,7 @@ public abstract class SegmentBuilder
         @Override
         public boolean supportsAsyncAdd()
         {
-            return true;
+            return CassandraRelevantProperties.SAI_VECTOR_INDEX_BUILD_THREADS.getInt() > 0;
         }
 
         @Override
@@ -395,8 +453,12 @@ public abstract class SegmentBuilder
         @Override
         protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
         {
+            ExecutorService executor = getCompactionExecutor();
+            assert executor != null : "addInternalAsync should not be called when supportsAsyncAdd() returns false";
+
+            // Async mode - submit to thread pool
             updatesInFlight.incrementAndGet();
-            compactionExecutor.submit(() -> {
+            executor.submit(() -> {
                 try
                 {
                     long bytesAdded = addInternal(terms, segmentRowId);
@@ -405,19 +467,21 @@ public abstract class SegmentBuilder
                 }
                 catch (Throwable th)
                 {
-                    asyncThrowable.compareAndExchange(null, th);
+                    asyncThrowable.compareAndSet(null, th);
                 }
                 finally
                 {
                     updatesInFlight.decrementAndGet();
                 }
             });
+
             // bytes allocated will be approximated immediately as the average of recently added terms,
             // rather than waiting until the async update completes to get the exact value.  The latter could
             // result in a dangerously large discrepancy between the amount of memory actually consumed
             // and the amount the limiter knows about if the queue depth grows.
             busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
-            if (asyncThrowable.get() != null) {
+            if (asyncThrowable.get() != null)
+            {
                 throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
             }
             return (long) termSizeReservoir.getMean();
@@ -437,7 +501,7 @@ public abstract class SegmentBuilder
         @Override
         public boolean supportsAsyncAdd()
         {
-            return true;
+            return CassandraRelevantProperties.SAI_VECTOR_INDEX_BUILD_THREADS.getInt() > 0;
         }
     }
 
@@ -558,10 +622,12 @@ public abstract class SegmentBuilder
         throw new UnsupportedOperationException();
     }
 
-    public boolean supportsAsyncAdd() {
+    public boolean supportsAsyncAdd()
+    {
         return false;
     }
 
+    @Nullable
     public Throwable getAsyncThrowable()
     {
         return asyncThrowable.get();
@@ -570,7 +636,7 @@ public abstract class SegmentBuilder
     public void awaitAsyncAdditions()
     {
         // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
-        // terms being added while we're waiting -- updatesInFlight can only decrease
+        // terms being added while we're waiting -- updatesInFlight works as a counter of pending tasks for this builder.
         busyWaitWhile(() -> updatesInFlight.get() > 0);
     }
 
