@@ -14,7 +14,7 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<project basedir="." default="jar" name="dse-db"
+<project basedir="." default="jar" name="ds-db"
          xmlns:artifact="antlib:org.apache.maven.artifact.ant"
          xmlns:if="ant:if"
          xmlns:unless="ant:unless">
@@ -552,8 +552,8 @@
             description="Define dependencies and dependency versions">
       <!-- The parent pom defines the versions of all dependencies -->
       <artifact:pom id="parent-pom"
-                    groupId="com.datastax.dse"
-                    artifactId="dse-db-parent"
+                    groupId="com.datastax.db"
+                    artifactId="db-parent"
                     packaging="pom"
                     version="${version}"
                     url="https://datastax.com"
@@ -646,7 +646,7 @@
 
           <dependency groupId="org.apache.ant" artifactId="ant-junit" version="1.10.12" scope="test"/>
 
-          <dependency groupId="com.datastax.dse" artifactId="dse-db-all" version="${version}" />
+          <dependency groupId="com.datastax.db" artifactId="db-all" version="${version}" />
           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-core" version="3.1.5" />
           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-jvm" version="3.1.5" />
           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-logback" version="3.1.5" />
@@ -804,8 +804,8 @@
       <!-- each dependency set then defines the subset of the dependencies for that dependency set -->
       <artifact:pom id="build-deps-pom"
                     artifactId="cassandra-build-deps">
-        <parent groupId="com.datastax.dse"
-                artifactId="dse-db-parent"
+        <parent groupId="com.datastax.db"
+                artifactId="db-parent"
                 version="${version}"
                 relativePath="${final.name}-parent.pom"/>
 
@@ -840,11 +840,11 @@
 
       <!-- now the pom's for artifacts being deployed to Maven Central -->
       <artifact:pom id="all-pom"
-                    artifactId="dse-db-all"
+                    artifactId="db-all"
                     url="https://datastax.com"
                     name="DataStax DB">
-        <parent groupId="com.datastax.dse"
-                artifactId="dse-db-parent"
+        <parent groupId="com.datastax.db"
+                artifactId="db-parent"
                 version="${version}"
                 relativePath="${final.name}-parent.pom"/>
         <scm connection="${scm.connection}" developerConnection="${scm.developerConnection}" url="${scm.url}"/>
