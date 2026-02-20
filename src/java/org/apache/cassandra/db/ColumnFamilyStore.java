@@ -1598,6 +1598,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public void apply(PartitionUpdate update, CassandraWriteContext context, boolean updateIndexes)
     {
         long start = System.nanoTime();
+        metric.writeRequests.inc();
         OpOrder.Group opGroup = context.getGroup();
         CommitLogPosition commitLogPosition = context.getPosition();
         try
