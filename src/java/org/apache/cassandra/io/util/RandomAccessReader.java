@@ -25,6 +25,7 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.io.compress.BufferType;
@@ -61,8 +62,15 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
      */
     public void reBuffer()
     {
+        Preconditions.checkState(!buffer.hasRemaining(), "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
+
         if (isEOF())
+        {
+            bufferHolder.release();
+            bufferHolder = Rebufferer.emptyBufferHolderAt(length());
+            buffer = bufferHolder.buffer();
             return;
+        }
 
         reBufferAt(current());
     }
@@ -83,6 +91,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             buffer = bufferHolder.buffer();
             buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
             buffer.order(order);
+            assert buffer.remaining() > 0: "Buffer must be non empty after rebuffering at " + position;
         }
     }
 

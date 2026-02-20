@@ -19,6 +19,8 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 
+import com.google.common.base.Preconditions;
+
 /**
  * Input stream around a single ByteBuffer.
  */
@@ -58,7 +60,8 @@ public class DataInputBuffer extends RebufferingInputStream
     @Override
     protected void reBuffer()
     {
-        //nope, we don't rebuffer, we are done!
+        Preconditions.checkState(!buffer.hasRemaining(), "reBuffer called with remaining bytes: %s", buffer.remaining());
+        // nope, we don't rebuffer, we are done!
     }
 
     @Override
