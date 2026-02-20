@@ -43,11 +43,11 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
-implements RequestCallback<ReadResponse>
+public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>> implements RequestCallback<ReadResponse>
 {
     protected static final Logger logger = LoggerFactory.getLogger(ReadCallback.class);
     private static final AtomicIntegerFieldUpdater<ReadCallback> failuresUpdater = AtomicIntegerFieldUpdater
@@ -135,7 +135,6 @@ implements RequestCallback<ReadResponse>
         boolean failed = failures > 0 && (blockFor > received || !resolver.isDataPresent());
         if (signaled && !failed)
             return;
-
         if (Tracing.isTracing())
         {
             String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
@@ -144,8 +143,8 @@ implements RequestCallback<ReadResponse>
             long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(clock.now() - queryStartNanoTime);
             long timeoutMillis = TimeUnit.MILLISECONDS.convert(
             command.getTimeout(TimeUnit.NANOSECONDS), TimeUnit.NANOSECONDS);
-
-            if (!failureReasonByEndpoint.isEmpty()) {
+            if (!failureReasonByEndpoint.isEmpty())
+            {
                 for (Map.Entry<InetAddressAndPort, RequestFailureReason> entry : failureReasonByEndpoint.entrySet())
                 {
                     logger.trace(
@@ -162,14 +161,12 @@ implements RequestCallback<ReadResponse>
                              timeoutMillis - elapsedMillis,
                              replicaPlan().contacts());
             }
-
         }
         else if (logger.isDebugEnabled())
         {
             String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
             logger.debug("{}; received {} of {} responses{}", failed ? "Failed" : "Timed out", received, blockFor, gotData);
         }
-
         // Same as for writes, see AbstractWriteResponseHandler
         throw failed
               ? new ReadFailureException(replicaPlan().consistencyLevel(), received, blockFor, resolver.isDataPresent(), failureReasonByEndpoint)
@@ -185,9 +182,7 @@ implements RequestCallback<ReadResponse>
     public void onResponse(Message<ReadResponse> message)
     {
         assertWaitingFor(message.from());
-
         resolver.preprocess(message);
-
         trackReplicaResponseSize(message);
 
         /*
@@ -202,14 +197,12 @@ implements RequestCallback<ReadResponse>
 
     /**
      * Track the size of a response message from a replica
-     *
      * @param message the response message
      */
     private void trackReplicaResponseSize(Message<ReadResponse> message)
     {
         if (!ReplicaResponseSizeMetrics.isMetricsEnabled())
             return;
-
         // Only track remote responses (local responses have null from field)
         // check that we have a valid payload and serializer and the response type supports size tracking
         if (message != null && message.from() != null && message.payload != null
@@ -238,7 +231,6 @@ implements RequestCallback<ReadResponse>
     public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
     {
         assertWaitingFor(from);
-
         failureReasonByEndpoint.put(from, failureReason);
 
         int numContacts = replicaPlan().contacts().size();

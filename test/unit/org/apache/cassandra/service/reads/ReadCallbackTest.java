@@ -21,41 +21,31 @@ import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
-
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.MultiRangeReadCommand;
-import org.apache.cassandra.db.MultiRangeReadResponse;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SimpleBuilders;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.partitions.SingletonUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryInfoTracker;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -71,7 +61,6 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-
 /**
  * Integration tests for ReadCallback replica response size metrics tracking.
  * This test class verifies that read responses from replicas are properly tracked in metrics.
@@ -81,7 +70,6 @@ public class ReadCallbackTest extends AbstractReadResponseTest
     private SinglePartitionReadCommand command;
     private EndpointsForToken targetReplicas;
     private ListAppender<ILoggingEvent> logAppender;
-
     @Before
     public void setUp()
     {
@@ -90,7 +78,6 @@ public class ReadCallbackTest extends AbstractReadResponseTest
         command = SinglePartitionReadCommand.fullPartitionRead(cfm, nowInSec, dk);
         targetReplicas = EndpointsForToken.of(dk.getToken(), full(EP1), full(EP2), full(EP3));
     }
-
     /**
      * Test that read response metrics are properly collected for remote responses
      */
@@ -100,23 +87,18 @@ public class ReadCallbackTest extends AbstractReadResponseTest
         long initialTotalBytes = ReplicaResponseSizeMetrics.totalBytesReceived.getCount();
         long initialReadBytes = ReplicaResponseSizeMetrics.readResponseBytesReceived.getCount();
         long initialHistogramCount = ReplicaResponseSizeMetrics.readResponseBytesPerResponse.getCount();
-
         ReplicaPlan.SharedForTokenRead plan = plan(ConsistencyLevel.QUORUM, targetReplicas);
         DigestResolver<EndpointsForToken, ReplicaPlan.ForTokenRead> resolver =
             new DigestResolver<>(command, plan, queryStartNanoTime(), noopReadTracker());
         ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> callback =
             new ReadCallback<>(resolver, command, plan, queryStartNanoTime());
-
         PartitionUpdate.Builder updateBuilder = PartitionUpdate.builder(cfm, dk, cfm.regularAndStaticColumns(), 1);
         updateBuilder.add(createRow(1000, 1, "value1"));
         PartitionUpdate update = updateBuilder.build();
         ReadResponse readResponse = command.createResponse(iter(update), command.executionController().getRepairedDataInfo());
-
         callback.onResponse(createReadResponseMessage(readResponse, EP1));
         callback.onResponse(createReadResponseMessage(readResponse, EP2));
-
         callback.awaitResults();
-
         assertTrue("Total bytes metric should have increased",
                    ReplicaResponseSizeMetrics.totalBytesReceived.getCount() > initialTotalBytes);
         assertTrue("Read bytes metric should have increased",
@@ -124,8 +106,6 @@ public class ReadCallbackTest extends AbstractReadResponseTest
         assertTrue("Histogram count should have increased by at least 2",
                    ReplicaResponseSizeMetrics.readResponseBytesPerResponse.getCount() >= initialHistogramCount + 2);
     }
-
-
     /**
      * Test that read response metrics track all responses, including those after consistency is met
      */
@@ -133,26 +113,21 @@ public class ReadCallbackTest extends AbstractReadResponseTest
     public void testReadResponseMetricsTracksAllResponses() throws Throwable
     {
         long initialHistogramCount = ReplicaResponseSizeMetrics.readResponseBytesPerResponse.getCount();
-
         ReplicaPlan.SharedForTokenRead plan = plan(ConsistencyLevel.QUORUM, targetReplicas);
         DigestResolver<EndpointsForToken, ReplicaPlan.ForTokenRead> resolver =
             new DigestResolver<>(command, plan, queryStartNanoTime(), noopReadTracker());
         ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> callback =
             new ReadCallback<>(resolver, command, plan, queryStartNanoTime());
-
         PartitionUpdate.Builder updateBuilder = PartitionUpdate.builder(cfm, dk, cfm.regularAndStaticColumns(), 1);
         updateBuilder.add(createRow(1000, 1, "value1"));
         PartitionUpdate update = updateBuilder.build();
         ReadResponse readResponse = command.createResponse(iter(update), command.executionController().getRepairedDataInfo());
-
         callback.onResponse(createReadResponseMessage(readResponse, EP1));
         callback.onResponse(createReadResponseMessage(readResponse, EP2));
         callback.onResponse(createReadResponseMessage(readResponse, EP3)); // Extra response after consistency met
-
         assertTrue("All responses should be tracked, not just those meeting consistency",
                    ReplicaResponseSizeMetrics.readResponseBytesPerResponse.getCount() >= initialHistogramCount + 3);
     }
-
     /**
      * Test that metrics collection handles unsupported responses
      */
@@ -164,17 +139,14 @@ public class ReadCallbackTest extends AbstractReadResponseTest
             new DigestResolver<>(command, plan, queryStartNanoTime(), noopReadTracker());
         ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> callback =
             new ReadCallback<>(resolver, command, plan, queryStartNanoTime());
-
         // Test with a response that doesn't support size tracking
         ReadResponse unsupportedResponse = new TestUnsupportedReadResponse();
         Message<ReadResponse> message = Message.builder(Verb.READ_RSP, unsupportedResponse)
                                                .from(EP1)
                                                .build();
-
         // This should not throw an exception even though the response doesn't support tracking
         callback.onResponse(message);
     }
-
     /**
      * Test that MultiRangeReadResponse doesn't cause exceptions in metrics tracking
      */
