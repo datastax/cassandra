@@ -26,6 +26,7 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.roaringbitmap.RoaringBitmap;
 
 /**
  * Reads vectors from a file indexed by ordinal position.
@@ -50,6 +51,7 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     private final ExplicitThreadLocal<RandomAccessReader> threadLocalRandomAccessReader;
     private final int dimension;
     private final long vectorSize;
+    private final RoaringBitmap presentOrdinals;
 
     /**
      * Creates a new reader for vectors of the specified dimension.
@@ -59,9 +61,22 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
      */
     public OnDiskVectorValues(File file, int dimension)
     {
+        this(file, dimension, null);
+    }
+
+    /**
+     * Creates a new reader for vectors of the specified dimension with a BitSet indicating which ordinals have vectors.
+     *
+     * @param file the file containing vectors written by VectorByOrdinalWriter
+     * @param dimension the dimension of vectors in the file
+     * @param presentOrdinals BitSet indicating which ordinals have vectors, or null if all ordinals have vectors
+     */
+    public OnDiskVectorValues(File file, int dimension, RoaringBitmap presentOrdinals)
+    {
         this.threadLocalRandomAccessReader = ExplicitThreadLocal.withInitial(() -> RandomAccessReader.open(file));
         this.dimension = dimension;
         this.vectorSize = (long) dimension * Float.BYTES;
+        this.presentOrdinals = presentOrdinals;
     }
 
     /**
@@ -87,12 +102,15 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
      * Reads and returns the vector at the specified ordinal position.
      *
      * @param ordinal the ordinal position to read from
-     * @return the vector at the specified position
+     * @return the vector at the specified position, or null if no vector was written at this ordinal
      * @throws RuntimeException if an I/O error occurs
      */
     @Override
     public VectorFloat<?> getVector(int ordinal)
     {
+        if (presentOrdinals != null && !presentOrdinals.contains(ordinal))
+            return null;
+
         try
         {
             var reader = threadLocalRandomAccessReader.get();

@@ -45,6 +45,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
+import org.roaringbitmap.RoaringBitmap;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -114,7 +115,12 @@ public class V5VectorPostingsWriter<T>
      * vectors to disk as they are added to the graph, so there is no opportunity to reorder the way there is
      * in a Memtable index.
      */
-    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, int maxRowId, int maxOrdinal, ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
+    public static RemappedPostings describeForCompaction(Structure structure,
+                                                         int graphSize,
+                                                         int maxRowId,
+                                                         int maxOrdinal,
+                                                         ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap,
+                                                         RoaringBitmap presentOrdinals)
     {
         assert !postingsMap.isEmpty(); // flush+compact should skip writing an index component in this case
 
@@ -128,6 +134,10 @@ public class V5VectorPostingsWriter<T>
                                         new OrdinalMapper.IdentityMapper(graphSize - 1));
         }
 
+        // A missing presentOrdinals bitmap indicates all ordinals are present
+        IntPredicate isMissingOrdinal = presentOrdinals == null ? (i) -> false
+                                                                : (i) -> !presentOrdinals.contains(i);
+
         if (structure == Structure.ONE_TO_MANY)
         {
             // compute extraOrdinals from the postingsMap
@@ -136,17 +146,21 @@ public class V5VectorPostingsWriter<T>
                 VectorPostings.CompactionVectorPostings.Marshaller.recordExtraOrdinals(entry, extraOrdinals);
             });
 
-            var skippedOrdinals = extraOrdinals.keySet();
             return new RemappedPostings(Structure.ONE_TO_MANY,
                                         maxOrdinal,
                                         maxRowId,
                                         null,
                                         extraOrdinals,
-                                        new OmissionAwareIdentityMapper(maxOrdinal, skippedOrdinals::contains));
+                                        new OmissionAwareIdentityMapper(maxOrdinal, isMissingOrdinal));
         }
 
         assert structure == Structure.ZERO_OR_ONE_TO_MANY : structure;
-        return createGenericIdentityMapping(postingsMap, maxRowId, maxOrdinal);
+        return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
+                                    maxOrdinal,
+                                    maxRowId,
+                                    null,
+                                    null,
+                                    new OmissionAwareIdentityMapper(maxOrdinal, isMissingOrdinal));
     }
 
     public long writePostings(SequentialWriter writer,
@@ -480,26 +494,6 @@ public class V5VectorPostingsWriter<T>
         return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
                                     maxOldOrdinal,
                                     maxRow,
-                                    null,
-                                    null,
-                                    new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
-    }
-
-    /**
-     * return an exhaustive zero-to-many mapping with no renumbering
-     */
-    public static RemappedPostings createGenericIdentityMapping(ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, int maxRowId, int maxOldOrdinal)
-    {
-        var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
-
-        // Iterate the whole map using the low level API that avoids deserialization penalties.
-        postingsMap.forEachEntry(entry -> {
-            presentOrdinals.set(VectorPostings.CompactionVectorPostings.Marshaller.extractOrdinal(entry));
-        });
-
-        return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
-                                    maxOldOrdinal,
-                                    maxRowId,
                                     null,
                                     null,
                                     new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
