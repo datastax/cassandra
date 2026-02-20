@@ -1,6 +1,6 @@
 ### Checklist before you submit for review
 - [ ] This PR adheres to [the Definition of Done](https://github.com/riptano/cndb/blob/main/DEFINITION_OF_DONE.md)
-- [ ] Make sure there is a PR in the CNDB project updating the Converged Cassandra version
+- [ ] Make sure there is a PR and ticket in the CNDB project updating the Converged Cassandra version
 - [ ] Use `NoSpamLogger` for log lines that may appear frequently in the logs
 - [ ] Verify test results on Butler
 - [ ] Test coverage for new/modified code is > 80%
