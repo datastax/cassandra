@@ -444,6 +444,10 @@ public class CompactionGraph implements Closeable, Accountable
 
         try
         {
+            // The likely limiting factor in terms of memory utilization is the compactionExecutor's blocking queue
+            // or the speed at which we can read from disk. We have not accounted for the graph's memory consumption
+            // yet, but each fp vector is expected to take up significantly more memory than its corresponding
+            // node in memory, so there should be no issue in terms of memory consumption.
             var futures = new ArrayDeque<Future<Long>>();
             for (int i = 0; i < onDiskVectorValues.size(); i++)
             {
