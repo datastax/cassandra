@@ -358,9 +358,9 @@ public abstract class SortedTableWriter extends SSTableWriter
         // need to move this inside the `try` so that the `storageHandler` callback can intercept reading issues.
         // Which would imply being able to get at the compressed/uncompressed sizes upfront (directly from the
         // writer, without reading the compression metadata written file) in some other way.
-        dataFile.updateFileHandle(dbuilder);
-
-        FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
+        FileHandle dfile = dataFile.updateFileHandle(dbuilder)
+                                   .bufferSize(dataBufferSize)
+                                   .complete();
         invalidateCacheAtPreviousBoundary(dfile, Long.MAX_VALUE);
 
         DecoratedKey firstMinimized = getMinimalKey(first);

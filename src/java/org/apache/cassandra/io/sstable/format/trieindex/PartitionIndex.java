@@ -94,7 +94,7 @@ public class PartitionIndex implements Closeable
         this.version = version;
     }
 
-    private PartitionIndex(PartitionIndex src)
+    protected PartitionIndex(PartitionIndex src)
     {
         this(src.fh, src.root, src.keyCount, src.first, src.last, src.filterFirst, src.filterLast, src.version);
     }
