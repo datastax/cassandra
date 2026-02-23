@@ -93,8 +93,15 @@ public class ForceRepairTest extends TestBaseImpl
                 {
                     throw new RuntimeException(e);
                 }
+                
+                // Wait for node to be marked down, with timeout to prevent infinite hangs in CI
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
                 while (FailureDetector.instance.isAlive(neighbor))
+                {
+                    if (System.nanoTime() > deadline)
+                        throw new AssertionError("Node " + neighbor + " not marked as down within 30 seconds");
                     Uninterruptibles.sleepUninterruptibly(500, TimeUnit.MILLISECONDS);
+                }
             });
 
 
