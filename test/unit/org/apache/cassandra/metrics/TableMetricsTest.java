@@ -429,7 +429,7 @@ public class TableMetricsTest
         // Execute INSERT operations
         for (int i = 0; i < numOperations; i++)
             session.execute(String.format("INSERT INTO %s.%s (id, val1, val2) VALUES (%d, '%s', '%s')",
-                    KEYSPACE, TABLE, i, "val" + i, "val" + i));
+                                          KEYSPACE, TABLE, i, "val" + i, "val" + i));
 
         // Verify writeRequests counter is incremented for inserts
         assertEquals(numOperations, cfs.metric.writeRequests.getCount());
@@ -438,7 +438,7 @@ public class TableMetricsTest
         // Execute UPDATE operations
         for (int i = 0; i < numOperations; i++)
             session.execute(String.format("UPDATE %s.%s SET val2 = '%s' WHERE id = %d AND val1 = '%s'",
-                    KEYSPACE, TABLE, "updated" + i, i, "val" + i));
+                                          KEYSPACE, TABLE, "updated" + i, i, "val" + i));
 
         // Verify counter increments for updates
         assertEquals(numOperations * 2, cfs.metric.writeRequests.getCount());
@@ -446,7 +446,7 @@ public class TableMetricsTest
         // Execute DELETE operations
         for (int i = 0; i < numOperations; i++)
             session.execute(String.format("DELETE FROM %s.%s WHERE id = %d AND val1 = '%s'",
-                    KEYSPACE, TABLE, i, "val" + i));
+                                          KEYSPACE, TABLE, i, "val" + i));
 
         // Verify counter increments for deletes
         assertEquals(numOperations * 3, cfs.metric.writeRequests.getCount());
