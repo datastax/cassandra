@@ -71,6 +71,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringBuilder;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
@@ -832,6 +833,12 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                           long nowInSeconds,
                           Dispatcher.RequestTime requestTime)
     {
+        if (type == StatementType.DELETE && !metadata.isVirtual())
+        {
+            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
+            cfs.metric.deleteRequests.inc();
+        }
+
         if (hasSlices())
         {
             Slices slices = createSlices(options);
