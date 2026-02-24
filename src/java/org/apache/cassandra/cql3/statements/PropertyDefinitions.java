@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import javax.annotation.Nullable;
@@ -33,7 +34,9 @@ public class PropertyDefinitions
     public static final String MULTIPLE_DEFINITIONS_ERROR = "Multiple definitions for property '%s'";
     private static final Pattern POSITIVE_PATTERN = Pattern.compile("(1|true|yes)");
     private static final Pattern NEGATIVE_PATTERN = Pattern.compile("(0|false|no)");
-    
+    private static final Map<String, Long> OBSOLETE_PROPERTY_LOG_TIME = new ConcurrentHashMap<>();
+    private static long OBSOLETE_PROPERTY_LOG_INTERVAL_MS = 30_000;
+
     protected static final Logger logger = LoggerFactory.getLogger(PropertyDefinitions.class);
 
     protected final Map<String, Object> properties = new HashMap<>();
@@ -64,7 +67,16 @@ public class PropertyDefinitions
                 continue;
 
             if (obsolete.contains(name))
-                logger.warn("Ignoring obsolete property {}", name);
+            {
+                long now = System.currentTimeMillis();
+                Long lastLogged = OBSOLETE_PROPERTY_LOG_TIME.get(name);
+
+                if (lastLogged == null || (now - lastLogged) >= OBSOLETE_PROPERTY_LOG_INTERVAL_MS)
+                {
+                    logger.warn("Ignoring obsolete property {}", name);
+                    OBSOLETE_PROPERTY_LOG_TIME.put(name, now);
+                }
+            }
             else
                 throw new SyntaxException(String.format("Unknown property '%s'", name));
         }
