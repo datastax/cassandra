@@ -1095,6 +1095,7 @@ public enum CassandraRelevantProperties
     UCS_PARALLELIZE_OUTPUT_SHARDS("unified_compaction.parallelize_output_shards", "true"),
     UCS_RESERVATIONS_TYPE_OPTION("unified_compaction.reservations_type_option", Reservations.Type.LEVEL_OR_BELOW.name()),
     UCS_RESERVED_THREADS("reserved_threads", "max"),
+    UCS_SCALING_PARAMETER_PERSISTENCE("unified_compaction.scaling_parameter_persistence", "true"),
     UCS_SHARED_STORAGE("unified_compaction.shared_storage", "false"),
     UCS_SSTABLE_GROWTH("unified_compaction.sstable_growth", "0.333"),
     UCS_STATIC_SCALING_PARAMETERS("unified_compaction.scaling_parameters", "T4"),
