@@ -191,12 +191,13 @@ public class MessageTest
     public void testFailureResponse() throws IOException
     {
         long expiresAt = approxTime.now();
-        Message<RequestFailureReason> msg = Message.failureResponse(1, expiresAt, RequestFailureReason.INCOMPATIBLE_SCHEMA);
+        Message<RequestFailureReason> msg = Message.failureResponse(1, expiresAt, RequestFailureReason.INCOMPATIBLE_SCHEMA, Verb.MUTATION_REQ);
 
         assertEquals(1, msg.id());
         assertEquals(Verb.FAILURE_RSP, msg.verb());
         assertEquals(expiresAt, msg.expiresAtNanos());
         assertEquals(RequestFailureReason.INCOMPATIBLE_SCHEMA, msg.payload);
+        assertEquals(Verb.MUTATION_REQ.name(), msg.header.params().get(ParamType.REQUEST_VERB_NAME));
         assertTrue(msg.isFailureResponse());
 
         testCycle(msg);

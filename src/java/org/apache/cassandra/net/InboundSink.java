@@ -22,14 +22,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Predicate;
 
-import org.apache.cassandra.index.IndexBuildInProgressException;
-import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.slf4j.LoggerFactory;
 
 import net.openhft.chronicle.core.util.ThrowingConsumer;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
+import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -87,7 +87,8 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
             InetAddressAndPort to = header.respondTo() != null ? header.respondTo() : header.from;
             Message<RequestFailureReason> response = Message.failureResponse(header.id,
                                                                              header.expiresAtNanos,
-                                                                             RequestFailureReason.forException(failure));
+                                                                             RequestFailureReason.forException(failure),
+                                                                             header.verb);
             messaging.send(response, to);
         }
     }

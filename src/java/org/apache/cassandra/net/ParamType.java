@@ -19,7 +19,6 @@ package org.apache.cassandra.net;
 
 import java.util.HashMap;
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -29,7 +28,6 @@ import org.apache.cassandra.utils.StringSerializer;
 import org.apache.cassandra.utils.UUIDSerializer;
 
 import static java.lang.Math.max;
-
 import static org.apache.cassandra.locator.InetAddressAndPort.FwdFrmSerializer.fwdFrmSerializer;
 
 /**
@@ -62,6 +60,10 @@ public enum ParamType
      * Messages with tracing sessions are decorated with the traced keyspace.
      */
     TRACE_KEYSPACE      (8, "TraceKeyspace", StringSerializer.serializer),
+    /**
+     * Failure callback messages contain verb name of the incoming message.
+     */
+    REQUEST_VERB_NAME   (9, "RequestVerbName", StringSerializer.serializer),
 
     CUSTOM_MAP          (14, "CUSTOM",       CustomParamsSerializer.serializer);
 
