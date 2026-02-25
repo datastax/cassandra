@@ -112,7 +112,7 @@ public class InMemoryUnfilteredPartitionIterator implements UnfilteredPartitionI
         @Override
         public RegularAndStaticColumns columns()
         {
-            return command.metadata().regularAndStaticColumns();
+            return partitionInfo.columns;
         }
 
         @Override
