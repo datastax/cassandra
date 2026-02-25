@@ -747,6 +747,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         {
             ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
             cfs.metric.deleteRequests.inc();
+            cfs.keyspace.metric.deleteRequests.inc();
         }
 
         if (hasSlices())

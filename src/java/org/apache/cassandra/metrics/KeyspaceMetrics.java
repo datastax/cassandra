@@ -154,6 +154,7 @@ public class KeyspaceMetrics
     /** Time spent waiting for free memtable space, either on- or off-heap */
     public final Histogram waitingOnFreeMemtableSpace;
     public final Histogram coordinatorReadSize;
+    public final Counter deleteRequests;
 
     /*
      * Metrics for inconsistencies detected between repaired data sets across replicas. These
@@ -275,6 +276,7 @@ public class KeyspaceMetrics
         coordinatorCasWriteLatency = createKeyspaceTimer("CoordinatorCasWriteLatency");
         waitingOnFreeMemtableSpace = createKeyspaceHistogram("WaitingOnFreeMemtableSpace", false);
         coordinatorReadSize = createKeyspaceHistogram("CoordinatorReadSize", false);
+        deleteRequests = createKeyspaceCounter("DeleteRequestsCount", metric -> metric.deleteRequests.getCount());
 
 
         confirmedRepairedInconsistencies = createKeyspaceMeter("RepairedDataInconsistenciesConfirmed");
