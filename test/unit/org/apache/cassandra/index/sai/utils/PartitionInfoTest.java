@@ -16,8 +16,6 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import org.apache.cassandra.dht.IPartitioner;
-import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -45,7 +43,6 @@ import static org.mockito.Mockito.when;
 
 public class PartitionInfoTest
 {
-    private static IPartitioner oldPartitioner;
     private static DecoratedKey partitionKey;
     private static Row staticRow;
     private static RegularAndStaticColumns columns;
@@ -55,7 +52,7 @@ public class PartitionInfoTest
     @BeforeClass
     public static void setup()
     {
-        oldPartitioner = DatabaseDescriptor.setPartitionerUnsafe(new Murmur3Partitioner());
+        DatabaseDescriptor.setPartitionerUnsafe(new Murmur3Partitioner());
         TableMetadata tableMetadata = TableMetadata.builder("test", "test")
                                                    .partitioner(Murmur3Partitioner.instance)
                                                    .addPartitionKeyColumn("pk", Int32Type.instance)
@@ -68,12 +65,6 @@ public class PartitionInfoTest
         columns = tableMetadata.regularAndStaticColumns();
         partitionDeletion = new DeletionTime(1000L, 10);
         encodingStats = new EncodingStats(500L, LivenessInfo.NO_EXPIRATION_TIME, 0);
-    }
-
-    @AfterClass
-    public static void teardown()
-    {
-        DatabaseDescriptor.setPartitionerUnsafe(oldPartitioner);
     }
 
     @Test
