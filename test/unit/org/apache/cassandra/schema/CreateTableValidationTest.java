@@ -150,9 +150,9 @@ public class CreateTableValidationTest extends CQLTester
     @Test
     public void testNonAlphanummericTableName() throws Throwable
     {
-        assertInvalidMessage(String.format("%s.d-3: Table name must not be empty or not contain non-alphanumeric-underscore characters (got \"d-3\")", KEYSPACE),
+        assertInvalidMessage(String.format("%s.d-3: Table name must not be empty or contain non-alphanumeric-underscore characters (got \"d-3\")", KEYSPACE),
                              String.format("CREATE TABLE %s.\"d-3\" (key int PRIMARY KEY, val int)", KEYSPACE));
-        assertInvalidMessage(String.format("%s.    : Table name must not be empty or not contain non-alphanumeric-underscore characters (got \"    \")", KEYSPACE),
+        assertInvalidMessage(String.format("%s.    : Table name must not be empty or contain non-alphanumeric-underscore characters (got \"    \")", KEYSPACE),
                              String.format("CREATE TABLE %s.\"    \" (key int PRIMARY KEY, val int)", KEYSPACE));
 
         String keyspace = "\"38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch\"";
