@@ -606,8 +606,12 @@ public class OnDiskVectorValuesTest extends SAITester
             }
         }
 
-        // No bitmap means no holes
-        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, null))
+        // Dense bitmap (all ordinals present) means no holes
+        RoaringBitmap presentOrdinals = new RoaringBitmap();
+        for (int i = 0; i < numVectors; i++)
+            presentOrdinals.add(i);
+
+        try (OnDiskVectorValues reader = new OnDiskVectorValues(tempFile, dimension, presentOrdinals))
         {
             RandomAccessVectorValues result = reader.removeHoles();
             assertSame("Should return self when no holes", reader, result);

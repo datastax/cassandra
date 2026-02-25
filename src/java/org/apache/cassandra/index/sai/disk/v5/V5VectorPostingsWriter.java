@@ -134,9 +134,8 @@ public class V5VectorPostingsWriter<T>
                                         new OrdinalMapper.IdentityMapper(graphSize - 1));
         }
 
-        // A missing presentOrdinals bitmap indicates all ordinals are present
-        IntPredicate isMissingOrdinal = presentOrdinals == null ? (i) -> false
-                                                                : (i) -> !presentOrdinals.contains(i);
+        // Check if ordinals are missing using the presentOrdinals bitmap
+        IntPredicate isMissingOrdinal = (i) -> !presentOrdinals.contains(i);
 
         if (structure == Structure.ONE_TO_MANY)
         {

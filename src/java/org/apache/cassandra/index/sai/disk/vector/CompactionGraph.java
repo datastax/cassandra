@@ -144,7 +144,8 @@ public class CompactionGraph implements Closeable, Accountable
     private int maxOrdinal = -1; // Inclusive
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
-    // TODO evaluate negation so simplify implementation.
+    // TODO evaluate negation so simplify implementation or abstract class that tracks bitset as a dense range until
+    // proven otherwise.
     private final RoaringBitmap presentOrdinals;
     private int nextOrdinal = 0;
 
@@ -193,7 +194,7 @@ public class CompactionGraph implements Closeable, Accountable
         // and the next compaction will fill in the holes.
         this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings(context.version()) || !allRowsHaveVectors;
 
-        this.presentOrdinals = useSyntheticOrdinals ? null : new RoaringBitmap();
+        this.presentOrdinals = new RoaringBitmap();
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
         postingsFile = perIndexComponents.tmpFileFor("postings_chonicle_map");
@@ -314,12 +315,9 @@ public class CompactionGraph implements Closeable, Accountable
                 Data<CompactionVectorPostings> data = postingsQueryContext.wrapValueAsData(postings);
                 absentEntry.doInsert(data);
 
-                if (presentOrdinals != null)
-                {
-                    long initBytes = presentOrdinals.getLongSizeInBytes();
-                    presentOrdinals.add(ordinal);
-                    bytesUsed += (initBytes - presentOrdinals.getLongSizeInBytes());
-                }
+                long initBytes = presentOrdinals.getLongSizeInBytes();
+                presentOrdinals.add(ordinal);
+                bytesUsed += (initBytes - presentOrdinals.getLongSizeInBytes());
 
                 // Update the global mean, if we're tracking it (which is currently only done when we will write using NVQ)
                 if (globalMean != null)
@@ -509,8 +507,7 @@ public class CompactionGraph implements Closeable, Accountable
         onDiskVectorValues.refreshReaders();
 
         // Now that we're done adding rows, we can optimize the bitmap for runs since we expect many runs.
-        if (presentOrdinals != null)
-            presentOrdinals.runOptimize();
+        presentOrdinals.runOptimize();
 
         // If we haven't created the builder yet, it means we were accumulating vectors still. Force it to build
         // now.
@@ -663,7 +660,7 @@ public class CompactionGraph implements Closeable, Accountable
     @Override
     public long ramBytesUsed()
     {
-        long presentOrdinalsBitMapSize = presentOrdinals != null ? presentOrdinals.getLongSizeInBytes() : 0;
+        long presentOrdinalsBitMapSize = presentOrdinals.getLongSizeInBytes();
 
         if (compressedVectors != null)
             return presentOrdinalsBitMapSize + compressedVectors.ramBytesUsed() + builder.getGraph().ramBytesUsed();
@@ -675,8 +672,8 @@ public class CompactionGraph implements Closeable, Accountable
 
     private long currentVectorBytesNeededToBuildCompressor()
     {
-        long numVectors = presentOrdinals != null ? presentOrdinals.getLongCardinality() : (maxOrdinal + 1);
-        return numVectors * bytesPerVectorBeforeCompressorCreated;
+        // num unique vectors * bytes per vector
+        return presentOrdinals.getLongCardinality() * bytesPerVectorBeforeCompressorCreated;
     }
 
     public boolean requiresFlush()

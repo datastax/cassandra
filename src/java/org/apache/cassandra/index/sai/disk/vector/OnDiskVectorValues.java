@@ -56,13 +56,19 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
 
     /**
      * Creates a new reader for vectors of the specified dimension.
+     * Assumes all ordinals from 0 to size()-1 have vectors present.
      *
      * @param file the file containing vectors written by VectorByOrdinalWriter
      * @param dimension the dimension of vectors in the file
      */
     public OnDiskVectorValues(File file, int dimension)
     {
-        this(file, dimension, null);
+        this.threadLocalRandomAccessReader = ExplicitThreadLocal.withInitial(() -> RandomAccessReader.open(file));
+        this.dimension = dimension;
+        this.vectorSize = (long) dimension * Float.BYTES;
+        // Create a bitmap with all ordinals present
+        int size = (int) (threadLocalRandomAccessReader.get().length() / vectorSize);
+        this.presentOrdinals = RoaringBitmap.bitmapOfRange(0, size);
     }
 
     /**
@@ -70,7 +76,7 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
      *
      * @param file the file containing vectors written by VectorByOrdinalWriter
      * @param dimension the dimension of vectors in the file
-     * @param presentOrdinals BitSet indicating which ordinals have vectors, or null if all ordinals have vectors
+     * @param presentOrdinals BitSet indicating which ordinals have vectors
      */
     public OnDiskVectorValues(File file, int dimension, RoaringBitmap presentOrdinals)
     {
@@ -109,7 +115,7 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     @Override
     public VectorFloat<?> getVector(int ordinal)
     {
-        if (presentOrdinals != null && !presentOrdinals.contains(ordinal))
+        if (!presentOrdinals.contains(ordinal))
             return null;
 
         try
@@ -176,7 +182,7 @@ public class OnDiskVectorValues implements RandomAccessVectorValues, AutoCloseab
     {
         // todo test size() here!
         // Range check on presentOrdinals is exclusive, so size() is the correct value.
-        if (presentOrdinals == null || presentOrdinals.contains(0, size()))
+        if (presentOrdinals.contains(0, size()))
             return this;
 
         // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
