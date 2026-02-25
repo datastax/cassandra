@@ -509,10 +509,8 @@ public class CompactionGraph implements Closeable, Accountable
         // Now that we're done adding rows, we can optimize the bitmap for runs since we expect many runs.
         presentOrdinals.runOptimize();
 
-        // If we haven't created the builder yet, it means we were accumulating vectors still. Force it to build
-        // now.
-        if (graphBuilderNeedsInitialization())
-            maybeInitializeGraphBuilder(true, compactionExecutor);
+        // If we haven't created the builder yet, it means we were accumulating vectors still. Force it to build now.
+        maybeInitializeGraphBuilder(true, compactionExecutor);
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
