@@ -18,12 +18,11 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.Objects;
-
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
@@ -34,6 +33,7 @@ public class PartitionInfo
 {
     public final DecoratedKey key;
     public final Row staticRow;
+    public final RegularAndStaticColumns columns;
 
     // present if it's unfiltered partition iterator
     @Nullable
@@ -43,45 +43,35 @@ public class PartitionInfo
     @Nullable
     public final EncodingStats encodingStats;
 
-    public PartitionInfo(DecoratedKey key, Row staticRow)
+    private PartitionInfo(DecoratedKey key,
+                          Row staticRow,
+                          RegularAndStaticColumns columns,
+                          @Nullable DeletionTime partitionDeletion,
+                          @Nullable EncodingStats encodingStats)
     {
         this.key = key;
         this.staticRow = staticRow;
-        this.partitionDeletion = null;
-        this.encodingStats = null;
-    }
-
-    public PartitionInfo(DecoratedKey key, Row staticRow, DeletionTime partitionDeletion, EncodingStats encodingStats)
-    {
-        this.key = key;
-        this.staticRow = staticRow;
-
+        this.columns = columns;
         this.partitionDeletion = partitionDeletion;
         this.encodingStats = encodingStats;
     }
 
     public static <U extends Unfiltered, R extends BaseRowIterator<U>> PartitionInfo create(R baseRowIterator)
     {
-        return baseRowIterator instanceof UnfilteredRowIterator
-               ? new PartitionInfo(baseRowIterator.partitionKey(), baseRowIterator.staticRow(),
-                                   ((UnfilteredRowIterator) baseRowIterator).partitionLevelDeletion(),
-                                   ((UnfilteredRowIterator) baseRowIterator).stats())
-               : new PartitionInfo(baseRowIterator.partitionKey(), baseRowIterator.staticRow());
-    }
+        // only unfiltered row iterators have a partition deletion time and encoding stats
+        DeletionTime partitionDeletion = null;
+        EncodingStats encodingStats = null;
+        if (baseRowIterator instanceof UnfilteredRowIterator)
+        {
+            UnfilteredRowIterator unfilteredRowIterator = (UnfilteredRowIterator) baseRowIterator;
+            partitionDeletion = unfilteredRowIterator.partitionLevelDeletion();
+            encodingStats = unfilteredRowIterator.stats();
+        }
 
-    @Override
-    public boolean equals(Object o)
-    {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        PartitionInfo that = (PartitionInfo) o;
-        return Objects.equals(key, that.key) && Objects.equals(staticRow, that.staticRow)
-               && Objects.equals(partitionDeletion, that.partitionDeletion) && Objects.equals(encodingStats, that.encodingStats);
-    }
-
-    @Override
-    public int hashCode()
-    {
-        return Objects.hash(key, staticRow, partitionDeletion, encodingStats);
+        return new PartitionInfo(baseRowIterator.partitionKey(),
+                                 baseRowIterator.staticRow(),
+                                 baseRowIterator.columns(),
+                                 partitionDeletion,
+                                 encodingStats);
     }
 }
