@@ -38,8 +38,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -53,8 +52,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -78,8 +76,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -109,8 +106,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -134,8 +130,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -165,8 +160,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -190,8 +184,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -221,8 +214,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -246,8 +238,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -277,8 +268,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -308,8 +298,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
     @Test
@@ -339,11 +328,16 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        tokenByteComparisonTests(factory, keys);
-        compareToAndEqualsTests(factory, keys);
+        assertCorrectComparison(factory, keys);
     }
 
-    private void compareToAndEqualsTests(PrimaryKey.Factory factory, PrimaryKey... keys)
+    void assertCorrectComparison(PrimaryKey.Factory factory, PrimaryKey[] keys)
+    {
+        compareTokenOnlyWithByteComparison(factory, keys);
+        compareToAndEquals(factory, keys);
+    }
+
+    private void compareToAndEquals(PrimaryKey.Factory factory, PrimaryKey... keys)
     {
         for (int index = 0; index < keys.length - 1; index++)
         {
@@ -362,7 +356,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
         }
     }
 
-    private void tokenByteComparisonTests(PrimaryKey.Factory factory, PrimaryKey... keys)
+    void compareTokenOnlyWithByteComparison(PrimaryKey.Factory factory, PrimaryKey... keys)
     {
         for (int index = 0; index < keys.length - 1; index++)
         {
