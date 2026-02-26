@@ -194,26 +194,6 @@ public class SSTableReaderTest
     @After
     public void teardown()
     {
-        Throwable exceptions = null;
-        for (Ref<?> ref : refsToRelease)
-        {
-            try
-            {
-                ref.release();
-            }
-            catch (Throwable exc)
-            {
-                exceptions = Throwables.merge(exceptions, exc);
-            }
-        }
-
-        if (exceptions != null)
-            fail("Unable to release all tracked references " + exceptions);
-
-        refsToRelease.clear();
-    }
-
-    public void Cleanup() {
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(false);
@@ -1832,43 +1812,50 @@ public class SSTableReaderTest
     @Test
     public void testBloomFilterIsCreatedOnLoad() throws IOException
     {
-        BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(true);
+        try
+        {
+            BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(true);
 
-        final int numKeys = 100;
-        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD_NO_BLOOM_FILTER);
+            final int numKeys = 100;
+            final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+            final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD_NO_BLOOM_FILTER);
 
-        SSTableReader sstable = getNewSSTable(cfs, numKeys, 1);
-        Assert.assertTrue(getFilterSize(sstable) == 0);
-        Assert.assertSame(FilterFactory.AlwaysPresent, getFilter(sstable));
+            SSTableReader sstable = getNewSSTable(cfs, numKeys, 1);
+            Assert.assertTrue(getFilterSize(sstable) == 0);
+            Assert.assertSame(FilterFactory.AlwaysPresent, getFilter(sstable));
 
-        // should do nothing
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1, false, numKeys, false);
+            // should do nothing
+            checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1, false, numKeys, false);
 
-        // should create BF because the FP has changed
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, BloomCalculations.minSupportedBloomFilterFpChance(), true, numKeys, true);
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, true, numKeys, true);
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.1, true, numKeys, true);
+            // should create BF because the FP has changed
+            checkSSTableOpenedWithGivenFPChance(cfs, sstable, BloomCalculations.minSupportedBloomFilterFpChance(), true, numKeys, true);
+            checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, true, numKeys, true);
+            checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.1, true, numKeys, true);
 
-        // should deserialize the existing BF
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.1, true, numKeys, false);
-        // should create BF because the FP has changed
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BF_FP_CHANCE_TOLERANCE.getDouble(), true, numKeys, true);
-        // should install empty filter without changing file or metadata
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1, false, numKeys, false);
+            // should deserialize the existing BF
+            checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.1, true, numKeys, false);
+            // should create BF because the FP has changed
+            checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BF_FP_CHANCE_TOLERANCE.getDouble(), true, numKeys, true);
+            // should install empty filter without changing file or metadata
+            checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1, false, numKeys, false);
 
-        // corrupted bf file should fail to deserialize and we should fall back to recreating it
-        Files.write(sstable.descriptor.fileFor(Components.FILTER).toPath(), new byte[] { 0, 0, 0, 0});
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BF_FP_CHANCE_TOLERANCE.getDouble(), true, numKeys, true);
+            // corrupted bf file should fail to deserialize and we should fall back to recreating it
+            Files.write(sstable.descriptor.fileFor(Components.FILTER).toPath(), new byte[] { 0, 0, 0, 0});
+            checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BF_FP_CHANCE_TOLERANCE.getDouble(), true, numKeys, true);
 
-        // missing primary index file should make BF fail to load and we should install the empty one
-        HashSet<Component> nonDataPrimaryComponents = new HashSet<>(sstable.descriptor.getFormat().primaryComponents());
-        nonDataPrimaryComponents.remove(Components.DATA);
-        nonDataPrimaryComponents.remove(Components.COMPRESSION_INFO);
-        nonDataPrimaryComponents.remove(Components.STATS);
-        for (Component component : nonDataPrimaryComponents)
-            sstable.descriptor.fileFor(component).delete();
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, false, numKeys, false);
+            // missing primary index file should make BF fail to load and we should install the empty one
+            HashSet<Component> nonDataPrimaryComponents = new HashSet<>(sstable.descriptor.getFormat().primaryComponents());
+            nonDataPrimaryComponents.remove(Components.DATA);
+            nonDataPrimaryComponents.remove(Components.COMPRESSION_INFO);
+            nonDataPrimaryComponents.remove(Components.STATS);
+            for (Component component : nonDataPrimaryComponents)
+                sstable.descriptor.fileFor(component).delete();
+            checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, false, numKeys, false);
+        }
+        finally
+        {
+            BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(false);
+        }
     }
 
     @Test
