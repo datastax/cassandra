@@ -221,6 +221,7 @@ import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.MD5Digest;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -1472,7 +1473,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             DatabaseDescriptor.getAuthenticator().setup();
             DatabaseDescriptor.getAuthorizer().setup();
             DatabaseDescriptor.getNetworkAuthorizer().setup();
-            DatabaseDescriptor.getCIDRAuthorizer().setup();
+            if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+                DatabaseDescriptor.getCIDRAuthorizer().setup();
             AuthCacheService.initializeAndRegisterCaches();
             Schema.instance.registerListener(new AuthSchemaChangeListener());
             authSetupComplete = true;

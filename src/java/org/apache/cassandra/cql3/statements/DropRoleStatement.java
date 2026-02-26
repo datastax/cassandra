@@ -25,6 +25,7 @@ import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
@@ -76,7 +77,8 @@ public class DropRoleStatement extends AuthenticationStatement
         DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
         DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
         DatabaseDescriptor.getNetworkAuthorizer().drop(role);
-        DatabaseDescriptor.getCIDRAuthorizer().dropCidrPermissionsForRole(role);
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+            DatabaseDescriptor.getCIDRAuthorizer().dropCidrPermissionsForRole(role);
         return null;
     }
     

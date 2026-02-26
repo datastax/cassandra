@@ -336,6 +336,21 @@ public final class SystemKeyspace
                 .defaultTimeToLive((int) TimeUnit.DAYS.toSeconds(7))
                 .build();
 
+    private static final TableMetadata CompactionHistoryV1 =
+        parse(COMPACTION_HISTORY,
+                "week-long compaction history",
+                "CREATE TABLE %s ("
+                + "id timeuuid,"
+                + "bytes_in bigint,"
+                + "bytes_out bigint,"
+                + "columnfamily_name text,"
+                + "compacted_at timestamp,"
+                + "keyspace_name text,"
+                + "rows_merged map<int, bigint>,"
+                + "PRIMARY KEY ((id)))")
+                .defaultTimeToLive((int) TimeUnit.DAYS.toSeconds(7))
+                .build();
+
     private static final TableMetadata LegacySSTableActivity =
         parse(LEGACY_SSTABLE_ACTIVITY,
                 "historic sstable read rates",
@@ -553,7 +568,7 @@ public final class SystemKeyspace
                          LegacyPeers,
                          PeerEventsV2,
                          LegacyPeerEvents,
-                         CompactionHistory,
+                         DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? CompactionHistoryV1 : CompactionHistory,
                          LegacySSTableActivity,
                          SSTableActivity,
                          LegacySizeEstimates,
@@ -621,16 +636,31 @@ public final class SystemKeyspace
         if (ksname.equals("system") && cfname.equals(COMPACTION_HISTORY))
             return;
         // For historical reasons (pre 3.0 refactor) we call the final field rows_merged but we actually store partitions!
-        String req = "INSERT INTO system.%s (id, keyspace_name, columnfamily_name, compacted_at, bytes_in, bytes_out, rows_merged, compaction_properties) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-        executeInternal(format(req, COMPACTION_HISTORY),
-                        taskId,
-                        ksname,
-                        cfname,
-                        ByteBufferUtil.bytes(compactedAt),
-                        bytesIn,
-                        bytesOut,
-                        partitionsMerged,
-                        compactionProperties);
+        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+        {
+            String req = "INSERT INTO system.%s (id, keyspace_name, columnfamily_name, compacted_at, bytes_in, bytes_out, rows_merged) VALUES (?, ?, ?, ?, ?, ?, ?)";
+            executeInternal(format(req, COMPACTION_HISTORY),
+                            taskId,
+                            ksname,
+                            cfname,
+                            ByteBufferUtil.bytes(compactedAt),
+                            bytesIn,
+                            bytesOut,
+                            partitionsMerged);
+        }
+        else
+        {
+            String req = "INSERT INTO system.%s (id, keyspace_name, columnfamily_name, compacted_at, bytes_in, bytes_out, rows_merged, compaction_properties) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            executeInternal(format(req, COMPACTION_HISTORY),
+                            taskId,
+                            ksname,
+                            cfname,
+                            ByteBufferUtil.bytes(compactedAt),
+                            bytesIn,
+                            bytesOut,
+                            partitionsMerged,
+                            compactionProperties);
+        }
     }
 
     public static TabularData getCompactionHistory() throws OpenDataException
