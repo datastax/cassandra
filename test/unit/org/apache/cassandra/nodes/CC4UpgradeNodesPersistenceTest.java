@@ -111,11 +111,19 @@ public class CC4UpgradeNodesPersistenceTest extends CQLTester
     }
 
     @Test
-    public void testLoadLocalReturnsNullWhenNoCC4Files() throws Exception
+    public void testLoadLocalFallsBackToSystemTablesWhenNoCC4Files() throws Exception
     {
         Files.delete(nodesDir);
+
         LocalInfo loaded = persistence.loadLocal();
-        assertThat(loaded).isNull();
+        NodesPersistence basePersistence = new NodesPersistence();
+        LocalInfo fromSystemTable = basePersistence.loadLocal();
+
+        assertThat(loaded).isNotNull();
+        assertThat(loaded.getHostId()).isEqualTo(fromSystemTable.getHostId());
+        assertThat(loaded.getDataCenter()).isEqualTo(fromSystemTable.getDataCenter());
+        assertThat(loaded.getRack()).isEqualTo(fromSystemTable.getRack());
+        assertThat(loaded.getClusterName()).isEqualTo(fromSystemTable.getClusterName());
     }
 
     @Test
