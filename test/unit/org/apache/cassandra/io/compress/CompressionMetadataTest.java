@@ -65,7 +65,7 @@ public class CompressionMetadataTest
 
             cm.close();
             assertThat(cm.isCleanedUp()).isTrue();
-            assertThatExceptionOfType(IllegalStateException.class).isThrownBy(memory.memory::free);
+            assertThatExceptionOfType(AssertionError.class).isThrownBy(memory.memory::free);
         }
     }
 
@@ -88,7 +88,7 @@ public class CompressionMetadataTest
             copy.close();
             assertThat(cm.isCleanedUp()).isTrue();
             assertThat(copy.isCleanedUp()).isTrue();
-            assertThatExceptionOfType(IllegalStateException.class).isThrownBy(memory.memory::free);
+            assertThatExceptionOfType(AssertionError.class).isThrownBy(memory.memory::free);
         }
     }
 
