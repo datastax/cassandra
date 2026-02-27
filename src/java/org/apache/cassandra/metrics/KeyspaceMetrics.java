@@ -276,7 +276,7 @@ public class KeyspaceMetrics
         coordinatorCasWriteLatency = createKeyspaceTimer("CoordinatorCasWriteLatency");
         waitingOnFreeMemtableSpace = createKeyspaceHistogram("WaitingOnFreeMemtableSpace", false);
         coordinatorReadSize = createKeyspaceHistogram("CoordinatorReadSize", false);
-        deleteRequests = createKeyspaceCounter("DeleteRequestsCount", metric -> metric.deleteRequests.getCount());
+        deleteRequests = createKeyspaceCounter("DeleteRequests", metric -> metric.deleteRequests.getCount());
 
 
         confirmedRepairedInconsistencies = createKeyspaceMeter("RepairedDataInconsistenciesConfirmed");
