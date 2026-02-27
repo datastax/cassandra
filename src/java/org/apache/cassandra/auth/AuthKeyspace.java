@@ -31,7 +31,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Tables;
-import org.apache.cassandra.utils.StorageCompatibilityMode;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SUPERUSER_SETUP_DELAY_MS;
@@ -155,7 +155,7 @@ public final class AuthKeyspace
 
     public static KeyspaceMetadata metadata()
     {
-        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
             return KeyspaceMetadata.create(SchemaConstants.AUTH_KEYSPACE_NAME,
                                            KeyspaceParams.systemDistributed(Math.max(DEFAULT_RF, DatabaseDescriptor.getDefaultKeyspaceRF())),
                                            Tables.of(Roles, RoleMembers, RolePermissions,

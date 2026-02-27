@@ -65,7 +65,10 @@ public class CC4UpgradeNodesPersistence extends NodesPersistence
         CC4NodesFileReader.archiveCC4NodesDirectory();
 
         if (migrated.isEmpty())
+        {
+            logger.warn("No CC4 peer metadata found to migrate, falling back to system tables");
             return super.loadPeers();
+        }
 
         return migrated.stream();
     }

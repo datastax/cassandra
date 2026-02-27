@@ -336,7 +336,7 @@ public final class SystemKeyspace
                 .defaultTimeToLive((int) TimeUnit.DAYS.toSeconds(7))
                 .build();
 
-    private static final TableMetadata CompactionHistoryV1 =
+    private static final TableMetadata CompactionHistoryLegacy =
         parse(COMPACTION_HISTORY,
                 "week-long compaction history",
                 "CREATE TABLE %s ("
@@ -568,7 +568,7 @@ public final class SystemKeyspace
                          LegacyPeers,
                          PeerEventsV2,
                          LegacyPeerEvents,
-                         DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? CompactionHistoryV1 : CompactionHistory,
+                         DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major) ? CompactionHistoryLegacy : CompactionHistory,
                          LegacySSTableActivity,
                          SSTableActivity,
                          LegacySizeEstimates,
@@ -636,7 +636,7 @@ public final class SystemKeyspace
         if (ksname.equals("system") && cfname.equals(COMPACTION_HISTORY))
             return;
         // For historical reasons (pre 3.0 refactor) we call the final field rows_merged but we actually store partitions!
-        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
         {
             String req = "INSERT INTO system.%s (id, keyspace_name, columnfamily_name, compacted_at, bytes_in, bytes_out, rows_merged) VALUES (?, ?, ?, ?, ?, ?, ?)";
             executeInternal(format(req, COMPACTION_HISTORY),

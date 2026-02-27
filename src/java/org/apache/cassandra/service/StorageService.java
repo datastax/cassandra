@@ -221,7 +221,6 @@ import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.MD5Digest;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.Future;

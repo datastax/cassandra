@@ -51,7 +51,7 @@ import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.NoSpamLogger;
-import org.apache.cassandra.utils.StorageCompatibilityMode;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.mindrot.jbcrypt.BCrypt;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.AUTH_BCRYPT_GENSALT_LOG2_ROUNDS;
@@ -157,7 +157,7 @@ public class CassandraRoleManager implements IRoleManager
     public void setup()
     {
         loadRoleStatement();
-        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+        if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
             loadIdentityStatement();
         loadRoleMembersStatement = (SelectStatement) prepare("SELECT member FROM %s.%s WHERE role = ?",
                                                       SchemaConstants.AUTH_KEYSPACE_NAME,
@@ -255,7 +255,7 @@ public class CassandraRoleManager implements IRoleManager
     public void createRole(AuthenticatedUser performer, RoleResource role, RoleOptions options)
     throws RequestValidationException, RequestExecutionException
     {
-        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+        if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
         {
             List<String> identitiesOfRole = identitiesForRole(role.getRoleName());
             if (!identitiesOfRole.isEmpty())
@@ -288,7 +288,7 @@ public class CassandraRoleManager implements IRoleManager
                               escape(role.getRoleName())),
                 consistencyForRoleWrite(role.getRoleName()));
         removeAllMembers(role.getRoleName());
-        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+        if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
             removeAllIdentitiesOfRole(role.getRoleName());
     }
 
