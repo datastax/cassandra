@@ -267,11 +267,16 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                             //table exists so keep the file
                             Schema.instance.getKeyspaceInstance(names[0]).getColumnFamilyStore(names[1]);
                         }
-                        catch (NullPointerException e)
+                        catch (NullPointerException | IllegalArgumentException e)
                         {
                             //table does not exist so delete the file
-                            logger.debug("Removing " + file + " because it does not correspond to an existing table");
+                            logger.debug("Removing {} because it does not correspond to an existing table", file);
                             file.delete();
+                        }
+                        catch (Throwable e)
+                        {
+                            logger.error("Encountered an exception while cleaning up the orphaned compaction settings file ({}) for {}.{}", file, names[0], names[1]);
+                            throw e;
                         }
                     }
                     else if (names.length == 3) // if keyspace/table names are long, we include table id as a 3rd component while the keyspace and table names are abbreviated
@@ -281,7 +286,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                         if (Schema.instance.getTableMetadata(tableId) == null)
                         {
                             //table does not exist so delete the file
-                            logger.debug("Removing " + file + " because it does not correspond to an existing table");
+                            logger.debug("Removing {} because it does not correspond to an existing table", file);
                             file.delete();
                         }
                     }
