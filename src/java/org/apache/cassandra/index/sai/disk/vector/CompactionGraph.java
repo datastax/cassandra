@@ -446,6 +446,8 @@ public class CompactionGraph implements Closeable, Accountable
             // or the speed at which we can read from disk. We have not accounted for the graph's memory consumption
             // yet, but each fp vector is expected to take up significantly more memory than its corresponding
             // node in memory, so there should be no issue in terms of memory consumption.
+            // Note also that we encode all vectors up through `ordinal` before adding to the graph. This may not
+            // be strictly necessary, but it does ensure that the graph is consistently built from the lowest ordinals.
             var futures = new ArrayDeque<Future<Long>>();
             for (int i = 0; i < onDiskVectorValues.size(); i++)
             {
@@ -466,7 +468,7 @@ public class CompactionGraph implements Closeable, Accountable
 
                 // See if there are any futures to drain. This helps to exit earlier if there are any excpetions.
                 while (futures.peek() != null && futures.peek().isDone())
-                    bytesUsed += futures.poll().get();
+                    bytesUsed += futures.remove().get();
             }
 
             // Now that we've added the compressed vectors, add the bytes used.
@@ -478,6 +480,8 @@ public class CompactionGraph implements Closeable, Accountable
         }
         catch (InterruptedException | ExecutionException e)
         {
+            logger.error("Error bulk loading graph with {} vectors of {} dim with bytesUsed so far {}",
+                         presentOrdinals.getLongCardinality(), dimension, bytesUsed, e);
             throw new RuntimeException(e);
         }
         long encodeAndInsertVectorsNanos = System.nanoTime() - start - fetchTrainingVectorsNanos;
