@@ -62,6 +62,7 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -74,12 +75,12 @@ public class CompactionControllerTest extends SchemaLoader
     private static final String KEYSPACE = "CompactionControllerTest";
     private static final String CF1 = "Standard1";
     private static final String CF2 = "Standard2";
-    private static final int TTL_SECONDS = 10;
     private static CountDownLatch compaction2FinishLatch = new CountDownLatch(1);
     private static CountDownLatch createCompactionControllerLatch = new CountDownLatch(1);
     private static CountDownLatch compaction1RefreshLatch = new CountDownLatch(1);
     private static CountDownLatch refreshCheckLatch = new CountDownLatch(1);
     private static int overlapRefreshCounter = 0;
+    private static boolean shouldThrowOnConfigCleanup = false;
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -266,6 +267,34 @@ public class CompactionControllerTest extends SchemaLoader
         finally
         {
             DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMiB(earlyOpen);
+        }
+    }
+
+    @Test
+    @BMRule(name = "Simulate an non standard exception while opening a keyspace",
+    targetClass = "org.apache.cassandra.schema.Schema",
+    targetMethod = "getKeyspaceInstance",
+    targetLocation = "AT ENTRY",
+    condition = "org.apache.cassandra.db.compaction.CompactionControllerTest.shouldThrowOnConfigCleanup",
+    action = "throw new java.lang.RuntimeException(\"Expected exception\");")
+    public void testRethrowingExceptionOnConfigCleanup()
+    {
+        try
+        {
+            // given the config was stored
+            CompactionManager.storeControllerConfig();
+            // below flag is read by byteman, it is needed to throw the exception on the second call of cleanupControllerConfig
+            shouldThrowOnConfigCleanup = true;
+            // when
+            // unhandled exception is throw while cleaning up the controller config
+            // then the excepion is not swallowed
+            assertThatExceptionOfType(RuntimeException.class)
+            .isThrownBy(CompactionManager::cleanupControllerConfig)
+            .withMessage("Expected exception");
+        }
+        finally
+        {
+            shouldThrowOnConfigCleanup = false;
         }
     }
 
