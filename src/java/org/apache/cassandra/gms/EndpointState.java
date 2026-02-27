@@ -326,20 +326,29 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         switch (state.getKey())
         {
             case INTERNAL_ADDRESS_AND_PORT:
-                values = vv.value.split(":");
+                // DSE sends only out this value as a storage port thus it doesn't contain the address part
+                // If such a state has been saved into the gossip state we cannot read the address out of it
+                // instead we map it to STORAGE_PORT
+                values = splitAddressAndPort(vv);
                 if (values.length > 1)
                     return Map.of(ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version),
                                   ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
                 else
                     return Map.of(ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case NATIVE_ADDRESS_AND_PORT:
-                values = vv.value.split(":");
+                // DSE sends only out this value as a native transport port thus it doesn't contain the address part
+                // If such a state has been saved into the gossip state we cannot read the address out of it
+                // instead we map it to NATIVE_TRANSPORT_PORT
+                values = splitAddressAndPort(vv);
                 if (values.length > 1)
                     return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
                 else
                     return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
             case STATUS_WITH_PORT:
-                values = vv.value.split("[:,]");
+                // DSE sends only out status without port
+                // If such a state has been saved into the gossip state we cannot read the port out of it
+                // instead we map it to STATUS
+                values = splitStatusAndPort(vv);
                 if (values.length > 1)
                     return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version));
                 else
@@ -358,6 +367,16 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
             default:
                 return Map.of(state.getKey(), state.getValue());
         }
+    }
+
+    private static String[] splitStatusAndPort(VersionedValue vv)
+    {
+        return vv.value.split("[:,]");
+    }
+
+    private static String[] splitAddressAndPort(VersionedValue vv)
+    {
+        return vv.value.split(":");
     }
 
     @VisibleForTesting
