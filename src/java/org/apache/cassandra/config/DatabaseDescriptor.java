@@ -5490,6 +5490,12 @@ public class DatabaseDescriptor
         return storageCompatibilityMode;
     }
 
+    @VisibleForTesting
+    public static void setStorageCompatibilityMode(StorageCompatibilityMode mode)
+    {
+        storageCompatibilityMode = mode;
+    }
+
     public static ParameterizedClass getDefaultCompaction()
     {
         return conf != null ? conf.default_compaction : null;

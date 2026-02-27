@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -38,13 +39,16 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.db.SystemKeyspace.LOCAL;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -198,5 +202,29 @@ public class SystemKeyspaceTest
     {
         ILocalInfo info = Nodes.local().get();
         return info != null && info.getReleaseVersion() != null ? info.getReleaseVersion().toString() : null;
+    }
+
+    @Test
+    public void testCompactionHistoryTableSelectionByCompatMode()
+    {
+        StorageCompatibilityMode original = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CASSANDRA_4);
+            TableMetadata v1Table = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.COMPACTION_HISTORY);
+            assertNotNull(v1Table);
+            Set<String> v1Columns = v1Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
+            assertThat(v1Columns).doesNotContain("compaction_properties");
+
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.NONE);
+            TableMetadata v2Table = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.COMPACTION_HISTORY);
+            assertNotNull(v2Table);
+            Set<String> v2Columns = v2Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
+            assertThat(v2Columns).contains("compaction_properties");
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(original);
+        }
     }
 }
