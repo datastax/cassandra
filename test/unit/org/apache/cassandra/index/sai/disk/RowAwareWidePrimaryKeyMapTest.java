@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,13 +14,17 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2;
+package org.apache.cassandra.index.sai.disk;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
@@ -34,9 +36,10 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -44,8 +47,9 @@ import static org.junit.Assert.assertEquals;
 
 /**
  * Wide-table tests (with clustering columns) for
- * {@link RowAwarePrimaryKeyMap} using the row-aware on-disk format.
+ * {@link PrimaryKeyMap} using the row-aware on-disk format.
  */
+@RunWith(Parameterized.class)
 public class RowAwareWidePrimaryKeyMapTest extends SAITester
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
@@ -56,10 +60,23 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
     private IndexComponents.ForRead perSSTableComponents;
     private IPartitioner partitioner;
 
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "version={0}")
+    public static List<Object[]> data()
+    {
+        return Version.ALL.stream()
+                          .filter(v -> v != Version.AA)
+                          .map(v -> new Object[]{ v })
+                          .collect(Collectors.toList());
+    }
 
     @Before
     public void setup() throws Throwable
     {
+        SAIUtil.setCurrentVersion(version);
+
         createTable("CREATE TABLE %s (pk int, ck int, int_value int, text_value text, PRIMARY KEY (pk, ck)) WITH CLUSTERING ORDER BY (ck ASC)");
         execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
         execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
