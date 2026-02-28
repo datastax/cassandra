@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-public class WidePrimaryKeyFactoryTest extends RowAwarePrimaryKeyFactoryTest
+public class OptimizedRowAwarePrimaryKeyFactoryTest extends RowAwarePrimaryKeyFactoryTest
 {
     @Override
     protected void assertCorrectComparison(PrimaryKey.Factory factory, PrimaryKey[] keys)
