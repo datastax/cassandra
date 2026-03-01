@@ -16,12 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2;
+package org.apache.cassandra.index.sai.disk;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
@@ -31,7 +36,9 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,12 +46,31 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(Parameterized.class)
 public class RowAwarePrimaryKeyTest extends SAITester
 {
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "version={0}")
+    public static List<Object[]> data()
+    {
+        return Version.ALL.stream()
+                          .filter(v -> v != Version.AA)
+                          .map(v -> new Object[]{ v })
+                          .collect(Collectors.toList());
+    }
+
+    @Before
+    public void setup() throws Throwable
+    {
+        SAIUtil.setCurrentVersion(version);
+    }
+
     @Test
     public void testHashCodeForDeferredPrimaryKey()
     {
-        PrimaryKey.Factory factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
+        PrimaryKey.Factory factory = version.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -71,7 +97,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     @Test
     public void testHashCodeForLoadedPrimaryKey()
     {
-        PrimaryKey.Factory factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
+        PrimaryKey.Factory factory = version.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -93,7 +119,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     public void testHashCodeForDeferedPrimaryKeyWithClusteringColumns()
     {
         ClusteringComparator comparator = new ClusteringComparator(Int32Type.instance);
-        PrimaryKey.Factory factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(comparator);
+        PrimaryKey.Factory factory = version.onDiskFormat().newPrimaryKeyFactory(comparator);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -114,7 +140,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     @Test
     public void testComparisonBetweenTokenOnlyAndFullKey()
     {
-        PrimaryKey.Factory factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
+        PrimaryKey.Factory factory = version.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -139,7 +165,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     @Test
     public void testComparisonBetweenTokenOnlyKeysWithDifferentTokens()
     {
-        PrimaryKey.Factory factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
+        PrimaryKey.Factory factory = version.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -163,7 +189,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     public void testComparisonWithClusteringColumns()
     {
         ClusteringComparator comparator = new ClusteringComparator(Int32Type.instance);
-        PrimaryKey.Factory factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(comparator);
+        PrimaryKey.Factory factory = version.onDiskFormat().newPrimaryKeyFactory(comparator);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -184,7 +210,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     @Test
     public void testTokenOnlyKeyHashCode()
     {
-        PrimaryKey.Factory factory = Version.BA.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
+        PrimaryKey.Factory factory = version.onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
