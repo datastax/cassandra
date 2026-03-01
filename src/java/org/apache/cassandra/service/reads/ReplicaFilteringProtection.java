@@ -281,10 +281,7 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
         }
 
         @Override
-        public void close() {
-            for (int i = 0; i < sources.size(); i++)
-                originalPartitions.get(i).add(builders.get(i));
-        }
+        public void close() {}
 
         public void populate()
         {
