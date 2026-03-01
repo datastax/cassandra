@@ -21,7 +21,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -198,7 +200,24 @@ public class RowFilter
      */
     public boolean isMutableIntersection()
     {
-        return expressions().stream().filter(e -> !e.column.isPrimaryKeyColumn()).count() > 1;
+        List<Expression> exprs = expressions();
+        Set<ColumnMetadata> columns = null;
+        for (Expression e : exprs)
+        {
+            if (e.column.isStatic() && exprs.size() > 1)
+                return true;
+
+            if (!e.column.isPrimaryKeyColumn())
+            {
+                if (columns == null)
+                    columns = new HashSet<>(exprs.size());
+
+                columns.add(e.column);
+                if (columns.size() > 1)
+                    return true;
+            }
+        }
+        return false;
     }
 
     /**
