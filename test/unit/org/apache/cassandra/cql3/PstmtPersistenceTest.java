@@ -341,8 +341,8 @@ public class PstmtPersistenceTest extends CQLTester
     @Test
     @BMRule(name = "CapturePageInvocations",
             targetClass = "PartitionRangeQueryPager",
-            targetMethod = "nextPageReadQuery(int)",
-            action = "org.apache.cassandra.cql3.PstmtPersistenceTest.nextPageReadQuery($this.query, $pageSize)")
+            targetMethod = "nextPageReadQuery(org.apache.cassandra.cql3.PageSize, org.apache.cassandra.db.filter.DataLimits)",
+            action = "org.apache.cassandra.cql3.PstmtPersistenceTest.nextPageReadQuery($this.query, $pageSize.rows())")
     public void testPreloadPreparedStatements() throws Throwable
     {
         ClientState clientState = ClientState.forInternalCalls();
