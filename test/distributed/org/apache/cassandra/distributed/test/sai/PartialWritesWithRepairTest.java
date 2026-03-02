@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.distributed.test.sai;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.Feature;
@@ -38,6 +39,8 @@ public class PartialWritesWithRepairTest extends TestBaseImpl
     @Test
     public void test() throws IOException
     {
+        CassandraRelevantProperties.VECTOR_FLOAT_ONLY.setBoolean(false);
+
         try (Cluster cluster = Cluster.build(2)
                 .withConfig(c -> c.with(Feature.values()))
                 .start())
