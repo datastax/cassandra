@@ -655,7 +655,8 @@ public abstract class CQLTester
     private static void startServices()
     {
         VirtualKeyspaceRegistry.instance.register(VirtualSchemaKeyspace.instance);
-        StorageService.instance.initServer();
+        if (!StorageService.instance.isInitialized())
+            StorageService.instance.initServer();
         SchemaLoader.startGossiper();
     }
 
