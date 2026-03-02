@@ -40,8 +40,8 @@ import org.apache.lucene.util.RamUsageEstimator;
  */
 public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
-    private final ClusteringComparator clusteringComparator;
-    final boolean hasClustering;
+    protected final ClusteringComparator clusteringComparator;
+    public final boolean hasClustering;
 
 
     public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
@@ -62,19 +62,19 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
     }
 
-    PrimaryKey createWithSource(PrimaryKeyMap primaryKeyMap, long sstableRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
+    public PrimaryKey createWithSource(PrimaryKeyMap primaryKeyMap, long sstableRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
     {
         return new PrimaryKeyWithSource(primaryKeyMap, sstableRowId, sourceSstableMinKey, sourceSstableMaxKey);
     }
 
-    private class RowAwarePrimaryKey implements PrimaryKey
+    protected class RowAwarePrimaryKey implements PrimaryKey
     {
         private final Token token;
-        private DecoratedKey partitionKey;
-        private Clustering clustering;
+        protected DecoratedKey partitionKey;
+        protected Clustering clustering;
         private Supplier<PrimaryKey> primaryKeySupplier;
 
-        private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
+        protected RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
         {
             this.token = token;
             this.partitionKey = partitionKey;
