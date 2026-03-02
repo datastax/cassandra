@@ -68,7 +68,7 @@ public class IndexesSystemViewTest extends SAITester
     {
         VirtualKeyspaceRegistry.instance.register(new VirtualKeyspace(SchemaConstants.VIRTUAL_VIEWS, ImmutableList.of(new IndexesSystemView(SchemaConstants.VIRTUAL_VIEWS))));
 
-        StorageService.instance.initServer(); // Ensure the node has advanced out of STARTING mode
+        StorageService.instance.setStartingModeUnsafe(); // Ensure the node has advanced out of STARTING mode
     }
 
     @Test
