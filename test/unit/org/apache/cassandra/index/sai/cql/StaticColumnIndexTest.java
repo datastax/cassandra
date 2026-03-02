@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.TimeType;
 import org.apache.cassandra.db.marshal.UUIDType;
@@ -81,6 +82,8 @@ public class StaticColumnIndexTest extends SAITester
     @Test
     public void testTupleAndBlobFiltering() throws Throwable
     {
+        CassandraRelevantProperties.VECTOR_FLOAT_ONLY.setBoolean(false);
+
         String blobTupleType = createType("CREATE TYPE IF NOT EXISTS %s (f0 blob)");
         String boolTinyTextType = createType("CREATE TYPE IF NOT EXISTS %s (f0 boolean, f1 tinyint, f2 text)");
         createTable("CREATE TABLE %s (pk0 time, pk1 uuid, ck0 uuid, ck1 blob, s0 frozen<tuple<smallint, frozen<set<float>>>> static, " +
@@ -112,7 +115,7 @@ public class StaticColumnIndexTest extends SAITester
                 "        {f0: 0x92c1497d7072b81c91}: [-7587541014989351350, -2813091340484612608]}, [{f0: true, f1: 41, f2: '쎺╇⒀왶'}, {f0: true, f1: -84, f2: '턺䋏篷'}], -1473884563651667176 + 128345915915881356) USING TIMESTAMP 9");
 
         beforeAndAfterFlush(() -> assertRows(execute("SELECT pk0, pk1, ck0, ck1 FROM %s WHERE s0 = (28387, {-1.18764904E-20}) AND pk1 = 00000000-0000-4000-ad00-000000000000 AND ck1 = 0xa06bb301 LIMIT 307 ALLOW FILTERING"),
-                                             row(TimeType.instance.fromString("03:36:30.876439626"), UUIDType.instance.fromString("00000000-0000-4000-ad00-000000000000"), 
+                                             row(TimeType.instance.fromString("03:36:30.876439626"), UUIDType.instance.fromString("00000000-0000-4000-ad00-000000000000"),
                                                  UUIDType.instance.fromString("00000000-0000-4000-9f00-000000000000"), BytesType.instance.fromString("a06bb301"))));
     }
 }
