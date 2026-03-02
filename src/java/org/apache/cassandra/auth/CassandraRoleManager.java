@@ -55,6 +55,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.AUTH_BCRYPT_GENSALT_LOG2_ROUNDS;
 import static org.apache.cassandra.service.QueryState.forInternalCalls;
@@ -173,7 +174,8 @@ public class CassandraRoleManager implements IRoleManager
     public void setup()
     {
         loadRoleStatement();
-        loadIdentityStatement();
+        if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
+            loadIdentityStatement();
         loadRoleMembersStatement = (SelectStatement) prepare("SELECT member FROM %s.%s WHERE role = ?",
                                                       SchemaConstants.AUTH_KEYSPACE_NAME,
                                                       AuthKeyspace.ROLE_MEMBERS);
@@ -274,10 +276,13 @@ public class CassandraRoleManager implements IRoleManager
     public void createRole(AuthenticatedUser performer, RoleResource role, RoleOptions options)
     throws RequestValidationException, RequestExecutionException
     {
-        List<String> identitiesOfRole = identitiesForRole(role.getRoleName());
-        if (!identitiesOfRole.isEmpty())
+        if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
         {
-            throw new IllegalStateException(String.format("Cannot create a role '%s' when identities already exists for it", role.getRoleName()));
+            List<String> identitiesOfRole = identitiesForRole(role.getRoleName());
+            if (!identitiesOfRole.isEmpty())
+            {
+                throw new IllegalStateException(String.format("Cannot create a role '%s' when identities already exists for it", role.getRoleName()));
+            }
         }
         String insertCql = options.getPassword().isPresent() || options.getHashedPassword().isPresent()
                          ? String.format("INSERT INTO %s.%s (role, is_superuser, can_login, salted_hash) VALUES ('%s', %s, %s, '%s')",
@@ -304,7 +309,8 @@ public class CassandraRoleManager implements IRoleManager
                               escape(role.getRoleName())),
                 consistencyForRoleWrite(role.getRoleName()));
         removeAllMembers(role.getRoleName());
-        removeAllIdentitiesOfRole(role.getRoleName());
+        if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
+            removeAllIdentitiesOfRole(role.getRoleName());
     }
 
     public void alterRole(AuthenticatedUser performer, RoleResource role, RoleOptions options)

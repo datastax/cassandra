@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -38,13 +39,17 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
+import org.apache.cassandra.utils.TimeUUID;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.db.SystemKeyspace.LOCAL;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -199,4 +204,79 @@ public class SystemKeyspaceTest
         ILocalInfo info = Nodes.local().get();
         return info != null && info.getReleaseVersion() != null ? info.getReleaseVersion().toString() : null;
     }
+
+    @Test
+    public void testCompactionHistoryTableSelectionByCompatMode()
+    {
+        StorageCompatibilityMode original = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CASSANDRA_4);
+            TableMetadata v1Table = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.COMPACTION_HISTORY);
+            assertNotNull(v1Table);
+            Set<String> v1Columns = v1Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
+            assertThat(v1Columns).doesNotContain("compaction_properties");
+
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CC_4);
+            TableMetadata cc4Table = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.COMPACTION_HISTORY);
+            assertNotNull(cc4Table);
+            Set<String> cc4Columns = cc4Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
+            assertThat(cc4Columns).doesNotContain("compaction_properties");
+
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.NONE);
+            TableMetadata v2Table = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.COMPACTION_HISTORY);
+            assertNotNull(v2Table);
+            Set<String> v2Columns = v2Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
+            assertThat(v2Columns).contains("compaction_properties");
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(original);
+        }
+    }
+
+    @Test
+    public void testUpdateCompactionHistoryBefore5()
+    {
+        StorageCompatibilityMode original = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CASSANDRA_4);
+            TimeUUID taskId1 = TimeUUID.Generator.nextTimeUUID();
+            Map<Integer, Long> partitionsMerged = Collections.singletonMap(2, 10L);
+            Map<String, String> compactionProperties = Collections.singletonMap("type", "COMPACTION");
+
+            SystemKeyspace.updateCompactionHistory(taskId1, "ks1", "cf1", System.currentTimeMillis(), 100L, 50L, partitionsMerged, compactionProperties);
+
+            UntypedResultSet result = executeInternal(format("SELECT * FROM system.%s WHERE id = ?", SystemKeyspace.COMPACTION_HISTORY), taskId1);
+            assertThat(result).isNotNull();
+            assertThat(result.isEmpty()).isFalse();
+            UntypedResultSet.Row row = result.one();
+            assertEquals("ks1", row.getString("keyspace_name"));
+            assertEquals("cf1", row.getString("columnfamily_name"));
+            assertEquals(100L, row.getLong("bytes_in"));
+            assertEquals(50L, row.getLong("bytes_out"));
+            assertThat(row.has("compaction_properties")).isFalse();
+
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CC_4);
+            TimeUUID taskId2 = TimeUUID.Generator.nextTimeUUID();
+
+            SystemKeyspace.updateCompactionHistory(taskId2, "ks2", "cf2", System.currentTimeMillis(), 200L, 100L, partitionsMerged, compactionProperties);
+
+            result = executeInternal(format("SELECT * FROM system.%s WHERE id = ?", SystemKeyspace.COMPACTION_HISTORY), taskId2);
+            assertThat(result).isNotNull();
+            assertThat(result.isEmpty()).isFalse();
+            row = result.one();
+            assertEquals("ks2", row.getString("keyspace_name"));
+            assertEquals("cf2", row.getString("columnfamily_name"));
+            assertEquals(200L, row.getLong("bytes_in"));
+            assertEquals(100L, row.getLong("bytes_out"));
+            assertThat(row.has("compaction_properties")).isFalse();
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(original);
+        }
+    }
+
 }

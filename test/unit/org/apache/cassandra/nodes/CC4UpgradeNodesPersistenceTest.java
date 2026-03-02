@@ -111,11 +111,19 @@ public class CC4UpgradeNodesPersistenceTest extends CQLTester
     }
 
     @Test
-    public void testLoadLocalReturnsNullWhenNoCC4Files() throws Exception
+    public void testLoadLocalFallsBackToSystemTablesWhenNoCC4Files() throws Exception
     {
         Files.delete(nodesDir);
+
         LocalInfo loaded = persistence.loadLocal();
-        assertThat(loaded).isNull();
+        NodesPersistence basePersistence = new NodesPersistence();
+        LocalInfo fromSystemTable = basePersistence.loadLocal();
+
+        assertThat(loaded).isNotNull();
+        assertThat(loaded.getHostId()).isEqualTo(fromSystemTable.getHostId());
+        assertThat(loaded.getDataCenter()).isEqualTo(fromSystemTable.getDataCenter());
+        assertThat(loaded.getRack()).isEqualTo(fromSystemTable.getRack());
+        assertThat(loaded.getClusterName()).isEqualTo(fromSystemTable.getClusterName());
     }
 
     @Test
@@ -164,11 +172,37 @@ public class CC4UpgradeNodesPersistenceTest extends CQLTester
     }
 
     @Test
-    public void testLoadPeersReturnsEmptyWhenNoCC4Files() throws Exception
+    public void testLoadPeersFallsBackToSystemTablesWhenNoCC4Files() throws Exception
     {
-        Files.delete(nodesDir);
-        List<PeerInfo> loaded = persistence.loadPeers().collect(Collectors.toList());
-        assertThat(loaded).isEmpty();
+        UUID hostId = UUID.randomUUID();
+        InetAddressAndPort peer = InetAddressAndPort.getByNameOverrideDefaults("10.0.0.99", 7000);
+
+        PeerInfo testPeer = new PeerInfo();
+        testPeer.setPeerAddressAndPort(peer);
+        testPeer.setHostId(hostId);
+        testPeer.setDataCenter("dc1");
+        testPeer.setRack("rack1");
+
+        NodesPersistence basePersistence = new NodesPersistence();
+        basePersistence.savePeer(testPeer);
+
+        try
+        {
+            Files.delete(nodesDir);
+
+            List<PeerInfo> loaded = persistence.loadPeers().collect(Collectors.toList());
+            assertThat(loaded).isNotEmpty();
+
+            PeerInfo loadedPeer = loaded.stream().filter(p -> p.getHostId().equals(hostId)).findFirst().orElse(null);
+            assertThat(loadedPeer).isNotNull();
+            assertThat(loadedPeer.getPeerAddressAndPort()).isEqualTo(peer);
+            assertThat(loadedPeer.getDataCenter()).isEqualTo("dc1");
+            assertThat(loadedPeer.getRack()).isEqualTo("rack1");
+        }
+        finally
+        {
+            basePersistence.deletePeer(peer);
+        }
     }
 
     // ---- Helpers to write CC4-format msgpack data ----
