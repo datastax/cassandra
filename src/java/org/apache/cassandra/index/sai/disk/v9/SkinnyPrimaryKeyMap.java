@@ -84,14 +84,14 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         protected final LongArray.Factory partitionReaderFactory;
         protected final KeyLookup partitionKeyReader;
         protected final IPartitioner partitioner;
-        protected final RowAwarePrimaryKeyFactory primaryKeyFactory;
+        protected final OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory;
 
         // private final FileHandle tokensFile;
         private final FileHandle partitionsFile;
         private final FileHandle partitionKeyBlockOffsetsFile;
         private final FileHandle partitionKeyBlocksFile;
 
-        public Factory(IndexComponents.ForRead perSSTableComponents, RowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
+        public Factory(IndexComponents.ForRead perSSTableComponents, OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
             try
             {
@@ -152,7 +152,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     protected final LongArray partitionArray;
     protected final KeyLookup.Cursor partitionKeyCursor;
     protected final IPartitioner partitioner;
-    protected final RowAwarePrimaryKeyFactory primaryKeyFactory;
+    protected final OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory;
     protected final SSTableId<?> sstableId;
     private final boolean hasStaticColumns;
 
@@ -160,7 +160,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
                                   LongArray partitionArray,
                                   KeyLookup.Cursor partitionKeyCursor,
                                   IPartitioner partitioner,
-                                  RowAwarePrimaryKeyFactory primaryKeyFactory,
+                                  OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
                                   SSTableId<?> sstableId,
                                   boolean hasStaticColumns)
     {
