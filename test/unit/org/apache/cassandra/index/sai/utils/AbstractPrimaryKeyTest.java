@@ -49,6 +49,13 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
                                                                            .addClusteringColumn("ck1", UTF8Type.instance)
                                                                            .build();
 
+    protected static final TableMetadata simplePartitionStaticAndSingleClusteringAsc = TableMetadata.builder("test", "test")
+                                                                                                    .partitioner(Murmur3Partitioner.instance)
+                                                                                                    .addPartitionKeyColumn("pk1", Int32Type.instance)
+                                                                                                    .addStaticColumn("sk1", Int32Type.instance)
+                                                                                                    .addClusteringColumn("ck1", UTF8Type.instance)
+                                                                                                    .build();
+
     static TableMetadata simplePartitionMultipleClusteringAsc = TableMetadata.builder("test", "test")
                                                                              .partitioner(Murmur3Partitioner.instance)
                                                                              .addPartitionKeyColumn("pk1", Int32Type.instance)
