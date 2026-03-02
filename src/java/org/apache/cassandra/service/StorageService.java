@@ -1472,7 +1472,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             DatabaseDescriptor.getAuthenticator().setup();
             DatabaseDescriptor.getAuthorizer().setup();
             DatabaseDescriptor.getNetworkAuthorizer().setup();
-            DatabaseDescriptor.getCIDRAuthorizer().setup();
+            if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+                DatabaseDescriptor.getCIDRAuthorizer().setup();
             AuthCacheService.initializeAndRegisterCaches();
             Schema.instance.registerListener(new AuthSchemaChangeListener());
             authSetupComplete = true;
