@@ -47,8 +47,8 @@ public class CC4UpgradeNodesPersistence extends NodesPersistence
             saveLocal(migrated);
             return migrated;
         }
-        logger.debug("No CC4 local metadata found to migrate");
-        return null;
+        logger.debug("No CC4 local metadata found to migrate, falling back to system tables");
+        return super.loadLocal();
     }
 
     @Override
@@ -63,6 +63,12 @@ public class CC4UpgradeNodesPersistence extends NodesPersistence
         }
 
         CC4NodesFileReader.archiveCC4NodesDirectory();
+
+        if (migrated.isEmpty())
+        {
+            logger.warn("No CC4 peer metadata found to migrate, falling back to system tables");
+            return super.loadPeers();
+        }
 
         return migrated.stream();
     }
