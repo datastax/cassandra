@@ -65,7 +65,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
 
     private WidePrimaryKeyMap(LongArray tokenArray,
                               LongArray partitionArray, KeyLookup.Cursor partitionKeyCursor,
-                              KeyLookup.Cursor clusteringKeyCursor, IPartitioner partitioner, RowAwarePrimaryKeyFactory primaryKeyFactory,
+                              KeyLookup.Cursor clusteringKeyCursor, IPartitioner partitioner, OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
                               ClusteringComparator clusteringComparator, SSTableId<?> sstableId, boolean hasStaticColumns)
     {
         super(tokenArray, partitionArray, partitionKeyCursor, partitioner, primaryKeyFactory,
@@ -241,7 +241,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         private final FileHandle clusteringKeyBlockOffsetsFile;
         private final FileHandle clustingingKeyBlocksFile;
 
-        public Factory(IndexComponents.ForRead perSSTableComponents, RowAwarePrimaryKeyFactory primaryKeyFactory,
+        public Factory(IndexComponents.ForRead perSSTableComponents, OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
                        SSTableReader sstable)
         {
             super(perSSTableComponents, primaryKeyFactory, sstable);
