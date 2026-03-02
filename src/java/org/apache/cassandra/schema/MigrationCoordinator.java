@@ -52,6 +52,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.FutureTask;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.gms.ApplicationState;
@@ -65,6 +66,7 @@ import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
@@ -387,6 +389,11 @@ public class MigrationCoordinator
 
         if (messagingService.versions.getRaw(endpoint) != MessagingService.current_version)
         {
+            if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major) && messagingService.versions.getRaw(endpoint) == MessagingService.VERSION_50)
+            {
+                logger.debug("Allowing schema pull from {} because we are in {} compatibility mode", endpoint, DatabaseDescriptor.getStorageCompatibilityMode());
+                return true;
+            }
             logger.debug("Not pulling schema from {} because their schema format is incompatible", endpoint);
             return false;
         }
