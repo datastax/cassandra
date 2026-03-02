@@ -18,8 +18,45 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.Arrays;
+
+import org.junit.Test;
+
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
+
 public class OptimizedRowAwarePrimaryKeyFactoryTest extends RowAwarePrimaryKeyFactoryTest
 {
+    @Test
+    public void simplePartitonStaticAndSingleClusteringAscTest()
+    {
+        PrimaryKey.Factory factory = new RowAwarePrimaryKeyFactory(simplePartitionStaticAndSingleClusteringAsc.comparator);
+        int rows = nextInt(10, 100);
+        PrimaryKey[] keys = new PrimaryKey[rows];
+        int partition = 0;
+        int clustering = 0;
+        for (int index = 0; index < rows; index++)
+        {
+            if (clustering == 0)
+            {
+                keys[index] = factory.create(makeKey(simplePartitionSingleClusteringAsc, partition), Clustering.STATIC_CLUSTERING);
+                clustering++;
+            }
+            else
+                keys[index] = factory.create(makeKey(simplePartitionSingleClusteringAsc, partition),
+                                             makeClustering(simplePartitionSingleClusteringAsc, Integer.toString(clustering++)));
+            if (clustering == 5)
+            {
+                clustering = 0;
+                partition++;
+            }
+        }
+
+        Arrays.sort(keys);
+
+        assertCorrectComparison(factory, keys);
+    }
+
     @Override
     protected void assertCorrectComparison(PrimaryKey.Factory factory, PrimaryKey[] keys)
     {
