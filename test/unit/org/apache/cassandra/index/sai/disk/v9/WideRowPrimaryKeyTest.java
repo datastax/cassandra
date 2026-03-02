@@ -44,7 +44,7 @@ public class WideRowPrimaryKeyTest extends AbstractPrimaryKeyTest
 
         SSTableComponentsWriter writer = new SSTableComponentsWriter(components);
 
-        RowAwarePrimaryKeyFactory factory = new RowAwarePrimaryKeyFactory(compositePartitionMultipleClusteringAsc.comparator);
+        OptimizedRowAwarePrimaryKeyFactory factory = new OptimizedRowAwarePrimaryKeyFactory(compositePartitionMultipleClusteringAsc.comparator);
 
         int rows = nextInt(1000, 10000);
         PrimaryKey[] keys = new PrimaryKey[rows];
