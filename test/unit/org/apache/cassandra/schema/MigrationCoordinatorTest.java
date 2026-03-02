@@ -57,6 +57,7 @@ import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.awaitility.Awaitility;
 import org.mockito.ArgumentCaptor;
@@ -446,5 +447,42 @@ public class MigrationCoordinatorTest
         wrapper.coordinator.reset();
         assertThat(wrapper.mergedSchemasFrom).anyMatch(ep -> regularNode1.equals(ep) || regularNode2.equals(ep));
         assertThat(wrapper.mergedSchemasFrom).hasSize(1);
+    }
+
+    @Test
+    public void testAllowSchemaPullFromVersion50InCC4Mode() throws UnknownHostException
+    {
+        StorageCompatibilityMode original = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CASSANDRA_4);
+            Wrapper wrapper = new Wrapper();
+            wrapper.configureMocksForEndpoint(EP1, validEndpointState, MessagingService.VERSION_50, false);
+
+            getUnchecked(wrapper.coordinator.reportEndpointVersion(EP1, V1));
+            Assert.assertEquals(1, wrapper.requests.size());
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(original);
+        }
+    }
+
+    @Test
+    public void testRejectSchemaPullFromVersion50InNoneMode() throws UnknownHostException
+    {
+        StorageCompatibilityMode original = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.NONE);
+            Wrapper wrapper = new Wrapper();
+            wrapper.configureMocksForEndpoint(EP1, validEndpointState, MessagingService.VERSION_50, false);
+
+            assertNoContact(wrapper, false);
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(original);
+        }
     }
 }

@@ -37,6 +37,11 @@ public class CreateRoleStatement extends AuthenticationStatement
     final CIDRPermissions cidrPermissions;
     private final boolean ifNotExists;
 
+    public CreateRoleStatement(RoleName name, RoleOptions options, DCPermissions dcPermissions, boolean ifNotExists)
+    {
+        this(name, options, dcPermissions, null, ifNotExists);
+    }
+
     public CreateRoleStatement(RoleName name, RoleOptions options, DCPermissions dcPermissions,
                                CIDRPermissions cidrPermissions, boolean ifNotExists)
     {
@@ -94,7 +99,7 @@ public class CreateRoleStatement extends AuthenticationStatement
             DatabaseDescriptor.getNetworkAuthorizer().setRoleDatacenters(role, dcPermissions);
         }
 
-        if (cidrPermissions != null)
+        if (cidrPermissions != null && !DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
             DatabaseDescriptor.getCIDRAuthorizer().setCidrGroupsForRole(role, cidrPermissions);
 
         grantPermissionsToCreator(state);
