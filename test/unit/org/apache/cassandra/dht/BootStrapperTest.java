@@ -18,6 +18,8 @@
 package org.apache.cassandra.dht;
 
 import java.net.UnknownHostException;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -51,6 +53,7 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
 
 @RunWith(BMUnitRunner.class)
 public class BootStrapperTest
@@ -216,6 +219,113 @@ public class BootStrapperTest
                 tokens.add(p.getRandomToken(rand));
 
             tmd.updateNormalTokens(tokens, addr);
+        }
+    }
+
+    /**
+     * Test that a node can reclaim its own tokens during restart.
+     * This scenario occurs when:
+     * 1. Node stops with tokens in TokenMetadata
+     * 2. Node restarts with same tokens specified
+     * 3. TokenMetadata still contains node's own tokens from previous session
+     * Without the fix, this would throw ConfigurationException
+     */
+    @Test
+    public void testAllowNodeToReclaimOwnTokensOnRestart() throws Exception
+    {
+        StorageService ss = StorageService.instance;
+        TokenMetadata tmd = ss.getTokenMetadata();
+        tmd.clearUnsafe();
+
+        InetAddressAndPort myEndpoint = InetAddressAndPort.getByName("127.0.0.1");
+        Token token1 = tmd.partitioner.getTokenFactory().fromString("100");
+        Token token2 = tmd.partitioner.getTokenFactory().fromString("200");
+
+        // Simulate node's tokens already existing in TokenMetadata (from previous session)
+        tmd.updateNormalTokens(Arrays.asList(token1, token2), myEndpoint);
+
+        // Verify tokens are in metadata
+        assertEquals(myEndpoint, tmd.getEndpoint(token1));
+        assertEquals(myEndpoint, tmd.getEndpoint(token2));
+
+        // Now try to bootstrap with the same tokens - should succeed (node reclaiming its own tokens)
+        Collection<String> initialTokens = Arrays.asList("100", "200");
+        Collection<Token> bootstrapTokens = BootStrapper.getSpecifiedTokens(myEndpoint, tmd, initialTokens);
+
+        // Should succeed without throwing ConfigurationException
+        assertNotNull(bootstrapTokens);
+        assertEquals(2, bootstrapTokens.size());
+    }
+
+    /**
+     * Test that tokens owned by a different node are still rejected.
+     * This ensures we don't break the original collision detection.
+     */
+    @Test
+    public void testRejectTokensOwnedByDifferentNode() throws Exception
+    {
+        StorageService ss = StorageService.instance;
+        TokenMetadata tmd = ss.getTokenMetadata();
+        tmd.clearUnsafe();
+
+        InetAddressAndPort otherEndpoint = InetAddressAndPort.getByName("127.0.0.2");
+        InetAddressAndPort myEndpoint = InetAddressAndPort.getByName("127.0.0.1");
+        Token token1 = tmd.partitioner.getTokenFactory().fromString("100");
+
+        // Simulate another node owning the token
+        tmd.updateNormalTokens(Arrays.asList(token1), otherEndpoint);
+
+        // Verify token is owned by other node
+        assertEquals(otherEndpoint, tmd.getEndpoint(token1));
+
+        // Try to bootstrap with a token owned by another node - should fail
+        Collection<String> initialTokens = Arrays.asList("100");
+        try
+        {
+            BootStrapper.getSpecifiedTokens(myEndpoint, tmd, initialTokens);
+            fail("Expected ConfigurationException when bootstrapping to token owned by different node");
+        }
+        catch (ConfigurationException e)
+        {
+            // Expected - token is owned by a different node
+            assert e.getMessage().contains("Bootstrapping to existing token");
+            assert e.getMessage().contains("100");
+        }
+    }
+
+    /**
+     * Test that a node cannot reclaim tokens owned by same IP but different port.
+     * This tests the .equals() comparison which includes both IP and port.
+     */
+    @Test
+    public void testRejectTokensOwnedBySameIPDifferentPort() throws Exception
+    {
+        StorageService ss = StorageService.instance;
+        TokenMetadata tmd = ss.getTokenMetadata();
+        tmd.clearUnsafe();
+
+        InetAddressAndPort endpoint1 = InetAddressAndPort.getByName("127.0.0.1:7000");
+        InetAddressAndPort endpoint2 = InetAddressAndPort.getByName("127.0.0.1:7001");
+        Token token1 = tmd.partitioner.getTokenFactory().fromString("100");
+
+        // Simulate endpoint1 owning the token
+        tmd.updateNormalTokens(Arrays.asList(token1), endpoint1);
+
+        // Verify token is owned by endpoint1
+        assertEquals(endpoint1, tmd.getEndpoint(token1));
+
+        // Try to bootstrap with endpoint2 (same IP, different port) - should fail
+        Collection<String> initialTokens = Arrays.asList("100");
+        try
+        {
+            BootStrapper.getSpecifiedTokens(endpoint2, tmd, initialTokens);
+            fail("Expected ConfigurationException when bootstrapping to token owned by different endpoint (different port)");
+        }
+        catch (ConfigurationException e)
+        {
+            // Expected - token is owned by a different endpoint (different port)
+            assert e.getMessage().contains("Bootstrapping to existing token");
+            assert e.getMessage().contains("100");
         }
     }
 

@@ -20,6 +20,7 @@ package org.apache.cassandra.dht;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -164,7 +165,7 @@ public class BootStrapper extends ProgressEventNotifierSupport
         // if user specified tokens, use those
         if (initialTokens.size() > 0)
         {
-            Collection<Token> tokens = getSpecifiedTokens(metadata, initialTokens);
+            Collection<Token> tokens = getSpecifiedTokens(address, metadata, initialTokens);
             BootstrapDiagnostics.useSpecifiedTokens(address, allocationKeyspace, tokens, DatabaseDescriptor.getNumTokens());
             return tokens;
         }
@@ -187,15 +188,19 @@ public class BootStrapper extends ProgressEventNotifierSupport
         return tokens;
     }
 
-    private static Collection<Token> getSpecifiedTokens(final TokenMetadata metadata,
-                                                        Collection<String> initialTokens)
+    @VisibleForTesting
+    static Collection<Token> getSpecifiedTokens(InetAddressAndPort address, final TokenMetadata metadata,
+                                                Collection<String> initialTokens)
     {
         logger.info("tokens manually specified as {}",  initialTokens);
         List<Token> tokens = new ArrayList<>(initialTokens.size());
         for (String tokenString : initialTokens)
         {
             Token token = metadata.partitioner.getTokenFactory().fromString(tokenString);
-            if (metadata.getEndpoint(token) != null)
+            InetAddressAndPort existingEndpoint = metadata.getEndpoint(token);
+            // Allow a node to reclaim its own tokens (e.g., during restart after upgrade)
+            // Only reject tokens owned by different nodes
+            if (existingEndpoint != null && !existingEndpoint.equals(address))
                 throw new ConfigurationException("Bootstrapping to existing token " + tokenString + " is not allowed (decommission/removenode the old node first).");
             tokens.add(token);
         }
