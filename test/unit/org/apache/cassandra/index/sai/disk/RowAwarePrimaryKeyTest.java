@@ -56,7 +56,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     public static List<Object[]> data()
     {
         return Version.ALL.stream()
-                          .filter(v -> v != Version.AA)
+                          .filter(v -> v.onDiskFormat().indexFeatureSet().isRowAware())
                           .map(v -> new Object[]{ v })
                           .collect(Collectors.toList());
     }
