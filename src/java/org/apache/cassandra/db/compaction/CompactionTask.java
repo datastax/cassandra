@@ -276,7 +276,9 @@ public class CompactionTask extends AbstractCompactionTask
 
     private CompactionOperation createCompactionOperation(CompactionController controller, CompactionStrategy strategy)
     {
-        Set<CompactionSSTable> fullyExpiredSSTables = controller.getFullyExpiredSSTables();
+        Set<CompactionSSTable> fullyExpiredSSTables = controller.getFullyExpiredSSTables();        
+        maybeNotifyIndexersAboutRowsInFullyExpiredSSTables(fullyExpiredSSTables);
+ 
         Set<SSTableReader> actuallyCompact = new HashSet<>(inputSSTables());
         actuallyCompact.removeAll(fullyExpiredSSTables);
         // select SSTables to compact based on available disk space.
