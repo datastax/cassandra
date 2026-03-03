@@ -61,7 +61,7 @@ public enum ParamType
      */
     TRACE_KEYSPACE      (8, "TraceKeyspace", StringSerializer.serializer),
     /**
-     * Failure callback messages contain verb name of the incoming message.
+     * Failure response messages contain verb name of the incoming message.
      */
     REQUEST_VERB_NAME   (9, "RequestVerbName", StringSerializer.serializer),
 

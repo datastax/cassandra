@@ -204,6 +204,22 @@ public class MessageTest
     }
 
     @Test
+    public void testNonStaticFailureResponse() throws IOException
+    {
+        Message<String> incomingMessage = Message.builder(Verb.MUTATION_REQ, "some-payload").withId(1).build();
+        Message<RequestFailureReason> msg = incomingMessage.failureResponse(RequestFailureReason.INCOMPATIBLE_SCHEMA);
+
+        assertEquals(1, msg.id());
+        assertEquals(Verb.FAILURE_RSP, msg.verb());
+        assertEquals(incomingMessage.expiresAtNanos(), msg.expiresAtNanos());
+        assertEquals(RequestFailureReason.INCOMPATIBLE_SCHEMA, msg.payload);
+        assertEquals(Verb.MUTATION_REQ.name(), msg.header.params().get(ParamType.REQUEST_VERB_NAME));
+        assertTrue(msg.isFailureResponse());
+
+        testCycle(msg);
+    }
+
+    @Test
     public void testBuilderAddTraceHeaderWhenTraceSessionPresent()
     {
         Stream.of(TraceType.values()).forEach(this::testAddTraceHeaderWithType);
