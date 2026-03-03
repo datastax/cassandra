@@ -238,7 +238,7 @@ public class StubIndex implements Index
         @Override
         public UnfilteredPartitionIterator search(ReadExecutionController executionController)
         {
-            return Util.executeLocally((PartitionRangeReadCommand)command, baseCfs, executionController);
+            return Util.executeLocally(command, baseCfs, executionController);
         }
     }
 }

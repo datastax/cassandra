@@ -39,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -65,6 +66,7 @@ import org.apache.cassandra.guardrails.DefaultGuardrail;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.Threshold;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -83,6 +85,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.read.TrackingRowIterator;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -336,7 +339,8 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     protected abstract ReadCommand copyAsDigestQuery();
 
-    protected abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
+    @VisibleForTesting
+    public abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
     /**
      * Whether the underlying {@code ClusteringIndexFilter} is reversed or not.
@@ -398,10 +402,12 @@ public abstract class ReadCommand extends AbstractReadQuery
      * violates the implementation specific validation rules.
      */
     @Override
-    public void maybeValidateIndexes()
+    public void maybeValidateIndexes(SelectOptions selectOptions, QueryState queryState)
     {
         if (null != indexQueryPlan)
             indexQueryPlan.validate(this);
+
+        selectOptions.validate(queryState, metadata(), limits().count(), IndexRegistry.obtain(metadata()), indexQueryPlan);
     }
 
     /**
