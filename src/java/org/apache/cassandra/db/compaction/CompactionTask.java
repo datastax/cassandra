@@ -1094,14 +1094,18 @@ public class CompactionTask extends AbstractCompactionTask
         for (SSTableReader reader : newSStables)
             newSSTableNames.append(reader.descriptor.baseFileUri()).append(',');
         long durationInNano = TimeUnit.MILLISECONDS.toNanos(durationInMillis);
-        logger.debug("Compacted ({}{}) {} sstables to [{}] to level={}. {} to {} (~{}% of original) in {}ms. " +
+        int level = getLevel();
+        if (level == 0 && strategy != null)
+            level = strategy.getLevel(transaction);
+
+        logger.debug("Compacted ({}{}) {} sstables to [{}]{}. {} to {} (~{}% of original) in {}ms. " +
                      "Read Throughput = {}, Write Throughput = {}, Row Throughput = ~{}/s, Partition Throughput = ~{}/s." +
                      " {} total partitions merged to {}. Partition merge counts were {}.",
                      taskId,
                      tokenRange() != null ? " range " + tokenRange() : "",
                      transaction.originals().size(),
                      newSSTableNames,
-                     getLevel(),
+                     level >= 0 ? " to level=" + level : "",
                      prettyPrintMemory(progress.adjustedInputDiskSize()),
                      prettyPrintMemory(progress.outputDiskSize()),
                      (int) (progress.sizeRatio() * 100),

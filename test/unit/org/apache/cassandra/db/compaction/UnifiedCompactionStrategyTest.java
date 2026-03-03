@@ -54,6 +54,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
 import org.apache.cassandra.dht.Bounds;
@@ -2198,6 +2199,61 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         assertEquals(1, level.index);
         assertEquals(0.25d, level.min, 0);
         assertEquals(0.5d, level.max, 0);
+    }
+
+    @Test
+    public void testGetLevelForTransaction()
+    {
+        // Test that getLevel returns -1 for unknown transactions
+        Controller controller = Mockito.mock(Controller.class);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(realm);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, backgroundCompactions, controller);
+
+        UUID unknownTaskId = UUID.randomUUID();
+        ILifecycleTransaction unknownTxn = Mockito.mock(ILifecycleTransaction.class);
+        when(unknownTxn.opId()).thenReturn(unknownTaskId);
+
+        assertEquals(-1, strategy.getLevel(unknownTxn));
+
+        // Test that getLevel returns the correct level for a registered compaction
+        UUID taskId = UUID.randomUUID();
+        ILifecycleTransaction txn = Mockito.mock(ILifecycleTransaction.class);
+        when(txn.opId()).thenReturn(taskId);
+
+        // Create a compaction pick at level 3
+        CompactionPick pick = Mockito.mock(CompactionPick.class);
+        when(pick.id()).thenReturn(taskId);
+        when(pick.parent()).thenReturn(3L);
+
+        CompactionAggregate aggregate = Mockito.mock(CompactionAggregate.class);
+        when(aggregate.getSelected()).thenReturn(pick);
+        when(aggregate.getMatching(any(TreeMap.class))).thenReturn(aggregate);
+        when(aggregate.containsSameInstance(any())).thenReturn(Pair.create(true, pick));
+
+        backgroundCompactions.setSubmitted(strategy, taskId, aggregate);
+
+        assertEquals(3, strategy.getLevel(txn));
+
+        // Test with a different level
+        UUID taskId2 = UUID.randomUUID();
+        ILifecycleTransaction txn2 = Mockito.mock(ILifecycleTransaction.class);
+        when(txn2.opId()).thenReturn(taskId2);
+
+        CompactionPick pick2 = Mockito.mock(CompactionPick.class);
+        when(pick2.id()).thenReturn(taskId2);
+        when(pick2.parent()).thenReturn(7L);
+
+        CompactionAggregate aggregate2 = Mockito.mock(CompactionAggregate.class);
+        when(aggregate2.getSelected()).thenReturn(pick2);
+        when(aggregate2.getMatching(any(TreeMap.class))).thenReturn(aggregate2);
+        when(aggregate2.containsSameInstance(any())).thenReturn(Pair.create(true, pick2));
+
+        backgroundCompactions.setSubmitted(strategy, taskId2, aggregate2);
+
+        assertEquals(7, strategy.getLevel(txn2));
+
+        // Verify first transaction still returns correct level
+        assertEquals(3, strategy.getLevel(txn));
     }
 
     @Test
