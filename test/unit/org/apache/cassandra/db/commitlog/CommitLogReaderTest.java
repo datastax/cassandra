@@ -43,6 +43,8 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.CassandraDaemon;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 import org.assertj.core.api.Assertions;
@@ -65,6 +67,11 @@ public class CommitLogReaderTest extends CQLTester
 
         // Once per-JVM is enough
         prepareServer();
+
+        // Register a daemon and mark it as setup complete to avoid JVM kill during commit log error handling
+        CassandraDaemon daemon = new CassandraDaemon();
+        daemon.completeSetup();
+        StorageService.instance.registerDaemon(daemon);
     }
 
     @Before
