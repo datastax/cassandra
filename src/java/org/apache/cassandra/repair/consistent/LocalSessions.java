@@ -55,6 +55,8 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
 import org.apache.cassandra.db.compaction.CleanupTask;
@@ -417,7 +419,7 @@ public class LocalSessions
      */
     public void cancelSession(UUID sessionID, boolean force)
     {
-        logger.info("Cancelling local repair session {}", sessionID);
+        logger.info("Cancelling local repair session {} \n {}", sessionID, ExceptionUtils.getStackTrace(new Exception("HCD-181 debug - Ignore me")));
         LocalSession session = getSession(sessionID);
         Preconditions.checkArgument(session != null, "Session {} does not exist", sessionID);
         Preconditions.checkArgument(force || session.coordinator.equals(getBroadcastAddressAndPort()),
@@ -791,8 +793,8 @@ public class LocalSessions
         synchronized (session)
         {
             Preconditions.checkArgument(session.getState().canTransitionTo(state),
-                                        "Invalid state transition %s -> %s",
-                                        session.getState(), state);
+                                        "Invalid state transition %s -> %s for session %s",
+                                        session.getState(), state, session.sessionID);
             logger.trace("Changing LocalSession state from {} -> {} for {}", session.getState(), state, session.sessionID);
             boolean wasCompleted = session.isCompleted();
             session.setState(state);
@@ -831,7 +833,7 @@ public class LocalSessions
                 }
                 else if (session.getState() != FAILED)
                 {
-                    logger.info("Failing local repair session {}", session.sessionID);
+                    logger.info("Failing local repair session {} \n {}", session.sessionID, ExceptionUtils.getStackTrace(new Exception("HCD-181 debug - Ignore me")));
                     setStateAndSave(session, FAILED);
                 }
             }

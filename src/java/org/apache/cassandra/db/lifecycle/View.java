@@ -27,6 +27,7 @@ import com.google.common.base.Functions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -105,6 +106,9 @@ public class View
         this.sstablesByFilename = Maps.newHashMapWithExpectedSize(sstables.size());
         for (SSTableReader sstable : this.sstables)
             this.sstablesByFilename.put(sstable.getDataFile().name(), sstable);
+
+        if (!this.compacting.isEmpty())
+            logger.debug("New View {} at:\n{}", this, ExceptionUtils.getStackTrace(new Exception("HCD-200 debug - Ignore me")));
     }
 
     public Memtable getCurrentMemtable()
@@ -278,6 +282,9 @@ public class View
     @VisibleForTesting
     public static Function<View, View> updateCompacting(final Set<? extends SSTableReader> unmark, final Iterable<? extends SSTableReader> mark)
     {
+        if (unmark != null && !unmark.isEmpty())
+            logger.debug("HCD-200 updateCompacting unmark {} at\n{}", unmark, ExceptionUtils.getStackTrace(new Exception("HCD-200 debug - Ignore me" )));
+
         if (unmark.isEmpty() && Iterables.isEmpty(mark))
             return Functions.identity();
         return new Function<View, View>()

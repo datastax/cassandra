@@ -37,6 +37,7 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -274,7 +275,7 @@ public class CoordinatorSession extends ConsistentSession
             logger.error("Can't transition endpoints {} to FAILED", cantFail, new RuntimeException());
             return;
         }
-        logger.info("Incremental repair session {} failed", sessionID);
+        logger.info("Incremental repair session {} failed \n {}", sessionID, ExceptionUtils.getStackTrace(new Exception("HCD-181 debug - Ignore me")));
         sendFailureMessageToParticipants();
         setAll(State.FAILED);
 
