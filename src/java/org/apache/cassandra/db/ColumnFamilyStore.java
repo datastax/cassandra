@@ -2832,11 +2832,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         for (ColumnFamilyStore cfs : cfss)
         {
-            if (cfs.getTracker().getCompacting().stream().anyMatch(sstablesPredicate))
+            List<SSTableReader> compactingSatisfyingPredicate = cfs.getCompactingSSTables().stream().filter(sstablesPredicate).collect(Collectors.toList());
+            if (!compactingSatisfyingPredicate.isEmpty())
             {
                 logger.warn("Unable to cancel in-progress compactions for {}.{}.  Perhaps there is an unusually " +
                             "large row in progress somewhere, or the system is simply overloaded.", metadata.keyspace, metadata.name);
-                logger.debug("In-flight compactions: {}", Arrays.toString(cfs.getTracker().getCompacting().toArray()));
+
+                logger.debug("SSTables in in-flight operations: {}", compactingSatisfyingPredicate);
+                logger.debug("Operations involving these sstables: {}", CompactionManager.instance.getOperationsInvolving(List.of(cfs.metadata()), sstablesPredicate));
                 return false;
             }
         }

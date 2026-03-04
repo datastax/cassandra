@@ -2359,6 +2359,29 @@ public class CompactionManager implements CompactionManagerMBean
         return !interrupted.isEmpty();
     }
 
+    public Collection<AbstractTableOperation.OperationProgress> getOperationsInvolving(Iterable<TableMetadata> columnFamilies,
+                                                                                       Predicate<SSTableReader> sstablePredicate)
+    {
+        List<AbstractTableOperation.OperationProgress> result = new ArrayList<>();
+        for (TableOperation operationSource : active.getTableOperations())
+        {
+            AbstractTableOperation.OperationProgress info = operationSource.getProgress();
+
+            if (info.metadata() == null || Iterables.contains(columnFamilies, info.metadata()))
+            {
+                for (SSTableReader ssTableReader : info.sstables())
+                {
+                    if (sstablePredicate.test(ssTableReader))
+                    {
+                        result.add(info);
+                        break;
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
     /**
      * Try to stop all of the compactions for given ColumnFamilies.
      *
