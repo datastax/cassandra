@@ -2425,6 +2425,29 @@ public class CompactionManager implements CompactionManagerMBean
         return interrupted;
     }
 
+    public Collection<TableOperation.Progress> getOperationsInvolving(Iterable<TableMetadata> columnFamilies,
+                                                                      Predicate<SSTableReader> sstablePredicate)
+    {
+        List<TableOperation.Progress> result = new ArrayList<>();
+        for (TableOperation operationSource : active.getTableOperations())
+        {
+            TableOperation.Progress info = operationSource.getProgress();
+
+            if (info.metadata() == null || Iterables.contains(columnFamilies, info.metadata()))
+            {
+                for (SSTableReader ssTableReader : info.sstables())
+                {
+                    if (sstablePredicate.test(ssTableReader))
+                    {
+                        result.add(info);
+                        break;
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
     public boolean interruptCompactionFor(Iterable<TableMetadata> tables, TableOperation.StopTrigger trigger)
     {
         return interruptCompactionFor(tables, Predicates.alwaysTrue(), true, trigger);
