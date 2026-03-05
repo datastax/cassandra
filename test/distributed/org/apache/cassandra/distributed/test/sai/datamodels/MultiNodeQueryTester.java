@@ -66,9 +66,8 @@ abstract class MultiNodeQueryTester extends TestBaseImpl
         cluster = Cluster.build(3)
                          .withConfig(config -> config.with(Feature.NETWORK, Feature.GOSSIP)
                                                      .set("hinted_handoff_enabled", false))
-                         .withInstanceInitializer((cl, nodeNumber) -> {
-                             Byteman.createFromText(INJECTION_SCRIPT).install(cl);
-                         })
+                         .withInstanceInitializer((cl, nodeNumber) ->
+                                                  Byteman.createFromText(INJECTION_SCRIPT).install(cl))
                          .start();
 
         cluster.schemaChange("CREATE KEYSPACE " + DataModel.KEYSPACE + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2}");
