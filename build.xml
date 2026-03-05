@@ -108,6 +108,7 @@
     <property name="version.properties.dir"
               value="${build.src.resources}/org/apache/cassandra/config/" />
     <property name="final.name" value="${ant.project.name}-${version}"/>
+    <property name="new.artifact.name" value="db-all-${version}"/>
 
     <property name="local.repository" value="${user.home}/.m2/repository" />
 
@@ -831,6 +832,15 @@
         <copy file=".build/cassandra-build-deps-template.xml" tofile="${build.dir}/tmp-${final.name}-deps.pom">
             <filterset refid="pom-template"/>
         </copy>
+
+        <!-- Generate POM for com.datastax.db:db-all by copying and modifying the dse-db-all POM -->
+        <copy file="${build.dir}/${final.name}.pom"
+              tofile="${build.dir}/${new.artifact.name}.pom"/>
+        <replace file="${build.dir}/${new.artifact.name}.pom">
+            <replacetoken><![CDATA[<artifactId>dse-db-all</artifactId>]]></replacetoken>
+            <replacevalue><![CDATA[<groupId>com.datastax.db</groupId>
+  <artifactId>db-all</artifactId>]]></replacevalue>
+        </replace>
     </target>
 
     <!--
@@ -2297,6 +2307,16 @@
     <install pomFile="${build.dir}/${final.name}.pom"
              file="${build.dir}/${final.name}-javadoc.jar"
              classifier="javadoc"/>
+
+    <!-- the db-all jar (same JARs, new Maven coordinates com.datastax.db:db-all) -->
+    <install pomFile="${build.dir}/${new.artifact.name}.pom"
+             file="${build.dir}/${final.name}.jar"/>
+    <install pomFile="${build.dir}/${new.artifact.name}.pom"
+             file="${build.dir}/${final.name}-sources.jar"
+             classifier="sources"/>
+    <install pomFile="${build.dir}/${new.artifact.name}.pom"
+             file="${build.dir}/${final.name}-javadoc.jar"
+             classifier="javadoc"/>
   </target>
 
   <!-- Publish artifacts to remote Maven repository -->
@@ -2316,6 +2336,16 @@
             file="${build.dir}/${final.name}-sources.jar"
             classifier="sources"/>
     <deploy pomFile="${build.dir}/${final.name}.pom"
+            file="${build.dir}/${final.name}-javadoc.jar"
+            classifier="javadoc"/>
+
+    <!-- the db-all jar (same JARs, new Maven coordinates com.datastax.db:db-all) -->
+    <deploy pomFile="${build.dir}/${new.artifact.name}.pom"
+            file="${build.dir}/${final.name}.jar"/>
+    <deploy pomFile="${build.dir}/${new.artifact.name}.pom"
+            file="${build.dir}/${final.name}-sources.jar"
+            classifier="sources"/>
+    <deploy pomFile="${build.dir}/${new.artifact.name}.pom"
             file="${build.dir}/${final.name}-javadoc.jar"
             classifier="javadoc"/>
 
