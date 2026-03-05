@@ -154,6 +154,12 @@ public class KeyspaceMetrics
     /** Time spent waiting for free memtable space, either on- or off-heap */
     public final Histogram waitingOnFreeMemtableSpace;
     public final Histogram coordinatorReadSize;
+    public final Histogram coordinatorRangeReadSize;
+    public final Histogram coordinatorRangeReadSizeWithIndex;
+    public final Histogram coordinatorRangeReadSizeWithoutIndex;
+    public final Histogram coordinatorSingleReadSize;
+    public final Histogram coordinatorSingleReadSizeWithIndex;
+    public final Histogram coordinatorSingleReadSizeWithoutIndex;
     public final Counter deleteRequests;
 
     /*
@@ -276,6 +282,12 @@ public class KeyspaceMetrics
         coordinatorCasWriteLatency = createKeyspaceTimer("CoordinatorCasWriteLatency");
         waitingOnFreeMemtableSpace = createKeyspaceHistogram("WaitingOnFreeMemtableSpace", false);
         coordinatorReadSize = createKeyspaceHistogram("CoordinatorReadSize", false);
+        coordinatorRangeReadSize = createKeyspaceHistogram("CoordinatorRangeReadSize", false);
+        coordinatorRangeReadSizeWithIndex = createKeyspaceHistogram("CoordinatorRangeReadSizeWithIndex", false);
+        coordinatorRangeReadSizeWithoutIndex = createKeyspaceHistogram("CoordinatorRangeReadSizeWithoutIndex", false);
+        coordinatorSingleReadSize = createKeyspaceHistogram("CoordinatorSingleReadSize", false);
+        coordinatorSingleReadSizeWithIndex = createKeyspaceHistogram("CoordinatorSingleReadSizeWithIndex", false);
+        coordinatorSingleReadSizeWithoutIndex = createKeyspaceHistogram("CoordinatorSingleReadSizeWithoutIndex", false);
         deleteRequests = createKeyspaceCounter("DeleteRequests", metric -> metric.deleteRequests.getCount());
 
 

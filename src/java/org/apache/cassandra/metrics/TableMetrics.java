@@ -364,6 +364,12 @@ public class TableMetrics
     public final Counter speculativeInsufficientReplicas;
     public final Gauge<Long> speculativeSampleLatencyNanos;
     public final TableHistogram coordinatorReadSize;
+    public final TableHistogram coordinatorRangeReadSize;
+    public final TableHistogram coordinatorRangeReadSizeWithIndex;
+    public final TableHistogram coordinatorRangeReadSizeWithoutIndex;
+    public final TableHistogram coordinatorSingleReadSize;
+    public final TableHistogram coordinatorSingleReadSizeWithIndex;
+    public final TableHistogram coordinatorSingleReadSizeWithoutIndex;
     public final Counter additionalWrites;
     public final Gauge<Long> additionalWriteLatencyNanos;
 
@@ -1073,6 +1079,12 @@ public class TableMetrics
         coordinatorCasWriteLatency = createTableTimer("CoordinatorCasWriteLatency", cfs.getKeyspaceMetrics().coordinatorCasWriteLatency);
         waitingOnFreeMemtableSpace = createTableHistogram("WaitingOnFreeMemtableSpace", cfs.getKeyspaceMetrics().waitingOnFreeMemtableSpace, false);
         coordinatorReadSize = createTableHistogram("CoordinatorReadSize", cfs.getKeyspaceMetrics().coordinatorReadSize, false);
+        coordinatorRangeReadSize = createTableHistogram("CoordinatorRangeReadSize", cfs.getKeyspaceMetrics().coordinatorRangeReadSize, false);
+        coordinatorRangeReadSizeWithIndex = createTableHistogram("CoordinatorRangeReadSizeWithIndex", cfs.getKeyspaceMetrics().coordinatorRangeReadSizeWithIndex, false);
+        coordinatorRangeReadSizeWithoutIndex = createTableHistogram("CoordinatorRangeReadSizeWithoutIndex", cfs.getKeyspaceMetrics().coordinatorRangeReadSizeWithoutIndex, false);
+        coordinatorSingleReadSize = createTableHistogram("CoordinatorSingleReadSize", cfs.getKeyspaceMetrics().coordinatorSingleReadSize, false);
+        coordinatorSingleReadSizeWithIndex = createTableHistogram("CoordinatorSingleReadSizeWithIndex", cfs.getKeyspaceMetrics().coordinatorSingleReadSizeWithIndex, false);
+        coordinatorSingleReadSizeWithoutIndex = createTableHistogram("CoordinatorSingleReadSizeWithoutIndex", cfs.getKeyspaceMetrics().coordinatorSingleReadSizeWithoutIndex, false);
 
         // We do not want to capture view mutation specific metrics for a view
         // They only makes sense to capture on the base table

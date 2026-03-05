@@ -42,6 +42,7 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -147,6 +148,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                                        false,
                                                                        false,
                                                                        false);
+
+    private static enum ReadTypes {
+        SINGLE,
+        SINGLE_INDEX,
+        RANGE,
+        RANGE_INDEX
+    }
 
     public SelectStatement(String queryString,
                            TableMetadata table,
@@ -1040,9 +1048,40 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         ColumnFamilyStore store = cfs();
         if (store != null)
-            store.metric.coordinatorReadSize.update(result.readRowsSize());
+        {
+            boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
+            boolean isIndexQuery = restrictions.usesSecondaryIndexing();
+            updatedMetrics(store.metric, isPartitionRangeQuery, isIndexQuery, result.readRowsSize());
+        }
 
         return result.build();
+    }
+
+    private void updatedMetrics(TableMetrics metrics, boolean isRangeQuery, boolean isIndexQuery, long rowsSize)
+    {
+        metrics.coordinatorReadSize.update(rowsSize); // total read size
+        ReadTypes readType = isRangeQuery
+                         // range select
+                         ? isIndexQuery ? ReadTypes.RANGE_INDEX : ReadTypes.RANGE
+                         // single partition select
+                         : isIndexQuery ? ReadTypes.SINGLE_INDEX : ReadTypes.SINGLE;
+        switch (readType) {
+            case RANGE:
+                metrics.coordinatorRangeReadSize.update(rowsSize); // total range size
+                metrics.coordinatorRangeReadSizeWithoutIndex.update(rowsSize);
+                break;
+            case RANGE_INDEX:
+                metrics.coordinatorRangeReadSize.update(rowsSize); // total range size
+                metrics.coordinatorRangeReadSizeWithIndex.update(rowsSize);
+                break;
+            case SINGLE:
+                metrics.coordinatorSingleReadSize.update(rowsSize); // total single partition size
+                metrics.coordinatorSingleReadSizeWithoutIndex.update(rowsSize);
+                break;
+            case SINGLE_INDEX:
+                metrics.coordinatorSingleReadSize.update(rowsSize); // total single partition size
+                metrics.coordinatorSingleReadSizeWithIndex.update(rowsSize);
+        }
     }
 
     public ColumnFamilyStore cfs()
