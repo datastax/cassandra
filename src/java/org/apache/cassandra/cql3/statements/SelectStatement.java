@@ -42,6 +42,7 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -1035,9 +1036,42 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         ColumnFamilyStore store = cfs();
         if (store != null)
-            store.metric.coordinatorReadSize.update(result.readRowsSize());
-
+            updatedMetrics(store.metric, restrictions, result.readRowsSize());
         return result.build();
+    }
+
+    private void updatedMetrics(TableMetrics metrics, StatementRestrictions restrictions, long rowsSize)
+    {
+
+        boolean isRangeQuery = restrictions.isKeyRange() || restrictions.isDisjunction();
+        boolean isIndexQuery = restrictions.usesSecondaryIndexing();
+
+        metrics.coordinatorReadSize.update(rowsSize);
+
+        if (isRangeQuery && !isIndexQuery)
+        {
+            metrics.coordinatorRangeReadSize.update(rowsSize); // total range size
+            metrics.coordinatorRangeReadSizeWithoutIndex.update(rowsSize);
+        }
+        else if (isRangeQuery && isIndexQuery)
+        {
+            metrics.coordinatorRangeReadSize.update(rowsSize); // total range size
+            metrics.coordinatorRangeReadSizeWithIndex.update(rowsSize);
+        }
+        else if (!isRangeQuery && !isIndexQuery)
+        {
+            metrics.coordinatorSingleReadSize.update(rowsSize); // total single partition size
+            metrics.coordinatorSingleReadSizeWithoutIndex.update(rowsSize);
+        }
+        else if (!isRangeQuery && isIndexQuery)
+        {
+            metrics.coordinatorSingleReadSize.update(rowsSize); // total single partition size
+            metrics.coordinatorSingleReadSizeWithIndex.update(rowsSize);
+        }
+        else
+        {
+            noSpamLogger.debug("Unable to report SelectStatement metrics due to unexpected query restrictions: %s.", restrictions);
+        }
     }
 
     public ColumnFamilyStore cfs()
