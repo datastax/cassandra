@@ -125,7 +125,7 @@ public class DisabledRepairStateCheckingTest
                 assertNotNull(txn);
                 CompactionTask task = new CompactionTask(cfs, txn, 0, false, mockStrategy);
                 assertNotNull(task); // task must be successfully created
-                task.executeInternal(); // and run
+                task.execute(); // and run
                 for (SSTableReader s : txn.current())
                 {
                     assertFalse(s.isRepaired()); // and the resulting files must be marked unrepaired
