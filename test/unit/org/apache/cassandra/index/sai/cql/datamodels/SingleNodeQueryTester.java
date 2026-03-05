@@ -109,6 +109,13 @@ abstract class SingleNodeQueryTester extends SAITester
                              IndexQuerySupport.BASE_QUERY_SETS};
     }
 
+    protected static Object[] baseDataModelParamsLarge(Version version)
+    {
+        return new Object[]{ version,
+                             new DataModel.BaseDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA_LARGE),
+                             IndexQuerySupport.BASE_QUERY_SETS};
+    }
+
     protected static Object[] compoundKeyParams(Version version)
     {
         return new Object[]{ version,
@@ -116,10 +123,24 @@ abstract class SingleNodeQueryTester extends SAITester
                              IndexQuerySupport.BASE_QUERY_SETS};
     }
 
+    protected static Object[] compoundKeyParamsLarge(Version version)
+    {
+        return new Object[]{ version,
+                             new DataModel.CompoundKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA_LARGE),
+                             IndexQuerySupport.BASE_QUERY_SETS};
+    }
+
     protected static Object[] compoundKeyWithStaticsParams(Version version)
     {
         return new Object[]{ version,
                              new DataModel.CompoundKeyWithStaticsDataModel(DataModel.STATIC_COLUMNS, DataModel.STATIC_COLUMN_DATA),
+                             IndexQuerySupport.STATIC_QUERY_SETS};
+    }
+
+    protected static Object[] compoundKeyWithStaticsParamsLarge(Version version)
+    {
+        return new Object[]{ version,
+                             new DataModel.CompoundKeyWithStaticsDataModel(DataModel.STATIC_COLUMNS, DataModel.STATIC_COLUMN_DATA_LARGE),
                              IndexQuerySupport.STATIC_QUERY_SETS};
     }
 
@@ -132,4 +153,15 @@ abstract class SingleNodeQueryTester extends SAITester
                                           .addAll(IndexQuerySupport.COMPOSITE_PARTITION_QUERY_SETS)
                                      .build() };
     }
+
+    protected static Object[] compositePartitionKeyParamsLarge(Version version)
+    {
+        return new Object[]{ version,
+                             new DataModel.CompositePartitionKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA_LARGE),
+                             ImmutableList.<IndexQuerySupport.BaseQuerySet>builder()
+                                          .addAll(IndexQuerySupport.BASE_QUERY_SETS)
+                                          .addAll(IndexQuerySupport.COMPOSITE_PARTITION_QUERY_SETS)
+                             .build() };
+    }
+
 }
