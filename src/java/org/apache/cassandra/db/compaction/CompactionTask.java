@@ -1105,7 +1105,7 @@ public class CompactionTask extends AbstractCompactionTask
                      tokenRange() != null ? " range " + tokenRange() : "",
                      transaction.originals().size(),
                      newSSTableNames,
-                     level >= 0 ? " to level=" + level : "",
+                     level >= 0 ? " in level=" + level : "",
                      prettyPrintMemory(progress.adjustedInputDiskSize()),
                      prettyPrintMemory(progress.outputDiskSize()),
                      (int) (progress.sizeRatio() * 100),
@@ -1130,9 +1130,6 @@ public class CompactionTask extends AbstractCompactionTask
         for (SSTableReader sstr : originals)
         {
             ssTableLoggerMsg.append(sstr.getFilename());
-            if (sstr.getSSTableLevel() != 0)
-                ssTableLoggerMsg.append(":level=")
-                                .append(sstr.getSSTableLevel());
             ssTableLoggerMsg.append(", ");
         }
         ssTableLoggerMsg.append(']');

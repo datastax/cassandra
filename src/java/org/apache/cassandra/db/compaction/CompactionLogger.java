@@ -189,7 +189,6 @@ public class CompactionLogger
         // The details are only relevant or available for some strategies, e.g. LCS or Date tiered but
         // it doesn't hurt to log them all the time in order to simplify things
         ObjectNode details = json.objectNode();
-        details.put("level", sstable.getSSTableLevel());
         details.put("min_token", sstable.getFirst().getToken().toString());
         details.put("max_token", sstable.getLast().getToken().toString());
         details.put("min_timestamp", sstable.getMinTimestamp());

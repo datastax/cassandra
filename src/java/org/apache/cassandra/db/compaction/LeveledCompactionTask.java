@@ -84,7 +84,7 @@ public class LeveledCompactionTask extends CompactionTask
                         (float) expectedSize / 1024 / 1024,
                         transaction.originals()
                                    .stream()
-                                   .map(sstable -> String.format("%s (level=%s, size=%s)", sstable, sstable.getSSTableLevel(), sstable.onDiskLength()))
+                                   .map(sstable -> String.format("%s (size=%s)", sstable, sstable.onDiskLength()))
                                    .collect(Collectors.joining(",")),
                         transaction.opIdString());
             // Note that we have removed files that are still marked as compacting.
@@ -103,9 +103,8 @@ public class LeveledCompactionTask extends CompactionTask
             // no point doing a L0 -> L{0,1} compaction if we have cancelled all L0 sstables
             if (largestL0SSTable != null && l0SSTableCount > 1)
             {
-                logger.info("Removing {} (level={}, size={}) from compaction {}",
+                logger.info("Removing {} (size={}) from compaction {}",
                             largestL0SSTable,
-                            largestL0SSTable.getSSTableLevel(),
                             largestL0SSTable.onDiskLength(),
                             transaction.opIdString());
                 transaction.cancel(largestL0SSTable);

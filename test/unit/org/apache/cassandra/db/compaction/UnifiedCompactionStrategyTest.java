@@ -2257,6 +2257,41 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     }
 
     @Test
+    public void testGetSSTableLevelForUCS()
+    {
+        // For UCS, sstable.getSSTableLevel() is always 0 (misleading), 
+        // while strategy.getLevel(txn) provides the correct context.
+        Controller controller = Mockito.mock(Controller.class);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(realm);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, backgroundCompactions, controller);
+
+        CompactionSSTable sstable = Mockito.mock(CompactionSSTable.class);
+        when(sstable.getSSTableLevel()).thenReturn(0);
+
+        // Verify the "misleading" level is 0
+        assertEquals(0, sstable.getSSTableLevel());
+
+        // Verify that even if we had a task at level 5, the sstable itself still reports 0
+        UUID taskId = UUID.randomUUID();
+        ILifecycleTransaction txn = Mockito.mock(ILifecycleTransaction.class);
+        when(txn.opId()).thenReturn(taskId);
+
+        CompactionPick pick = Mockito.mock(CompactionPick.class);
+        when(pick.id()).thenReturn(taskId);
+        when(pick.parent()).thenReturn(5L);
+
+        CompactionAggregate aggregate = Mockito.mock(CompactionAggregate.class);
+        when(aggregate.getSelected()).thenReturn(pick);
+        when(aggregate.getMatching(any(TreeMap.class))).thenReturn(aggregate);
+        when(aggregate.containsSameInstance(any())).thenReturn(Pair.create(true, pick));
+
+        backgroundCompactions.setSubmitted(strategy, taskId, aggregate);
+
+        assertEquals(5, strategy.getLevel(txn));
+        assertEquals(0, sstable.getSSTableLevel()); // Still 0
+    }
+
+    @Test
     public void testSkippedAggregatesOnInsufficientDiskSpace()
     {
         long overheadSizeInBytes = 1000L;

@@ -48,6 +48,11 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
+import org.mockito.Mockito;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -91,6 +96,9 @@ public class LeveledCompactionStrategyTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        if (System.getProperty("cassandra.releaseVersion") == null || System.getProperty("cassandra.releaseVersion").equals("Unknown"))
+            System.setProperty("cassandra.releaseVersion", "4.0");
+
         // Disable tombstone histogram rounding for tests
         System.setProperty("cassandra.streaminghistogram.roundseconds", "1");
 
@@ -978,6 +986,43 @@ public class LeveledCompactionStrategyTest
             assertFalse(task.reduceScopeForLimitedSpace(Sets.newHashSet(sstables), 0));
             assertEquals(Sets.newHashSet(sstables), txn.originals());
         }
+    }
+
+    @Test
+    public void testGetLevelForTransaction()
+    {
+        CompactionStrategyFactory strategyFactory = Mockito.mock(CompactionStrategyFactory.class);
+        when(strategyFactory.getRealm()).thenReturn(cfs);
+        when(strategyFactory.getCompactionLogger()).thenReturn(Mockito.mock(CompactionLogger.class));
+
+        LeveledCompactionStrategy strategy = new LeveledCompactionStrategy(strategyFactory, Collections.<String, String>emptyMap());
+        BackgroundCompactions backgroundCompactions = strategy.getBackgroundCompactions();
+
+        // Test that getLevel returns -1 for unknown transactions
+        UUID unknownTaskId = UUID.randomUUID();
+        ILifecycleTransaction unknownTxn = Mockito.mock(ILifecycleTransaction.class);
+        when(unknownTxn.opId()).thenReturn(unknownTaskId);
+
+        assertEquals(-1, strategy.getLevel(unknownTxn));
+
+        // Test that getLevel returns the correct level for a registered compaction
+        UUID taskId = UUID.randomUUID();
+        ILifecycleTransaction txn = Mockito.mock(ILifecycleTransaction.class);
+        when(txn.opId()).thenReturn(taskId);
+
+        // Create a compaction pick at level 3
+        CompactionPick pick = Mockito.mock(CompactionPick.class);
+        when(pick.id()).thenReturn(taskId);
+        when(pick.parent()).thenReturn(3L);
+
+        CompactionAggregate aggregate = Mockito.mock(CompactionAggregate.class);
+        when(aggregate.getSelected()).thenReturn(pick);
+        when(aggregate.getMatching(any())).thenReturn(aggregate);
+        when(aggregate.containsSameInstance(any())).thenReturn(Pair.create(true, pick));
+
+        backgroundCompactions.setSubmitted(strategy, taskId, aggregate);
+
+        assertEquals(3, strategy.getLevel(txn));
     }
 
     private Pair<Set<SSTableReader>, Set<SSTableReader>> groupByLevel(Iterable<SSTableReader> sstables)
