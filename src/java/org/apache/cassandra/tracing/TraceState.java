@@ -17,8 +17,10 @@
  */
 package org.apache.cassandra.tracing;
 
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -49,6 +51,7 @@ public abstract class TraceState implements ProgressEventNotifier
     public final Tracing.TraceType traceType;
     public final int ttl;
     public final ClientState clientState;
+    public final boolean isProbabilistic;
 
     private boolean rangeQuery;
     private String tracedKeyspace;
@@ -70,7 +73,7 @@ public abstract class TraceState implements ProgressEventNotifier
     // See CASSANDRA-7626 for more details.
     private final AtomicInteger references = new AtomicInteger(1);
 
-    protected TraceState(ClientState clientState, InetAddressAndPort coordinator, UUID sessionId, Tracing.TraceType traceType)
+    protected TraceState(ClientState clientState, InetAddressAndPort coordinator, UUID sessionId, Tracing.TraceType traceType, boolean isProbabilistic)
     {
         assert coordinator != null;
         assert sessionId != null;
@@ -83,6 +86,7 @@ public abstract class TraceState implements ProgressEventNotifier
         this.ttl = traceType.getTTL();
         watch = Stopwatch.createStarted();
         this.status = Status.IDLE;
+        this.isProbabilistic = isProbabilistic;
     }
 
     /**
@@ -111,6 +115,8 @@ public abstract class TraceState implements ProgressEventNotifier
         listeners.remove(listener);
     }
 
+    public abstract TraceStorage getStorage();
+
     public boolean isRangeQuery()
     {
         return rangeQuery;
@@ -137,6 +143,11 @@ public abstract class TraceState implements ProgressEventNotifier
     public void tracedKeyspace(String tracedKeyspace)
     {
         this.tracedKeyspace = tracedKeyspace;
+    }
+
+    public boolean isStopped()
+    {
+        return status == Status.STOPPED;
     }
 
     public int elapsed()
@@ -214,6 +225,10 @@ public abstract class TraceState implements ProgressEventNotifier
             listener.progress(tag, ProgressEvent.createNotification(message));
         }
     }
+
+    public abstract void stopSession();
+
+    public abstract void begin(InetAddress client, String request, Map<String, String> parameters);
 
     protected abstract void traceImpl(String message);
 
