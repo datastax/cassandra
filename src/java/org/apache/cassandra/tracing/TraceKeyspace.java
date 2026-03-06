@@ -80,6 +80,7 @@ public final class TraceKeyspace
                 + "parameters map<text, text>,"
                 + "request text,"
                 + "started_at timestamp,"
+                + "context map<text, text>,"
                 + "PRIMARY KEY ((session_id)))");
 
     static final TableMetadata Events =
@@ -93,6 +94,7 @@ public final class TraceKeyspace
                 + "source_port int,"
                 + "source_elapsed int,"
                 + "thread text,"
+                + "context map<text, text>,"
                 + "PRIMARY KEY ((session_id), event_id))");
 
     public static TableMetadata parse(String table, String description, String cql)
