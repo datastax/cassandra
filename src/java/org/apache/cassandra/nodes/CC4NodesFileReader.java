@@ -303,6 +303,13 @@ final class CC4NodesFileReader
                 logger.warn("Unknown CC4 bootstrap state: {}", cc4.bootstrapped);
             }
         }
+        else if (cc4.tokens != null && !cc4.tokens.isEmpty())
+        {
+            logger.warn("CC4 node has tokens but no bootstrap state, tokens: {}", cc4.tokens);
+            // CC4 node has tokens but no bootstrap state recorded - assume bootstrap completed
+//            logger.info("CC4 node has tokens but no bootstrap state; defaulting to COMPLETED");
+//            info.setBootstrapState(SystemKeyspace.BootstrapState.COMPLETED);
+        }
         if (cc4.truncatedAt != null && !cc4.truncatedAt.isEmpty())
         {
             ImmutableMap.Builder<UUID, TruncationRecord> builder = ImmutableMap.builder();

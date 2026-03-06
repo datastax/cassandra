@@ -213,6 +213,7 @@ public class Nodes
         {
             try
             {
+                logger.info("Using custom nodes persistence implementation: {}", nodesPersistenceClassName);
                 return FBUtilities.instanceOrConstruct(nodesPersistenceClassName, "INodesPersistence implementation (" + NODES_PERSISTENCE_CLASS.getKey() + ")");
             }
             catch (Exception e)
@@ -221,9 +222,16 @@ public class Nodes
             }
         }
         if (!DatabaseDescriptor.isDaemonInitialized() || NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.getBoolean())
+        {
+            logger.info("Using NO_NODES_PERSISTENCE (daemon not initialized or persistence disabled)");
             return INodesPersistence.NO_NODES_PERSISTENCE;
+        }
         if (CC4NodesFileReader.hasCC4NodesDirectory())
+        {
+            logger.info("CC4 nodes directory detected; using CC4UpgradeNodesPersistence for migration");
             return new CC4UpgradeNodesPersistence();
+        }
+        logger.info("Using standard NodesPersistence (system keyspace)");
         return new NodesPersistence();
     }
 
@@ -514,9 +522,13 @@ public class Nodes
 
         private Local load()
         {
-            logger.trace("Loading local...");
+            logger.info("Loading local node info...");
             internalMap.compute(localInfoKey, (key, existingLocalInfo) -> {
                 LocalInfo info = nodesPersistence.loadLocal();
+                logger.info("Loaded local info: hostId={}, tokens={}, bootstrapState={}",
+                            info != null ? info.getHostId() : null,
+                            info != null ? info.getTokens() : null,
+                            info != null ? info.getBootstrapState() : null);
                 return info != null ? info : new LocalInfo();
             });
             if (logger.isTraceEnabled())

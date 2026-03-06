@@ -159,12 +159,15 @@ public class BootStrapper extends ProgressEventNotifierSupport
         String allocationKeyspace = DatabaseDescriptor.getAllocateTokensForKeyspace();
         Integer allocationLocalRf = DatabaseDescriptor.getAllocateTokensForLocalRf();
         Collection<String> initialTokens = DatabaseDescriptor.getInitialTokens();
+        logger.info("BootStrapper.getBootstrapTokens() called: address={}, initialTokens from config={}",
+                    address, initialTokens);
         if (initialTokens.size() > 0 && allocationKeyspace != null)
             logger.warn("manually specified tokens override automatic allocation");
 
         // if user specified tokens, use those
         if (initialTokens.size() > 0)
         {
+            logger.info("tokens manually specified as {}, calling getSpecifiedTokens()", initialTokens);
             Collection<Token> tokens = getSpecifiedTokens(address, metadata, initialTokens);
             BootstrapDiagnostics.useSpecifiedTokens(address, allocationKeyspace, tokens, DatabaseDescriptor.getNumTokens());
             return tokens;
@@ -192,15 +195,19 @@ public class BootStrapper extends ProgressEventNotifierSupport
     static Collection<Token> getSpecifiedTokens(InetAddressAndPort address, final TokenMetadata metadata,
                                                 Collection<String> initialTokens)
     {
-        logger.info("tokens manually specified as {}",  initialTokens);
+        logger.info("getSpecifiedTokens() called: address={}, initialTokens={}", address, initialTokens);
         List<Token> tokens = new ArrayList<>(initialTokens.size());
         for (String tokenString : initialTokens)
         {
             Token token = metadata.partitioner.getTokenFactory().fromString(tokenString);
             InetAddressAndPort existingEndpoint = metadata.getEndpoint(token);
-            // Allow a node to reclaim its own tokens (e.g., during restart after upgrade)
-            // Only reject tokens owned by different nodes
-            if (existingEndpoint != null && !existingEndpoint.equals(address))
+            logger.info("Checking token {}: existingEndpoint={}, requestingAddress={}",
+                        tokenString, existingEndpoint, address);
+            if (metadata.getEndpoint(token) != null)
+//            InetAddressAndPort existingEndpoint = metadata.getEndpoint(token);
+//            // Allow a node to reclaim its own tokens (e.g., during restart after upgrade)
+//            // Only reject tokens owned by different nodes
+//            if (existingEndpoint != null && !existingEndpoint.equals(address))
                 throw new ConfigurationException("Bootstrapping to existing token " + tokenString + " is not allowed (decommission/removenode the old node first).");
             tokens.add(token);
         }

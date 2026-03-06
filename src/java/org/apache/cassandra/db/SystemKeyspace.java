@@ -969,7 +969,11 @@ public final class SystemKeyspace
 
     public static Collection<Token> getSavedTokens()
     {
-        return Nodes.local().get().getTokens();
+        Collection<Token> tokens = Nodes.local().get().getTokens();
+        logger.info("getSavedTokens(): returning {} tokens: {}",
+                    tokens == null ? 0 : tokens.size(),
+                    tokens == null || tokens.isEmpty() ? "[]" : tokens);
+        return tokens;
     }
 
     public static int incrementAndGetGeneration()
@@ -1012,7 +1016,10 @@ public final class SystemKeyspace
 
     public static BootstrapState getBootstrapState()
     {
-        return ObjectUtils.firstNonNull(Nodes.local().get().getBootstrapState(), BootstrapState.NEEDS_BOOTSTRAP);
+        BootstrapState state = Nodes.local().get().getBootstrapState();
+        BootstrapState result = ObjectUtils.firstNonNull(state, BootstrapState.NEEDS_BOOTSTRAP);
+        logger.info("getBootstrapState(): state from Nodes.local()={}, returning={}", state, result);
+        return result;
     }
 
     public static boolean bootstrapComplete()

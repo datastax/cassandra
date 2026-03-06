@@ -1108,7 +1108,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private boolean shouldBootstrap()
     {
-        return DatabaseDescriptor.isAutoBootstrap() && !SystemKeyspace.bootstrapComplete() && !isSeed();
+        boolean autoBootstrap = DatabaseDescriptor.isAutoBootstrap();
+        boolean bootstrapComplete = SystemKeyspace.bootstrapComplete();
+        boolean isSeed = isSeed();
+        boolean result = autoBootstrap && !bootstrapComplete && !isSeed;
+        logger.info("shouldBootstrap() decision: autoBootstrap={}, bootstrapComplete={}, isSeed={}, result={}",
+                    autoBootstrap, bootstrapComplete, isSeed, result);
+        return result;
     }
 
     public static boolean isSeed()
@@ -1328,14 +1334,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (shouldBootstrap)
         {
+            logger.info("Taking bootstrap path (shouldBootstrap=true)");
             current.addAll(prepareForBootstrap(schemaTimeoutMillis, ringTimeoutMillis));
             dataAvailable = bootstrap(bootstrapTokens, bootstrapTimeoutMillis);
         }
         else
         {
+            logger.info("Taking non-bootstrap path (shouldBootstrap=false)");
             bootstrapTokens = SystemKeyspace.getSavedTokens();
             if (bootstrapTokens.isEmpty())
             {
+                logger.info("getSavedTokens() returned empty; calling BootStrapper.getBootstrapTokens()");
                 bootstrapTokens = BootStrapper.getBootstrapTokens(getTokenMetadata(), FBUtilities.getBroadcastAddressAndPort(), schemaTimeoutMillis, ringTimeoutMillis);
             }
             else
