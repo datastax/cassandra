@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.schema;
 
+import java.nio.ByteBuffer;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -26,10 +28,14 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.InheritingClass;
 import org.apache.cassandra.config.ParameterizedClass;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -277,5 +283,167 @@ public class MemtableParamsTest
         {
             // expected
         }
+    }
+
+    // ========================================================================
+    // CC4 to CC5 Upgrade Compatibility Tests
+    // ========================================================================
+
+    /**
+     * Helper method to create a row with CC4 binary map data.
+     */
+    private UntypedResultSet.Row createCC4MapRow(Map<String, String> cc4Map)
+    {
+        ByteBuffer serialized = MapType.getInstance(UTF8Type.instance, UTF8Type.instance, false)
+                                       .decompose(cc4Map);
+        Map<String, ByteBuffer> data = new HashMap<>();
+        data.put("memtable", serialized);
+        return new UntypedResultSet.Row(data);
+    }
+
+    /**
+     * Helper method to create a row with CC5 text data.
+     */
+    private UntypedResultSet.Row createCC5TextRow(String textValue)
+    {
+        ByteBuffer serialized = UTF8Type.instance.decompose(textValue);
+        Map<String, ByteBuffer> data = new HashMap<>();
+        data.put("memtable", serialized);
+        return new UntypedResultSet.Row(data);
+    }
+
+    /**
+     * Helper method to assert memtable configuration key.
+     */
+    private void assertMemtableConfigKey(UntypedResultSet.Row row, String expectedKey)
+    {
+        MemtableParams params = MemtableParams.getWithCC4Fallback(row, "memtable");
+        assertNotNull(params);
+        assertEquals(expectedKey, params.configurationKey());
+    }
+
+    /**
+     * Test CC4 empty map upgrade.
+     * CC4 stored empty map as 4 null bytes (32-bit integer = 0 entries).
+     */
+    @Test
+    public void testCC4EmptyMapUpgrade()
+    {
+        ByteBuffer emptyMap = ByteBuffer.wrap(new byte[]{ 0x00, 0x00, 0x00, 0x00});
+        Map<String, ByteBuffer> data = new HashMap<>();
+        data.put("memtable", emptyMap);
+        UntypedResultSet.Row row = new UntypedResultSet.Row(data);
+
+        MemtableParams params = MemtableParams.getWithCC4Fallback(row, "memtable");
+        assertEquals(MemtableParams.DEFAULT, params);
+    }
+
+    /**
+     * Test CC4 TrieMemtable configuration upgrade.
+     * CC4 stored: {"class": "TrieMemtable"} → Should map to CC5 "trie"
+     */
+    @Test
+    public void testCC4TrieMemtableUpgrade()
+    {
+        UntypedResultSet.Row row = createCC4MapRow(ImmutableMap.of("class", "TrieMemtable"));
+        assertMemtableConfigKey(row, "trie");
+    }
+
+    /**
+     * Test CC4 SkipListMemtable configuration upgrade.
+     * CC4 stored: {"class": "SkipListMemtable"} → Should map to CC5 "skiplist"
+     */
+    @Test
+    public void testCC4SkipListMemtableUpgrade()
+    {
+        UntypedResultSet.Row row = createCC4MapRow(ImmutableMap.of("class", "SkipListMemtable"));
+        assertMemtableConfigKey(row, "skiplist");
+    }
+
+    /**
+     * Test CC4 fully qualified class name upgrade.
+     * CC4 stored: {"class": "org.apache.cassandra.db.memtable.TrieMemtable"}
+     * Should extract short name and map to CC5 "trie"
+     */
+    @Test
+    public void testCC4FullyQualifiedClassNameUpgrade()
+    {
+        UntypedResultSet.Row row = createCC4MapRow(
+            ImmutableMap.of("class", "org.apache.cassandra.db.memtable.TrieMemtable")
+        );
+        assertMemtableConfigKey(row, "trie");
+    }
+
+    /**
+     * Test CC4 map with additional parameters (should still work).
+     * CC4 stored: {"class": "TrieMemtable", "extra_param": "value"}
+     * Should extract class name and map to CC5 "trie"
+     */
+    @Test
+    public void testCC4MapWithExtraParametersUpgrade()
+    {
+        UntypedResultSet.Row row = createCC4MapRow(
+            ImmutableMap.of("class", "TrieMemtable", "extra_param", "some_value")
+        );
+        assertMemtableConfigKey(row, "trie");
+    }
+
+    /**
+     * Test CC4 map without "class" key (should fall back to default).
+     * CC4 corrupted data: {"other_key": "value"} → Should fall back to DEFAULT
+     */
+    @Test
+    public void testCC4MapWithoutClassKeyUpgrade()
+    {
+        UntypedResultSet.Row row = createCC4MapRow(ImmutableMap.of("other_key", "value"));
+        MemtableParams params = MemtableParams.getWithCC4Fallback(row, "memtable");
+        assertEquals(MemtableParams.DEFAULT, params);
+    }
+
+    /**
+     * Test CC5 text values (normal operation, should work unchanged).
+     */
+    @Test
+    public void testCC5TextValueTrie()
+    {
+        assertMemtableConfigKey(createCC5TextRow("trie"), "trie");
+    }
+
+    @Test
+    public void testCC5TextValueSkiplist()
+    {
+        assertMemtableConfigKey(createCC5TextRow("skiplist"), "skiplist");
+    }
+
+    @Test
+    public void testCC5TextValueDefault()
+    {
+        assertMemtableConfigKey(createCC5TextRow("default"), "default");
+    }
+
+    /**
+     * Test missing memtable column (should return DEFAULT).
+     * This happens when reading old schema that predates the memtable column.
+     */
+    @Test
+    public void testMissingMemtableColumn()
+    {
+        UntypedResultSet.Row row = new UntypedResultSet.Row(new HashMap<>());
+        MemtableParams params = MemtableParams.getWithCC4Fallback(row, "memtable");
+        assertEquals(MemtableParams.DEFAULT, params);
+    }
+
+    /**
+     * Test null memtable value (should return DEFAULT).
+     */
+    @Test
+    public void testNullMemtableValue()
+    {
+        Map<String, ByteBuffer> data = new HashMap<>();
+        data.put("memtable", null);
+        UntypedResultSet.Row row = new UntypedResultSet.Row(data);
+
+        MemtableParams params = MemtableParams.getWithCC4Fallback(row, "memtable");
+        assertEquals(MemtableParams.DEFAULT, params);
     }
 }

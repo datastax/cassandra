@@ -1077,9 +1077,8 @@ public final class SchemaKeyspace
                                                  .comment(row.getString("comment"))
                                                  .compaction(CompactionParams.fromMap(row.getFrozenTextMap("compaction")))
                                                  .compression(CompressionParams.fromMap(row.getFrozenTextMap("compression")))
-                                                 .memtable(MemtableParams.getWithFallback(row.has("memtable")
-                                                                                          ? row.getString("memtable")
-                                                                                          : null)) // memtable column was introduced in 4.1
+                                                 // Handles CC4 upgrade compatibility
+                                                 .memtable(MemtableParams.getWithCC4Fallback(row, "memtable"))
                                                  .defaultTimeToLive(row.getInt("default_time_to_live"))
                                                  .extensions(row.getFrozenMap("extensions", UTF8Type.instance, BytesType.instance))
                                                  .gcGraceSeconds(row.getInt("gc_grace_seconds"))
