@@ -93,10 +93,10 @@ public class NonNumericTermsDistributionTest extends SAITester
         var sai = getIndex();
 
         assertInMemoryEstimateCount(sai, Operator.EQ, "ab", 1);
-        assertInMemoryEstimateCount(sai, Operator.LT, "ab", 2);
-        assertInMemoryEstimateCount(sai, Operator.GT, "ab", 3);
-        assertInMemoryEstimateCount(sai, Operator.LTE, "ab", 3);
-        assertInMemoryEstimateCount(sai, Operator.GTE, "ab", 4);
+        assertInMemoryEstimateCount(sai, Operator.LT, "ab", 2, 1);
+        assertInMemoryEstimateCount(sai, Operator.GT, "ab", 3, 1);
+        assertInMemoryEstimateCount(sai, Operator.LTE, "ab", 3, 1);
+        assertInMemoryEstimateCount(sai, Operator.GTE, "ab", 4, 1);
         assertInMemoryEstimateCount(sai, Operator.EQ, "•", 1);
         assertInMemoryEstimateCount(sai, Operator.EQ, "x", 0);
 
@@ -183,10 +183,10 @@ public class NonNumericTermsDistributionTest extends SAITester
         var sai = getIndex();
 
         assertInMemoryEstimateCount(sai, Operator.EQ, "ab", 1);
-        assertInMemoryEstimateCount(sai, Operator.LT, "ab", 2);
-        assertInMemoryEstimateCount(sai, Operator.GT, "ab", 3);
-        assertInMemoryEstimateCount(sai, Operator.LTE, "ab", 3);
-        assertInMemoryEstimateCount(sai, Operator.GTE, "ab", 4);
+        assertInMemoryEstimateCount(sai, Operator.LT, "ab", 2, 1);
+        assertInMemoryEstimateCount(sai, Operator.GT, "ab", 3, 1);
+        assertInMemoryEstimateCount(sai, Operator.LTE, "ab", 3, 1);
+        assertInMemoryEstimateCount(sai, Operator.GTE, "ab", 4, 1);
         assertInMemoryEstimateCount(sai, Operator.EQ, "x", 0);
 
         flush();
@@ -327,10 +327,10 @@ public class NonNumericTermsDistributionTest extends SAITester
         var sai = getIndex();
 
         assertInMemoryEstimateCount(sai, Operator.EQ, "2024-01-01 12:00:00.000", 1);
-        assertInMemoryEstimateCount(sai, Operator.LT, "2024-01-01 12:00:00.000", 2);
-        assertInMemoryEstimateCount(sai, Operator.GT, "2024-01-01 12:00:00.000", 3);
-        assertInMemoryEstimateCount(sai, Operator.LTE, "2024-01-01 12:00:00.000", 3);
-        assertInMemoryEstimateCount(sai, Operator.GTE, "2024-01-01 12:00:00.000", 4);
+        assertInMemoryEstimateCount(sai, Operator.LT, "2024-01-01 12:00:00.000", 2, 1);
+        assertInMemoryEstimateCount(sai, Operator.GT, "2024-01-01 12:00:00.000", 3, 1);
+        assertInMemoryEstimateCount(sai, Operator.LTE, "2024-01-01 12:00:00.000", 3, 1);
+        assertInMemoryEstimateCount(sai, Operator.GTE, "2024-01-01 12:00:00.000", 4, 1);
         assertInMemoryEstimateCount(sai, Operator.EQ, "2550-01-01 12:00:00", 1);
         assertInMemoryEstimateCount(sai, Operator.EQ, "2550-01-01 12:00:01", 0);
         assertInMemoryEstimateCount(sai, Operator.EQ, "1810-12-31 16:00:00", 1);
