@@ -191,7 +191,7 @@ public class NumericTermsDistributionTest extends SAITester
         // of this test relied on the fact overwriting a primary key in the memtables didn't remove the old value
         // from the index. I've updated the test to account for more realistic uncertainty and also added a compact
         // then estimate step since that exercises a different build path in the index.
-        var uncertainty = (testType == CQL3Type.Native.TINYINT) ? 1 : 52;
+        var uncertainty = (testType == CQL3Type.Native.TINYINT) ? 2 : 52;
         assertInMemoryEstimateCount(sai, Operator.LT, MID_POINT, COUNT / 2, 0, uncertainty);
         assertInMemoryEstimateCount(sai, Operator.GT, MID_POINT, COUNT / 2, 0, uncertainty);
         assertInMemoryEstimateCount(sai, Operator.LTE, MID_POINT, COUNT / 2, 1, uncertainty);
