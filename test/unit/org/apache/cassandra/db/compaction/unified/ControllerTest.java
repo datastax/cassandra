@@ -16,6 +16,8 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -38,6 +40,7 @@ import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.ReplicationFactor;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -45,6 +48,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.Overlaps;
+import org.apache.cassandra.utils.ReflectionUtils;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.Mockito;
@@ -913,5 +917,80 @@ public abstract class ControllerTest
         // Test negative values (should return first element)
         assertEquals(1, controller.getLargestFactorizedShardCount(-1.0));
         assertEquals(1, controller.getLargestFactorizedShardCount(-100.0));
+    }
+
+    @Test
+    public void testScalingParameterPersistence() throws Exception
+    {
+        // Verify that by default (SCALING_PARAMETER_PERSISTENCE = true), storeOptions creates a file
+        assertTrue("Scaling parameter persistence should be enabled by default", Controller.SCALING_PARAMETER_PERSISTENCE);
+
+        TableMetadata testMetadata = standardCFMD("test_ks", "test_table").build();
+        int[] scalingParameters = new int[] { 0, 2, 4 };
+        long flushSize = 100 << 20; // 100 MB
+
+        File configPath = Controller.getControllerConfigPath(testMetadata);
+        if (configPath.exists())
+            configPath.delete();
+
+        // Store the options - should create a file when persistence is enabled
+        Controller.storeOptions(testMetadata, scalingParameters, flushSize);
+
+        // Verify the file was created
+        assertTrue("Config file should exist when persistence is enabled", configPath.exists());
+
+        // Clean up
+        configPath.delete();
+    }
+
+    @Test
+    public void testScalingParameterPersistenceDisabled() throws Exception
+    {
+        TableMetadata testMetadata = standardCFMD("test_ks", "test_table_disabled").build();
+        int[] scalingParameters = new int[] { 0, 2, 4 };
+        long flushSize = 100 << 20; // 100 MB
+        File configPath = Controller.getControllerConfigPath(testMetadata);
+
+        if (configPath.exists())
+            configPath.delete();
+
+        try
+        {
+            setScalingParameterPersistenceForTest(false);
+            Controller.storeOptions(testMetadata, scalingParameters, flushSize);
+            assertFalse("Config file should not exist when persistence is disabled", configPath.exists());
+        }
+        finally
+        {
+            setScalingParameterPersistenceForTest(true);
+            if (configPath.exists())
+                configPath.delete();
+        }
+    }
+
+    private static void setScalingParameterPersistenceForTest(boolean enabled) throws Exception
+    {
+        Field field = Controller.class.getDeclaredField("SCALING_PARAMETER_PERSISTENCE");
+        field.setAccessible(true);
+        Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
+        modifiersField.setAccessible(true);
+        modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+        field.set(null, enabled);
+    }
+
+    @Test
+    public void testScalingParameterPersistenceSystemKeyspace()
+    {
+        // Verify that system keyspaces never write config files regardless of persistence setting
+        TableMetadata systemMetadata = standardCFMD("system", "test_table").build();
+        int[] scalingParameters = new int[] { 0, 2, 4 };
+        long flushSize = 100 << 20; // 100 MB
+
+        // Store the options - should not create a file for system keyspace
+        Controller.storeOptions(systemMetadata, scalingParameters, flushSize);
+
+        // Verify the file was NOT created
+        File configPath = Controller.getControllerConfigPath(systemMetadata);
+        assertFalse("Config file should not exist for system keyspace", configPath.exists());
     }
 }

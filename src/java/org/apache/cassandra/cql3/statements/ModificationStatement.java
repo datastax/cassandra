@@ -743,6 +743,12 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                           int nowInSeconds,
                           long queryStartNanoTime)
     {
+        if (type == StatementType.DELETE)
+        {
+            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
+            cfs.metric.deleteRequests.inc();
+        }
+
         if (hasSlices())
         {
             Slices slices = createSlices(options);
