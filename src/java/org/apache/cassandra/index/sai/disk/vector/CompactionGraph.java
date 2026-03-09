@@ -33,6 +33,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.IntFunction;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -393,7 +394,7 @@ public class CompactionGraph implements Closeable, Accountable
 
         long start = System.nanoTime();
         RandomAccessVectorValues denseVectorValues = onDiskVectorValues.removeHoles();
-        long fetchTrainingVectorsNanos = System.nanoTime() - start;
+        long makdVectorsDenseStartNanos = System.nanoTime();
 
         // Now we start to build the graph and encode the vectors
         BuildScoreProvider bsp;
@@ -425,7 +426,7 @@ public class CompactionGraph implements Closeable, Accountable
         }
 
         // Record duration of quantization
-        long refineVectorsNanos = System.nanoTime() - start - fetchTrainingVectorsNanos;
+        long refineVectorsStartNanos = System.nanoTime();
 
         var indexConfig = context.getIndexWriterConfig();
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
@@ -440,6 +441,10 @@ public class CompactionGraph implements Closeable, Accountable
                                         compactionSimdPool,
                                         compactionFjp);
 
+        // We track these two because they are expected to be the primary source of latency and are expected
+        // to help diagnose issues
+        var waitTimeNanos = new LongAdder();
+        var addGraphNodeNanos = new LongAdder();
         try
         {
             // The likely limiting factor in terms of memory utilization is the compactionExecutor's blocking queue
@@ -463,7 +468,14 @@ public class CompactionGraph implements Closeable, Accountable
 
                 final int ordinal = i;
                 final VectorFloat<?> vector = onDiskVectorValues.isValueShared() ? v.copy() : v;
-                var futureBytes = compactionExecutor.submit(() -> builder.addGraphNode(ordinal, vector));
+                long submitTime = System.nanoTime();
+                var futureBytes = compactionExecutor.submit(() -> {
+                    long addGraphStart = System.nanoTime();
+                    long bytesAdded = builder.addGraphNode(ordinal, vector);
+                    addGraphNodeNanos.add(System.nanoTime() - addGraphStart);
+                    waitTimeNanos.add(addGraphStart - submitTime);
+                    return bytesAdded;
+                });
                 futures.offer(futureBytes);
 
                 // See if there are any futures to drain. This helps to exit earlier if there are any excpetions.
@@ -484,16 +496,20 @@ public class CompactionGraph implements Closeable, Accountable
                          presentOrdinals.getLongCardinality(), dimension, bytesUsed, e);
             throw new RuntimeException(e);
         }
-        long encodeAndInsertVectorsNanos = System.nanoTime() - start - fetchTrainingVectorsNanos;
+        long encodeAndInsertVectorsStartNanos = System.nanoTime();
 
         // Log some stats about this run.
-        long fetchTrainingVectorsMs = TimeUnit.NANOSECONDS.toMillis(fetchTrainingVectorsNanos);
-        long refineVectorsMs = TimeUnit.NANOSECONDS.toMillis(refineVectorsNanos);
-        long encodeAndInsertMs = TimeUnit.NANOSECONDS.toMillis(encodeAndInsertVectorsNanos);
+        long startMs = TimeUnit.NANOSECONDS.toMillis(start);
+        long makeVectorsDenseMs = TimeUnit.NANOSECONDS.toMillis(makdVectorsDenseStartNanos) - startMs;
+        long refineVectorsMs = TimeUnit.NANOSECONDS.toMillis(refineVectorsStartNanos) - startMs - makeVectorsDenseMs;
+        long encodeAndInsertMs = TimeUnit.NANOSECONDS.toMillis(encodeAndInsertVectorsStartNanos) - startMs - refineVectorsMs;
+        long waitTimeMs = TimeUnit.NANOSECONDS.toMillis(waitTimeNanos.longValue());
+        long addGraphNodeTimeMs = TimeUnit.NANOSECONDS.toMillis(addGraphNodeNanos.longValue());
         long oldBytesReserved = currentVectorBytesNeededToBuildCompressor();
-        logger.info("Processed {} vectors. Fetch {} ms, {} {} ms, encode and insert {} ms, new bytes {}, previously reserved bytes {}",
-                    onDiskVectorValues.size(), fetchTrainingVectorsMs, quantizationVerb, refineVectorsMs,
-                    encodeAndInsertMs, bytesUsed, oldBytesReserved);
+        logger.info("Processed {} vectors. Remove holes from vector mapping {} ms, {} {} ms, encode and insert {} " +
+                    "with submit wait time {} ms and graph add time {} ms, new bytes {}, previously reserved bytes {}",
+                    onDiskVectorValues.size(), makeVectorsDenseMs, quantizationVerb, refineVectorsMs, encodeAndInsertMs,
+                    waitTimeMs, addGraphNodeTimeMs, bytesUsed, oldBytesReserved);
 
         return bytesUsed - oldBytesReserved;
     }
