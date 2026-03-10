@@ -43,6 +43,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.utils.CassandraVersion;
 
 /**
  * Memtable types and options are specified with these parameters. Memtable classes must either contain a static
@@ -312,7 +313,7 @@ public final class MemtableParams
     }
     /**
      * Attempts to read memtable configuration, with fallback for CC4 upgrade compatibility.
-     * CC4 stored memtable as frozen<map<text, text>>, while CC5 uses text.
+     * CC4 stored memtable as {@code frozen<map<text, text>>}, while CC5 uses text.
      * This method detects binary-serialized map data (containing null bytes) and converts it.
      */
     public static MemtableParams getWithCC4Fallback(UntypedResultSet.Row row, String columnName)
@@ -387,6 +388,101 @@ public final class MemtableParams
                 // For unknown types, try the short name as-is
                 logger.warn("Unknown CC4 memtable class '{}', attempting to use as configuration key", shortName);
                 return shortName.toLowerCase();
+        }
+    }
+
+
+
+    /**
+     * Returns the memtable value to write to schema based on storage compatibility mode.
+     * - In CC_4 mode: Returns a map {"class": "TrieMemtable"} for CC4 compatibility
+     * - In CC5 mode: Returns the configuration key as text ("trie")
+     *
+     * @return Object to write (either {@code Map<String, String>} or String)
+     */
+    public Object asSchemaValue()
+    {
+        return asSchemaValue(DatabaseDescriptor.getStorageCompatibilityMode());
+    }
+
+    /**
+     * Returns the memtable value to write to schema based on the provided storage compatibility mode.
+     * This overload exists for testing purposes.
+     *
+     * @param mode The storage compatibility mode to use
+     * @return Object to write (either {@code Map<String, String>} or String)
+     * @throws ConfigurationException if the memtable type is not compatible with the requested mode
+     */
+    @VisibleForTesting
+    Object asSchemaValue(org.apache.cassandra.utils.StorageCompatibilityMode mode)
+    {
+        if (mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
+        {
+            // CC4 compatibility mode: write as map
+            // CC4 writes empty map {} for "default" configuration
+            if ("default".equals(configurationKey))
+                return ImmutableMap.of();
+
+            // Validate and map the configuration key to CC4 class name
+            String className = mapCC5KeyToCC4ClassName(configurationKey);
+            return ImmutableMap.of("class", className);
+        }
+        else
+        {
+            // CC5 mode: write as text
+            return configurationKey;
+        }
+    }
+
+    /**
+     * Maps CC5 configuration key to CC4 class name, validating CC4 compatibility.
+     * This method combines validation and mapping for use in CC4 compatibility mode.
+     *
+     * @param configKey The CC5 configuration key (e.g., "trie", "skiplist")
+     * @return The corresponding CC4 class name (e.g., "TrieMemtable")
+     * @throws ConfigurationException if the configuration is not compatible with CC4
+     */
+    private static String mapCC5KeyToCC4ClassName(String configKey)
+    {
+        if (configKey == null || configKey.isEmpty())
+            throw new ConfigurationException("Configuration key cannot be null or empty");
+
+        // Check if this is a CC5-only memtable type
+        // ShardedSkipListMemtable and related sharded types don't exist in CC4
+        String lowerKey = configKey.toLowerCase();
+        if (lowerKey.contains("sharded"))
+        {
+            throw new ConfigurationException(
+                String.format("Memtable configuration '%s' is not compatible with CC4. " +
+                             "Sharded memtable types were introduced in CC5. " +
+                             "Please use 'skiplist' or 'trie' when storage_compatibility_mode is CC_4 or CASSANDRA_4.",
+                             configKey));
+        }
+
+        // Check if the configuration key exists in CONFIGURATION_DEFINITIONS
+        // This ensures we're not trying to write an unknown/invalid configuration
+        if (!CONFIGURATION_DEFINITIONS.containsKey(configKey))
+        {
+            throw new ConfigurationException(
+                String.format("Memtable configuration '%s' not found in cassandra.yaml. " +
+                             "Cannot write to schema in CC4 compatibility mode.",
+                             configKey));
+        }
+
+        // Map to CC4 class name
+        switch (lowerKey)
+        {
+            case "skiplist":
+                return "SkipListMemtable";
+            case "trie":
+                return "TrieMemtable";
+            case "triememtablestage1":
+                return "TrieMemtableStage1";
+            case "persistentmemorymemtable":
+                return "PersistentMemoryMemtable";
+            default:
+                // For unknown types, capitalize first letter
+                return configKey.substring(0, 1).toUpperCase() + configKey.substring(1) + "Memtable";
         }
     }
 }

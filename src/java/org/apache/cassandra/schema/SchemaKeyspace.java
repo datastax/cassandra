@@ -59,6 +59,7 @@ import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Simulate;
 
@@ -117,6 +118,42 @@ public final class SchemaKeyspace
               + "graph_engine text,"
               + "PRIMARY KEY ((keyspace_name)))");
 
+    // CC4-compatible schema with memtable as frozen<map<text, text>>
+    // Used when storage_compatibility_mode is CC_4 to support downgrade to CC4
+    private static final TableMetadata TablesLegacy =
+        parse(TABLES,
+              "table definitions",
+              "CREATE TABLE %s ("
+              + "keyspace_name text,"
+              + "table_name text,"
+              + "allow_auto_snapshot boolean,"
+              + "bloom_filter_fp_chance double,"
+              + "caching frozen<map<text, text>>,"
+              + "comment text,"
+              + "compaction frozen<map<text, text>>,"
+              + "compression frozen<map<text, text>>,"
+              + "memtable frozen<map<text, text>>," // CC4 format for downgrade compatibility
+              + "crc_check_chance double,"
+              + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
+              + "default_time_to_live int,"
+              + "extensions frozen<map<text, blob>>,"
+              + "flags frozen<set<text>>," // SUPER, COUNTER, DENSE, COMPOUND
+              + "gc_grace_seconds int,"
+              + "incremental_backups boolean,"
+              + "id uuid,"
+              + "max_index_interval int,"
+              + "memtable_flush_period_in_ms int,"
+              + "min_index_interval int,"
+              + "nodesync frozen<map<text, text>>,"
+              + "read_repair_chance double," // no longer used, left for drivers' sake
+              + "speculative_retry text,"
+              + "additional_write_policy text,"
+              + "cdc boolean,"
+              + "read_repair text,"
+              + "PRIMARY KEY ((keyspace_name), table_name))");
+
+    // CC5 schema with memtable as text
+    // Used when storage_compatibility_mode is NONE (no downgrade support)
     private static final TableMetadata Tables =
         parse(TABLES,
               "table definitions",
@@ -129,7 +166,7 @@ public final class SchemaKeyspace
               + "comment text,"
               + "compaction frozen<map<text, text>>,"
               + "compression frozen<map<text, text>>,"
-              + "memtable text,"
+              + "memtable text," // CC5 format
               + "crc_check_chance double,"
               + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
               + "default_time_to_live int,"
@@ -200,6 +237,44 @@ public final class SchemaKeyspace
               + "options frozen<map<text, text>>,"
               + "PRIMARY KEY ((keyspace_name), table_name, trigger_name))");
 
+    // CC4-compatible schema with memtable as frozen<map<text, text>>
+    private static final TableMetadata ViewsLegacy =
+        parse(VIEWS,
+              "view definitions",
+              "CREATE TABLE %s ("
+              + "keyspace_name text,"
+              + "view_name text,"
+              + "base_table_id uuid,"
+              + "base_table_name text,"
+              + "where_clause text,"
+              + "allow_auto_snapshot boolean,"
+              + "bloom_filter_fp_chance double,"
+              + "caching frozen<map<text, text>>,"
+              + "comment text,"
+              + "compaction frozen<map<text, text>>,"
+              + "compression frozen<map<text, text>>,"
+              + "memtable frozen<map<text, text>>," // CC4 format for downgrade compatibility
+              + "crc_check_chance double,"
+              + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
+              + "default_time_to_live int,"
+              + "extensions frozen<map<text, blob>>,"
+              + "gc_grace_seconds int,"
+              + "incremental_backups boolean,"
+              + "id uuid,"
+              + "include_all_columns boolean,"
+              + "max_index_interval int,"
+              + "memtable_flush_period_in_ms int,"
+              + "min_index_interval int,"
+              + "nodesync frozen<map<text, text>>,"
+              + "read_repair_chance double," // no longer used, left for drivers' sake
+              + "speculative_retry text,"
+              + "additional_write_policy text,"
+              + "cdc boolean,"
+              + "version int,"
+              + "read_repair text,"
+              + "PRIMARY KEY ((keyspace_name), view_name))");
+
+    // CC5 schema with memtable as text
     private static final TableMetadata Views =
         parse(VIEWS,
               "view definitions",
@@ -215,7 +290,7 @@ public final class SchemaKeyspace
               + "comment text,"
               + "compaction frozen<map<text, text>>,"
               + "compression frozen<map<text, text>>,"
-              + "memtable text,"
+              + "memtable text," // CC5 format
               + "crc_check_chance double,"
               + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
               + "default_time_to_live int,"
@@ -289,17 +364,20 @@ public final class SchemaKeyspace
               + "deterministic boolean,"
               + "PRIMARY KEY ((keyspace_name), aggregate_name, argument_types))");
 
-    private static final List<TableMetadata> ALL_TABLE_METADATA = ImmutableList.of(Keyspaces,
-                                                                                   Tables,
-                                                                                   Columns,
-                                                                                   ColumnMasks,
-                                                                                   Triggers,
-                                                                                   DroppedColumns,
-                                                                                   Views,
-                                                                                   Types,
-                                                                                   Functions,
-                                                                                   Aggregates,
-                                                                                   Indexes);
+    private static final List<TableMetadata> ALL_TABLE_METADATA = ImmutableList.of(
+        Keyspaces,
+        // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
+        DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major) ? TablesLegacy : Tables,
+        Columns,
+        ColumnMasks,
+        Triggers,
+        DroppedColumns,
+        // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
+        DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major) ? ViewsLegacy : Views,
+        Types,
+        Functions,
+        Aggregates,
+        Indexes);
 
     private static TableMetadata parse(String name, String description, String cql)
     {
@@ -619,8 +697,9 @@ public final class SchemaKeyspace
 
         // As above, only add the memtable column if the table uses a non-default memtable configuration to avoid RTE
         // in mixed operation with pre-4.1 versioned node during upgrades.
+        // Write in CC4 format (map) or CC5 format (text) based on storage compatibility mode
         if (params.memtable != MemtableParams.DEFAULT)
-            builder.add("memtable", params.memtable.configurationKey());
+            builder.add("memtable", params.memtable.asSchemaValue());
 
         // As above, only add the allow_auto_snapshot column if the value is not default (true) and
         // auto-snapshotting is enabled, to avoid RTE in pre-4.2 versioned node during upgrades

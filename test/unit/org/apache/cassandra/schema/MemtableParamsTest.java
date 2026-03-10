@@ -33,6 +33,7 @@ import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -446,4 +447,81 @@ public class MemtableParamsTest
         MemtableParams params = MemtableParams.getWithCC4Fallback(row, "memtable");
         assertEquals(MemtableParams.DEFAULT, params);
     }
+
+    // ========================================================================
+    // StorageCompatibilityMode Writing Tests
+    // ========================================================================
+
+    /**
+     * Test that asSchemaValue() returns a Map in CC_4 and CASSANDRA_4 compatibility modes.
+     * Both modes should write memtable as {@code frozen<map<text, text>>} for CC4 compatibility.
+     * This ensures downgrade to CC4 is safe.
+     */
+    @Test
+    public void testAsSchemaValueInCC4CompatibilityModes()
+    {
+        // Test both CC_4 and CASSANDRA_4 modes (they should behave identically)
+        for (StorageCompatibilityMode mode : new StorageCompatibilityMode[]{StorageCompatibilityMode.CC_4,
+                                                                             StorageCompatibilityMode.CASSANDRA_4})
+        {
+            // Test DEFAULT memtable - CC4 writes empty map {} for "default" configuration
+            Object defaultValue = MemtableParams.DEFAULT.asSchemaValue(mode);
+            assertTrue("Should return Map in " + mode + " mode", defaultValue instanceof Map);
+            @SuppressWarnings("unchecked")
+            Map<String, String> defaultMap = (Map<String, String>) defaultValue;
+            assertTrue("Default should be empty map in " + mode + " mode", defaultMap.isEmpty());
+        }
+    }
+
+    /**
+     * Test that asSchemaValue() rejects incompatible configurations in CC_4 mode.
+     * Tests both CC5-only types (sharded) and unknown configurations.
+     */
+    @Test
+    public void testAsSchemaValueInCC4ModeRejectsIncompatibleConfigurations()
+    {
+        // Test 1: Sharded memtables (CC5-only, don't exist in CC4)
+        MemtableParams shardedParams = MemtableParams.forTesting(MemtableParams.DEFAULT.factory(), "sharded-skiplist");
+        try
+        {
+            shardedParams.asSchemaValue(StorageCompatibilityMode.CC_4);
+            fail("Should have thrown ConfigurationException for sharded memtable in CC_4 mode");
+        }
+        catch (ConfigurationException e)
+        {
+            assertTrue("Error message should mention CC4 incompatibility",
+                      e.getMessage().contains("not compatible with CC4"));
+            assertTrue("Error message should mention sharded types",
+                      e.getMessage().contains("Sharded memtable types"));
+        }
+
+        // Test 2: Unknown configurations (might not exist in CC4)
+        MemtableParams unknownParams = MemtableParams.forTesting(MemtableParams.DEFAULT.factory(), "unknown-memtable-type");
+        try
+        {
+            unknownParams.asSchemaValue(StorageCompatibilityMode.CC_4);
+            fail("Should have thrown ConfigurationException for unknown configuration in CC_4 mode");
+        }
+        catch (ConfigurationException e)
+        {
+            assertTrue("Error message should mention configuration not found",
+                      e.getMessage().contains("not found in cassandra.yaml"));
+            assertTrue("Error message should mention CC4 compatibility mode",
+                      e.getMessage().contains("CC4 compatibility mode"));
+        }
+    }
+
+    /**
+     * Test that asSchemaValue() returns a String in CC5 mode (NONE).
+     * This is the normal CC5 operation.
+     */
+    @Test
+    public void testAsSchemaValueInCC5Mode()
+    {
+        // Test DEFAULT memtable in CC5 mode
+        Object defaultValue = MemtableParams.DEFAULT.asSchemaValue(StorageCompatibilityMode.NONE);
+        assertTrue("Should return String in CC5 mode", defaultValue instanceof String);
+        assertEquals("default", defaultValue);
+    }
+
 }
