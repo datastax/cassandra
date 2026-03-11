@@ -34,6 +34,7 @@ import org.apache.cassandra.io.sstable.format.RangeAwareSSTableWriter;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 /**
@@ -81,8 +82,7 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
     @Override
     protected Throwable doPostCleanup(Throwable accumulate)
     {
-        txn.close();
-        writer.close();
+        accumulate = Throwables.close(accumulate, txn, writer);
         return super.doPostCleanup(accumulate);
     }
 
