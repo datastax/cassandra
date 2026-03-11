@@ -334,10 +334,30 @@ public class BackgroundCompactionRunner implements Runnable
 
     private CompletableFuture<Void> startCompactionTasks(ColumnFamilyStore cfs)
     {
+        // Check if we are in a paused state. If so, we shouldn't modify sstable lists until the pause is done.
+        if (!cfs.isCompactionActive())
+            return null;
+
         Collection<AbstractCompactionTask> compactionTasks = cfs.getCompactionStrategy()
                                                                 .getNextBackgroundTasks(CompactionManager.getDefaultGcBefore(cfs, FBUtilities.nowInSeconds()));
-        CompletableFuture<?>[] compactionTaskFutures = startCompactionTasks(cfs, compactionTasks);
-        return compactionTaskFutures != null ? CompletableFuture.allOf(compactionTaskFutures) : null;
+
+        // Re-check if we are in a paused state (this status may have changed between the time the next tasks call
+        // was initiated and now). If so, we shouldn't modify sstable lists until the pause is done.
+        if (cfs.isCompactionActive())
+        {
+
+            CompletableFuture<?>[] compactionTaskFutures = startCompactionTasks(cfs, compactionTasks);
+            return compactionTaskFutures != null ? CompletableFuture.allOf(compactionTaskFutures) : null;
+        }
+        else
+        {
+            logger.debug("Background compactions not issued because compaction is not active.");
+            Throwable t = null;
+            for (var c : compactionTasks)
+                t = c.rejected(t);
+            Throwables.maybeFail(t);
+            return null;
+        }
     }
     
     CompletableFuture<?>[] startCompactionTasks(ColumnFamilyStore cfs, Collection<AbstractCompactionTask> compactionTasks)
