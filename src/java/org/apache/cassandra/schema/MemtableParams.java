@@ -311,10 +311,27 @@ public final class MemtableParams
             throw new ConfigurationException("Could not create memtable factory for class " + options, e);
         }
     }
+
     /**
      * Attempts to read memtable configuration, with fallback for CC4 upgrade compatibility.
+     *
      * CC4 stored memtable as {@code frozen<map<text, text>>}, while CC5 uses text.
-     * This method detects binary-serialized map data (containing null bytes) and converts it.
+     * During upgrades or in mixed clusters, the column may contain either format.
+     *
+     * This method uses byte-sniffing (detecting null bytes) to determine the actual
+     * format of the stored data. The storage_compatibility_mode determines the format
+     * to write, but doesn't guarantee the format of existing stored data.
+     *
+     * This defensive approach handles:
+     * <ul>
+     *   <li>Upgrading from CC4 to CC5 (reads CC4 format, writes CC5 format)</li>
+     *   <li>Running CC5 in CC_4 mode (reads either format, writes CC4 format)</li>
+     *   <li>Mixed clusters during rolling upgrades (reads both formats)</li>
+     * </ul>
+     *
+     * @param row The row containing the memtable column
+     * @param columnName The name of the memtable column
+     * @return MemtableParams instance, or DEFAULT if column is missing or invalid
      */
     public static MemtableParams getWithCC4Fallback(UntypedResultSet.Row row, String columnName)
     {
@@ -391,47 +408,67 @@ public final class MemtableParams
         }
     }
 
-
-
     /**
-     * Returns the memtable value to write to schema based on storage compatibility mode.
-     * - In CC_4 mode: Returns a map {"class": "TrieMemtable"} for CC4 compatibility
-     * - In CC5 mode: Returns the configuration key as text ("trie")
+     * Returns the memtable value as a map for CC4 compatibility mode.
+     * Used when storage_compatibility_mode is CC_4 or CASSANDRA_4.
      *
-     * @return Object to write (either {@code Map<String, String>} or String)
+     * @return Map representation for CC4 schema (frozen&lt;map&lt;text,text&gt;&gt;)
+     * @throws ConfigurationException if the memtable type is not compatible with CC4
      */
-    public Object asSchemaValue()
+    public Map<String, String> asSchemaValueMap()
     {
-        return asSchemaValue(DatabaseDescriptor.getStorageCompatibilityMode());
+        return asSchemaValueMap(DatabaseDescriptor.getStorageCompatibilityMode());
     }
 
     /**
-     * Returns the memtable value to write to schema based on the provided storage compatibility mode.
+     * Returns the memtable value as a map for CC4 compatibility mode.
      * This overload exists for testing purposes.
      *
      * @param mode The storage compatibility mode to use
-     * @return Object to write (either {@code Map<String, String>} or String)
-     * @throws ConfigurationException if the memtable type is not compatible with the requested mode
+     * @return Map representation for CC4 schema (frozen&lt;map&lt;text,text&gt;&gt;)
+     * @throws ConfigurationException if the memtable type is not compatible with CC4
      */
     @VisibleForTesting
-    Object asSchemaValue(org.apache.cassandra.utils.StorageCompatibilityMode mode)
+    Map<String, String> asSchemaValueMap(org.apache.cassandra.utils.StorageCompatibilityMode mode)
+    {
+        if (!mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
+            throw new IllegalStateException("Cannot get map value in CC5 mode. Use asSchemaValueText() instead.");
+
+        // CC4 writes empty map {} for "default" configuration
+        if ("default".equals(configurationKey))
+            return ImmutableMap.of();
+
+        // Validate and map the configuration key to CC4 class name
+        String className = mapCC5KeyToCC4ClassName(configurationKey);
+        return ImmutableMap.of("class", className);
+    }
+
+    /**
+     * Returns the memtable value as text for CC5 mode.
+     * Used when storage_compatibility_mode is NONE.
+     *
+     * @return String representation for CC5 schema (text)
+     */
+    public String asSchemaValueText()
+    {
+        return asSchemaValueText(DatabaseDescriptor.getStorageCompatibilityMode());
+    }
+
+    /**
+     * Returns the memtable value as text for CC5 mode.
+     * This overload exists for testing purposes.
+     *
+     * @param mode The storage compatibility mode to use
+     * @return String representation for CC5 schema (text)
+     * @throws IllegalStateException if called in CC4 compatibility mode
+     */
+    @VisibleForTesting
+    String asSchemaValueText(org.apache.cassandra.utils.StorageCompatibilityMode mode)
     {
         if (mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
-        {
-            // CC4 compatibility mode: write as map
-            // CC4 writes empty map {} for "default" configuration
-            if ("default".equals(configurationKey))
-                return ImmutableMap.of();
+            throw new IllegalStateException("Cannot get text value in CC4 compatibility mode. Use asSchemaValueMap() instead.");
 
-            // Validate and map the configuration key to CC4 class name
-            String className = mapCC5KeyToCC4ClassName(configurationKey);
-            return ImmutableMap.of("class", className);
-        }
-        else
-        {
-            // CC5 mode: write as text
-            return configurationKey;
-        }
+        return configurationKey;
     }
 
     /**

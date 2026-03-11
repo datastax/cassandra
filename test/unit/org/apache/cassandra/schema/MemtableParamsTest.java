@@ -453,38 +453,45 @@ public class MemtableParamsTest
     // ========================================================================
 
     /**
-     * Test that asSchemaValue() returns a Map in CC_4 and CASSANDRA_4 compatibility modes.
+     * Test that asSchemaValueMap() returns a Map in CC_4 and CASSANDRA_4 compatibility modes.
      * Both modes should write memtable as {@code frozen<map<text, text>>} for CC4 compatibility.
      * This ensures downgrade to CC4 is safe.
      */
     @Test
-    public void testAsSchemaValueInCC4CompatibilityModes()
+    public void testAsSchemaValueMapInCC4CompatibilityModes()
     {
         // Test both CC_4 and CASSANDRA_4 modes (they should behave identically)
         for (StorageCompatibilityMode mode : new StorageCompatibilityMode[]{StorageCompatibilityMode.CC_4,
                                                                              StorageCompatibilityMode.CASSANDRA_4})
         {
             // Test DEFAULT memtable - CC4 writes empty map {} for "default" configuration
-            Object defaultValue = MemtableParams.DEFAULT.asSchemaValue(mode);
-            assertTrue("Should return Map in " + mode + " mode", defaultValue instanceof Map);
-            @SuppressWarnings("unchecked")
-            Map<String, String> defaultMap = (Map<String, String>) defaultValue;
+            Map<String, String> defaultMap = MemtableParams.DEFAULT.asSchemaValueMap(mode);
+            assertNotNull("Should return Map in " + mode + " mode", defaultMap);
             assertTrue("Default should be empty map in " + mode + " mode", defaultMap.isEmpty());
         }
     }
 
     /**
-     * Test that asSchemaValue() rejects incompatible configurations in CC_4 mode.
+     * Test that asSchemaValueMap() throws exception when called in CC5 mode.
+     */
+    @Test(expected = IllegalStateException.class)
+    public void testAsSchemaValueMapThrowsInCC5Mode()
+    {
+        MemtableParams.DEFAULT.asSchemaValueMap(StorageCompatibilityMode.NONE);
+    }
+
+    /**
+     * Test that asSchemaValueMap() rejects incompatible configurations in CC_4 mode.
      * Tests both CC5-only types (sharded) and unknown configurations.
      */
     @Test
-    public void testAsSchemaValueInCC4ModeRejectsIncompatibleConfigurations()
+    public void testAsSchemaValueMapRejectsIncompatibleConfigurations()
     {
         // Test 1: Sharded memtables (CC5-only, don't exist in CC4)
         MemtableParams shardedParams = MemtableParams.forTesting(MemtableParams.DEFAULT.factory(), "sharded-skiplist");
         try
         {
-            shardedParams.asSchemaValue(StorageCompatibilityMode.CC_4);
+            shardedParams.asSchemaValueMap(StorageCompatibilityMode.CC_4);
             fail("Should have thrown ConfigurationException for sharded memtable in CC_4 mode");
         }
         catch (ConfigurationException e)
@@ -499,7 +506,7 @@ public class MemtableParamsTest
         MemtableParams unknownParams = MemtableParams.forTesting(MemtableParams.DEFAULT.factory(), "unknown-memtable-type");
         try
         {
-            unknownParams.asSchemaValue(StorageCompatibilityMode.CC_4);
+            unknownParams.asSchemaValueMap(StorageCompatibilityMode.CC_4);
             fail("Should have thrown ConfigurationException for unknown configuration in CC_4 mode");
         }
         catch (ConfigurationException e)
@@ -512,16 +519,24 @@ public class MemtableParamsTest
     }
 
     /**
-     * Test that asSchemaValue() returns a String in CC5 mode (NONE).
+     * Test that asSchemaValueText() returns a String in CC5 mode (NONE).
      * This is the normal CC5 operation.
      */
     @Test
-    public void testAsSchemaValueInCC5Mode()
+    public void testAsSchemaValueTextInCC5Mode()
     {
         // Test DEFAULT memtable in CC5 mode
-        Object defaultValue = MemtableParams.DEFAULT.asSchemaValue(StorageCompatibilityMode.NONE);
-        assertTrue("Should return String in CC5 mode", defaultValue instanceof String);
+        String defaultValue = MemtableParams.DEFAULT.asSchemaValueText(StorageCompatibilityMode.NONE);
         assertEquals("default", defaultValue);
+    }
+
+    /**
+     * Test that asSchemaValueText() throws exception when called in CC4 compatibility mode.
+     */
+    @Test(expected = IllegalStateException.class)
+    public void testAsSchemaValueTextThrowsInCC4Mode()
+    {
+        MemtableParams.DEFAULT.asSchemaValueText(StorageCompatibilityMode.CC_4);
     }
 
 }

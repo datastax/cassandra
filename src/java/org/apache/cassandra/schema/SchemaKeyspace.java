@@ -699,7 +699,12 @@ public final class SchemaKeyspace
         // in mixed operation with pre-4.1 versioned node during upgrades.
         // Write in CC4 format (map) or CC5 format (text) based on storage compatibility mode
         if (params.memtable != MemtableParams.DEFAULT)
-            builder.add("memtable", params.memtable.asSchemaValue());
+        {
+            if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+                builder.add("memtable", params.memtable.asSchemaValueMap());
+            else
+                builder.add("memtable", params.memtable.asSchemaValueText());
+        }
 
         // As above, only add the allow_auto_snapshot column if the value is not default (true) and
         // auto-snapshotting is enabled, to avoid RTE in pre-4.2 versioned node during upgrades
