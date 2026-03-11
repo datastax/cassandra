@@ -29,10 +29,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
-/**
- * A row-aware {@link PrimaryKey.Factory}. This creates {@link PrimaryKey} instances that are
- * sortable by {@link DecoratedKey} and {@link Clustering}.
- */
 public class OptimizedRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactory
 {
     public OptimizedRowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
@@ -40,11 +36,41 @@ public class OptimizedRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactor
         super(clusteringComparator);
     }
 
+    @Override
+    public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
+    {
+        return new OptimizedRowAwarePrimaryKeyFactory.RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
+    }
+
+    @Override
+    public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
+    {
+        return new OptimizedRowAwarePrimaryKeyFactory.RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
+    }
+
     private class RowAwarePrimaryKey extends RowAwarePrimaryKeyFactory.RowAwarePrimaryKey
     {
         private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
         {
             super(token, partitionKey, clustering, primaryKeySupplier);
+        }
+
+        @Override
+        public ByteSource asComparableBytes(ByteComparable.Version version)
+        {
+            return asComparableBytes(version == ByteComparable.Version.LEGACY ? ByteSource.END_OF_STREAM : ByteSource.TERMINATOR, version, false);
+        }
+
+        @Override
+        public ByteSource asComparableBytesMinPrefix(ByteComparable.Version version)
+        {
+            return asComparableBytes(ByteSource.LT_NEXT_COMPONENT, version, true);
+        }
+
+        @Override
+        public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
+        {
+            return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, true);
         }
 
         private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
