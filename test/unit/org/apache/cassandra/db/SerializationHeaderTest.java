@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
@@ -58,6 +59,8 @@ import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -243,6 +246,79 @@ public class SerializationHeaderTest
         SerializationHeader header2 = component.toHeader("tab", metadata, versionWithExplicitFrozenTuples, false);
         assertThat(Iterables.find(header2.columns().regulars, md -> md.name.toString().equals("dv")).type.isMultiCell()).isTrue();
         assertThat(Iterables.find(header2.columns().statics, md -> md.name.toString().equals("ds")).type.isMultiCell()).isTrue();
+    }
+
+    /**
+     * Verify that DeletionTime.LIVE round-trips correctly through writeDeletionTime/readDeletionTime
+     * when the header has realistic (non-epoch) encoding stats. This exercises the fix for the 32-bit
+     * overflow bug where Long.MAX_VALUE (LIVE's localDeletionTime) minus a realistic minLocalDeletionTime
+     * doesn't fit in an int.
+     */
+    @Test
+    public void testLiveDeletionTimeRoundTrip() throws IOException
+    {
+        // Use realistic encoding stats — a real compaction would have a recent minLocalDeletionTime,
+        // which makes the delta (Long.MAX_VALUE - minLocalDeletionTime) overflow a 32-bit int.
+        long realisticTimestamp = System.currentTimeMillis() * 1000;
+        long realisticLocalDeletionTime = System.currentTimeMillis() / 1000;
+        EncodingStats stats = new EncodingStats(realisticTimestamp, realisticLocalDeletionTime, 0);
+
+        TableMetadata metadata = TableMetadata.builder("ks", "tab")
+                                              .addPartitionKeyColumn("k", Int32Type.instance)
+                                              .addRegularColumn("v", Int32Type.instance)
+                                              .build();
+        SerializationHeader header = new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(), stats);
+
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            header.writeDeletionTime(DeletionTime.LIVE, out);
+
+            try (DataInputBuffer in = new DataInputBuffer(out.getData(), 0, out.getLength()))
+            {
+                DeletionTime result = header.readDeletionTime(in);
+                assertThat(result.isLive()).isTrue();
+                assertThat(result).isEqualTo(DeletionTime.LIVE);
+            }
+        }
+    }
+
+    /**
+     * Verify that old (broken) sstables where LIVE DeletionTime was written with the overflow bug
+     * are still read back as LIVE. In the broken encoding, markedForDeleteAt is Long.MIN_VALUE
+     * (correctly delta-encoded) but localDeletionTime is garbage (-1 after 32-bit overflow).
+     * The read side should recognize LIVE by markedForDeleteAt == Long.MIN_VALUE and ignore the
+     * corrupt localDeletionTime.
+     */
+    @Test
+    public void testLiveDeletionTimeReadBackwardCompatibility() throws IOException
+    {
+        long realisticTimestamp = System.currentTimeMillis() * 1000;
+        long realisticLocalDeletionTime = System.currentTimeMillis() / 1000;
+        EncodingStats stats = new EncodingStats(realisticTimestamp, realisticLocalDeletionTime, 0);
+
+        TableMetadata metadata = TableMetadata.builder("ks", "tab")
+                                              .addPartitionKeyColumn("k", Int32Type.instance)
+                                              .addRegularColumn("v", Int32Type.instance)
+                                              .build();
+        SerializationHeader header = new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(), stats);
+
+        // Simulate the old broken encoding: write the timestamp delta for Long.MIN_VALUE (correct),
+        // then write -1 as the localDeletionTime delta (what the old code produced from overflow).
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            // Write timestamp: Long.MIN_VALUE - stats.minTimestamp (this is what the old code wrote correctly)
+            header.writeTimestamp(Long.MIN_VALUE, out);
+            // Write the overflowed localDeletionTime delta: the old broken code cast
+            // (Long.MAX_VALUE - minLocalDeletionTime) to int, which wraps to -1 for realistic stats.
+            // writeUnsignedVInt32 with -1 (0xFFFFFFFF) produces a specific byte sequence.
+            out.writeUnsignedVInt32(-1);
+
+            try (DataInputBuffer in = new DataInputBuffer(out.getData(), 0, out.getLength()))
+            {
+                DeletionTime result = header.readDeletionTime(in);
+                assertThat(result.isLive()).isTrue();
+            }
+        }
     }
 
 }

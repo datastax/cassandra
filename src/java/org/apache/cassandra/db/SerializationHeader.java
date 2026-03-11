@@ -196,7 +196,13 @@ public class SerializationHeader
     public void writeDeletionTime(DeletionTime dt, DataOutputPlus out) throws IOException
     {
         writeTimestamp(dt.markedForDeleteAt(), out);
-        writeLocalDeletionTime(dt.localDeletionTime(), out);
+        // LIVE DeletionTime has localDeletionTime=Long.MAX_VALUE which overflows the 32-bit delta encoding
+        // (Long.MAX_VALUE - minLocalDeletionTime doesn't fit in an int). Write a zero delta instead;
+        // the read side recognizes LIVE by markedForDeleteAt == Long.MIN_VALUE.
+        if (dt.isLive())
+            writeLocalDeletionTime(stats.minLocalDeletionTime, out);
+        else
+            writeLocalDeletionTime(dt.localDeletionTime(), out);
     }
 
     public long readTimestamp(DataInputPlus in) throws IOException
@@ -218,6 +224,11 @@ public class SerializationHeader
     {
         long markedAt = readTimestamp(in);
         long localDeletionTime = readLocalDeletionTime(in);
+        // markedForDeleteAt == Long.MIN_VALUE means LIVE (no deletion). The localDeletionTime may be corrupt
+        // due to a 32-bit overflow bug in the delta encoding of Long.MAX_VALUE (CASSANDRA-14227), so we
+        // ignore it and return LIVE directly. This handles both old (broken) and new (fixed) sstables.
+        if (markedAt == Long.MIN_VALUE)
+            return DeletionTime.LIVE;
         return DeletionTime.build(markedAt, localDeletionTime);
     }
 
@@ -239,7 +250,7 @@ public class SerializationHeader
     public long deletionTimeSerializedSize(DeletionTime dt)
     {
         return timestampSerializedSize(dt.markedForDeleteAt())
-               + localDeletionTimeSerializedSize(dt.localDeletionTime());
+               + localDeletionTimeSerializedSize(dt.isLive() ? stats.minLocalDeletionTime : dt.localDeletionTime());
     }
 
     public void skipTimestamp(DataInputPlus in) throws IOException
