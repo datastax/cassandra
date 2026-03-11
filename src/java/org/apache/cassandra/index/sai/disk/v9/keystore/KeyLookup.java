@@ -353,11 +353,8 @@ public class KeyLookup
          */
         public @Nonnull ByteComparable seekToPointId(long target)
         {
-//            if (target < -1 || target > keyLookupMeta.keyCount)
             if (target <= -1 || target >= keyLookupMeta.keyCount)
                 throw new IndexOutOfBoundsException(String.format(INDEX_OUT_OF_BOUNDS, target, keyLookupMeta.keyCount));
-
-//            if (target == -1 || target == keyLookupMeta.keyCount)
 
             if (target != currentPointId)
             {
