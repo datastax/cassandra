@@ -153,13 +153,11 @@ public abstract class AbstractBlockPackedReader implements LongArray
             min--;
         if (targetValue < delta(min, 0))
             return Math.max(min - 1, 0);
+        // Check for duplicates in the next blocks
+        while (min <= highest && delta(min, 0) <= targetValue)
         {
-            // Check for duplicates in next blocks
-            while (min <= highest && delta(min, 0) <= targetValue)
-            {
-                max = min;
-                min++;
-            }
+            max = min;
+            min++;
         }
         return max;
     }
@@ -175,7 +173,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
         // Calculate the global offset for the selected block
         long offset = (long) blockIdx << blockShift;
 
-        // Search from start of block to the end of block
+        // Search from the start of the block to the end of the block
         long high = Math.min(offset + blockSize - 1, valueCount - 1);
         return binarySearchBlockForFloor(targetValue, offset, high);
     }

@@ -121,7 +121,7 @@ public class KeyLookupBench
                                                metadata.name,
                                                Util.newUUIDGen().get());
 
-        indexDescriptor = IndexDescriptor.empty(descriptor, metadata);
+        indexDescriptor = IndexDescriptor.empty(descriptor, metadata.comparator);
 
         CassandraRelevantProperties.SAI_SORTED_TERMS_PARTITION_BLOCK_SHIFT.setInt(partitionBlockShift);
         CassandraRelevantProperties.SAI_SORTED_TERMS_CLUSTERING_BLOCK_SHIFT.setInt(clusteringBlockShift);
