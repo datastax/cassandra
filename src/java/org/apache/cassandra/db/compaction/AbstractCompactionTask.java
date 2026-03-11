@@ -22,8 +22,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 import com.google.common.base.Preconditions;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
@@ -37,11 +42,13 @@ import static com.google.common.base.Throwables.propagate;
 
 public abstract class AbstractCompactionTask extends WrappedRunnable
 {
+    protected static final Logger logger = LoggerFactory.getLogger(AbstractCompactionTask.class);
+
     // See CNDB-10549
     static final boolean SKIP_REPAIR_STATE_CHECKING =
         CassandraRelevantProperties.COMPACTION_SKIP_REPAIR_STATE_CHECKING.getBoolean();
     static final boolean SKIP_COMPACTING_STATE_CHECKING =
-    CassandraRelevantProperties.COMPACTION_SKIP_COMPACTING_STATE_CHECKING.getBoolean();
+        CassandraRelevantProperties.COMPACTION_SKIP_COMPACTING_STATE_CHECKING.getBoolean();
 
     protected final CompactionRealm realm;
     protected ILifecycleTransaction transaction;
@@ -49,6 +56,14 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     protected OperationType compactionType;
     protected TableOperationObserver opObserver;
     protected final List<CompactionObserver> compObservers;
+
+    private enum ExecutionState
+    {
+        CREATED, // Task is created and ready for execution, possibly waiting in a queue.
+        ACTIVE, // Task has started execution and is listed in the active operations.
+        REJECTED // Task has been rejected, either because of an error or cancelled before becoming active.
+    }
+    private volatile AtomicReference<ExecutionState> executionState = new AtomicReference<>(ExecutionState.CREATED);
 
     /**
      * @param realm
@@ -79,6 +94,8 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         {
             propagate(cleanup(err));
         }
+
+        CompactionManager.instance.active.addTaskToScheduled(this);
     }
 
     /**
@@ -130,10 +147,21 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     /** Executes the task */
     public void execute()
     {
+        // Exit immediately if task is already rejected. Note that we don't switch to ACTIVE here, because we want
+        // to do this only if the task moves to the active operations list (which is done by CompactionTask).
+        if (executionState.get() == ExecutionState.REJECTED)
+        {
+            cancelledOnStart();
+            return;
+        }
+
         Throwable t = null;
         try
         {
             executeInternal();
+            // if executeInternal has not switched the task to active state, do it now to remove it from the
+            // scheduled set.
+            switchToActive();
         }
         catch (FSDiskFullWriteError e)
         {
@@ -153,9 +181,52 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         }
     }
 
+    public void cancelledOnStart()
+    {
+        // Called when the task starts after being cancelled. Normally nothing to do, overridden by tests.
+    }
+
     public Throwable rejected(Throwable t)
     {
-        return cleanup(t);
+        if (executionState.compareAndSet(ExecutionState.CREATED, ExecutionState.REJECTED))
+        {
+            CompactionManager.instance.active.removeTaskFromScheduled(this);
+            logger.debug("Compaction {} rejected", transaction, t);
+            return cleanup(t);
+        }
+        else
+        {
+            // We are either already rejected, or racing with switching to active.
+            // In the latter case, the operation can now be cancelled through the active operations list.
+            return t;
+        }
+    }
+
+    public boolean switchToActive()
+    {
+        boolean switched = executionState.compareAndSet(ExecutionState.CREATED, ExecutionState.ACTIVE);
+        if (switched)
+            CompactionManager.instance.active.removeTaskFromScheduled(this);
+        return switched;
+    }
+
+    /**
+     * Reject/cancel the task if it affects any sstable that satisfies the given predicate.
+     */
+    public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
+    {
+        if (realm != this.realm)
+            return false;
+
+        for (SSTableReader r : transaction.originals())
+        {
+            if (sstablePredicate.test(r))
+            {
+                rejected(null);
+                return true;
+            }
+        }
+        return false;
     }
 
     protected Throwable cleanup(Throwable err)
