@@ -2888,8 +2888,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         longRunningSerializedOperationsLock.lock();
         try
         {
-            logger.trace("Cancelling in-progress compactions for {}", metadata.name);
+            logger.debug("Started cancelling in-progress compactions for {}", metadata.name);
             Iterable<ColumnFamilyStore> toInterruptFor = concatWith(interruptIndexes, interruptViews);
+
             try (CompactionManager.CompactionPauser pause = CompactionManager.instance.pauseGlobalCompaction();
                  CompactionManager.CompactionPauser pausedStrategies = pauseCompactionStrategies(toInterruptFor))
             {
@@ -2916,6 +2917,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 {
                     throw new RuntimeException(e);
                 }
+            }
+            finally
+            {
+                logger.debug("Finished cancelling in-progress compactions for {}", metadata.name);
             }
         }
         finally
