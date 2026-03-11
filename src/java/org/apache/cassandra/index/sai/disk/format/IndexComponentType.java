@@ -100,7 +100,6 @@ public enum IndexComponentType
      * V2
      */
     PRIMARY_KEY_BLOCK_OFFSETS("PrimaryKeyBlockOffsets"),
-
     /**
      * Stores per-sstable metadata.
      *
@@ -118,7 +117,6 @@ public enum IndexComponentType
      * Stores document length information for BM25 scoring
      */
     DOC_LENGTHS("DocLengths"),
-
 
     /**
      * An on-disk block-packed index containing the starting and ending rowIds for each partition.

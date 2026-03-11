@@ -56,7 +56,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Throwables;
@@ -110,16 +109,12 @@ public class IndexDescriptor
     @VisibleForTesting
     public static IndexDescriptor empty(Descriptor descriptor)
     {
-        IndexDescriptor created = new IndexDescriptor(descriptor, new ClusteringComparator());
-        // Some code assumes that you can always at least call `perSSTableComponents()` and not get `null`, so we
-        // set it to an empty group here.
-        created.perSSTable = created.createEmptyGroup(null);
-        return created;
+        return empty(descriptor, new ClusteringComparator());
     }
 
-    public static IndexDescriptor empty(Descriptor descriptor, TableMetadata metadata)
+    public static IndexDescriptor empty(Descriptor descriptor, ClusteringComparator comparator)
     {
-        IndexDescriptor created = new IndexDescriptor(descriptor, metadata.comparator);
+        IndexDescriptor created = new IndexDescriptor(descriptor, comparator);
         // Some code assumes that you can always at least call `perSSTableComponents()` and not get `null`, so we
         // set it to an empty group here.
         created.perSSTable = created.createEmptyGroup(null);
@@ -670,7 +665,7 @@ public class IndexDescriptor
                 {
                     if (logger.isTraceEnabled())
                     {
-                        logger.trace(logMessage("Opening {} file handle for {} ({})"),
+                        logger.trace(this.parent().logMessage("Opening {} file handle for {} ({})"),
                                      file, FBUtilities.prettyPrintMemory(file.length()));
                     }
                     FileHandle.Builder b = builder.order(byteOrder());

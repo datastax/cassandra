@@ -86,7 +86,6 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         protected final IPartitioner partitioner;
         protected final OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory;
 
-        // private final FileHandle tokensFile;
         private final FileHandle partitionsFile;
         private final FileHandle partitionKeyBlockOffsetsFile;
         private final FileHandle partitionKeyBlocksFile;
