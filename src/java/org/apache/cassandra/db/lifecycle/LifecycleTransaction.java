@@ -329,7 +329,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     @Override
     protected Throwable doPostCleanup(Throwable accumulate)
     {
-        log.close();
+        accumulate = Throwables.close(accumulate, log);
         return unmarkCompacting(marked, accumulate);
     }
 
