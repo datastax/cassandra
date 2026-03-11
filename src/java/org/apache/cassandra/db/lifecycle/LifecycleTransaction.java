@@ -188,6 +188,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
             marked.add(reader);
             identities.add(reader.instanceId);
         }
+        logger.debug("LifecycleTransaction {} created", uuid);
     }
 
     public AbstractLogTransaction log()
@@ -325,7 +326,9 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     protected Throwable doPostCleanup(Throwable accumulate)
     {
         accumulate = Throwables.close(accumulate, log);
-        return unmarkCompacting(marked, accumulate);
+        accumulate = unmarkCompacting(marked, accumulate);
+        logger.debug("LifecycleTransaction {} finalized", opId());
+        return accumulate;
     }
 
     public boolean isOffline()
