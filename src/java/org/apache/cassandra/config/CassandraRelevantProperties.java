@@ -676,6 +676,12 @@ public enum CassandraRelevantProperties
     SAI_TABLE_STATE_METRICS_ENABLED("cassandra.sai.metrics.table_state.enabled", "true"),
 
     /**
+     * Whether to enable SAI histogram metrics including memtableIndexWriteLatency, termsTraversalTotalTime,
+     * and intersectionLatency. Enabled by default.
+     */
+    SAI_HISTOGRAMS_ENABLED("cassandra.sai.metrics.histograms.enabled", "true"),
+
+    /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
      * This is to remain compatible with older workflows that first change the replication before adding the nodes.
      * Otherwise, it will validate that the names match existing DCs before allowing replication change.

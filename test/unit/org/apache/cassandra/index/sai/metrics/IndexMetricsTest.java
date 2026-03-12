@@ -171,29 +171,29 @@ public class IndexMetricsTest extends AbstractMetricsTest
             String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
 
             // Test all Gauge metrics
-            assertMetricExistsIfEnabled(metricsEnabled, "SSTableCellCount", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "LiveMemtableIndexWriteCount", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "DiskUsedBytes", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "MemtableOnHeapIndexBytes", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "MemtableOffHeapIndexBytes", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "IndexFileCacheBytes", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "SSTableCellCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "LiveMemtableIndexWriteCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "DiskUsedBytes", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableOnHeapIndexBytes", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableOffHeapIndexBytes", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "IndexFileCacheBytes", table, index);
 
             // Test all Counter metrics
-            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCount", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "CompactionCount", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "CompactionTermsProcessedCount", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushErrors", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentFlushErrors", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "QueriesCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionTermsProcessedCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexFlushErrors", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionSegmentFlushErrors", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "QueriesCount", table, index);
 
             // Test all Histogram metrics
-            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCellsPerSecond", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "SegmentsPerCompaction", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentCellsPerSecond", table, index);
-            assertMetricExistsIfEnabled(metricsEnabled, "CompactionSegmentBytesPerSecond", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCellsPerSecond", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "SegmentsPerCompaction", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionSegmentCellsPerSecond", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionSegmentBytesPerSecond", table, index);
 
             // Test Timer metrics
-            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
 
             // Test indexing operations to ensure null indexMetrics is handled gracefully
             execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
@@ -201,7 +201,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
             execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 2, '2')");
 
             // Verify MemtableIndexWriteLatency metric behavior after indexing operations
-            assertMetricExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
         }
         finally
         {
@@ -210,14 +210,24 @@ public class IndexMetricsTest extends AbstractMetricsTest
         }
     }
 
-    private void assertMetricExistsIfEnabled(boolean shouldExist, String metricName, String table, String index)
+    private void assertMetricExistsIfEnabled(boolean shouldExist, String metricName, String table, String index, String metricType)
     {
-        ObjectName name = objectName(metricName, KEYSPACE, table, index, "IndexMetrics");
+        ObjectName name = objectName(metricName, KEYSPACE, table, index, metricType);
 
         if (shouldExist)
             assertMetricExists(name);
         else
             assertMetricDoesNotExist(name);
+    }
+
+    private void assertIndexMetricsExistsIfEnabled(boolean shouldExist, String metricName, String table, String index)
+    {
+        assertMetricExistsIfEnabled(shouldExist, metricName, table, index, "IndexMetrics");
+    }
+
+    private void assertColumnQueryMetricsExistsIfEnabled(boolean shouldExist, String metricName, String table, String index)
+    {
+        assertMetricExistsIfEnabled(shouldExist, metricName, table, index, "ColumnQueryMetrics");
     }
 
     private void assertIndexQueryCount(String index, long expectedCount)
@@ -442,4 +452,58 @@ public class IndexMetricsTest extends AbstractMetricsTest
         // Verify compaction count was also incremented
         assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
     }
+
+    @Test
+    public void testHistogramMetricsEnabledAndDisabled()
+    {
+        testHistogramMetrics(false);
+        testHistogramMetrics(true);
+    }
+
+    private void testHistogramMetrics(boolean histogramsEnabled)
+    {
+        // Set the property before creating any indexes
+        CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.setBoolean(histogramsEnabled);
+
+        try
+        {
+            String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                       "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+            String indexV1 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+            String indexV2 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v2) USING 'StorageAttachedIndex'");
+
+            // Test indexing operations to ensure Optional histograms are handled gracefully
+            for (int i = 0; i < 10; i++)
+                execute("INSERT INTO %s (id1, v1, v2) VALUES (?, ?, ?)", String.valueOf(i), i, String.valueOf(i));
+
+            // Verify MemtableIndexWriteLatency metric behavior after indexing operations
+            // This metric is created at index creation time in IndexMetrics
+            assertIndexMetricsExistsIfEnabled(histogramsEnabled, "MemtableIndexWriteLatency", table, indexV1);
+            assertIndexMetricsExistsIfEnabled(histogramsEnabled, "MemtableIndexWriteLatency", table, indexV2);
+
+            // Flush to persist data
+            flush(KEYSPACE, table);
+
+            // Execute queries to trigger column query metrics
+            // v1 is INT, so it uses BKDIndexMetrics with KDTreeIntersectionLatency
+            ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0 AND v1 < 5");
+            assertEquals(5, rows.all().size());
+
+            // v2 is TEXT, so it uses TrieIndexMetrics with TermsLookupLatency
+            rows = executeNet("SELECT id1 FROM %s WHERE v2 = '0'");
+            assertEquals(1, rows.all().size());
+
+            // Test KDTreeIntersectionLatency histogram (ColumnQueryMetrics - BKD for INT column)
+            assertColumnQueryMetricsExistsIfEnabled(histogramsEnabled, "KDTreeIntersectionLatency", table, indexV1);
+
+            // Test TermsLookupLatency histogram (ColumnQueryMetrics - Trie for TEXT column)
+            assertColumnQueryMetricsExistsIfEnabled(histogramsEnabled, "TermsLookupLatency", table, indexV2);
+        }
+        finally
+        {
+            // Reset property to default
+            CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.setBoolean(true);
+        }
+    }
+
 }

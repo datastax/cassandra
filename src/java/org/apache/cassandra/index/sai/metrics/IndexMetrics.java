@@ -17,17 +17,20 @@
  */
 package org.apache.cassandra.index.sai.metrics;
 
+import java.util.Optional;
+
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Timer;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.IndexContext;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 public class IndexMetrics extends AbstractMetrics
 {
-    public final Timer memtableIndexWriteLatency;
+    public final Optional<Timer> memtableIndexWriteLatency;
     
     public final Gauge ssTableCellCount;
     public final Gauge liveMemtableIndexWriteCount;
@@ -52,7 +55,9 @@ public class IndexMetrics extends AbstractMetrics
     {
         super(context.getKeyspace(), context.getTable(), context.getIndexName(), "IndexMetrics");
 
-        memtableIndexWriteLatency = Metrics.timer(createMetricName("MemtableIndexWriteLatency"));
+        memtableIndexWriteLatency = CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.getBoolean()
+                                    ? Optional.of(Metrics.timer(createMetricName("MemtableIndexWriteLatency")))
+                                    : Optional.empty();
         compactionSegmentCellsPerSecond = Metrics.histogram(createMetricName("CompactionSegmentCellsPerSecond"), false);
         compactionSegmentBytesPerSecond = Metrics.histogram(createMetricName("CompactionSegmentBytesPerSecond"), false);
         memtableFlushCellsPerSecond = Metrics.histogram(createMetricName("MemtableIndexFlushCellsPerSecond"), false);
