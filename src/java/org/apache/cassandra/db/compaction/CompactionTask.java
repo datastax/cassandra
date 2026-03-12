@@ -1130,6 +1130,8 @@ public class CompactionTask extends AbstractCompactionTask
         for (SSTableReader sstr : originals)
         {
             ssTableLoggerMsg.append(sstr.getFilename());
+            if (sstr.getSSTableLevel() != 0)
+                ssTableLoggerMsg.append(":level=").append(sstr.getSSTableLevel());
             ssTableLoggerMsg.append(", ");
         }
         ssTableLoggerMsg.append(']');

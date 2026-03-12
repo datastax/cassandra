@@ -84,7 +84,7 @@ public class LeveledCompactionTask extends CompactionTask
                         (float) expectedSize / 1024 / 1024,
                         transaction.originals()
                                    .stream()
-                                   .map(sstable -> String.format("%s (size=%s)", sstable, sstable.onDiskLength()))
+                                   .map(sstable -> String.format("%s (level=%s, size=%s)", sstable, sstable.getSSTableLevel(), sstable.onDiskLength()))
                                    .collect(Collectors.joining(",")),
                         transaction.opIdString());
             // Note that we have removed files that are still marked as compacting.
