@@ -480,6 +480,14 @@ public class IndexMetricsTest extends AbstractMetricsTest
             // This metric is created at index creation time in IndexMetrics
             assertIndexMetricsExistsIfEnabled(histogramsEnabled, "MemtableIndexWriteLatency", table, indexV1);
             assertIndexMetricsExistsIfEnabled(histogramsEnabled, "MemtableIndexWriteLatency", table, indexV2);
+            // Verify that histograms added before April 2026 release are always enabled
+            for (String index : new String[]{ indexV1, indexV2})
+            {
+                assertIndexMetricsExistsIfEnabled(true, "MemtableIndexFlushCellsPerSecond", table, index);
+                assertIndexMetricsExistsIfEnabled(true, "SegmentsPerCompaction", table, index);
+                assertIndexMetricsExistsIfEnabled(true, "CompactionSegmentCellsPerSecond", table, index);
+                assertIndexMetricsExistsIfEnabled(true, "CompactionSegmentBytesPerSecond", table, index);
+            }
 
             // Flush to persist data
             flush(KEYSPACE, table);
