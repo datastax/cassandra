@@ -39,7 +39,7 @@ public interface DataModel
 {
     static final String KEYSPACE = "sai_query_keyspace";
 
-    int LARGE_DATA_SET_ROW_COUNT = 10000;
+    int LARGE_DATA_SET_ROW_COUNT = 1000;
 
     String SIMPLE_SELECT_TEMPLATE = "SELECT %s FROM %%s WHERE %s %s ? LIMIT ?";
     String SIMPLE_SELECT_WITH_FILTERING_TEMPLATE = "SELECT %s FROM %%s WHERE %s %s ? LIMIT ? ALLOW FILTERING";
