@@ -84,6 +84,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         /**
          * BKD index metrics.
          */
+        @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
         public final Optional<Timer> intersectionLatency;
         public final Meter postingsNumPostings;
         public final Meter intersectionEarlyExits;
