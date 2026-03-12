@@ -676,8 +676,11 @@ public enum CassandraRelevantProperties
     SAI_TABLE_STATE_METRICS_ENABLED("cassandra.sai.metrics.table_state.enabled", "true"),
 
     /**
-     * Whether to enable SAI histogram metrics including memtableIndexWriteLatency, termsTraversalTotalTime,
-     * and intersectionLatency. Enabled by default.
+     * Whether to enable SAI histogram metrics added after May 2025 release, including
+     * {@link org.apache.cassandra.index.sai.metrics.IndexMetrics#memtableIndexWriteLatency},
+     * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.TrieIndexMetrics#termsTraversalTotalTime}, and
+     * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.BKDIndexMetrics#intersectionLatency}.
+     * Enabled by default.
      */
     SAI_HISTOGRAMS_ENABLED("cassandra.sai.metrics.histograms.enabled", "true"),
 
