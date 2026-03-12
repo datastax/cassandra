@@ -159,9 +159,6 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         try
         {
             executeInternal();
-            // if executeInternal has not switched the task to active state, do it now to remove it from the
-            // scheduled set.
-            switchToActive();
         }
         catch (FSDiskFullWriteError e)
         {
@@ -177,6 +174,10 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         }
         finally
         {
+            // if executeInternal has not switched the task to active state, do it now to remove it from the
+            // scheduled set.
+            switchToActive();
+
             Throwables.maybeFail(cleanup(t));
         }
     }
