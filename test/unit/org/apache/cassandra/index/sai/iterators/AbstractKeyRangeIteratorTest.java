@@ -182,7 +182,6 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
         }
     }
 
-
     /**
      * Generates a random list of primary keys with the given average number of partitions and rows per partition.
      * Partition keys and clusterings are generated in such a way that when combining two such lists generated with
