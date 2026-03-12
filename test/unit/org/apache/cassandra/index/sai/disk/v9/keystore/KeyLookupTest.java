@@ -65,34 +65,6 @@ public class KeyLookupTest extends SaiRandomizedTest
         indexDescriptor = newIndexDescriptor();
     }
 
-//    @Test
-//    public void testLexicographicException() throws Exception
-//    {
-//        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
-//        try (MetadataWriter metadataWriter = new MetadataWriter(components))
-//        {
-//            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS),
-//                                                                        metadataWriter, true);
-//            try (KeyStoreWriter writer = new KeyStoreWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
-//                                                                  metadataWriter,
-//                                                                  blockFPWriter,
-//                                                            4, false))
-//            {
-//                ByteBuffer buffer = Int32Type.instance.decompose(99999);
-//                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
-//                byte[] bytes1 = ByteSourceInverse.readBytes(byteSource);
-//
-//                writer.add(ByteComparable.preencoded(VERSION, bytes1));
-//
-//                buffer = Int32Type.instance.decompose(444);
-//                byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
-//                byte[] bytes2 = ByteSourceInverse.readBytes(byteSource);
-//
-//                assertThrows(IllegalArgumentException.class, () -> writer.add(ByteComparable.preencoded(VERSION, bytes2)));
-//            }
-//        }
-//    }
-
     @Test
     public void testFileValidation() throws Exception
     {
@@ -111,11 +83,9 @@ public class KeyLookupTest extends SaiRandomizedTest
 
         try (MetadataWriter metadataWriter = new MetadataWriter(components))
         {
-//            IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponentType.PARTITION_KEY_BLOCKS);
             NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS), metadataWriter, true);
             try (KeyStoreWriter writer = new KeyStoreWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
                                                             metadataWriter,
-//                                                            bytesWriter,
                                                             blockFPWriter,
                                                             4,
                                                             false))
@@ -156,8 +126,6 @@ public class KeyLookupTest extends SaiRandomizedTest
                                   byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
 
                                   assertArrayEquals(keys.get(x), bytes);
-//                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, keys.get(x)));
-//                    assertEquals(x, pointId);
                               }
                           }
                       });
@@ -174,8 +142,6 @@ public class KeyLookupTest extends SaiRandomizedTest
                                   byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
 
                                   assertArrayEquals(keys.get(x), bytes);
-//                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, keys.get(x)));
-//                    assertEquals(x, pointId);
                               }
                           }
                       });
@@ -194,123 +160,10 @@ public class KeyLookupTest extends SaiRandomizedTest
                                   byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
 
                                   assertArrayEquals(keys.get(target), bytes);
-//                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, keys.get(target)));
-//                    assertEquals(target, pointId);
                               }
                           }
                       });
     }
-
-//    @Test
-//    public void testSeekToTermMinMaxPrefixNoMatch() throws Exception
-//    {
-//        IndexDescriptor descriptor = newIndexDescriptor();
-//
-//        List<ByteSource> termsMinPrefixNoMatch = new ArrayList<>();
-//        List<ByteSource> termsMaxPrefixNoMatch = new ArrayList<>();
-//        int valuesPerPrefix = 10;
-//        writeTerms(descriptor, termsMinPrefixNoMatch, termsMaxPrefixNoMatch, valuesPerPrefix, false);
-//
-//        var countEndOfData = new AtomicInteger();
-//        // iterate on terms ascending
-//        withKeyLookup(reader ->
-//        {
-//            for (int x = 0; x < termsMaxPrefixNoMatch.size(); x++)
-//            {
-//                try (KeyLookup.Cursor cursor = reader.openCursor())
-//                {
-//                    int index = x;
-//                    long pointIdEnd = cursor.ceiling(v -> termsMinPrefixNoMatch.get(index));
-//                    long pointIdStart = cursor.floor(v -> termsMaxPrefixNoMatch.get(index));
-//                    if (pointIdStart >= 0 && pointIdEnd >= 0)
-//                        assertTrue(pointIdEnd > pointIdStart);
-//                    else
-//                        countEndOfData.incrementAndGet();
-//                }
-//            }
-//        });
-//        // ceiling reaches the end of the data because we call writeTerms with matchesData false, which means that
-//        // the last set of terms we are calling ceiling on are greater than anything in the trie, so ceiling returns
-//        // a negative value.
-//        assertEquals(valuesPerPrefix, countEndOfData.get());
-//    }
-
-//    @Test
-//    public void testSeekToTermMinMaxPrefix() throws Exception
-//    {
-//        IndexDescriptor descriptor = newIndexDescriptor();
-//
-//        List<ByteSource> termsMinPrefix = new ArrayList<>();
-//        List<ByteSource> termsMaxPrefix = new ArrayList<>();
-//        int valuesPerPrefix = 10;
-//        writeTerms(descriptor, termsMinPrefix, termsMaxPrefix, valuesPerPrefix, true);
-//
-//        // iterate on terms ascending
-//        withKeyLookup(reader ->
-//        {
-//            for (int x = 0; x < termsMaxPrefix.size(); x++)
-//            {
-//                try (KeyLookup.Cursor cursor = reader.openCursor())
-//                {
-//                    int index = x;
-//                    long pointIdEnd = cursor.ceiling(v -> termsMinPrefix.get(index));
-//                    long pointIdStart = cursor.floor(v -> termsMaxPrefix.get(index));
-//                    assertEquals(pointIdEnd, x / valuesPerPrefix * valuesPerPrefix);
-//                    assertEquals(pointIdEnd + valuesPerPrefix - 1, pointIdStart);
-//                }
-//            }
-//        });
-//    }
-
-//    @Test
-//    public void testAdvance() throws Exception
-//    {
-//        IndexDescriptor descriptor = newIndexDescriptor();
-//
-//        List<byte[]> terms = new ArrayList<>();
-//        writeTerms(descriptor, terms);
-//
-//        withKeyLookupCursor(cursor ->
-//        {
-//            int x = 0;
-//            while (cursor.advance())
-//            {
-//                ByteComparable term = cursor.term();
-//
-//                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
-//                assertArrayEquals(terms.get(x), bytes);
-//
-//                x++;
-//            }
-//
-//            // assert we don't increase the point id beyond one point after the last item
-//            assertEquals(cursor.pointId(), terms.size());
-//            assertFalse(cursor.advance());
-//            assertEquals(cursor.pointId(), terms.size());
-//        });
-//    }
-
-//    @Test
-//    public void testReset() throws Exception
-//    {
-//        IndexDescriptor descriptor = newIndexDescriptor();
-//
-//        List<byte[]> terms = new ArrayList<>();
-//        writeTerms(descriptor, terms);
-//
-//        withKeyLookupCursor(cursor ->
-//        {
-//            assertTrue(cursor.advance());
-//            assertTrue(cursor.advance());
-//            String term1 = cursor.term().byteComparableAsString(VERSION);
-//            cursor.reset();
-//            assertTrue(cursor.advance());
-//            assertTrue(cursor.advance());
-//            String term2 = cursor.term().byteComparableAsString(VERSION);
-//            assertEquals(term1, term2);
-//            assertEquals(1, cursor.pointId());
-//        });
-//    }
 
     @Test
     public void testLongPrefixesAndSuffixes() throws Exception
@@ -376,11 +229,8 @@ public class KeyLookupTest extends SaiRandomizedTest
         writeKeys(writer -> {
             for (int x = 0; x < 4000; x++)
             {
-                ByteBuffer buffer = Int32Type.instance.decompose(5000);
-                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, TypeUtil.BYTE_COMPARABLE_VERSION);
-                byte[] bytes = ByteSourceInverse.readBytes(byteSource);
+                byte[] bytes = ByteSourceInverse.readBytes(intByteSource(5000));
                 keys.add(bytes);
-
                 writer.add(ByteComparable.preencoded(VERSION, bytes));
             }
         }, false);
@@ -396,11 +246,8 @@ public class KeyLookupTest extends SaiRandomizedTest
         writeKeys(writer -> {
             for (int x = 0; x < 4000; x++)
             {
-                ByteBuffer buffer = Int32Type.instance.decompose(x);
-                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
-                byte[] bytes = ByteSourceInverse.readBytes(byteSource);
+                byte[] bytes = ByteSourceInverse.readBytes(intByteSource(x));
                 keys.add(bytes);
-
                 writer.add(ByteComparable.preencoded(VERSION, bytes));
             }
         }, false);
@@ -458,10 +305,7 @@ public class KeyLookupTest extends SaiRandomizedTest
         writeKeys(writer -> {
             for (int x = 0; x < 4000; x++)
             {
-                ByteBuffer buffer = Int32Type.instance.decompose(x);
-                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
-                byte[] bytes = ByteSourceInverse.readBytes(byteSource);
-
+                byte[] bytes = ByteSourceInverse.readBytes(intByteSource(x));
                 writer.add(ByteComparable.preencoded(VERSION, bytes));
             }
         }, false);
@@ -552,9 +396,7 @@ public class KeyLookupTest extends SaiRandomizedTest
 
     private byte[] makeKey(int value)
     {
-        ByteBuffer buffer = Int32Type.instance.decompose(value);
-        ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, TypeUtil.BYTE_COMPARABLE_VERSION);
-        return ByteSourceInverse.readBytes(byteSource);
+        return ByteSourceInverse.readBytes(intByteSource(value));
     }
 
     private void doTestKeyLookup(List<byte[]> keys) throws Exception
@@ -596,59 +438,16 @@ public class KeyLookupTest extends SaiRandomizedTest
 
     private void writeTerms(List<byte[]> terms) throws Exception
     {
-//        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
-//        try (MetadataWriter metadataWriter = new MetadataWriter(components))
-//        {
-//            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS),
-//                                                                        metadataWriter, true);
-//            try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
-//                                                                  metadataWriter,
-//                                                                  blockFPWriter,
-//                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
-//            {
         writeKeys(writer -> {
 
             for (int x = 0; x < 1000 * 4; x++)
             {
-                ByteBuffer buffer = Int32Type.instance.decompose(x);
-                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
-                byte[] bytes = ByteSourceInverse.readBytes(byteSource);
+                byte[] bytes = ByteSourceInverse.readBytes(intByteSource(x));
                 terms.add(bytes);
 
                 writer.add(ByteComparable.preencoded(VERSION, bytes));
             }
         }, false);
-//        }
-//        components.markComplete();
-    }
-
-    private void writeTerms(List<ByteSource> termsMinPrefix, List<ByteSource> termsMaxPrefix, int numPerPrefix, boolean matchesData) throws Exception
-    {
-//        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
-//        try (MetadataWriter metadataWriter = new MetadataWriter(components))
-//        {
-//            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS),
-//                                                                        metadataWriter, true);
-//            try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
-//                                                                  metadataWriter,
-//                                                                  blockFPWriter,
-//                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
-//            {
-        writeKeys(writer -> {
-            for (int x = 0; x < 1000; x++)
-            {
-                int component1 = x * 2;
-                for (int i = 0; i < numPerPrefix; i++)
-                {
-                    String component2 = "v" + i;
-                    termsMinPrefix.add(ByteSource.withTerminator(ByteSource.LT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1))));
-                    termsMaxPrefix.add(ByteSource.withTerminator(ByteSource.GT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1))));
-                    writer.add(v -> ByteSource.withTerminator(ByteSource.TERMINATOR, intByteSource(component1), utfByteSource(component2)));
-                }
-            }
-        }, false);
-//        }
-//        components.markComplete();
     }
 
     private ByteSource intByteSource(int value)
@@ -657,22 +456,14 @@ public class KeyLookupTest extends SaiRandomizedTest
         return Int32Type.instance.asComparableBytes(buffer, VERSION);
     }
 
-    private ByteSource utfByteSource(String value)
-    {
-        ByteBuffer buffer = UTF8Type.instance.decompose(value);
-        return UTF8Type.instance.asComparableBytes(buffer, VERSION);
-    }
-
     protected void writeKeys(ThrowingConsumer<KeyStoreWriter> testCode, boolean clustering) throws Exception
     {
         IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
         try (MetadataWriter metadataWriter = new MetadataWriter(components))
         {
-//            IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PARTITION_KEY_BLOCKS);
             NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS), metadataWriter, true);
             try (KeyStoreWriter writer = new KeyStoreWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
                                                             metadataWriter,
-//                                                            bytesWriter,
                                                             blockFPWriter,
                                                             4,
                                                             clustering))
