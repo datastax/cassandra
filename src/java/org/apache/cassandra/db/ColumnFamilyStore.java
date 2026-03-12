@@ -1455,18 +1455,25 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
             catch (Throwable t)
             {
-                JVMStabilityInspector.inspectThrowable(t);
                 postFlush.flushFailure = t;
+                JVMStabilityInspector.inspectThrowable(t);
             }
+            finally
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Flush task {}@{} signaling post flush task", hashCode(), name);
 
-            if (logger.isTraceEnabled())
-                logger.trace("Flush task {}@{} signaling post flush task", hashCode(), name);
+                // signal the post-flush we've done our work
+                postFlush.latch.decrement();
 
-            // signal the post-flush we've done our work
-            postFlush.latch.decrement();
-
-            if (logger.isTraceEnabled())
-                logger.trace("Flush task task {}@{} finished", hashCode(), name);
+                if (logger.isTraceEnabled())
+                {
+                    if (postFlush.flushFailure != null)
+                        logger.trace("Flush task task {}@{} failed", hashCode(), name);
+                    else
+                        logger.trace("Flush task task {}@{} finished successfully", hashCode(), name);
+                }
+            }
         }
 
         public Collection<SSTableReader> flushMemtable(ColumnFamilyStore cfs, Memtable memtable, boolean flushNonCf2i)
