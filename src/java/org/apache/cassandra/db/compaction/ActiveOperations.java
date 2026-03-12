@@ -29,6 +29,7 @@ import java.util.function.Predicate;
 
 import javax.annotation.concurrent.ThreadSafe;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 
 import org.slf4j.Logger;
@@ -186,5 +187,14 @@ public class ActiveOperations implements TableOperationObserver
         for (AbstractCompactionTask task : tasksCopy)
             for (ColumnFamilyStore cfs : cfss)
                 task.cancelIfAffects(cfs, predicate);
+    }
+
+    @VisibleForTesting
+    List<AbstractCompactionTask> getScheduledTasks()
+    {
+        synchronized (scheduledTasks)
+        {
+            return new ArrayList<>(scheduledTasks);
+        }
     }
 }
