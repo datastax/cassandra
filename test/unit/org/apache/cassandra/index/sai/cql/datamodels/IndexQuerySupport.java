@@ -174,6 +174,8 @@ public class IndexQuerySupport
         // queries after compacting to a single SSTable index of the current version
         dataModel.compact(executor);
         executeQueries(dataModel, executor, sets);
+
+        dataModel.truncateTables(executor);
     }
 
     public static void rowDeletions(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable 
@@ -206,6 +208,8 @@ public class IndexQuerySupport
         dataModel.truncateTables(executor);
         dataModel.insertRows(executor);
         executeQueries(dataModel, executor, sets);
+
+        dataModel.truncateTables(executor);
     }
 
     /**
@@ -257,6 +261,8 @@ public class IndexQuerySupport
         dataModel.truncateTables(executor);
         dataModel.insertRows(executor);
         executeQueries(dataModel, executor, sets);
+
+        dataModel.truncateTables(executor);
     }
 
     public static void cellDeletions(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable 
@@ -284,6 +290,8 @@ public class IndexQuerySupport
         // queries after compacting deletes into to a single SSTable index
         dataModel.compact(executor);
         executeQueries(dataModel, executor, sets);
+
+        dataModel.truncateTables(executor);
     }
 
     /**
@@ -325,6 +333,8 @@ public class IndexQuerySupport
         // queries after compacting to a single SSTable index of the current version
         dataModel.compact(executor);
         executeQueries(dataModel, executor, sets);
+
+        dataModel.truncateTables(executor);
     }
 
     public static void timeToLive(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
@@ -349,6 +359,8 @@ public class IndexQuerySupport
         // Make sure fresh overwrites invalidate TTLs:
         dataModel.insertRows(executor);
         executeQueries(dataModel, executor, sets);
+
+        dataModel.truncateTables(executor);
     }
 
     /**
@@ -394,6 +406,8 @@ public class IndexQuerySupport
         // Make sure fresh overwrites invalidate TTLs:
         dataModel.insertRows(executor);
         executeQueries(dataModel, executor, sets);
+
+        dataModel.truncateTables(executor);
     }
 
     private static void executeQueries(DataModel dataModel, DataModel.Executor executor, List<BaseQuerySet> sets) throws Throwable
