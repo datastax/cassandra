@@ -43,6 +43,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         /**
          * Trie index metrics.
          */
+        @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
         public final Optional<Timer> termsTraversalTotalTime;
 
         public final QueryEventListener.PostingListEventListener postingsListener;
