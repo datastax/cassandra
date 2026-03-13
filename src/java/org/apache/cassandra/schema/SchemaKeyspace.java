@@ -364,20 +364,29 @@ public final class SchemaKeyspace
               + "deterministic boolean,"
               + "PRIMARY KEY ((keyspace_name), aggregate_name, argument_types))");
 
-    private static final List<TableMetadata> ALL_TABLE_METADATA = ImmutableList.of(
-        Keyspaces,
-        // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
-        DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major) ? TablesLegacy : Tables,
-        Columns,
-        ColumnMasks,
-        Triggers,
-        DroppedColumns,
-        // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
-        DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major) ? ViewsLegacy : Views,
-        Types,
-        Functions,
-        Aggregates,
-        Indexes);
+    /**
+     * Returns the list of schema table metadata based on current storage compatibility mode.
+     * This must be dynamic (not static final) because storage_compatibility_mode can change
+     * via rolling restart, and we need to use the correct schema table definitions (legacy
+     * vs current) based on the mode at the time of access.
+     */
+    private static List<TableMetadata> allTableMetadata()
+    {
+        boolean useLegacySchema = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major);
+        return ImmutableList.of(Keyspaces,
+                                // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
+                                useLegacySchema ? TablesLegacy : Tables,
+                                Columns,
+                                ColumnMasks,
+                                Triggers,
+                                DroppedColumns,
+                                // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
+                                useLegacySchema ? ViewsLegacy : Views,
+                                Types,
+                                Functions,
+                                Aggregates,
+                                Indexes);
+    }
 
     private static TableMetadata parse(String name, String description, String cql)
     {
@@ -391,7 +400,7 @@ public final class SchemaKeyspace
 
     public static KeyspaceMetadata metadata()
     {
-        return KeyspaceMetadata.create(SchemaConstants.SCHEMA_KEYSPACE_NAME, KeyspaceParams.local(), org.apache.cassandra.schema.Tables.of(ALL_TABLE_METADATA));
+        return KeyspaceMetadata.create(SchemaConstants.SCHEMA_KEYSPACE_NAME, KeyspaceParams.local(), org.apache.cassandra.schema.Tables.of(allTableMetadata()));
     }
 
     static Collection<Mutation> convertSchemaDiffToMutations(KeyspacesDiff diff, long timestamp)
@@ -616,7 +625,7 @@ public final class SchemaKeyspace
         Mutation.SimpleBuilder builder = Mutation.simpleBuilder(SchemaConstants.SCHEMA_KEYSPACE_NAME, decorate(Keyspaces, keyspace.name))
                                                  .timestamp(timestamp);
 
-        for (TableMetadata schemaTable : ALL_TABLE_METADATA)
+        for (TableMetadata schemaTable : allTableMetadata())
             builder.update(schemaTable).delete();
 
         return builder;
