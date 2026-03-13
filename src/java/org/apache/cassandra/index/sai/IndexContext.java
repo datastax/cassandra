@@ -948,7 +948,10 @@ public class IndexContext
                 else
                 {
                     long count = context.primaryKeyMapFactory().count();
-                    logger.debug(logMessage("Successfully loaded index for SSTable {} with {} rows."), context.descriptor(), count);
+                    if (count > 0)
+                        logger.debug(logMessage("Successfully loaded index for SSTable {} with {} rows."), context.descriptor(), count);
+                    else
+                        logger.debug(logMessage("Failed to load index for SSTable {} as it is empty."), context.descriptor());
                 }
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.
