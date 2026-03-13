@@ -44,6 +44,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 /**
  * Memtable types and options are specified with these parameters. Memtable classes must either contain a static
@@ -429,7 +430,7 @@ public final class MemtableParams
      * @throws ConfigurationException if the memtable type is not compatible with CC4
      */
     @VisibleForTesting
-    Map<String, String> asSchemaValueMap(org.apache.cassandra.utils.StorageCompatibilityMode mode)
+    Map<String, String> asSchemaValueMap(StorageCompatibilityMode mode)
     {
         if (!mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
             throw new IllegalStateException("Cannot get map value in CC5 mode. Use asSchemaValueText() instead.");
@@ -439,8 +440,19 @@ public final class MemtableParams
             return ImmutableMap.of();
 
         // Validate and map the configuration key to CC4 class name
+        // This also validates CC4 compatibility (rejects sharded types, unknown configs)
         String className = mapCC5KeyToCC4ClassName(configurationKey);
-        return ImmutableMap.of("class", className);
+
+        // Get the configuration definition to access parameters
+        ParameterizedClass definition = CONFIGURATION_DEFINITIONS.get(configurationKey);
+
+        // Build the map with class name and any additional parameters
+        Map<String, String> map = new HashMap<>();
+        map.put("class", className);
+        if (definition != null && definition.parameters != null)
+            map.putAll(definition.parameters);
+
+        return map;
     }
 
     /**
@@ -463,7 +475,7 @@ public final class MemtableParams
      * @throws IllegalStateException if called in CC4 compatibility mode
      */
     @VisibleForTesting
-    String asSchemaValueText(org.apache.cassandra.utils.StorageCompatibilityMode mode)
+    String asSchemaValueText(StorageCompatibilityMode mode)
     {
         if (mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
             throw new IllegalStateException("Cannot get text value in CC4 compatibility mode. Use asSchemaValueMap() instead.");
@@ -498,7 +510,8 @@ public final class MemtableParams
 
         // Check if the configuration key exists in CONFIGURATION_DEFINITIONS
         // This ensures we're not trying to write an unknown/invalid configuration
-        if (!CONFIGURATION_DEFINITIONS.containsKey(configKey))
+        ParameterizedClass definition = CONFIGURATION_DEFINITIONS.get(configKey);
+        if (definition == null)
         {
             throw new ConfigurationException(
                 String.format("Memtable configuration '%s' not found in cassandra.yaml. " +
@@ -506,20 +519,23 @@ public final class MemtableParams
                              configKey));
         }
 
-        // Map to CC4 class name
-        switch (lowerKey)
+        // Get the class name from the definition and strip the package prefix
+        // CC4 accepts both short names (e.g., 'TrieMemtable') and fully qualified names,
+        // but we use short names for standard Cassandra memtables
+        String className = definition.class_name;
+        if (className == null || className.isEmpty())
         {
-            case "skiplist":
-                return "SkipListMemtable";
-            case "trie":
-                return "TrieMemtable";
-            case "triememtablestage1":
-                return "TrieMemtableStage1";
-            case "persistentmemorymemtable":
-                return "PersistentMemoryMemtable";
-            default:
-                // For unknown types, capitalize first letter
-                return configKey.substring(0, 1).toUpperCase() + configKey.substring(1) + "Memtable";
+            throw new ConfigurationException(
+                String.format("Memtable configuration '%s' has no class name defined.",
+                             configKey));
         }
+
+        // Strip the standard Cassandra memtable package prefix
+        if (className.startsWith("org.apache.cassandra.db.memtable."))
+        {
+            className = className.substring("org.apache.cassandra.db.memtable.".length());
+        }
+
+        return className;
     }
 }
