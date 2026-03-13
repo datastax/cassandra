@@ -194,7 +194,7 @@ public class VectorTester extends SAITester
         @Parameterized.Parameter(2)
         public boolean ENABLE_FUSED;
 
-        @Parameterized.Parameters(name = "{0} {1} {2}")
+        @Parameterized.Parameters(name = "version={0} enableNVQ={1} enableFused={2}")
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
