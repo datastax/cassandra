@@ -30,8 +30,8 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 public class IndexMetrics extends AbstractMetrics
 {
-        @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
-        public final Optional<Timer> memtableIndexWriteLatency;
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+    public final Optional<Timer> memtableIndexWriteLatency;
     
     public final Gauge ssTableCellCount;
     public final Gauge liveMemtableIndexWriteCount;

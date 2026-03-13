@@ -678,8 +678,9 @@ public enum CassandraRelevantProperties
     /**
      * Whether to enable SAI histogram metrics added after May 2025 release, including
      * {@link org.apache.cassandra.index.sai.metrics.IndexMetrics#memtableIndexWriteLatency},
-     * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.TrieIndexMetrics#termsTraversalTotalTime}, and
-     * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.BKDIndexMetrics#intersectionLatency}.
+     * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.TrieIndexMetrics#termsTraversalTotalTime},
+     * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.BKDIndexMetrics#intersectionLatency}, and
+     * {@link org.apache.cassandra.index.sai.metrics.TableQueryMetrics.PerQuery#queryLatency}.
      * Enabled by default.
      */
     SAI_HISTOGRAMS_ENABLED("cassandra.sai.metrics.histograms.enabled", "true"),

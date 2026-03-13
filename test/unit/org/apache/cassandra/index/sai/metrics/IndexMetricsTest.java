@@ -230,6 +230,16 @@ public class IndexMetricsTest extends AbstractMetricsTest
         assertMetricExistsIfEnabled(shouldExist, metricName, table, index, "ColumnQueryMetrics");
     }
 
+    private void assertTableQueryMetricsExistsIfEnabled(boolean shouldExist, String metricName, String table)
+    {
+        ObjectName name = objectNameNoIndex(metricName, KEYSPACE, table, "PerQuery");
+
+        if (shouldExist)
+            assertMetricExists(name);
+        else
+            assertMetricDoesNotExist(name);
+    }
+
     private void assertIndexQueryCount(String index, long expectedCount)
     {
         assertEquals(expectedCount,
@@ -480,6 +490,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
             // This metric is created at index creation time in IndexMetrics
             assertIndexMetricsExistsIfEnabled(histogramsEnabled, "MemtableIndexWriteLatency", table, indexV1);
             assertIndexMetricsExistsIfEnabled(histogramsEnabled, "MemtableIndexWriteLatency", table, indexV2);
+
             // Verify that histograms added before April 2026 release are always enabled
             for (String index : new String[]{ indexV1, indexV2})
             {
@@ -506,6 +517,25 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
             // Test TermsLookupLatency histogram (ColumnQueryMetrics - Trie for TEXT column)
             assertColumnQueryMetricsExistsIfEnabled(histogramsEnabled, "TermsLookupLatency", table, indexV2);
+
+            // Test QueryLatency timer (TableQueryMetrics.PerQuery - table-level metric, no index name)
+            assertTableQueryMetricsExistsIfEnabled(histogramsEnabled, "QueryLatency", table);
+
+            // Verify that other PerQuery histograms are always enabled (not affected by the flag)
+            assertTableQueryMetricsExistsIfEnabled(true, "SSTableIndexesHit", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "IndexSegmentsHit", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "KeysFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PartitionsFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PartitionsReturned", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PartitionTombstonesFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "RowsFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "RowsReturned", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "RowTombstonesFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "KDTreePostingsSkips", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "KDTreePostingsNumPostings", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "KDTreePostingsDecodes", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PostingsSkips", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PostingsDecodes", table);
         }
         finally
         {

@@ -302,9 +302,8 @@ public class IndexContext
             ByteBuffer value = getValueOf(key, row, FBUtilities.nowInSeconds());
             target.index(key, row.clustering(), value, memtable, opGroup);
         }
-        indexMetrics.ifPresent(metrics ->
-            metrics.memtableIndexWriteLatency.ifPresent(timer ->
-                timer.update(System.nanoTime() - start, TimeUnit.NANOSECONDS)));
+        indexMetrics.flatMap(metrics -> metrics.memtableIndexWriteLatency).ifPresent(timer ->
+                timer.update(System.nanoTime() - start, TimeUnit.NANOSECONDS));
     }
 
     /**
