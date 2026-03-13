@@ -366,9 +366,6 @@ public final class SchemaKeyspace
 
     /**
      * Returns the list of schema table metadata based on current storage compatibility mode.
-     * This must be dynamic (not static final) because storage_compatibility_mode can change
-     * via rolling restart, and we need to use the correct schema table definitions (legacy
-     * vs current) based on the mode at the time of access.
      */
     private static List<TableMetadata> allTableMetadata()
     {
