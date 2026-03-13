@@ -182,8 +182,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             if (readClusteringKey(rowId).isEmpty())
             {
                 long partitionId = partitionArray.get(rowId);
-                long thisPartitionRowId = partitionArray.ceilingRowId(partitionId);
-                return thisPartitionRowId;
+                return partitionArray.ceilingRowId(partitionId);
             }
 
             return rowId;
@@ -284,6 +283,14 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             {
                 throw new UncheckedIOException(e);
             }
+        }
+
+        @Override
+        public long count()
+        {
+            if (clusteringKeyReader.keyLookupMeta.keyCount == 0)
+                return 0;
+            return super.count();
         }
 
         @Override
