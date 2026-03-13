@@ -67,7 +67,7 @@ public class KeyLookup
     public static final String INDEX_OUT_OF_BOUNDS = "The target point id [%d] cannot be less than 0 or greater than or equal to the key count [%d]";
 
     private final FileHandle keysFileHandle;
-    private final KeyLookupMeta keyLookupMeta;
+    public final KeyLookupMeta keyLookupMeta;
     private final LongArray.Factory keyBlockOffsetsFactory;
 
     /**
