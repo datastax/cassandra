@@ -286,14 +286,6 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         }
 
         @Override
-        public long count()
-        {
-            if (clusteringKeyReader.keyLookupMeta.keyCount == 0)
-                return 0;
-            return super.count();
-        }
-
-        @Override
         public void close()
         {
             super.close();
