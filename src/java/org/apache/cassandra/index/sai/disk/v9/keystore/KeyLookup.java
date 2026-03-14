@@ -44,11 +44,11 @@ import org.apache.lucene.util.BytesRefBuilder;
  * Offers the following features:
  * <ul>
  *     <li>forward iterating over all keys sequentially with a cursor</li>
- *     <li>constant-time look up of the key at a given point id</li>
+ *     <li>constant-time lookup of the key at a given point id</li>
  *     <li>log-time lookup of the point id of a key</li>
  * </ul>
  * <p> * Care has been taken to make this structure as efficient as possible.
- * Reading keys does not require allocating data heap buffers per each read operation.
+ * Reading keys do not require allocating data heap buffers per each read operation.
  * Only one key at a time is loaded to memory.
  * Low complexity algorithms are used – a lookup of the key by point id is constant time,
  * and a lookup of the point id by the key is logarithmic.
@@ -65,9 +65,8 @@ import org.apache.lucene.util.BytesRefBuilder;
 public class KeyLookup
 {
     public static final String INDEX_OUT_OF_BOUNDS = "The target point id [%d] cannot be less than 0 or greater than or equal to the key count [%d]";
-
     private final FileHandle keysFileHandle;
-    public final KeyLookupMeta keyLookupMeta;
+    private final KeyLookupMeta keyLookupMeta;
     private final LongArray.Factory keyBlockOffsetsFactory;
 
     /**
@@ -75,7 +74,7 @@ public class KeyLookup
      * <p>
      * It does not own the components, so you must close them separately after you're done with the reader.
      *
-     * @param keysFileHandle      handle to the file with a sequence of prefix-compressed blocks
+     * @param keysFileHandle      handle to the file with a sequence of prefix-compressed blocks,
      *                            each storing a fixed number of keys
      * @param keysBlockOffsets    handle to the file containing an encoded sequence of the file offsets pointing to the blocks
      * @param keyLookupMeta       metadata object created earlier by the writer
@@ -102,18 +101,68 @@ public class KeyLookup
      */
     public @Nonnull Cursor openCursor() throws IOException
     {
-        return new Cursor(keysFileHandle, keyBlockOffsetsFactory);
+        if (keyLookupMeta.keyCount == 0)
+            return new EmptyCursor();
+        return new StandardCursor(keysFileHandle, keyBlockOffsetsFactory);
+    }
+
+    /**
+     * Interface for cursor operations on keys.
+     */
+    public interface Cursor extends AutoCloseable
+    {
+        long clusteredSeekToKey(ByteComparable key, long startingPointId, long endingPointId);
+
+        @Nonnull
+        ByteComparable seekToPointId(long target);
+
+        @VisibleForTesting
+        void reset() throws IOException;
+
+        void close() throws IOException;
+    }
+
+    /**
+     * An empty cursor implementation that is returned when keyCount is 0.
+     * This cursor has no keys, and all operations either throw exceptions or return sentinel values.
+     */
+    @NotThreadSafe
+    private static class EmptyCursor implements Cursor
+    {
+        @Override
+        public long clusteredSeekToKey(ByteComparable key, long startingPointId, long endingPointId)
+        {
+            return -1;
+        }
+
+        @Override
+        public @Nonnull ByteComparable seekToPointId(long target)
+        {
+            throw new IndexOutOfBoundsException(String.format(INDEX_OUT_OF_BOUNDS, target, 0));
+        }
+
+        @Override
+        public void reset()
+        {
+            // No-op for empty cursor
+        }
+
+        @Override
+        public void close()
+        {
+            // No-op for empty cursor
+        }
     }
 
     /**
      * Allows reading the keys from the keys file.
      * Can quickly seek to a random key by point id.
      * <p>
-     * This object is stateful and not thread safe.
+     * This object is stateful and not thread-safe.
      * It maintains a position to the current key as well as a buffer that can hold one key.
      */
     @NotThreadSafe
-    public class Cursor implements AutoCloseable
+    public class StandardCursor implements Cursor
     {
         private final IndexInputReader keysInput;
         private final int blockShift;
@@ -132,7 +181,7 @@ public class KeyLookup
         private long currentPointId;
         private long currentBlockIndex;
 
-        Cursor(FileHandle keysFileHandle, LongArray.Factory blockOffsetsFactory) throws IOException
+        StandardCursor(FileHandle keysFileHandle, LongArray.Factory blockOffsetsFactory) throws IOException
         {
             try
             {
@@ -160,7 +209,7 @@ public class KeyLookup
          * Finds the pointId for a clustering key within a range of pointIds. The start and end of the range must not
          * exceed the number of keys available. The keys within the range are expected to be in lexographical order.
          * <p>
-         * If the key is not in the block containing the start of the range a binary search is done to find
+         * If the key is not in the block containing the start of the range, a binary search is done to find
          * the block containing the search key. That block is then searched to return the pointId that corresponds
          * to the key that is either equal to or next highest to the search key.
          *
@@ -171,6 +220,7 @@ public class KeyLookup
          * @return a {@code long} representing the pointId of the key that is >= to the key passed to the method, or
          * -1 if the key passed is > all the keys.
          */
+        @Override
         public long clusteredSeekToKey(ByteComparable key, long startingPointId, long endingPointId)
         {
             assert clustering : "Cannot do a clustered seek to a key on non-clustered keys";
@@ -208,7 +258,7 @@ public class KeyLookup
 
                     split /= 2;
                 }
-                // After we finish the binary search we need to move the block back till we hit a block that has
+                // After we finish the binary search, we need to move the block back till we hit a block that has
                 // a starting key that is less than or equal to the skip key
                 while (currentBlockIndex > 0 && compareKeys(currentKey, skipKey) > 0)
                 {
@@ -298,7 +348,7 @@ public class KeyLookup
                 {
                     // Read the prefix and suffix lengths following the compression mechanism described
                     // in the KeyStoreWriterWriter. If the lengths contained in the starting byte are less
-                    // than the 4-bit maximum then nothing further is read. Otherwise, the lengths in the
+                    // than the 4-bit maximum, then nothing further is read. Otherwise, the lengths in the
                     // following vints are added.
                     int compressedLengths = Byte.toUnsignedInt(keysInput.readByte());
                     prefixLength = compressedLengths & 0x0F;
@@ -351,6 +401,7 @@ public class KeyLookup
          * @return The {@link ByteComparable} containing the key
          * @throws IndexOutOfBoundsException if the target point id is less than -1 or greater than the number of keys
          */
+        @Override
         public @Nonnull ByteComparable seekToPointId(long target)
         {
             if (target <= -1 || target >= keyLookupMeta.keyCount)
@@ -378,7 +429,7 @@ public class KeyLookup
             return ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, currentKey.bytes, currentKey.offset, currentKey.length);
         }
 
-        @VisibleForTesting
+        @Override
         public void reset() throws IOException
         {
             currentPointId = 0;
