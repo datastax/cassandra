@@ -34,6 +34,7 @@ import com.datastax.driver.core.exceptions.AuthenticationException;
 import com.datastax.driver.core.exceptions.SyntaxError;
 import com.datastax.driver.core.exceptions.UnauthorizedException;
 import org.apache.cassandra.ServerTestUtils;
+import org.apache.cassandra.auth.CassandraRoleManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.OverrideConfigurationLoader;
 import org.apache.cassandra.config.ParameterizedClass;
@@ -41,6 +42,7 @@ import org.apache.cassandra.cql3.PasswordObfuscator;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.EmbeddedCassandraService;
 import org.hamcrest.CoreMatchers;
+
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.junit.Assert.assertEquals;
@@ -76,6 +78,7 @@ public class AuditLoggerAuthTest
         });
 
         System.setProperty("cassandra.superuser_setup_delay_ms", "0");
+        CassandraRoleManager.updatePasswordUpdateMinInterval(0);
         embedded = ServerTestUtils.startEmbeddedCassandraService();
 
         executeWithCredentials(

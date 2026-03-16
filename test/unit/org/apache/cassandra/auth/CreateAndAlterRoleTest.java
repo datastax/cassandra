@@ -41,6 +41,7 @@ public class CreateAndAlterRoleTest extends CQLTester
     @BeforeClass
     public static void setUpClass()
     {
+        CassandraRoleManager.updatePasswordUpdateMinInterval(0);
         CQLTester.setUpClass();
         requireAuthentication();
         requireNetwork();
