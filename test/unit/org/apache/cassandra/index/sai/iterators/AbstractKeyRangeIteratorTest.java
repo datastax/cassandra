@@ -48,8 +48,8 @@ import static org.apache.cassandra.io.util.FileUtils.closeQuietly;
 
 public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
 {
-    private static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = SAIUtil.currentVersion().onDiskFormat()
-                                                                              .newPrimaryKeyFactory(new ClusteringComparator(LongType.instance));
+    static final PrimaryKey.Factory TEST_PRIMARY_KEY_FACTORY = SAIUtil.currentVersion().onDiskFormat()
+                                                                      .newPrimaryKeyFactory(new ClusteringComparator(LongType.instance));
 
     protected long[] arr(long... longArray)
     {
