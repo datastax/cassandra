@@ -108,6 +108,7 @@
     <property name="version.properties.dir"
               value="${build.src.resources}/org/apache/cassandra/config/" />
     <property name="final.name" value="${ant.project.name}-${version}"/>
+    <property name="new.artifact.name" value="db-all-${version}"/>
 
     <property name="local.repository" value="${user.home}/.m2/repository" />
 
@@ -831,6 +832,15 @@
         <copy file=".build/cassandra-build-deps-template.xml" tofile="${build.dir}/tmp-${final.name}-deps.pom">
             <filterset refid="pom-template"/>
         </copy>
+
+        <!-- Generate POM for com.datastax.db:db-all by copying and modifying the dse-db-all POM -->
+        <copy file="${build.dir}/${final.name}.pom"
+              tofile="${build.dir}/${new.artifact.name}.pom"/>
+        <replace file="${build.dir}/${new.artifact.name}.pom">
+            <replacetoken><![CDATA[<artifactId>dse-db-all</artifactId>]]></replacetoken>
+            <replacevalue><![CDATA[<groupId>com.datastax.db</groupId>
+  <artifactId>db-all</artifactId>]]></replacevalue>
+        </replace>
     </target>
 
     <!--
@@ -1098,6 +1108,118 @@
           <include name="${final.name}-src.tar.gz" />
         </fileset>
       </checksum>
+
+      <!-- ================================================================ -->
+      <!-- Create db-all artifacts (copies of dse-db with new names)       -->
+      <!-- ================================================================ -->
+
+      <!-- Copy parent POM -->
+      <copy file="${build.dir}/${final.name}-parent.pom"
+          tofile="${build.dir}/${new.artifact.name}-parent.pom"
+          failonerror="false"/>
+
+      <!-- Copy main jar -->
+      <copy file="${build.dir}/${final.name}.jar"
+          tofile="${build.dir}/${new.artifact.name}.jar"
+          failonerror="false"/>
+
+      <!-- Copy sources jar -->
+      <copy file="${build.dir}/${final.name}-sources.jar"
+          tofile="${build.dir}/${new.artifact.name}-sources.jar"
+          failonerror="false"/>
+
+      <!-- Copy javadoc jar -->
+      <copy file="${build.dir}/${final.name}-javadoc.jar"
+          tofile="${build.dir}/${new.artifact.name}-javadoc.jar"
+          failonerror="false"/>
+
+      <!-- Create db-all binary tarball (duplicate of dse-db content) -->
+      <tar compression="gzip" longfile="gnu"
+        destfile="${build.dir}/${new.artifact.name}-bin.tar.gz">
+
+        <!-- Everything but bin/ (default mode) -->
+        <tarfileset dir="${dist.dir}" prefix="${new.artifact.name}">
+          <include name="**"/>
+          <exclude name="bin/*" />
+          <exclude name="tools/bin/*"/>
+        </tarfileset>
+        <!-- Shell includes in bin/ (default mode) -->
+        <tarfileset dir="${dist.dir}" prefix="${new.artifact.name}">
+          <include name="bin/*.in.sh" />
+          <include name="tools/bin/*.in.sh" />
+        </tarfileset>
+        <!-- Executable scripts in bin/ -->
+        <tarfileset dir="${dist.dir}" prefix="${new.artifact.name}" mode="755">
+          <include name="bin/*"/>
+          <include name="tools/bin/*"/>
+          <exclude name="bin/*.in.sh" />
+          <exclude name="tools/bin/*.in.sh" />
+        </tarfileset>
+      </tar>
+
+      <!-- Create db-all source tarball (duplicate of dse-db content) -->
+      <tar compression="gzip" longfile="gnu"
+           destfile="${build.dir}/${new.artifact.name}-src.tar.gz">
+
+        <tarfileset dir="${basedir}"
+                    prefix="${new.artifact.name}-src">
+          <include name="**"/>
+          <exclude name="build/**" />
+          <exclude name="lib/**" />
+          <exclude name="src/gen-java/**" />
+          <exclude name=".git/**" />
+          <exclude name="venv/**" />
+          <exclude name="src/resources/org/apache/cassandra/config/version.properties" />
+          <exclude name="conf/hotspot_compiler" />
+          <exclude name="doc/cql3/CQL.html" />
+          <exclude name="doc/build/**" />
+          <exclude name="bin/*" /> <!-- handled separately below -->
+          <exclude name="tools/bin/*" /> <!-- handled separately below -->
+          <!-- exclude python generated files -->
+          <exclude name="**/__pycache__/**" />
+          <!-- exclude Eclipse files -->
+          <exclude name=".project" />
+          <exclude name=".classpath" />
+          <exclude name=".settings/**" />
+          <exclude name=".externalToolBuilders/**" />
+          <!-- exclude NetBeans files -->
+          <exclude name="ide/nbproject/private/**" />
+        </tarfileset>
+
+        <!-- python driver -->
+        <tarfileset dir="${basedir}" prefix="${new.artifact.name}-src">
+          <include name="lib/cassandra-driver-internal-only-**" />
+        </tarfileset>
+
+        <!-- Shell includes in bin/ and tools/bin/ -->
+        <tarfileset dir="${basedir}" prefix="${new.artifact.name}-src">
+          <include name="bin/*.in.sh" />
+          <include name="tools/bin/*.in.sh" />
+        </tarfileset>
+        <!-- Everything else (assumed to be scripts), is executable -->
+        <tarfileset dir="${basedir}" prefix="${new.artifact.name}-src" mode="755">
+          <include name="bin/*"/>
+          <exclude name="bin/*.in.sh" />
+          <include name="tools/bin/*"/>
+          <exclude name="tools/bin/*.in.sh" />
+          <include name=".build/**/*.sh"/>
+        </tarfileset>
+      </tar>
+
+      <!-- Generate checksums for db-all tarballs -->
+      <checksum forceOverwrite="yes" todir="${build.dir}" fileext=".sha256" algorithm="SHA-256">
+        <fileset dir="${build.dir}">
+          <include name="${new.artifact.name}-bin.tar.gz" />
+          <include name="${new.artifact.name}-src.tar.gz" />
+        </fileset>
+      </checksum>
+      <checksum forceOverwrite="yes" todir="${build.dir}" fileext=".sha512" algorithm="SHA-512">
+        <fileset dir="${build.dir}">
+          <include name="${new.artifact.name}-bin.tar.gz" />
+          <include name="${new.artifact.name}-src.tar.gz" />
+        </fileset>
+      </checksum>
+
     </target>
 
   <!-- Wrapper of build-test without dependencies, so both that target and its dependencies are skipped if the property
@@ -2295,6 +2417,16 @@
     <install pomFile="${build.dir}/${final.name}.pom"
              file="${build.dir}/${final.name}-javadoc.jar"
              classifier="javadoc"/>
+
+    <!-- the db-all jar (same JARs, new Maven coordinates com.datastax.db:db-all) -->
+    <install pomFile="${build.dir}/${new.artifact.name}.pom"
+             file="${build.dir}/${final.name}.jar"/>
+    <install pomFile="${build.dir}/${new.artifact.name}.pom"
+             file="${build.dir}/${final.name}-sources.jar"
+             classifier="sources"/>
+    <install pomFile="${build.dir}/${new.artifact.name}.pom"
+             file="${build.dir}/${final.name}-javadoc.jar"
+             classifier="javadoc"/>
   </target>
 
   <!-- Publish artifacts to remote Maven repository -->
@@ -2317,9 +2449,23 @@
             file="${build.dir}/${final.name}-javadoc.jar"
             classifier="javadoc"/>
 
+    <!-- the db-all jar (same JARs, new Maven coordinates com.datastax.db:db-all) -->
+    <deploy pomFile="${build.dir}/${new.artifact.name}.pom"
+            file="${build.dir}/${final.name}.jar"/>
+    <deploy pomFile="${build.dir}/${new.artifact.name}.pom"
+            file="${build.dir}/${final.name}-sources.jar"
+            classifier="sources"/>
+    <deploy pomFile="${build.dir}/${new.artifact.name}.pom"
+            file="${build.dir}/${final.name}-javadoc.jar"
+            classifier="javadoc"/>
+
     <!-- the distribution -->
     <sign-dist file="${build.dir}/${final.name}-bin.tar.gz" />
     <sign-dist file="${build.dir}/${final.name}-src.tar.gz" />
+
+    <!-- the db-all distribution (separate tarballs, new Maven coordinates com.datastax.db:db-all) -->
+    <sign-dist file="${build.dir}/${new.artifact.name}-bin.tar.gz" />
+    <sign-dist file="${build.dir}/${new.artifact.name}-src.tar.gz" />
 
   </target>
 
