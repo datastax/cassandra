@@ -359,6 +359,10 @@ public class BackgroundCompactionRunner implements Runnable
             for (var c : compactionTasks)
                 t = c.rejected(t);
             Throwables.maybeFail(t);
+            // Note that there is still a race between the compaction pause in `runWithCompactionsDisabled` and task
+            // collection creating the transactions for the tasks above that can cause `runWithCompactionsDisabled` to
+            // fail if we have prepared a compaction task but not reached this point to reject it yet.
+            // This situation, however, should occur very rarely and will resolve itself quickly.
             return null;
         }
     }
