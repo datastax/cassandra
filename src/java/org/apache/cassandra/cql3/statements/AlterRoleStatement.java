@@ -27,6 +27,7 @@ import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 import static org.apache.cassandra.cql3.statements.RequestValidations.*;
@@ -130,7 +131,7 @@ public class AlterRoleStatement extends AuthenticationStatement
         if (dcPermissions != null)
             DatabaseDescriptor.getNetworkAuthorizer().setRoleDatacenters(role, dcPermissions);
 
-        if (cidrPermissions != null)
+        if (cidrPermissions != null && DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
             DatabaseDescriptor.getCIDRAuthorizer().setCidrGroupsForRole(role, cidrPermissions);
 
         return null;
