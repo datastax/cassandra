@@ -38,6 +38,7 @@ import org.apache.cassandra.io.util.FileUtils;
  */
 public class KeyRangeConcatIterator extends KeyRangeIterator
 {
+    public static final String MUST_BE_SORTED_ERROR = "RangeIterator must be sorted, previous max: %s, next min: %s";
     private final Iterator<KeyRangeIterator> ranges;
     private KeyRangeIterator currentRange;
     private final List<KeyRangeIterator> toRelease;

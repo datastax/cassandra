@@ -217,7 +217,7 @@ public abstract class KeyRangeIterator extends AbstractGuavaIterator<PrimaryKey>
                             }
                             else if (tokenCount > 0 && max.compareTo(range.getMinimum()) > 0)
                             {
-                                throw new IllegalArgumentException("KeyRangeIterator must be sorted, previous max: " + max + ", next min: " + range.getMinimum());
+                                throw new IllegalArgumentException(String.format(KeyRangeConcatIterator.MUST_BE_SORTED_ERROR, max, range.getMinimum()));
                             }
 
                             max = range.getMaximum();
