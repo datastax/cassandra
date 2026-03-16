@@ -29,6 +29,9 @@ import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.RoleName;
+import org.apache.cassandra.cql3.statements.AlterRoleStatement;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertFalse;
@@ -160,6 +163,35 @@ public class CreateAndAlterRoleTest extends CQLTester
         assertTrue(roles.contains("does_not_exist_yet"));
         // not created - CASSANDRA-19749
         assertFalse(roles.contains("also_does_not_exist_yet"));
+    }
+
+    @Test
+    public void alterRoleSkipsCidrUpdatesInPre50CompatibilityMode() throws Throwable
+    {
+        StorageCompatibilityMode originalMode = DatabaseDescriptor.getStorageCompatibilityMode();
+        ICIDRAuthorizer originalCidrAuthorizer = DatabaseDescriptor.getCIDRAuthorizer();
+        try
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CASSANDRA_4);
+            DatabaseDescriptor.setCIDRAuthorizer(new AllowAllCIDRAuthorizer()
+            {
+                @Override
+                public void setCidrGroupsForRole(RoleResource role, CIDRPermissions cidrPermissions)
+                {
+                    throw new AssertionError("CIDR permissions should not be updated in pre-5.0 compatibility mode");
+                }
+            });
+
+            RoleName roleName = new RoleName();
+            roleName.setName("some_role", true);
+            AlterRoleStatement statement = new AlterRoleStatement(roleName, new RoleOptions(), null, CIDRPermissions.all(), false);
+            statement.execute(null);
+        }
+        finally
+        {
+            DatabaseDescriptor.setCIDRAuthorizer(originalCidrAuthorizer);
+            DatabaseDescriptor.setStorageCompatibilityMode(originalMode);
+        }
     }
 
     private Set<String> getAllRoles()
