@@ -66,6 +66,42 @@ public class KeyLookupTest extends SaiRandomizedTest
     }
 
     @Test
+    public void testLexicographicException() throws Exception
+    {
+        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
+        try (MetadataWriter metadataWriter = new MetadataWriter(components))
+        {
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS),
+                                                                        metadataWriter, true);
+            try (KeyStoreWriter writer = new KeyStoreWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
+                                                            metadataWriter,
+                                                            blockFPWriter,
+                                                            4,
+                                                            true))
+            {
+                // Start the first partition
+                writer.startPartition();
+                ByteBuffer buffer = Int32Type.instance.decompose(99999);
+                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
+                byte[] bytes1 = ByteSourceInverse.readBytes(byteSource);
+
+                writer.add(ByteComparable.preencoded(VERSION, bytes1));
+
+                buffer = Int32Type.instance.decompose(444);
+                byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
+                byte[] bytes2 = ByteSourceInverse.readBytes(byteSource);
+
+                // Within the same partition, keys must be in ascending lexicographic order
+                assertThrows(IllegalArgumentException.class, () -> writer.add(ByteComparable.preencoded(VERSION, bytes2)));
+
+                // Start a new partition - now we can add a smaller key because it's a different partition
+                writer.startPartition();
+                writer.add(ByteComparable.preencoded(VERSION, bytes2));
+            }
+        }
+    }
+
+    @Test
     public void testFileValidation() throws Exception
     {
         List<PrimaryKey> primaryKeys = new ArrayList<>();
