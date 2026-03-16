@@ -421,10 +421,69 @@ public class IndexQuerySupport
             query(tester, model, DataModel.STATIC_INT_COLUMN, Operator.GT, 1845);
             query(tester, model, DataModel.STATIC_INT_COLUMN, Operator.GTE, 1845);
             query(tester, model, DataModel.STATIC_INT_COLUMN, Operator.EQ, 1909);
+            query(tester, model, DataModel.STATIC_INT_COLUMN, Operator.NEQ, 1845);
             query(tester, model, DataModel.STATIC_INT_COLUMN, Operator.LT, 1787);
             query(tester, model, DataModel.STATIC_INT_COLUMN, Operator.GT, 1910);
 
             rangeQuery(tester, model, DataModel.STATIC_INT_COLUMN, 1845, 1909);
+
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.EQ, 1845,
+                     DataModel.BIGINT_COLUMN, Operator.LT, 5000000000L,
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.NEQ, 1845,
+                     DataModel.BIGINT_COLUMN, Operator.LT, 5000000000L,
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.GT, 1845,
+                     DataModel.BIGINT_COLUMN, Operator.LT, 5000000000L,
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.LT, 1845,
+                     DataModel.BIGINT_COLUMN, Operator.LT, 5000000000L,
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.LT, 1845,
+                     DataModel.BIGINT_COLUMN, Operator.GT, 5000000000L,
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.GT, 1845,
+                     DataModel.BIGINT_COLUMN, Operator.GT, 5000000000L,
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.GTE, 1845,
+                     DataModel.TINYINT_COLUMN, Operator.NEQ, (byte) 1,
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.GTE, 1845,
+                     DataModel.TINYINT_COLUMN, Operator.GT, (byte) 1,
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.LT, 1845,
+                     DataModel.TEXT_COLUMN, Operator.EQ, "Alaska",
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.LT, 1845,
+                     DataModel.DATE_COLUMN, Operator.IN, list(SimpleDateType.instance.fromString("2020-01-01"),
+                                                              SimpleDateType.instance.fromString("2013-06-17"),
+                                                              SimpleDateType.instance.fromString("2018-06-19")),
+                     false);
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.LT, 1845,
+                     DataModel.DATE_COLUMN, Operator.NOT_IN, list(SimpleDateType.instance.fromString("2020-01-01"),
+                                                                  SimpleDateType.instance.fromString("2013-06-17"),
+                                                                  SimpleDateType.instance.fromString("2018-06-19")),
+                     false);
+
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.GTE, 1845,
+                     DataModel.TINYINT_COLUMN, Operator.NEQ, (byte) 1,
+                     DataModel.TEXT_COLUMN, Operator.EQ, "Wyoming");
+            andQuery(tester, model,
+                     DataModel.STATIC_INT_COLUMN, Operator.EQ, 1845,
+                     DataModel.BIGINT_COLUMN, Operator.GT, 1L,
+                     DataModel.ASCII_COLUMN, Operator.EQ, "LA");
         }
     }
 
