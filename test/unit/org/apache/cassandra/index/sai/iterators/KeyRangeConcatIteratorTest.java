@@ -23,54 +23,35 @@ import java.util.stream.IntStream;
 
 import org.junit.Test;
 
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.index.sai.iterators.LongIterator.convert;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class KeyRangeConcatIteratorTest extends AbstractKeyRangeIteratorTest
 {
     @Test
     public void testValidation()
     {
-        try
-        {
-            buildConcat(build(1L, 4L), build(2L, 3L));
-            fail("Flows for a merging concatenation must not contain one another.");
-        }
-        catch (IllegalArgumentException ignored)
-        {
-        }
+        // Iterators being merged via concatanation must not include each other
+        assertThatThrownBy(() -> buildConcat(build(1L, 4L), build(2L, 3L))).isInstanceOf(IllegalArgumentException.class)
+                                                                           .hasMessage(createErrorMessage(4, 2));
 
-        try
-        {
-            buildConcat(build(1L, 4L), build(2L, 5L));
-            fail("Minimum for flow must not be included in exclusive range of previous flow.");
-        }
-        catch (IllegalArgumentException ignored)
-        {
-        }
+        // Iterators being merged via concatanation must not overlap
+        assertThatThrownBy(() -> buildConcat(build(1L, 4L), build(2L, 5L))).isInstanceOf(IllegalArgumentException.class)
+                                                                           .hasMessage(createErrorMessage(4, 2));
 
         // allow min boundary included
         KeyRangeIterator concat = buildConcat(build(1L, 4L), build(4L, 5L));
         assertEquals(convert(1L, 4L, 4L, 5L), convert(concat));
 
-        try
-        {
-            buildConcat(build(1L, 4L), build(0L, 3L));
-            fail("Maximum for flow must not be included in exclusive range of previous flow.");
-        }
-        catch (IllegalArgumentException ignored)
-        {
-        }
+        assertThatThrownBy(() -> buildConcat(build(1L, 4L), build(0L, 3L))).isInstanceOf(IllegalArgumentException.class)
+                                                                           .hasMessage(createErrorMessage(4, 0));
 
-        try
-        {
-            buildConcat(build(2L, 4L), build(0L, 1L));
-            fail("Flows for merging concatenation must be sorted.");
-        }
-        catch (IllegalArgumentException ignored)
-        {
-        }
+        // Iterators being merged via concatanation must be sorted
+        assertThatThrownBy(() -> buildConcat(build(2L, 4L), build(0L, 1L))).isInstanceOf(IllegalArgumentException.class)
+                                                                           .hasMessage(createErrorMessage(4, 0));
 
         // with empty flow
         concat = buildConcat(build(), build(0L, 1L));
@@ -438,5 +419,12 @@ public class KeyRangeConcatIteratorTest extends AbstractKeyRangeIteratorTest
     private KeyRangeIterator.Builder getConcatBuilder()
     {
         return KeyRangeConcatIterator.builder();
+    }
+
+    private String createErrorMessage(int max, int min)
+    {
+        return String.format(KeyRangeConcatIterator.MUST_BE_SORTED_ERROR,
+                             TEST_PRIMARY_KEY_FACTORY.createTokenOnly(new Murmur3Partitioner.LongToken(max)),
+                             TEST_PRIMARY_KEY_FACTORY.createTokenOnly(new Murmur3Partitioner.LongToken(min)));
     }
 }
