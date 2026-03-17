@@ -20,9 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.stream.Collectors;
 
@@ -65,23 +63,22 @@ abstract public class VectorCompactionTest extends VectorTester
     // Subclasses must implement this to cover different dimensions
     abstract public int dimension();
 
-    @Parameterized.Parameter(0)
+    // Subclasses can override this to enable NVQ
+    public boolean enableNVQ()
+    {
+        return false;
+    }
+
+    @Parameterized.Parameter
     public Version version;
 
-    @Parameterized.Parameter(1)
-    public boolean enableNVQ;
-
-    @Parameterized.Parameters(name = "{0} {1}")
+    @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
         // See Version file for explanation of changes associated with each version
         return Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
-                          .flatMap(vd -> {
-                              // NVQ is only relevant some of the time, but we always pass it so that the test
-                              // could be broken up into multiple tests, and would finish before timeouts.
-                              return Arrays.stream(new Boolean[]{ true, false }).map(b -> new Object[]{ vd, b });
-                          })
+                          .map(vd -> new Object[]{ vd })
                           .collect(Collectors.toList());
     }
 
@@ -94,7 +91,7 @@ abstract public class VectorCompactionTest extends VectorTester
     @Before
     public void setEnableNVQ() throws Throwable
     {
-        SAIUtil.setEnableNVQ(enableNVQ);
+        SAIUtil.setEnableNVQ(enableNVQ());
     }
 
     @Test
