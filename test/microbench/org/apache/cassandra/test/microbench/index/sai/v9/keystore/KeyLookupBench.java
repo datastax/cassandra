@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.test.microbench.sai;
+package org.apache.cassandra.test.microbench.index.sai.v9.keystore;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
