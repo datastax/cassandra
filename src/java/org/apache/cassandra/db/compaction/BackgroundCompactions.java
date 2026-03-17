@@ -32,8 +32,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.MovingAverage;
-import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * A class for grouping the background compactions picked by a strategy, either pending or in progress.
@@ -318,6 +318,14 @@ public class BackgroundCompactions
     public Collection<CompactionPick> getCompactionsInProgress()
     {
         return Collections.unmodifiableCollection(compactions.values());
+    }
+
+    /**
+     * @return the compaction with the given id, if it is currently in progress
+     */
+    public CompactionPick getCompaction(TimeUUID id)
+    {
+        return compactions.get(id);
     }
 
     /**

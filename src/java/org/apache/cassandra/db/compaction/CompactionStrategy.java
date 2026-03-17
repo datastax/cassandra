@@ -24,6 +24,7 @@ import java.util.Set;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
@@ -123,6 +124,14 @@ public interface CompactionStrategy extends CompactionObserver
      * @return the total number of background compactions, pending or in progress
      */
     int getTotalCompactions();
+
+    /**
+     * @return the level for the given transaction, if this strategy supports levels. Otherwise return -1.
+     */
+    default int getLevel(ILifecycleTransaction txn)
+    {
+        return -1;
+    }
 
     /**
      * Return the statistics. Not all strategies will provide non-empty statistics,
