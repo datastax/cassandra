@@ -28,6 +28,7 @@ import com.google.common.base.Stopwatch;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.CompositeType;
@@ -60,7 +61,6 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 
-import static org.apache.cassandra.index.sai.SAITester.getRandom;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -74,6 +74,7 @@ import static org.mockito.Mockito.when;
 public class KeyLookupBench
 {
     private static final int rows = 1_000_000;
+    private static final CQLTester.Randomization random = new CQLTester.Randomization();
 
     static
     {
@@ -201,8 +202,8 @@ public class KeyLookupBench
     private String makeClusteringString()
     {
         if (randomClustering)
-            return getRandom().nextTextString(10, 100);
+            return random.nextTextString(10, 100);
         else
-            return String.format("%08d", getRandom().nextIntBetween(0, partitionSize));
+            return String.format("%08d", random.nextIntBetween(0, partitionSize));
     }
 }
