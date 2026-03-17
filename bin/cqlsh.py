@@ -153,8 +153,7 @@ from cqlshlib.formatting import (DEFAULT_DATE_FORMAT, DEFAULT_NANOTIME_FORMAT,
                                  DEFAULT_TIMESTAMP_FORMAT, CqlType, DateTimeFormat,
                                  format_by_type)
 from cqlshlib.tracing import print_trace, print_trace_session
-from cqlshlib.util import get_file_encoding_bomsize
-from cqlshlib.util import is_file_secure
+from cqlshlib.util import get_file_encoding_bomsize, is_file_secure
 from cqlshlib.serverversion import version as build_version
 try:
     from cqlshlib.serverversion import version as build_version
@@ -223,6 +222,8 @@ parser.add_argument("--request-timeout", default=DEFAULT_REQUEST_TIMEOUT_SECONDS
                     help='Specify the default request timeout in seconds (default: %(default)s seconds).')
 parser.add_argument("-t", "--tty", action='store_true', dest='tty',
                     help='Force tty mode (command prompt).')
+parser.add_argument('--disable-history', default=False, action='store_true',
+                    help='Disable saving of history (existing history will still be loaded)')
 
 # This is a hidden option to suppress the warning when the -p/--password command line option is used.
 # Power users may use this option if they know no other people has access to the system where cqlsh is run or don't care about security.
@@ -273,6 +274,22 @@ else:
     CONFIG_FILE = DEFAULT_CQLSHRC
 
 CQL_DIR = os.path.dirname(CONFIG_FILE)
+
+OLD_CONFIG_FILE = os.path.expanduser(os.path.join('~', '.cqlshrc'))
+if os.path.exists(OLD_CONFIG_FILE):
+    if os.path.exists(CONFIG_FILE):
+        print('\nWarning: cqlshrc config files were found at both the old location ({0})'
+              + ' and the new location ({1}), the old config file will not be migrated to the new'
+              + ' location, and the new location will be used for now.  You should manually'
+              + ' consolidate the config files at the new location and remove the old file.'
+              .format(OLD_CONFIG_FILE, CONFIG_FILE))
+    else:
+        os.rename(OLD_CONFIG_FILE, CONFIG_FILE)
+OLD_HISTORY = os.path.expanduser(os.path.join('~', '.cqlsh_history'))
+if os.path.exists(OLD_HISTORY):
+    os.rename(OLD_HISTORY, HISTORY)
+
+# END history/config definition
 
 CQL_ERRORS = (
     cassandra.AlreadyExists, cassandra.AuthenticationFailed, cassandra.CoordinationFailure,
@@ -449,7 +466,8 @@ class Shell(cmd.Cmd):
                  protocol_version=None,
                  connect_timeout=DEFAULT_CONNECT_TIMEOUT_SECONDS,
                  is_subshell=False,
-                 auth_provider=None):
+                 auth_provider=None,
+                 disable_history=False):
         cmd.Cmd.__init__(self, completekey=completekey)
         self.hostname = hostname
         self.port = port
@@ -528,9 +546,18 @@ class Shell(cmd.Cmd):
         self.check_build_versions()
 
         if tty:
+            # Inform users about history logging if not disabled
+            if not disable_history and readline is not None:
+                print()
+                print("ATTENTION: All commands will be saved to history file: %s" % HISTORY)
+                print("This may include sensitive information such as passwords.")
+                print("To disable history, use --disable-history or set 'disabled = true' in the [history] section of cqlshrc.")
+                print("See https://cassandra.apache.org/doc/latest/tools/cqlsh.html for more information.")
+                print()
             self.reset_prompt()
             self.report_connection()
             print('Use HELP for help.')
+
         else:
             self.show_line_nums = True
         self.stdin = stdin
@@ -2137,6 +2164,7 @@ def read_options(cmdlineargs, environment):
     argvalues.request_timeout = option_with_default(configs.getint, 'connection', 'request_timeout', DEFAULT_REQUEST_TIMEOUT_SECONDS)
     argvalues.execute = None
     argvalues.insecure_password_without_warning = False
+    argvalues.disable_history = option_with_default(configs.getboolean, 'history', 'disabled', False)
 
     options, arguments = parser.parse_known_args(cmdlineargs, argvalues)
 
@@ -2258,8 +2286,8 @@ def init_history():
         readline.set_completer_delims(delims)
 
 
-def save_history():
-    if readline is not None:
+def save_history(history_disabled=False):
+    if readline is not None and not history_disabled:
         try:
             readline.write_history_file(HISTORY)
         except IOError:
@@ -2348,7 +2376,8 @@ def main(options, hostname, port):
                           config_file=CONFIG_FILE,
                           cred_file=options.credentials,
                           username=options.username,
-                          password=options.password))
+                          password=options.password),
+                      disable_history=options.disable_history)
     except KeyboardInterrupt:
         sys.exit('Connection aborted.')
     except CQL_ERRORS as e:
@@ -2368,7 +2397,7 @@ def main(options, hostname, port):
         signal.signal(signal.SIGHUP, handle_sighup)
 
     shell.cmdloop()
-    save_history()
+    save_history(options.disable_history)
 
     if shell.batch_mode and shell.statement_error:
         sys.exit(2)
