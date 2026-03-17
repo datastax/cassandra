@@ -103,9 +103,8 @@ public class LeveledCompactionTask extends CompactionTask
             // no point doing a L0 -> L{0,1} compaction if we have cancelled all L0 sstables
             if (largestL0SSTable != null && l0SSTableCount > 1)
             {
-                logger.info("Removing {} (level={}, size={}) from compaction {}",
+                logger.info("Removing {} (size={}) from compaction {}",
                             largestL0SSTable,
-                            largestL0SSTable.getSSTableLevel(),
                             largestL0SSTable.onDiskLength(),
                             transaction.opIdString());
                 transaction.cancel(largestL0SSTable);

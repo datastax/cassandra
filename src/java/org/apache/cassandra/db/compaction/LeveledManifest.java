@@ -420,7 +420,7 @@ public class LeveledManifest
                         Range<PartitionPosition> r = new Range<>(sstable.getFirst(), sstable.getLast());
                         if (boundaries.contains(r) && !compacting.contains(sstable))
                         {
-                            logger.info("Adding high-level (L{}) {} to candidates", sstable.getSSTableLevel(), sstable);
+                            logger.info("Adding high-level {} to candidates", sstable);
                             withStarvedCandidate.add(sstable);
                             return withStarvedCandidate;
                         }
