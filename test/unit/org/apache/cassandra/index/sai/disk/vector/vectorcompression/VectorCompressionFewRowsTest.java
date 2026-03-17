@@ -33,5 +33,3 @@ public class VectorCompressionFewRowsTest extends AbstractVectorCompressionTest
         testOne(1, VectorSourceModel.OTHER, 200, VectorCompression.NO_COMPRESSION);
     }
 }
-
-// Made with Bob

@@ -32,5 +32,3 @@ public class VectorCompressionNvQa4Test extends AbstractVectorCompressionTest
         testOne(VectorSourceModel.NV_QA_4, 1024, VectorSourceModel.NV_QA_4.compressionProvider.apply(1024));
     }
 }
-
-// Made with Bob

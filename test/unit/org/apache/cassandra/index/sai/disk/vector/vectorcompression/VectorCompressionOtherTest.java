@@ -35,5 +35,3 @@ public class VectorCompressionOtherTest extends AbstractVectorCompressionTest
             testOne(VectorSourceModel.OTHER, dimension, VectorSourceModel.OTHER.compressionProvider.apply(dimension));
     }
 }
-
-// Made with Bob

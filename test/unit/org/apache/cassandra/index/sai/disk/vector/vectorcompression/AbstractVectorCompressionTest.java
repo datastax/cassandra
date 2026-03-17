@@ -89,5 +89,3 @@ public abstract class AbstractVectorCompressionTest extends VectorTester
         }
     }
 }
-
-// Made with Bob

@@ -35,5 +35,3 @@ public class VectorCompressionBertTest extends AbstractVectorCompressionTest
         }
     }
 }
-
-// Made with Bob

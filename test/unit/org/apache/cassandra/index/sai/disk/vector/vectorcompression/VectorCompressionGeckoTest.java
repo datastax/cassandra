@@ -31,5 +31,3 @@ public class VectorCompressionGeckoTest extends AbstractVectorCompressionTest
         testOne(VectorSourceModel.GECKO, 768, VectorSourceModel.GECKO.compressionProvider.apply(768));
     }
 }
-
-// Made with Bob

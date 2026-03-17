@@ -31,5 +31,3 @@ public class VectorCompressionAda002Test extends AbstractVectorCompressionTest
         testOne(VectorSourceModel.ADA002, 1536, VectorSourceModel.ADA002.compressionProvider.apply(1536));
     }
 }
-
-// Made with Bob

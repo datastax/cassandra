@@ -35,5 +35,3 @@ public class VectorCompressionOpenAiV3LargeTest extends AbstractVectorCompressio
         }
     }
 }
-
-// Made with Bob
