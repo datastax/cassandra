@@ -119,7 +119,7 @@ public class CassandraRoleManagerTest
             }
             catch (OverloadedException e)
             {
-                assertEquals("Password for role test_password_role can only be changed every 100ms. ", e.getMessage());
+                assertEquals("Password for role test_password_role can only be changed every 100ms.", e.getMessage());
             }
 
             // Wait for the rate limit interval to pass
@@ -199,7 +199,7 @@ public class CassandraRoleManagerTest
             }
             catch (OverloadedException e)
             {
-                assertEquals("Password for role test_role_1 can only be changed every 100ms. ", e.getMessage());
+                assertEquals("Password for role test_role_1 can only be changed every 100ms.", e.getMessage());
             }
 
             roleManager.dropRole(AuthenticatedUser.ANONYMOUS_USER, role1);
