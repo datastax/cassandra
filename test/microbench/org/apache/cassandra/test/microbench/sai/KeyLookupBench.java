@@ -25,6 +25,8 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Stopwatch;
 
+import org.junit.Assert;
+
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -35,6 +37,7 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -68,7 +71,11 @@ import static org.mockito.Mockito.when;
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @Warmup(iterations = 3, time = 1)
 @Measurement(iterations = 3, time = 5)
-@Fork(value = 1, jvmArgsAppend = "-Xmx512M")
+@Fork(value = 1, jvmArgsAppend = {
+        "-Xmx512M",
+        "--add-exports", "java.base/jdk.internal.ref=ALL-UNNAMED",
+        "--add-opens", "java.base/jdk.internal.ref=ALL-UNNAMED"
+})
 @Threads(1)
 @State(Scope.Benchmark)
 public class KeyLookupBench
@@ -106,6 +113,8 @@ public class KeyLookupBench
     @Setup(Level.Trial)
     public void trialSetup() throws Exception
     {
+        Version version = Version.LATEST.onOrAfter(Version.HA) ? Version.LATEST : Version.HA;
+        SAIUtil.setCurrentVersion(version);
         String keyspaceName = "ks";
         String tableName = this.getClass().getSimpleName();
         metadata = TableMetadata
@@ -126,6 +135,7 @@ public class KeyLookupBench
 
         CassandraRelevantProperties.SAI_SORTED_TERMS_PARTITION_BLOCK_SHIFT.setInt(partitionBlockShift);
         CassandraRelevantProperties.SAI_SORTED_TERMS_CLUSTERING_BLOCK_SHIFT.setInt(clusteringBlockShift);
+        Assert.assertTrue("Version must be at least HA", Version.current(keyspaceName).onOrAfter(Version.HA));
         PerSSTableWriter writer = Version.current(keyspaceName).onDiskFormat().newPerSSTableWriter(indexDescriptor);
         OptimizedRowAwarePrimaryKeyFactory factory = new OptimizedRowAwarePrimaryKeyFactory(metadata.comparator);
 
