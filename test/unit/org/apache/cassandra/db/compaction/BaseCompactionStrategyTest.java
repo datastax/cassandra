@@ -29,6 +29,7 @@ import java.util.stream.Stream;
 import org.apache.commons.math3.random.JDKRandomGenerator;
 import org.junit.Ignore;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
@@ -106,6 +107,10 @@ public class BaseCompactionStrategyTest
 
     protected static void setUpClass()
     {
+        String releaseVersion = CassandraRelevantProperties.RELEASE_VERSION.getString();
+        if (releaseVersion == null || FBUtilities.UNKNOWN_RELEASE_VERSION.equals(releaseVersion))
+            CassandraRelevantProperties.RELEASE_VERSION.setString("4.0");
+
         long seed = System.currentTimeMillis();
         random.setSeed(seed);
         System.out.println("Random seed: " + seed);
