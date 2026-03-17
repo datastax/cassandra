@@ -104,6 +104,9 @@ public class BaseCompactionStrategyTest
 
     protected static void setUpClass()
     {
+        if (System.getProperty("cassandra.releaseVersion") == null || System.getProperty("cassandra.releaseVersion").equals("Unknown"))
+            System.setProperty("cassandra.releaseVersion", "4.0");
+
         long seed = System.currentTimeMillis();
         random.setSeed(seed);
         System.out.println("Random seed: " + seed);

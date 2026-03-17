@@ -1370,6 +1370,16 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return overlapsMap;
     }
 
+    @Override
+    public int getLevel(ILifecycleTransaction txn)
+    {
+        CompactionPick pick = backgroundCompactions.getCompaction(txn.opId());
+        if (pick != null)
+            return (int) pick.parent();
+
+        return -1;
+    }
+
     private static int levelOf(CompactionPick pick)
     {
         return (int) pick.parent();
