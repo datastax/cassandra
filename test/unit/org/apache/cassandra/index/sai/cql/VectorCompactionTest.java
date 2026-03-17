@@ -80,9 +80,9 @@ abstract public class VectorCompactionTest extends VectorTester
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
                           .flatMap(vd -> {
                               // NVQ is only relevant some of the time
-                              var enableNVQ = JVectorVersionUtil.versionSupportsNVQ(vd)
-                                              ? new Boolean[]{ true, false }
-                                              : new Boolean[]{ false };
+                              Boolean[] enableNVQ = JVectorVersionUtil.versionSupportsNVQ(vd)
+                                                    ? new Boolean[]{ true, false }
+                                                    : new Boolean[]{ false };
                               return Arrays.stream(enableNVQ).map(b -> new Object[]{ vd, b });
                           })
                           .collect(Collectors.toList());
