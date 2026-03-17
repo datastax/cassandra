@@ -42,6 +42,7 @@ import com.google.common.primitives.Doubles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Range;
@@ -349,6 +350,16 @@ public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.
     public void addSSTable(CompactionSSTable added)
     {
         manifest.addSSTables(Collections.singleton(added));
+    }
+
+    @Override
+    public int getLevel(ILifecycleTransaction txn)
+    {
+        CompactionPick pick = backgroundCompactions.getCompaction(txn.opId());
+        if (pick != null)
+            return (int) pick.parent();
+
+        return -1;
     }
 
     @Override
