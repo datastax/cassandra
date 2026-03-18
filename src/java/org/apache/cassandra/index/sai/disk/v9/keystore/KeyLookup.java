@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.v9.keystore;
 
 import java.io.IOException;
+
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -207,7 +208,7 @@ public class KeyLookup
 
         /**
          * Finds the pointId for a clustering key within a range of pointIds. The start and end of the range must not
-         * exceed the number of keys available. The keys within the range are expected to be in lexographical order.
+         * exceed the number of keys available. The keys within the range are expected to be in lexicographical order.
          * <p>
          * If the key is not in the block containing the start of the range, a binary search is done to find
          * the block containing the search key. That block is then searched to return the pointId that corresponds
