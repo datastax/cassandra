@@ -369,20 +369,40 @@ public final class SchemaKeyspace
      */
     private static List<TableMetadata> allTableMetadata()
     {
-        boolean useLegacySchema = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major);
         return ImmutableList.of(Keyspaces,
                                 // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
-                                useLegacySchema ? TablesLegacy : Tables,
+                                tablesTableMetadata(),
                                 Columns,
                                 ColumnMasks,
                                 Triggers,
                                 DroppedColumns,
-                                // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
-                                useLegacySchema ? ViewsLegacy : Views,
+                                viewsTableMetadata(),
                                 Types,
                                 Functions,
                                 Aggregates,
                                 Indexes);
+    }
+
+    /**
+     * Returns the appropriate Tables schema table metadata based on current storage compatibility mode.
+     * Uses TablesLegacy (frozen<map> for memtable) in CC4 mode, Tables (text for memtable) otherwise.
+     */
+    private static TableMetadata tablesTableMetadata()
+    {
+        return DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major)
+               ? TablesLegacy
+               : Tables;
+    }
+
+    /**
+     * Returns the appropriate Views schema table metadata based on current storage compatibility mode.
+     * Uses ViewsLegacy (frozen<map> for memtable) in CC4 mode, Views (text for memtable) otherwise.
+     */
+    private static TableMetadata viewsTableMetadata()
+    {
+        return DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major)
+               ? ViewsLegacy
+               : Views;
     }
 
     private static TableMetadata parse(String name, String description, String cql)
@@ -652,7 +672,7 @@ public final class SchemaKeyspace
 
     private static void addTableToSchemaMutation(TableMetadata table, boolean withColumnsAndTriggers, Mutation.SimpleBuilder builder)
     {
-        Row.SimpleBuilder rowBuilder = builder.update(Tables)
+        Row.SimpleBuilder rowBuilder = builder.update(tablesTableMetadata())
                                               .row(table.name)
                                               .deletePrevious()
                                               .add("id", table.id.asUUID())
@@ -813,7 +833,7 @@ public final class SchemaKeyspace
 
     private static void addDropTableToSchemaMutation(TableMetadata table, Mutation.SimpleBuilder builder)
     {
-        builder.update(Tables).row(table.name).delete();
+        builder.update(tablesTableMetadata()).row(table.name).delete();
 
         for (ColumnMetadata column : table.columns())
             dropColumnFromSchemaMutation(table, column, builder);
@@ -922,7 +942,7 @@ public final class SchemaKeyspace
     private static void addViewToSchemaMutation(ViewMetadata view, boolean includeColumns, Mutation.SimpleBuilder builder)
     {
         TableMetadata table = view.metadata;
-        Row.SimpleBuilder rowBuilder = builder.update(Views)
+        Row.SimpleBuilder rowBuilder = builder.update(viewsTableMetadata())
                                               .row(view.name())
                                               .deletePrevious()
                                               .add("include_all_columns", view.includeAllColumns)
@@ -945,7 +965,7 @@ public final class SchemaKeyspace
 
     private static void addDropViewToSchemaMutation(ViewMetadata view, Mutation.SimpleBuilder builder)
     {
-        builder.update(Views).row(view.name()).delete();
+        builder.update(viewsTableMetadata()).row(view.name()).delete();
 
         TableMetadata table = view.metadata;
         for (ColumnMetadata column : table.columns())
