@@ -49,6 +49,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
@@ -71,16 +72,18 @@ abstract public class VectorCompactionTest extends VectorTester
     @Parameterized.Parameter(1)
     public boolean enableNVQ;
 
-    @Parameterized.Parameters(name = "{0} {1}")
+    @Parameterized.Parameters(name = "version={0} enableNVQ={1}")
     public static Collection<Object[]> data()
     {
         // See Version file for explanation of changes associated with each version
         return Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
                           .flatMap(vd -> {
-                              // NVQ is only relevant some of the time, but we always pass it so that the test
-                              // could be broken up into multiple tests, and would finish before timeouts.
-                              return Arrays.stream(new Boolean[]{ true, false }).map(b -> new Object[]{ vd, b });
+                              // NVQ is only relevant some of the time
+                              Boolean[] enableNVQ = JVectorVersionUtil.versionSupportsNVQ(vd)
+                                                    ? new Boolean[]{ true, false }
+                                                    : new Boolean[]{ false };
+                              return Arrays.stream(enableNVQ).map(b -> new Object[]{ vd, b });
                           })
                           .collect(Collectors.toList());
     }
