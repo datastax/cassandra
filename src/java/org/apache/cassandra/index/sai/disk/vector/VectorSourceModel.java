@@ -187,7 +187,7 @@ public enum VectorSourceModel
     }
 
     @VisibleForTesting
-    static double tapered2x(int limit)
+    public static double tapered2x(int limit)
     {
         return max(1.0, 0.509 + 9.491 * pow(limit, -0.402)); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
     }
