@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v9.keystore;
 
 import java.io.Closeable;
 import java.io.IOException;
+
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -127,7 +128,7 @@ public class KeyStoreWriter implements Closeable
         if (clustering && inPartition)
         {
             if (compareKeys(keyRef, prevKey.get()) <= 0)
-                throw new IllegalArgumentException("Clustering keys must be in ascending lexographical order");
+                throw new IllegalArgumentException("Clustering keys must be in ascending lexicographical order");
         }
 
         inPartition = true;
