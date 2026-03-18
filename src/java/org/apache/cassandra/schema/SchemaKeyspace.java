@@ -385,7 +385,7 @@ public final class SchemaKeyspace
 
     /**
      * Returns the appropriate Tables schema table metadata based on current storage compatibility mode.
-     * Uses TablesLegacy (frozen<map> for memtable) in CC4 mode, Tables (text for memtable) otherwise.
+     * Uses TablesLegacy ({@code frozen<map>} for memtable) in CC4 mode, Tables (text for memtable) otherwise.
      */
     private static TableMetadata tablesTableMetadata()
     {
@@ -396,7 +396,7 @@ public final class SchemaKeyspace
 
     /**
      * Returns the appropriate Views schema table metadata based on current storage compatibility mode.
-     * Uses ViewsLegacy (frozen<map> for memtable) in CC4 mode, Views (text for memtable) otherwise.
+     * Uses ViewsLegacy ({@code frozen<map>} for memtable) in CC4 mode, Views (text for memtable) otherwise.
      */
     private static TableMetadata viewsTableMetadata()
     {
