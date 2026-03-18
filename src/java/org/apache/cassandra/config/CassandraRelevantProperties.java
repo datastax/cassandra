@@ -480,6 +480,8 @@ public enum CassandraRelevantProperties
      */
     DISABLED_AUTO_COMPACTION_PROPERTY("cassandra.disabled_auto_compaction"),
 
+    LOAD_COMPACTION_ENABLED("cassandra.compaction.enabled", "true"),
+
     /** Which class to use for dynamic snitch severity values */
     DYNAMIC_SNITCH_SEVERITY_PROVIDER("cassandra.dynamic_snitch_severity_provider"),
 

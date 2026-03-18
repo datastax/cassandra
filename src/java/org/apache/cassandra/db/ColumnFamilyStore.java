@@ -194,6 +194,7 @@ import org.json.simple.JSONObject;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.LOAD_COMPACTION_ENABLED;
 import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
@@ -615,6 +616,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         metadata, strategyContainer.isEnabled(), DISABLED_AUTO_COMPACTION_PROPERTY.getKey(),
                         DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean());
             this.strategyContainer.disable();
+        }
+        if (!LOAD_COMPACTION_ENABLED.getBoolean())
+        {
+            this.strategyContainer.shutdown();
         }
 
         // create the private ColumnFamilyStores for the secondary column indexes
