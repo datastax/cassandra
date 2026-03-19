@@ -1478,7 +1478,7 @@ public class TableMetrics
         {
             LatencyMetrics[] parents = Stream.of(Optional.of(keyspace), global).filter(Optional::isPresent)
                                              .map(Optional::get).toArray(LatencyMetrics[]::new);
-            LatencyMetrics innerMetrics = new LatencyMetrics(factory, namePrefix, parents);
+            LatencyMetrics innerMetrics = new LatencyMetrics(factory, namePrefix, metricsRegistry, parents);
             metric = new TableLatencyMetrics.IndividualTableLatencyMetrics(innerMetrics);
         }
         else
