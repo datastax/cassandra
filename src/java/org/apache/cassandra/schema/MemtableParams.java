@@ -339,7 +339,6 @@ public final class MemtableParams
         if (!row.has(columnName))
             return DEFAULT;
 
-        // Try to get as string first
         String stringValue = row.getString(columnName);
 
         // Check if this looks like binary data (contains null bytes from CC4's map serialization)
