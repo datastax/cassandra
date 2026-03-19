@@ -42,25 +42,16 @@ import org.apache.lucene.util.BytesRefBuilder;
 /**
  * Provides read access to an on-disk sequence of partition or clustering keys written by {@link KeyStoreWriter}.
  * <p>
- * Offers the following features:
- * <ul>
- *     <li>forward iterating over all keys sequentially with a cursor</li>
- *     <li>constant-time lookup of the key at a given point id</li>
- *     <li>log-time lookup of the point id of a key</li>
- * </ul>
- * <p> * Care has been taken to make this structure as efficient as possible.
- * Reading keys do not require allocating data heap buffers per each read operation.
+ * Care has been taken to make this structure as efficient as possible.
+ * Reading keys does not require allocating data heap buffers per each read operation.
  * Only one key at a time is loaded to memory.
  * Low complexity algorithms are used – a lookup of the key by point id is constant time,
  * and a lookup of the point id by the key is logarithmic.
  * <p>
  * Because the blocks are prefix compressed, random access applies only to the locating the whole block.
  * In order to jump to a concrete key inside the block, the block keys are iterated from the block beginning.
- * <p>
- * For documentation of the underlying on-disk data structures, see the package documentation.
  *
  * @see KeyStoreWriter
- * @see org.apache.cassandra.index.sai.disk.v9.keystore
  */
 @NotThreadSafe
 public class KeyLookup
