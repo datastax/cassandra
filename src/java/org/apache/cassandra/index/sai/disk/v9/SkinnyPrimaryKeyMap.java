@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.function.BiFunction;
+import java.util.function.LongUnaryOperator;
 
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
@@ -198,8 +200,18 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
                                 : primaryKeyFactory.createWithSource(this, sstableRowId, lowerBound, upperBound);
     }
 
-    @Override
-    public long exactRowIdOrInvertedCeiling(PrimaryKey key)
+    /**
+     * Common implementation for row ID lookup operations that handles PrimaryKeyWithSource optimization
+     * and token collision detection.
+     *
+     * @param key                the primary key to lookup
+     * @param tokenLookup        function to perform the initial token-based lookup
+     * @param collisionDetection function to handle token collisions
+     * @return the row ID
+     */
+    protected long lookupRowId(PrimaryKey key,
+                               LongUnaryOperator tokenLookup,
+                               BiFunction<PrimaryKey, Long, Long> collisionDetection)
     {
         if (key instanceof PrimaryKeyWithSource)
         {
@@ -207,43 +219,29 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
             if (pkws.getSourceSstableId().equals(sstableId))
                 return pkws.getSourceRowId();
         }
-        long rowId = tokenArray.indexOf(key.token().getLongValue());
+        long rowId = tokenLookup.applyAsLong(key.token().getLongValue());
         if (key.isTokenOnly() || rowId < 0)
             return rowId;
         // The first index might not have been the correct match in the case of token collisions.
-        return tokenCeilingCollisionDetection(key, rowId);
+        return collisionDetection.apply(key, rowId);
+    }
+
+    @Override
+    public long exactRowIdOrInvertedCeiling(PrimaryKey key)
+    {
+        return lookupRowId(key, tokenArray::indexOf, this::tokenCeilingCollisionDetection);
     }
 
     @Override
     public long ceiling(PrimaryKey key)
     {
-        if (key instanceof PrimaryKeyWithSource)
-        {
-            var pkws = (PrimaryKeyWithSource) key;
-            if (pkws.getSourceSstableId().equals(sstableId))
-                return pkws.getSourceRowId();
-        }
-        long rowId = tokenArray.ceilingRowId(key.token().getLongValue());
-        if (key.isTokenOnly() || rowId < 0)
-            return rowId;
-        // The first index might not have been the correct match in the case of token collisions.
-        return tokenCeilingCollisionDetection(key, rowId);
+        return lookupRowId(key, tokenArray::ceilingRowId, this::tokenCeilingCollisionDetection);
     }
 
     @Override
     public long floor(PrimaryKey key)
     {
-        if (key instanceof PrimaryKeyWithSource)
-        {
-            var pkws = (PrimaryKeyWithSource) key;
-            if (pkws.getSourceSstableId().equals(sstableId))
-                return pkws.getSourceRowId();
-        }
-        long rowId = tokenArray.floorRowId(key.token().getLongValue());
-        if (key.isTokenOnly() || rowId < 0)
-            return rowId;
-        // The first index might not have been the correct match in the case of token collisions.
-        return tokenFloorCollisionDetection(key, rowId);
+        return lookupRowId(key, tokenArray::floorRowId, this::tokenFloorCollisionDetection);
     }
 
     @Override
@@ -252,36 +250,47 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         FileUtils.closeQuietly(Arrays.asList(partitionKeyCursor, tokenArray, partitionArray));
     }
 
-    // Look for token collision by if the adjacent token in the token array matches the
-    // current token. If we find a collision, we need to compare the partition key instead.
-    protected long tokenCeilingCollisionDetection(PrimaryKey primaryKey, long rowId)
+    /**
+     * Generic token collision detection that handles both ceiling and floor operations.
+     * Look for token collision by if the adjacent token in the token array matches the
+     * current token. If we find a collision, we need to compare the partition key instead.
+     *
+     * @param primaryKey the key to search for
+     * @param rowId      the initial row ID from token lookup
+     * @param direction  1 for ceiling (forward search), -1 for floor (backward search)
+     * @return the adjusted row ID after collision detection
+     */
+    protected long tokenCollisionDetection(PrimaryKey primaryKey, long rowId, int direction)
     {
-        // Look for collisions while we haven't reached the end of the tokens and the tokens don't collide
-        while (rowId + 1 < tokenArray.length() && primaryKey.token().getLongValue() == tokenArray.get(rowId + 1))
+        assert direction == 1 || direction == -1 : "Direction must be 1 (ceiling) or -1 (floor)";
+
+        long tokenValue = primaryKey.token().getLongValue();
+        long nextRowId = rowId + direction;
+
+        // Look for collisions while we haven't reached the boundaries and tokens match
+        while (nextRowId >= 0 && nextRowId < tokenArray.length() && tokenValue == tokenArray.get(nextRowId))
         {
-            // If we had a collision, then see if the partition key for this row is >= to the lookup partition key
-            if (readPartitionKey(rowId).compareTo(primaryKey.partitionKey()) >= 0)
+            // For ceiling: check if the partition key at current rowId is >= lookup key
+            // For floor: check if the partition key at current rowId is <= lookup key
+            int comparison = readPartitionKey(rowId).compareTo(primaryKey.partitionKey());
+            if ((direction == 1 && comparison >= 0) || (direction == -1 && comparison <= 0))
                 return rowId;
 
-            rowId++;
+            rowId = nextRowId;
+            nextRowId = rowId + direction;
         }
         // Note: We would normally expect to get here without going into the while loop
         return rowId;
     }
 
+    protected long tokenCeilingCollisionDetection(PrimaryKey primaryKey, long rowId)
+    {
+        return tokenCollisionDetection(primaryKey, rowId, 1);
+    }
+
     protected long tokenFloorCollisionDetection(PrimaryKey primaryKey, long rowId)
     {
-        // Look for collisions while we haven't reached the end of the tokens and the tokens don't collide
-        while (rowId - 1 >= 0 && primaryKey.token().getLongValue() == tokenArray.get(rowId - 1))
-        {
-            // If we had a collision, then see if the partition key for this row is >= to the lookup partition key
-            if (readPartitionKey(rowId).compareTo(primaryKey.partitionKey()) <= 0)
-                return rowId;
-
-            rowId--;
-        }
-        // Note: We would normally expect to get here without going into the while loop
-        return rowId;
+        return tokenCollisionDetection(primaryKey, rowId, -1);
     }
 
     protected PrimaryKey supplier(long sstableRowId)
