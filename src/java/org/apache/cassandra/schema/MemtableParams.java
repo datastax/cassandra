@@ -43,6 +43,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
@@ -339,52 +340,66 @@ public final class MemtableParams
         if (!row.has(columnName))
             return DEFAULT;
 
-        String stringValue = row.getString(columnName);
+        String stringValue;
+        try
+        {
+            stringValue = row.getString(columnName);
+        }
+        catch (MarshalException e)
+        {
+            // CC4 map data may not be valid UTF-8, fall back to map parsing
+            return parseCC4MapFormat(row, columnName);
+        }
 
         // Check if this looks like binary data (contains null bytes from CC4's map serialization)
         if (stringValue != null && stringValue.indexOf('\0') >= 0)
         {
-            // This is likely CC4's frozen<map<text, text>> serialization
-            // Try to read it as a map instead
-            try
-            {
-                ByteBuffer raw = row.getBytes(columnName);
-                Map<String, String> cc4Map = MapType.getInstance(UTF8Type.instance, UTF8Type.instance, false).compose(raw);
-
-                if (cc4Map == null || cc4Map.isEmpty())
-                {
-                    // Empty map in CC4 means "default"
-                    logger.info("Detected CC4 empty memtable map for upgrade compatibility, using default");
-                    return DEFAULT;
-                }
-
-                // Convert CC4 map format to CC5 configuration key
-                String className = cc4Map.get("class");
-                if (className != null)
-                {
-                    // CC4 used class names like "SkipListMemtable" or "TrieMemtable"
-                    // Try to map to CC5 configuration keys
-                    String configKey = mapCC4ClassNameToCC5Key(className);
-                    logger.info("Detected CC4 memtable configuration '{}', mapped to CC5 key '{}'",
-                                className, configKey);
-                    return getWithFallback(configKey);
-                }
-                else
-                {
-                    // CC4 map exists but has no "class" key - likely corrupted data
-                    logger.warn("Detected CC4 memtable map without 'class' key, falling back to default");
-                    return DEFAULT;
-                }
-            }
-            catch (Exception e)
-            {
-                logger.warn("Failed to parse memtable column as CC4 map format, falling back to default", e);
-                return DEFAULT;
-            }
+            return parseCC4MapFormat(row, columnName);
         }
 
         // Normal CC5 string value
         return getWithFallback(stringValue);
+    }
+
+    private static MemtableParams parseCC4MapFormat(UntypedResultSet.Row row, String columnName)
+    {
+        // This is likely CC4's frozen<map<text, text>> serialization
+        // Try to read it as a map instead
+        try
+        {
+            ByteBuffer raw = row.getBytes(columnName);
+            Map<String, String> cc4Map = MapType.getInstance(UTF8Type.instance, UTF8Type.instance, false).compose(raw);
+
+            if (cc4Map == null || cc4Map.isEmpty())
+            {
+                // Empty map in CC4 means "default"
+                logger.info("Detected CC4 empty memtable map for upgrade compatibility, using default");
+                return DEFAULT;
+            }
+
+            // Convert CC4 map format to CC5 configuration key
+            String className = cc4Map.get("class");
+            if (className != null)
+            {
+                // CC4 used class names like "SkipListMemtable" or "TrieMemtable"
+                // Try to map to CC5 configuration keys
+                String configKey = mapCC4ClassNameToCC5Key(className);
+                logger.info("Detected CC4 memtable configuration '{}', mapped to CC5 key '{}'",
+                            className, configKey);
+                return getWithFallback(configKey);
+            }
+            else
+            {
+                // CC4 map exists but has no "class" key - likely corrupted data
+                logger.warn("Detected CC4 memtable map without 'class' key, falling back to default");
+                return DEFAULT;
+            }
+        }
+        catch (Exception e)
+        {
+            logger.warn("Failed to parse memtable column as CC4 map format, falling back to default", e);
+            return DEFAULT;
+        }
     }
 
     private static String mapCC4ClassNameToCC5Key(String cc4ClassName)
