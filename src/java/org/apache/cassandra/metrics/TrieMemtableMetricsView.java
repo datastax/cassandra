@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.codahale.metrics.Counter;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
@@ -49,6 +50,7 @@ public class TrieMemtableMetricsView
     private final TrieMemtableMetricNameFactory factory;
     private final String keyspace;
     private final String table;
+    private final CassandraMetricsRegistry metricsRegistry;
 
     public static TrieMemtableMetricsView getOrCreate(String keyspace, String table)
     {
@@ -60,19 +62,20 @@ public class TrieMemtableMetricsView
         this.keyspace = keyspace;
         this.table = table;
         factory = new TrieMemtableMetricNameFactory(keyspace, table);
+        this.metricsRegistry = CassandraRelevantProperties.TABLE_METRICS_ENABLED.getBoolean() ? Metrics : CassandraMetricsRegistry.NoOpMetrics;
         
-        uncontendedPuts = Metrics.counter(factory.createMetricName(UNCONTENDED_PUTS));
-        contendedPuts = Metrics.counter(factory.createMetricName(CONTENDED_PUTS));
-        contentionTime = new LatencyMetrics(factory, CONTENTION_TIME);
-        lastFlushShardDataSizes = new MinMaxAvgMetric(factory, LAST_FLUSH_SHARD_SIZES);
+        uncontendedPuts = metricsRegistry.counter(factory.createMetricName(UNCONTENDED_PUTS));
+        contendedPuts = metricsRegistry.counter(factory.createMetricName(CONTENDED_PUTS));
+        contentionTime = new LatencyMetrics(factory, CONTENTION_TIME, metricsRegistry);
+        lastFlushShardDataSizes = new MinMaxAvgMetric(factory, LAST_FLUSH_SHARD_SIZES, metricsRegistry);
     }
 
     public void release()
     {
         perTableMetrics.remove(getKey(keyspace, table));
 
-        Metrics.remove(factory.createMetricName(UNCONTENDED_PUTS));
-        Metrics.remove(factory.createMetricName(CONTENDED_PUTS));
+        metricsRegistry.remove(factory.createMetricName(UNCONTENDED_PUTS));
+        metricsRegistry.remove(factory.createMetricName(CONTENDED_PUTS));
         contentionTime.release();
         lastFlushShardDataSizes.release();
     }
