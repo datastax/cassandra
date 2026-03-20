@@ -18,7 +18,6 @@
  */
 package org.apache.cassandra.schema;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
@@ -42,6 +41,7 @@ import org.junit.runner.RunWith;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
@@ -60,6 +60,7 @@ import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -85,6 +86,80 @@ public class SchemaKeyspaceTest
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1));
 
         MessagingService.instance().listen();
+    }
+
+    /**
+     * Helper method to run a test with different storage compatibility modes.
+     * This ensures schema mutations work correctly in both CC5 and CC4 modes.
+     *
+     * @param test The test logic to run for each mode
+     * @param validateMetadata If true, validates that schema table metadata matches the expected format for each mode
+     */
+    private void runWithAllCompatibilityModes(TestWithMode test, boolean validateMetadata) throws Exception
+    {
+        StorageCompatibilityMode[] modes = {
+            StorageCompatibilityMode.NONE,      // CC5 mode
+            StorageCompatibilityMode.CC_4,      // CC4 compatibility mode
+            StorageCompatibilityMode.CASSANDRA_4 // Cassandra 4 compatibility mode
+        };
+
+        for (StorageCompatibilityMode mode : modes)
+        {
+            StorageCompatibilityMode original = DatabaseDescriptor.getStorageCompatibilityMode();
+            try
+            {
+                DatabaseDescriptor.setStorageCompatibilityMode(mode);
+
+                if (validateMetadata)
+                {
+                    validateSchemaTableMetadata(mode);
+                }
+
+                test.run(mode);
+            }
+            finally
+            {
+                DatabaseDescriptor.setStorageCompatibilityMode(original);
+            }
+        }
+    }
+
+    /**
+     * Validates that the schema table metadata (Tables and Views) matches the expected format
+     * for the given storage compatibility mode.
+     */
+    private void validateSchemaTableMetadata(StorageCompatibilityMode mode)
+    {
+        KeyspaceMetadata ksm = SchemaKeyspace.metadata();
+
+        // Validate Tables table
+        TableMetadata tablesTable = ksm.tables.getNullable(SchemaKeyspaceTables.TABLES);
+        assertNotNull("Tables table should exist in mode " + mode, tablesTable);
+
+        ColumnMetadata memtableColumn = tablesTable.getColumn(new ColumnIdentifier("memtable", true));
+        assertNotNull("Memtable column should exist in mode " + mode, memtableColumn);
+
+        String expectedType = mode.isBefore(5) ? "frozen<map<text, text>>" : "text";
+        assertEquals("Memtable column type should match mode " + mode,
+                    expectedType,
+                    memtableColumn.type.asCQL3Type().toString());
+
+        // Validate Views table
+        TableMetadata viewsTable = ksm.tables.getNullable(SchemaKeyspaceTables.VIEWS);
+        assertNotNull("Views table should exist in mode " + mode, viewsTable);
+
+        ColumnMetadata viewMemtableColumn = viewsTable.getColumn(new ColumnIdentifier("memtable", true));
+        assertNotNull("View memtable column should exist in mode " + mode, viewMemtableColumn);
+
+        assertEquals("View memtable column type should match mode " + mode,
+                    expectedType,
+                    viewMemtableColumn.type.asCQL3Type().toString());
+    }
+
+    @FunctionalInterface
+    private interface TestWithMode
+    {
+        void run(StorageCompatibilityMode mode) throws Exception;
     }
 
     /** See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes */
@@ -146,38 +221,42 @@ public class SchemaKeyspaceTest
     @Test
     public void testConversionsInverses() throws Exception
     {
-        for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
-        {
-            for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+        runWithAllCompatibilityModes(mode -> {
+            for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
             {
-                checkInverses(cfs.metadata());
+                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                {
+                    checkInverses(cfs.metadata());
 
-                // Testing with compression to catch #3558
-                TableMetadata withCompression = cfs.metadata().unbuild().compression(CompressionParams.snappy(32768)).build();
-                checkInverses(withCompression);
+                    // Testing with compression to catch #3558
+                    TableMetadata withCompression = cfs.metadata().unbuild().compression(CompressionParams.snappy(32768)).build();
+                    checkInverses(withCompression);
+                }
             }
-        }
+        }, true); // Validate metadata for each mode
     }
 
     @Test
-    public void testExtensions() throws IOException
+    public void testExtensions() throws Exception
     {
-        String keyspace = "SandBox";
+        runWithAllCompatibilityModes(mode -> {
+            String keyspace = "SandBox";
 
-        createTable(keyspace, "CREATE TABLE test (a text primary key, b int, c int)");
+            createTable(keyspace, "CREATE TABLE test (a text primary key, b int, c int)");
 
-        TableMetadata metadata = Schema.instance.getTableMetadata(keyspace, "test");
-        assertTrue("extensions should be empty", metadata.params.extensions.isEmpty());
+            TableMetadata metadata = Schema.instance.getTableMetadata(keyspace, "test");
+            assertTrue("extensions should be empty", metadata.params.extensions.isEmpty());
 
-        ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of("From ... with Love",
-                                                                      ByteBuffer.wrap(new byte[]{0, 0, 7}));
+            ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of("From ... with Love",
+                                                                          ByteBuffer.wrap(new byte[]{0, 0, 7}));
 
-        TableMetadata copy = metadata.unbuild().extensions(extensions).build();
+            TableMetadata copy = metadata.unbuild().extensions(extensions).build();
 
-        updateTable(keyspace, metadata, copy);
+            updateTable(keyspace, metadata, copy);
 
-        metadata = Schema.instance.getTableMetadata(keyspace, "test");
-        assertEquals(extensions, metadata.params.extensions);
+            metadata = Schema.instance.getTableMetadata(keyspace, "test");
+            assertEquals(extensions, metadata.params.extensions);
+        }, true); // Validate metadata for each mode
     }
 
     @Test
@@ -218,12 +297,13 @@ public class SchemaKeyspaceTest
     }
 
     @Test
-    public void testReadRepair()
+    public void testReadRepair() throws Exception
     {
-        createTable("ks", "CREATE TABLE tbl (a text primary key, b int, c int) WITH read_repair='none'");
-        TableMetadata metadata = Schema.instance.getTableMetadata("ks", "tbl");
-        Assert.assertEquals(ReadRepairStrategy.NONE, metadata.params.readRepair);
-
+        runWithAllCompatibilityModes(mode -> {
+            createTable("ks", "CREATE TABLE tbl (a text primary key, b int, c int) WITH read_repair='none'");
+            TableMetadata metadata = Schema.instance.getTableMetadata("ks", "tbl");
+            Assert.assertEquals(ReadRepairStrategy.NONE, metadata.params.readRepair);
+        }, true); // Validate metadata for each mode
     }
 
     @Test
