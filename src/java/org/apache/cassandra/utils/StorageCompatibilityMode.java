@@ -42,7 +42,13 @@ public enum StorageCompatibilityMode
     CASSANDRA_4(4),
 
     /**
-     * Same as {@link #CASSANDRA_4}, but allows the use of BTI format in {@link #validateSstableFormat}.
+     * Same major version as {@link #CASSANDRA_4}, but with additional CC_4-specific behaviors:
+     * <ul>
+     *   <li>Schema storage: The memtable column in system_schema.tables and system_schema.views is stored
+     *       as {@code frozen<map<text, text>>} (CC4 format) instead of {@code text} (CC5 format).
+     *       This ensures safe downgrades to CC4.</li>
+     *   <li>SSTable format: Allows BTI format in {@link #validateSstableFormat}.</li>
+     * </ul>
      */
     CC_4(4),
 
