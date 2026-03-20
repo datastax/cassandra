@@ -59,6 +59,7 @@ import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Simulate;
 
@@ -117,6 +118,42 @@ public final class SchemaKeyspace
               + "graph_engine text,"
               + "PRIMARY KEY ((keyspace_name)))");
 
+    // CC4-compatible schema with memtable as frozen<map<text, text>>
+    // Used when storage_compatibility_mode is CC_4 to support downgrade to CC4
+    private static final TableMetadata TablesLegacy =
+        parse(TABLES,
+              "table definitions",
+              "CREATE TABLE %s ("
+              + "keyspace_name text,"
+              + "table_name text,"
+              + "allow_auto_snapshot boolean,"
+              + "bloom_filter_fp_chance double,"
+              + "caching frozen<map<text, text>>,"
+              + "comment text,"
+              + "compaction frozen<map<text, text>>,"
+              + "compression frozen<map<text, text>>,"
+              + "memtable frozen<map<text, text>>," // CC4 format for downgrade compatibility
+              + "crc_check_chance double,"
+              + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
+              + "default_time_to_live int,"
+              + "extensions frozen<map<text, blob>>,"
+              + "flags frozen<set<text>>," // SUPER, COUNTER, DENSE, COMPOUND
+              + "gc_grace_seconds int,"
+              + "incremental_backups boolean,"
+              + "id uuid,"
+              + "max_index_interval int,"
+              + "memtable_flush_period_in_ms int,"
+              + "min_index_interval int,"
+              + "nodesync frozen<map<text, text>>,"
+              + "read_repair_chance double," // no longer used, left for drivers' sake
+              + "speculative_retry text,"
+              + "additional_write_policy text,"
+              + "cdc boolean,"
+              + "read_repair text,"
+              + "PRIMARY KEY ((keyspace_name), table_name))");
+
+    // CC5 schema with memtable as text
+    // Used when storage_compatibility_mode is NONE (no downgrade support)
     private static final TableMetadata Tables =
         parse(TABLES,
               "table definitions",
@@ -129,7 +166,7 @@ public final class SchemaKeyspace
               + "comment text,"
               + "compaction frozen<map<text, text>>,"
               + "compression frozen<map<text, text>>,"
-              + "memtable text,"
+              + "memtable text," // CC5 format
               + "crc_check_chance double,"
               + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
               + "default_time_to_live int,"
@@ -200,6 +237,44 @@ public final class SchemaKeyspace
               + "options frozen<map<text, text>>,"
               + "PRIMARY KEY ((keyspace_name), table_name, trigger_name))");
 
+    // CC4-compatible schema with memtable as frozen<map<text, text>>
+    private static final TableMetadata ViewsLegacy =
+        parse(VIEWS,
+              "view definitions",
+              "CREATE TABLE %s ("
+              + "keyspace_name text,"
+              + "view_name text,"
+              + "base_table_id uuid,"
+              + "base_table_name text,"
+              + "where_clause text,"
+              + "allow_auto_snapshot boolean,"
+              + "bloom_filter_fp_chance double,"
+              + "caching frozen<map<text, text>>,"
+              + "comment text,"
+              + "compaction frozen<map<text, text>>,"
+              + "compression frozen<map<text, text>>,"
+              + "memtable frozen<map<text, text>>," // CC4 format for downgrade compatibility
+              + "crc_check_chance double,"
+              + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
+              + "default_time_to_live int,"
+              + "extensions frozen<map<text, blob>>,"
+              + "gc_grace_seconds int,"
+              + "incremental_backups boolean,"
+              + "id uuid,"
+              + "include_all_columns boolean,"
+              + "max_index_interval int,"
+              + "memtable_flush_period_in_ms int,"
+              + "min_index_interval int,"
+              + "nodesync frozen<map<text, text>>,"
+              + "read_repair_chance double," // no longer used, left for drivers' sake
+              + "speculative_retry text,"
+              + "additional_write_policy text,"
+              + "cdc boolean,"
+              + "version int,"
+              + "read_repair text,"
+              + "PRIMARY KEY ((keyspace_name), view_name))");
+
+    // CC5 schema with memtable as text
     private static final TableMetadata Views =
         parse(VIEWS,
               "view definitions",
@@ -215,7 +290,7 @@ public final class SchemaKeyspace
               + "comment text,"
               + "compaction frozen<map<text, text>>,"
               + "compression frozen<map<text, text>>,"
-              + "memtable text,"
+              + "memtable text," // CC5 format
               + "crc_check_chance double,"
               + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
               + "default_time_to_live int,"
@@ -289,17 +364,46 @@ public final class SchemaKeyspace
               + "deterministic boolean,"
               + "PRIMARY KEY ((keyspace_name), aggregate_name, argument_types))");
 
-    private static final List<TableMetadata> ALL_TABLE_METADATA = ImmutableList.of(Keyspaces,
-                                                                                   Tables,
-                                                                                   Columns,
-                                                                                   ColumnMasks,
-                                                                                   Triggers,
-                                                                                   DroppedColumns,
-                                                                                   Views,
-                                                                                   Types,
-                                                                                   Functions,
-                                                                                   Aggregates,
-                                                                                   Indexes);
+    /**
+     * Returns the list of schema table metadata based on current storage compatibility mode.
+     */
+    private static List<TableMetadata> allTableMetadata()
+    {
+        return ImmutableList.of(Keyspaces,
+                                // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
+                                tablesTableMetadata(),
+                                Columns,
+                                ColumnMasks,
+                                Triggers,
+                                DroppedColumns,
+                                viewsTableMetadata(),
+                                Types,
+                                Functions,
+                                Aggregates,
+                                Indexes);
+    }
+
+    /**
+     * Returns the appropriate Tables schema table metadata based on current storage compatibility mode.
+     * Uses TablesLegacy ({@code frozen<map>} for memtable) in CC4 mode, Tables (text for memtable) otherwise.
+     */
+    private static TableMetadata tablesTableMetadata()
+    {
+        return DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major)
+               ? TablesLegacy
+               : Tables;
+    }
+
+    /**
+     * Returns the appropriate Views schema table metadata based on current storage compatibility mode.
+     * Uses ViewsLegacy ({@code frozen<map>} for memtable) in CC4 mode, Views (text for memtable) otherwise.
+     */
+    private static TableMetadata viewsTableMetadata()
+    {
+        return DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major)
+               ? ViewsLegacy
+               : Views;
+    }
 
     private static TableMetadata parse(String name, String description, String cql)
     {
@@ -313,7 +417,7 @@ public final class SchemaKeyspace
 
     public static KeyspaceMetadata metadata()
     {
-        return KeyspaceMetadata.create(SchemaConstants.SCHEMA_KEYSPACE_NAME, KeyspaceParams.local(), org.apache.cassandra.schema.Tables.of(ALL_TABLE_METADATA));
+        return KeyspaceMetadata.create(SchemaConstants.SCHEMA_KEYSPACE_NAME, KeyspaceParams.local(), org.apache.cassandra.schema.Tables.of(allTableMetadata()));
     }
 
     static Collection<Mutation> convertSchemaDiffToMutations(KeyspacesDiff diff, long timestamp)
@@ -538,7 +642,7 @@ public final class SchemaKeyspace
         Mutation.SimpleBuilder builder = Mutation.simpleBuilder(SchemaConstants.SCHEMA_KEYSPACE_NAME, decorate(Keyspaces, keyspace.name))
                                                  .timestamp(timestamp);
 
-        for (TableMetadata schemaTable : ALL_TABLE_METADATA)
+        for (TableMetadata schemaTable : allTableMetadata())
             builder.update(schemaTable).delete();
 
         return builder;
@@ -568,7 +672,7 @@ public final class SchemaKeyspace
 
     private static void addTableToSchemaMutation(TableMetadata table, boolean withColumnsAndTriggers, Mutation.SimpleBuilder builder)
     {
-        Row.SimpleBuilder rowBuilder = builder.update(Tables)
+        Row.SimpleBuilder rowBuilder = builder.update(tablesTableMetadata())
                                               .row(table.name)
                                               .deletePrevious()
                                               .add("id", table.id.asUUID())
@@ -619,8 +723,14 @@ public final class SchemaKeyspace
 
         // As above, only add the memtable column if the table uses a non-default memtable configuration to avoid RTE
         // in mixed operation with pre-4.1 versioned node during upgrades.
+        // Write in CC4 format (map) or CC5 format (text) based on storage compatibility mode
         if (params.memtable != MemtableParams.DEFAULT)
-            builder.add("memtable", params.memtable.configurationKey());
+        {
+            if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+                builder.add("memtable", params.memtable.asSchemaValueMap());
+            else
+                builder.add("memtable", params.memtable.asSchemaValueText());
+        }
 
         // As above, only add the allow_auto_snapshot column if the value is not default (true) and
         // auto-snapshotting is enabled, to avoid RTE in pre-4.2 versioned node during upgrades
@@ -723,7 +833,7 @@ public final class SchemaKeyspace
 
     private static void addDropTableToSchemaMutation(TableMetadata table, Mutation.SimpleBuilder builder)
     {
-        builder.update(Tables).row(table.name).delete();
+        builder.update(tablesTableMetadata()).row(table.name).delete();
 
         for (ColumnMetadata column : table.columns())
             dropColumnFromSchemaMutation(table, column, builder);
@@ -832,7 +942,7 @@ public final class SchemaKeyspace
     private static void addViewToSchemaMutation(ViewMetadata view, boolean includeColumns, Mutation.SimpleBuilder builder)
     {
         TableMetadata table = view.metadata;
-        Row.SimpleBuilder rowBuilder = builder.update(Views)
+        Row.SimpleBuilder rowBuilder = builder.update(viewsTableMetadata())
                                               .row(view.name())
                                               .deletePrevious()
                                               .add("include_all_columns", view.includeAllColumns)
@@ -855,7 +965,7 @@ public final class SchemaKeyspace
 
     private static void addDropViewToSchemaMutation(ViewMetadata view, Mutation.SimpleBuilder builder)
     {
-        builder.update(Views).row(view.name()).delete();
+        builder.update(viewsTableMetadata()).row(view.name()).delete();
 
         TableMetadata table = view.metadata;
         for (ColumnMetadata column : table.columns())
@@ -1077,9 +1187,8 @@ public final class SchemaKeyspace
                                                  .comment(row.getString("comment"))
                                                  .compaction(CompactionParams.fromMap(row.getFrozenTextMap("compaction")))
                                                  .compression(CompressionParams.fromMap(row.getFrozenTextMap("compression")))
-                                                 .memtable(MemtableParams.getWithFallback(row.has("memtable")
-                                                                                          ? row.getString("memtable")
-                                                                                          : null)) // memtable column was introduced in 4.1
+                                                 // Handles CC4 upgrade compatibility
+                                                 .memtable(MemtableParams.getWithCC4Fallback(row, "memtable"))
                                                  .defaultTimeToLive(row.getInt("default_time_to_live"))
                                                  .extensions(row.getFrozenMap("extensions", UTF8Type.instance, BytesType.instance))
                                                  .gcGraceSeconds(row.getInt("gc_grace_seconds"))
