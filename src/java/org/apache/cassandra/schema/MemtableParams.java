@@ -20,6 +20,7 @@ package org.apache.cassandra.schema;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -30,14 +31,21 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InheritingClass;
 import org.apache.cassandra.config.ParameterizedClass;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 /**
  * Memtable types and options are specified with these parameters. Memtable classes must either contain a static
@@ -50,6 +58,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
   */
 public final class MemtableParams
 {
+    private static final Logger logger = LoggerFactory.getLogger(MemtableParams.class);
     public final Memtable.Factory factory;
     private final String configurationKey;
 
@@ -165,10 +174,10 @@ public final class MemtableParams
         }
         catch (ConfigurationException e)
         {
-            LoggerFactory.getLogger(MemtableParams.class).error("Invalid memtable configuration \"" + key + "\" in schema. " +
-                                                                "Falling back to default to avoid schema mismatch.\n" +
-                                                                "Please ensure the correct definition is given in cassandra.yaml.",
-                                                                e);
+            logger.error("Invalid memtable configuration \"" + key + "\" in schema. " +
+                         "Falling back to default to avoid schema mismatch.\n" +
+                         "Please ensure the correct definition is given in cassandra.yaml.",
+                         e);
             return new MemtableParams(DEFAULT.factory(), key);
         }
     }
@@ -303,5 +312,244 @@ public final class MemtableParams
                 throw (ConfigurationException) e.getCause();
             throw new ConfigurationException("Could not create memtable factory for class " + options, e);
         }
+    }
+
+    /**
+     * Attempts to read memtable configuration, with fallback for CC4 upgrade compatibility.
+     *
+     * CC4 stored memtable as {@code frozen<map<text, text>>}, while CC5 uses text.
+     * During upgrades or in mixed clusters, the column may contain either format.
+     *
+     * This method uses byte-sniffing (detecting null bytes) to determine the actual
+     * format of the stored data. The storage_compatibility_mode determines the format
+     * to write, but doesn't guarantee the format of existing stored data.
+     *
+     * This defensive approach handles:
+     * <ul>
+     *   <li>Upgrading from CC4 to CC5 (reads CC4 format, writes CC5 format)</li>
+     *   <li>Running CC5 in CC_4 mode (reads either format, writes CC4 format)</li>
+     *   <li>Mixed clusters during rolling upgrades (reads both formats)</li>
+     * </ul>
+     *
+     * @param row The row containing the memtable column
+     * @param columnName The name of the memtable column
+     * @return MemtableParams instance, or DEFAULT if column is missing or invalid
+     */
+    public static MemtableParams getWithCC4Fallback(UntypedResultSet.Row row, String columnName)
+    {
+        if (!row.has(columnName))
+            return DEFAULT;
+
+        String stringValue;
+        try
+        {
+            stringValue = row.getString(columnName);
+        }
+        catch (MarshalException e)
+        {
+            // CC4 map data may not be valid UTF-8, fall back to map parsing
+            return parseCC4MapFormat(row, columnName);
+        }
+
+        // Check if this looks like binary data (contains null bytes from CC4's map serialization)
+        if (stringValue != null && stringValue.indexOf('\0') >= 0)
+        {
+            return parseCC4MapFormat(row, columnName);
+        }
+
+        // Normal CC5 string value
+        return getWithFallback(stringValue);
+    }
+
+    private static MemtableParams parseCC4MapFormat(UntypedResultSet.Row row, String columnName)
+    {
+        // This is likely CC4's frozen<map<text, text>> serialization
+        // Try to read it as a map instead
+        try
+        {
+            ByteBuffer raw = row.getBytes(columnName);
+            Map<String, String> cc4Map = MapType.getInstance(UTF8Type.instance, UTF8Type.instance, false).compose(raw);
+
+            if (cc4Map == null || cc4Map.isEmpty())
+            {
+                // Empty map in CC4 means "default"
+                logger.info("Detected CC4 empty memtable map for upgrade compatibility, using default");
+                return DEFAULT;
+            }
+
+            // Convert CC4 map format to CC5 configuration key
+            String className = cc4Map.get("class");
+            if (className != null)
+            {
+                // CC4 used class names like "SkipListMemtable" or "TrieMemtable"
+                // Try to map to CC5 configuration keys
+                String configKey = mapCC4ClassNameToCC5Key(className);
+                logger.info("Detected CC4 memtable configuration '{}', mapped to CC5 key '{}'",
+                            className, configKey);
+                return getWithFallback(configKey);
+            }
+            else
+            {
+                // CC4 map exists but has no "class" key - likely corrupted data
+                logger.warn("Detected CC4 memtable map without 'class' key, falling back to default");
+                return DEFAULT;
+            }
+        }
+        catch (Exception e)
+        {
+            logger.warn("Failed to parse memtable column as CC4 map format, falling back to default", e);
+            return DEFAULT;
+        }
+    }
+
+    private static String mapCC4ClassNameToCC5Key(String cc4ClassName)
+    {
+        // Handle both short names and fully qualified names
+        String shortName = cc4ClassName.contains(".")
+                           ? cc4ClassName.substring(cc4ClassName.lastIndexOf('.') + 1)
+                           : cc4ClassName;
+
+        // Map common CC4 class names to CC5 configuration keys
+        switch (shortName)
+        {
+            case "SkipListMemtable":
+                return "skiplist";
+            case "TrieMemtable":
+                return "trie";
+            default:
+                // For unknown types, try the short name as-is
+                logger.warn("Unknown CC4 memtable class '{}', attempting to use as configuration key", shortName);
+                return shortName.toLowerCase();
+        }
+    }
+
+    /**
+     * Returns the memtable value as a map for CC4 compatibility mode.
+     * Used when storage_compatibility_mode is CC_4 or CASSANDRA_4.
+     *
+     * @return Map representation for CC4 schema (frozen&lt;map&lt;text,text&gt;&gt;)
+     * @throws ConfigurationException if the memtable type is not compatible with CC4
+     */
+    public Map<String, String> asSchemaValueMap()
+    {
+        return asSchemaValueMap(DatabaseDescriptor.getStorageCompatibilityMode());
+    }
+
+    /**
+     * Returns the memtable value as a map for CC4 compatibility mode.
+     * This overload exists for testing purposes.
+     *
+     * @param mode The storage compatibility mode to use
+     * @return Map representation for CC4 schema (frozen&lt;map&lt;text,text&gt;&gt;)
+     * @throws ConfigurationException if the memtable type is not compatible with CC4
+     */
+    @VisibleForTesting
+    Map<String, String> asSchemaValueMap(StorageCompatibilityMode mode)
+    {
+        if (!mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
+            throw new IllegalStateException("Cannot get map value in CC5 mode. Use asSchemaValueText() instead.");
+
+        // CC4 writes empty map {} for "default" configuration
+        if ("default".equals(configurationKey))
+            return ImmutableMap.of();
+
+        // Validate and map the configuration key to CC4 class name
+        // This also validates CC4 compatibility (rejects sharded types, unknown configs)
+        String className = mapCC5KeyToCC4ClassName(configurationKey);
+
+        // Get the configuration definition to access parameters
+        ParameterizedClass definition = CONFIGURATION_DEFINITIONS.get(configurationKey);
+
+        // Build the map with class name and any additional parameters
+        Map<String, String> map = new HashMap<>();
+        map.put("class", className);
+        if (definition != null && definition.parameters != null)
+            map.putAll(definition.parameters);
+
+        return map;
+    }
+
+    /**
+     * Returns the memtable value as text for CC5 mode.
+     * Used when storage_compatibility_mode is NONE.
+     *
+     * @return String representation for CC5 schema (text)
+     */
+    public String asSchemaValueText()
+    {
+        return asSchemaValueText(DatabaseDescriptor.getStorageCompatibilityMode());
+    }
+
+    /**
+     * Returns the memtable value as text for CC5 mode.
+     * This overload exists for testing purposes.
+     *
+     * @param mode The storage compatibility mode to use
+     * @return String representation for CC5 schema (text)
+     * @throws IllegalStateException if called in CC4 compatibility mode
+     */
+    @VisibleForTesting
+    String asSchemaValueText(StorageCompatibilityMode mode)
+    {
+        if (mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
+            throw new IllegalStateException("Cannot get text value in CC4 compatibility mode. Use asSchemaValueMap() instead.");
+
+        return configurationKey;
+    }
+
+    /**
+     * Maps CC5 configuration key to CC4 class name, validating CC4 compatibility.
+     * This method combines validation and mapping for use in CC4 compatibility mode.
+     *
+     * @param configKey The CC5 configuration key (e.g., "trie", "skiplist")
+     * @return The corresponding CC4 class name (e.g., "TrieMemtable")
+     * @throws ConfigurationException if the configuration is not compatible with CC4
+     */
+    private static String mapCC5KeyToCC4ClassName(String configKey)
+    {
+        if (configKey == null || configKey.isEmpty())
+            throw new ConfigurationException("Configuration key cannot be null or empty");
+
+        // Check if this is a CC5-only memtable type
+        // ShardedSkipListMemtable and related sharded types don't exist in CC4
+        String lowerKey = configKey.toLowerCase();
+        if (lowerKey.contains("sharded"))
+        {
+            throw new ConfigurationException(
+                String.format("Memtable configuration '%s' is not compatible with CC4. " +
+                             "Sharded memtable types were introduced in CC5. " +
+                             "Please use 'skiplist' or 'trie' when storage_compatibility_mode is CC_4 or CASSANDRA_4.",
+                             configKey));
+        }
+
+        // Check if the configuration key exists in CONFIGURATION_DEFINITIONS
+        // This ensures we're not trying to write an unknown/invalid configuration
+        ParameterizedClass definition = CONFIGURATION_DEFINITIONS.get(configKey);
+        if (definition == null)
+        {
+            throw new ConfigurationException(
+                String.format("Memtable configuration '%s' not found in cassandra.yaml. " +
+                             "Cannot write to schema in CC4 compatibility mode.",
+                             configKey));
+        }
+
+        // Get the class name from the definition and strip the package prefix
+        // CC4 accepts both short names (e.g., 'TrieMemtable') and fully qualified names,
+        // but we use short names for standard Cassandra memtables
+        String className = definition.class_name;
+        if (className == null || className.isEmpty())
+        {
+            throw new ConfigurationException(
+                String.format("Memtable configuration '%s' has no class name defined.",
+                             configKey));
+        }
+
+        // Strip the standard Cassandra memtable package prefix
+        if (className.startsWith("org.apache.cassandra.db.memtable."))
+        {
+            className = className.substring("org.apache.cassandra.db.memtable.".length());
+        }
+
+        return className;
     }
 }
