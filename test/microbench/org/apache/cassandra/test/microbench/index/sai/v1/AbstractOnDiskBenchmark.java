@@ -131,11 +131,11 @@ public abstract class AbstractOnDiskBenchmark
 
         // write per-sstable components: token and offset
         writeSSTableComponents(numRows());
-        token = indexDescriptor.perSSTableComponents().get(IndexComponentType.TOKEN_VALUES).createFileHandle(null);
+        token = indexDescriptor.perSSTableComponents().get(IndexComponentType.TOKEN_VALUES).createFileHandle();
 
         // write postings
         summaryPosition = writePostings(numPostings());
-        postings = indexDescriptor.perIndexComponents(indexContext).get(IndexComponentType.POSTING_LISTS).createFileHandle(null);
+        postings = indexDescriptor.perIndexComponents(indexContext).get(IndexComponentType.POSTING_LISTS).createFileHandle();
     }
 
     @TearDown(Level.Trial)

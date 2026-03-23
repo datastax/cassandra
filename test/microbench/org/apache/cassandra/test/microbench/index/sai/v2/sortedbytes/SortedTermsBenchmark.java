@@ -173,9 +173,9 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         IndexComponent.ForRead blockOffsetsComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
         NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(blockOffsetsComponent));
         SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(blocksComponent));
-        trieFile = components.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle(null);
-        termsData = blocksComponent.createFileHandle(null);
-        blockOffsets = blockOffsetsComponent.createFileHandle(null);
+        trieFile = components.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
+        termsData = blocksComponent.createFileHandle();
+        blockOffsets = blockOffsetsComponent.createFileHandle();
 
         sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, sortedTermsMeta, blockOffsetMeta);
 
