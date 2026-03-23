@@ -21,6 +21,8 @@ package org.apache.cassandra.index.sai.disk.format;
 import java.io.IOException;
 import java.nio.ByteOrder;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.sstable.Component;
@@ -52,6 +54,12 @@ public interface IndexComponent
         IndexComponents.ForRead parent();
 
         FileHandle createFileHandle(Throwables.DiscreteAction<?> cleanup);
+
+        @VisibleForTesting
+        default FileHandle createFileHandle()
+        {
+            return createFileHandle(null);
+        }
 
         /**
          * Opens a file handle for the provided index component similarly to {@link #createFileHandle(Throwables.DiscreteAction)},
