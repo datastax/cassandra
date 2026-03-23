@@ -436,9 +436,9 @@ public class SortedTermsTest extends SaiRandomizedTest
         IndexComponent.ForRead blockOffsetsComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
         NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(blockOffsetsComponent.fileNamePart()));
         SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(blocksComponent.fileNamePart()));
-        try (FileHandle trieHandle = components.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle(null);
-             FileHandle termsData = blocksComponent.createFileHandle(null);
-             FileHandle blockOffsets = blockOffsetsComponent.createFileHandle(null))
+        try (FileHandle trieHandle = components.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
+             FileHandle termsData = blocksComponent.createFileHandle();
+             FileHandle blockOffsets = blockOffsetsComponent.createFileHandle())
         {
             SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
             try (SortedTermsReader.Cursor cursor = reader.openCursor())
@@ -457,9 +457,9 @@ public class SortedTermsTest extends SaiRandomizedTest
         IndexComponent.ForRead blockOffsetsComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
         NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(blockOffsetsComponent.fileNamePart()));
         SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(blocksComponent.fileNamePart()));
-        try (FileHandle trieHandle = components.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle(null);
-             FileHandle termsData = blocksComponent.createFileHandle(null);
-             FileHandle blockOffsets = blockOffsetsComponent.createFileHandle(null))
+        try (FileHandle trieHandle = components.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
+             FileHandle termsData = blocksComponent.createFileHandle();
+             FileHandle blockOffsets = blockOffsetsComponent.createFileHandle())
         {
             SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
             testCode.accept(reader);
