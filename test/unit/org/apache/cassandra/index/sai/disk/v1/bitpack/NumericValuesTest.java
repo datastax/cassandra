@@ -71,7 +71,7 @@ public class NumericValuesTest extends SaiRandomizedTest
 
         NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(tokens));
 
-        try (FileHandle fileHandle = tokens.createFileHandle(null);
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = monotonic ? new MonotonicBlockPackedReader(fileHandle, tokensMeta).open()
                                           : new BlockPackedReader(fileHandle, tokensMeta).open())
         {
@@ -100,7 +100,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         IndexComponent.ForRead tokens = components.get(IndexComponentType.TOKEN_VALUES);
         NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(tokens));
 
-        try (FileHandle fileHandle = tokens.createFileHandle(null);
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = new BlockPackedReader(fileHandle, tokensMeta).open())
         {
             assertEquals(array.length, reader.length());
@@ -114,7 +114,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         }
 
         // non-exact match
-        try (FileHandle fileHandle = tokens.createFileHandle(null);
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = new BlockPackedReader(fileHandle, tokensMeta).open())
         {
             assertEquals(array.length, reader.length());
@@ -138,7 +138,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         IndexComponent.ForRead tokens = components.get(IndexComponentType.TOKEN_VALUES);
         NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(tokens));
 
-        try (FileHandle fileHandle = tokens.createFileHandle(null);
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = new BlockPackedReader(fileHandle, tokensMeta).open())
         {
             for (int x = 0; x < length; x++)
@@ -161,7 +161,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         IndexComponent.ForRead tokens = components.get(IndexComponentType.TOKEN_VALUES);
         NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(tokens));
 
-        try (FileHandle fileHandle = tokens.createFileHandle(null);
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = (monotonic ? new MonotonicBlockPackedReader(fileHandle, tokensMeta)
                                            : new BlockPackedReader(fileHandle, tokensMeta)).open())
         {
