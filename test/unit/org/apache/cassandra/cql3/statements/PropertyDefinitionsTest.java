@@ -37,6 +37,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.codahale.metrics.Clock;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.assertj.core.api.Assertions;
@@ -51,8 +52,9 @@ public class PropertyDefinitionsTest
 
     private ListAppender<ILoggingEvent> logAppender;
     private Logger logger;
-    private Field logIntervalField;
     private Field lastLoggedTimeField;
+    private Field clockField;
+    private TestClock testClock;
 
     @Before
     public void setup() throws Exception
@@ -62,21 +64,19 @@ public class PropertyDefinitionsTest
         logAppender.start();
         logger.addAppender(logAppender);
 
-        // Use reflection to access private fields for testing
-        logIntervalField = PropertyDefinitions.class.getDeclaredField("OBSOLETE_PROPERTY_LOG_INTERVAL_MS");
-        logIntervalField.setAccessible(true);
-        lastLoggedTimeField = PropertyDefinitions.class.getDeclaredField("OBSOLETE_PROPERTY_LOG_TIME");
+        lastLoggedTimeField = PropertyDefinitions.class.getDeclaredField("OBSOLETE_PROPERTY_LAST_LOG_TIMES");
         lastLoggedTimeField.setAccessible(true);
 
-        // Set to 100ms for testing
-        logIntervalField.setLong(null, 100L);
+        // Setup custom clock for testing
+        testClock = new TestClock();
+        clockField = PropertyDefinitions.class.getDeclaredField("clock");
+        clockField.setAccessible(true);
     }
 
     @After
     public void cleanup() throws Exception
     {
         logger.detachAppender(logAppender);
-        logIntervalField.setLong(null, 30_000L);
 
         // Clear map
         Map<String, Long> lastLoggedTime = (Map<String, Long>) lastLoggedTimeField.get(null);
@@ -140,14 +140,8 @@ public class PropertyDefinitionsTest
         testAddProperty("v1", "v2", (pd, v) -> pd.addProperty("k", v));
 
         // map overload
-        testAddProperty(new HashMap<String, String>()
-                        {{
-                            put("k1", "v1");
-                        }},
-                        new HashMap<String, String>()
-                        {{
-                            put("k2", "v2");
-                        }},
+        testAddProperty(new HashMap<String, String>(){{put("k1", "v1");}},
+                        new HashMap<String, String>(){{put("k2", "v2");}},
                         (pd, v) -> pd.addProperty("k", v));
 
         // set of QualifiedName overload
@@ -174,7 +168,9 @@ public class PropertyDefinitionsTest
         String obsoleteProperty = "old_prop";
 
         // First call - should log
+        testClock.setTime(0);
         PropertyDefinitions pd1 = new PropertyDefinitions();
+        clockField.set(pd1, testClock);
         pd1.addProperty(obsoleteProperty, "value1");
         pd1.validate(Collections.emptySet(), Collections.singleton(obsoleteProperty));
 
@@ -185,7 +181,9 @@ public class PropertyDefinitionsTest
         logAppender.list.clear();
 
         // Second call immediately - should NOT log (within 30 seconds)
+        testClock.setTime(100); // Only 100ms passed
         PropertyDefinitions pd2 = new PropertyDefinitions();
+        clockField.set(pd2, testClock);
         pd2.addProperty(obsoleteProperty, "value2");
         pd2.validate(Collections.emptySet(), Collections.singleton(obsoleteProperty));
 
@@ -194,15 +192,16 @@ public class PropertyDefinitionsTest
 
         logAppender.list.clear();
 
-        // Wait 100 ms and try again - should log
-        Thread.sleep(100);
+        // Advance time by 30 seconds and try again - should log
+        testClock.setTime(30_100); // 30 seconds + 100ms from start
 
         PropertyDefinitions pd3 = new PropertyDefinitions();
+        clockField.set(pd3, testClock);
         pd3.addProperty(obsoleteProperty, "value3");
         pd3.validate(Collections.emptySet(), Collections.singleton(obsoleteProperty));
 
         List<ILoggingEvent> logs3 = getWarningLogs(obsoleteProperty);
-        assertEquals("Third call after >100ms should log again", 1, logs3.size());
+        assertEquals("Third call after 30s should log again", 1, logs3.size());
     }
 
     @Test
@@ -236,5 +235,29 @@ public class PropertyDefinitionsTest
                                .filter(event -> event.getLevel() == Level.WARN)
                                .filter(event -> event.getFormattedMessage().contains(propertyName))
                                .collect(Collectors.toList());
+    }
+
+
+    // Custom Clock implementation for testing
+    private static class TestClock extends Clock
+    {
+        private long currentTime = 0;
+
+        @Override
+        public long getTick()
+        {
+            return currentTime * 1_000_000; // Convert ms to ns
+        }
+
+        @Override
+        public long getTime()
+        {
+            return currentTime;
+        }
+
+        public void setTime(long timeMs)
+        {
+            this.currentTime = timeMs;
+        }
     }
 }
