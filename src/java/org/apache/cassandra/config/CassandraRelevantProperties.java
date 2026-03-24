@@ -711,10 +711,11 @@ public enum CassandraRelevantProperties
      * and removing individual files. This is now used only tests, but eventually we will make it true by default.*/
     USE_NIX_RECURSIVE_DELETE("cassandra.use_nix_recursive_delete"),
 
+    USE_RANDOM_ALLOCATION_IF_NOT_SUPPORTED("cassandra.token_allocation.use_random_if_not_supported"),
+
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
 
-    USE_RANDOM_ALLOCATION_IF_NOT_SUPPORTED("cassandra.token_allocation.use_random_if_not_supported"),
     /** Gossiper compute expiration timeout. Default value 3 days. */
     VERY_LONG_TIME_MS("cassandra.very_long_time_ms", "259200000"),
     /** Controls output format for Collection-type settings in system_views.settings table */
