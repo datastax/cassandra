@@ -756,11 +756,12 @@ public enum CassandraRelevantProperties
 
     USE_RANDOM_ALLOCATION_IF_NOT_SUPPORTED("cassandra.token_allocation.use_random_if_not_supported"),
 
+    /** Gossiper compute expiration timeout. Default value 3 days. */
+    VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
+
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
 
-    /** Gossiper compute expiration timeout. Default value 3 days. */
-    VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
     VERY_LONG_TIME_MS("cassandra.very_long_time_ms", "259200000"),
     /** Controls output format for Collection-type settings in system_views.settings table */
     VIRTUAL_TABLE_COMPLEX_SETTINGS_FORMAT_JSON("cassandra.virtual_table_complex_settings_format_json", "false"),
