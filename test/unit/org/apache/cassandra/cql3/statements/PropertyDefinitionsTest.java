@@ -53,8 +53,6 @@ public class PropertyDefinitionsTest
     private ListAppender<ILoggingEvent> logAppender;
     private Logger logger;
     private Field lastLoggedTimeField;
-    private Field clockField;
-    private TestClock testClock;
 
     @Before
     public void setup() throws Exception
@@ -66,11 +64,6 @@ public class PropertyDefinitionsTest
 
         lastLoggedTimeField = PropertyDefinitions.class.getDeclaredField("OBSOLETE_PROPERTY_LAST_LOG_TIMES");
         lastLoggedTimeField.setAccessible(true);
-
-        // Setup custom clock for testing
-        testClock = new TestClock();
-        clockField = PropertyDefinitions.class.getDeclaredField("clock");
-        clockField.setAccessible(true);
     }
 
     @After
@@ -166,11 +159,11 @@ public class PropertyDefinitionsTest
     public void testObsoletePropertyWarningRateLimiting() throws Exception
     {
         String obsoleteProperty = "old_prop";
+        TestClock testClock = new TestClock();
 
         // First call - should log
         testClock.setTime(0);
-        PropertyDefinitions pd1 = new PropertyDefinitions();
-        clockField.set(pd1, testClock);
+        PropertyDefinitions pd1 = new PropertyDefinitions(new TestClock());
         pd1.addProperty(obsoleteProperty, "value1");
         pd1.validate(Collections.emptySet(), Collections.singleton(obsoleteProperty));
 
@@ -182,8 +175,7 @@ public class PropertyDefinitionsTest
 
         // Second call immediately - should NOT log (within 30 seconds)
         testClock.setTime(100); // Only 100ms passed
-        PropertyDefinitions pd2 = new PropertyDefinitions();
-        clockField.set(pd2, testClock);
+        PropertyDefinitions pd2 = new PropertyDefinitions(testClock);
         pd2.addProperty(obsoleteProperty, "value2");
         pd2.validate(Collections.emptySet(), Collections.singleton(obsoleteProperty));
 
@@ -195,8 +187,7 @@ public class PropertyDefinitionsTest
         // Advance time by 30 seconds and try again - should log
         testClock.setTime(30_100); // 30 seconds + 100ms from start
 
-        PropertyDefinitions pd3 = new PropertyDefinitions();
-        clockField.set(pd3, testClock);
+        PropertyDefinitions pd3 = new PropertyDefinitions(testClock);
         pd3.addProperty(obsoleteProperty, "value3");
         pd3.validate(Collections.emptySet(), Collections.singleton(obsoleteProperty));
 

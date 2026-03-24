@@ -23,6 +23,8 @@ import java.util.regex.Pattern;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import com.codahale.metrics.Clock;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.slf4j.Logger;
@@ -42,7 +44,17 @@ public class PropertyDefinitions
 
     protected final Map<String, Object> properties = new HashMap<>();
     // Wrapper around System.currentTimeMillis() to simplify unit testing.
-    private final Clock clock = Clock.defaultClock();
+    private final Clock clock;
+
+    @VisibleForTesting
+    PropertyDefinitions(Clock clock)
+    {
+        this.clock = clock;
+    }
+
+    public PropertyDefinitions() {
+        this.clock = Clock.defaultClock();
+    }
 
     public void addProperty(String name, String value) throws SyntaxException
     {
