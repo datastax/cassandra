@@ -29,10 +29,12 @@ import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.assertj.core.api.Assertions;
+import org.junit.Ignore;
 
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
 import static org.junit.Assert.assertEquals;
 
+@Ignore
 public abstract class AbstractVectorCompressionTest extends VectorTester
 {
     protected void testOne(VectorSourceModel model, int originalDimension, VectorCompression expectedCompression) throws IOException

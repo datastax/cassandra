@@ -321,6 +321,14 @@ public class BackgroundCompactions
     }
 
     /**
+     * @return the compaction with the given id, if it is currently in progress
+     */
+    public CompactionPick getCompaction(UUID id)
+    {
+        return compactions.get(id);
+    }
+
+    /**
      * @return the total number of background compactions, pending or in progress
      */
     public int getTotalCompactions()
