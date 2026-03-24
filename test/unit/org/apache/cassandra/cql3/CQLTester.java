@@ -2688,6 +2688,20 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
+    public Vector<Float> randomVectorBoxed(int dimension)
+    {
+        float[] floats = randomVector(dimension);
+        return vector(floats);
+    }
+
+    protected Vector<Float> vector(float[] v)
+    {
+        var v2 = new Float[v.length];
+        for (int i = 0; i < v.length; i++)
+            v2[i] = v[i];
+        return new Vector<>(v2);
+    }
+
     @SafeVarargs
     public static <T> Vector<T> vector(T... values)
     {
