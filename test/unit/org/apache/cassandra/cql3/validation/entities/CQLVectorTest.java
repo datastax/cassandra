@@ -26,14 +26,14 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.FLOAT_ONLY_VECTORS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 
 public class CQLVectorTest extends CQLTester
 {
     @BeforeClass
     public static void setupClass()
     {
-        FLOAT_ONLY_VECTORS.setBoolean(false);
+        VECTOR_FLOAT_ONLY.setBoolean(false);
     }
 
     @Test
@@ -123,5 +123,11 @@ public class CQLVectorTest extends CQLTester
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, ?)",
                                   vector(BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE), BigInteger.ONE));
+    }
+
+    @SafeVarargs
+    protected final <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
     }
 }
