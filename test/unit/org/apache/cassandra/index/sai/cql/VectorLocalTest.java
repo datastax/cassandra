@@ -75,7 +75,7 @@ public class VectorLocalTest extends VectorTester
         waitForTableIndexesQueryable();
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
-        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVector(2)).collect(Collectors.toList());
+        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(2)).collect(Collectors.toList());
 
         int pk = 0;
         for (Vector<Float> vector : vectors)
@@ -126,7 +126,7 @@ public class VectorLocalTest extends VectorTester
         waitForTableIndexesQueryable();
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
-        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVector(dimension)).collect(Collectors.toList());
+        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
 
         int pk = 0;
         for (Vector<Float> vector : vectors)
@@ -147,7 +147,7 @@ public class VectorLocalTest extends VectorTester
 
         // populate some more vectors
         int additionalVectorCount = getRandom().nextIntBetween(500, 1000);
-        List<Vector<Float>> additionalVectors = IntStream.range(0, additionalVectorCount).mapToObj(s -> randomVector(dimension)).collect(Collectors.toList());
+        List<Vector<Float>> additionalVectors = IntStream.range(0, additionalVectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
         for (Vector<Float> vector : additionalVectors)
             execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", pk++, vector);
 
@@ -293,7 +293,7 @@ public class VectorLocalTest extends VectorTester
             vectorCount = partitions * vectorCountPerPartition;
         }
 
-        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVector(dimension)).collect(Collectors.toList());
+        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
 
         int i = 0;
         for (int pk = 1; pk <= partitions; pk++)
@@ -309,7 +309,7 @@ public class VectorLocalTest extends VectorTester
         for (int executionCount = 0; executionCount < 50; executionCount++)
         {
             int key = getRandom().nextIntBetween(1, partitions);
-            var queryVector = randomVector(dimension);
+            var queryVector = randomVectorBoxed(dimension);
             searchWithKey(queryVector, key, vectorCountPerPartition, 1000);
             searchWithKey(queryVector, key, 1, 1);
         }
@@ -320,7 +320,7 @@ public class VectorLocalTest extends VectorTester
         for (int executionCount = 0; executionCount < 50; executionCount++)
         {
             int key = getRandom().nextIntBetween(1, partitions);
-            var queryVector = randomVector(dimension);
+            var queryVector = randomVectorBoxed(dimension);
             searchWithKey(queryVector, key, vectorCountPerPartition, 1000);
             searchWithKey(queryVector, key, 1, 1);
         }
@@ -329,7 +329,7 @@ public class VectorLocalTest extends VectorTester
         for (int executionCount = 0; executionCount < 50; executionCount++)
         {
             int nonExistingKey = getRandom().nextIntBetween(1, partitions) + partitions;
-            var queryVector = randomVector(dimension);
+            var queryVector = randomVectorBoxed(dimension);
             searchWithNonExistingKey(queryVector, nonExistingKey);
         }
     }
