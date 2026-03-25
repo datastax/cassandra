@@ -239,7 +239,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
         int rowCount = 10;
         for (int i = 0; i < rowCount; i++)
-            execute("INSERT INTO %s (id1, v1, v2, v3) VALUES (?, ?, '0', ?)", Integer.toString(i), i, vector(i, i));
+            execute("INSERT INTO %s (id1, v1, v2, v3) VALUES (?, ?, '0', ?)", Integer.toString(i), i, vectorOf(i, i));
 
         assertIndexQueryCount(indexV1, 0L);
 

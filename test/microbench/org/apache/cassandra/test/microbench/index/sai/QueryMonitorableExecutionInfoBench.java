@@ -100,7 +100,7 @@ public class QueryMonitorableExecutionInfoBench extends SAITester
             {
                 int n = RANDOM.nextInt(100);
                 execute("INSERT INTO %s (k, c, n, b, s, v) VALUES (?, ?, ?, ?, ?, ?)",
-                        k, c, n, (long) n, "value_" + n, vector(1, n));
+                        k, c, n, (long) n, "value_" + n, vectorOf(1, n));
             }
         }
         flush();
