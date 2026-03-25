@@ -141,12 +141,12 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
         int rowCount = 100;
         // Insert even rows to first sstable
         for (int i = 0; i < rowCount; i += 2)
-            execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, ?, 'A', ?)", i, vector(1, i));
+            execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, ?, 'A', ?)", i, vectorOf(1, i));
 
         flush();
         // Insert odd rows to new sstable
         for (int i = 1; i < rowCount; i += 2)
-            execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, ?, 'A', ?)", i, vector(1, i));
+            execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, ?, 'A', ?)", i, vectorOf(1, i));
 
         // Verify result for rows in different memtables/sstables
         beforeAndAfterFlush(() -> {
@@ -205,7 +205,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
 
         // Insert a complete row. We need at least one row with a vector and an entry for column c to ensure that
         // the query doesn't skip the query portion where we map from Primary Key back to sstable row id.
-        execute("INSERT INTO %s (k, i, v, c) VALUES (0, ?, ?, ?)", 1, vector(1, 1), 1);
+        execute("INSERT INTO %s (k, i, v, c) VALUES (0, ?, ?, ?)", 1, vectorOf(1, 1), 1);
 
         // Insert the first and last row in the table and leave of the vector
         execute("INSERT INTO %s (k, i, c) VALUES (0, 0, 0)");
