@@ -44,6 +44,8 @@ import java.util.stream.StreamSupport;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -94,11 +96,14 @@ import org.apache.cassandra.utils.JavaDriverUtils;
 
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 import static org.assertj.core.api.Assertions.assertThat;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 
 /**
  * Tests for {@link CQLSSTableWriter}.
@@ -129,11 +134,18 @@ public abstract class CQLSSTableWriterTest
     @Before
     public void perTestSetup() throws IOException
     {
+        VECTOR_FLOAT_ONLY.setBoolean(false);
         keyspace = "cql_keyspace" + idGen.incrementAndGet();
         table = "table" + idGen.incrementAndGet();
         qualifiedTable = keyspace + '.' + table;
         dataDir = new File(tempFolder.getRoot().getAbsolutePath() + File.pathSeparator() + keyspace + File.pathSeparator() + table);
         assert dataDir.tryCreateDirectories();
+    }
+
+    @After
+    public void perTestTearDown()
+    {
+        VECTOR_FLOAT_ONLY.setBoolean(true);
     }
 
     @Test
