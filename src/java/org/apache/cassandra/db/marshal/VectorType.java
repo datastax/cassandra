@@ -190,6 +190,36 @@ public final class VectorType<T> extends AbstractType<List<T>>
         return accessor.toFloatArray(input, dimension);
     }
 
+    @Override
+    @SuppressWarnings("unchecked")
+    public ByteBuffer decomposeUntyped(Object value)
+    {
+        if (value instanceof List && elementType instanceof NumberType)
+        {
+            List<?> list = (List<?>) value;
+            Class<?> expectedClass = elementSerializer.getType();
+            if (!list.isEmpty() && !expectedClass.isInstance(list.get(0)) && list.get(0) instanceof Number)
+            {
+                List<T> converted = new ArrayList<>(list.size());
+                for (Object e : list)
+                    converted.add((T) convertNumber((Number) e, expectedClass));
+                return decompose(converted);
+            }
+        }
+        return super.decomposeUntyped(value);
+    }
+
+    private static Number convertNumber(Number value, Class<?> targetClass)
+    {
+        if (targetClass == Float.class) return value.floatValue();
+        if (targetClass == Double.class) return value.doubleValue();
+        if (targetClass == Integer.class) return value.intValue();
+        if (targetClass == Long.class) return value.longValue();
+        if (targetClass == Short.class) return value.shortValue();
+        if (targetClass == Byte.class) return value.byteValue();
+        throw new IllegalArgumentException("Unsupported numeric type: " + targetClass);
+    }
+
     public ByteBuffer decompose(T... values)
     {
         return decompose(Arrays.asList(values));
