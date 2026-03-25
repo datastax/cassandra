@@ -730,16 +730,16 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         int baseRowCount = 1000;
         // Create 1000 rows so that each row has a slightly less similar score.
         for (int i = 0; i < baseRowCount - 10; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vectorOf(1, i));
 
         for (int i = baseRowCount -10; i < baseRowCount; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, -i));
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vectorOf(1, -i));
 
         flush();
 
         // Create 10 rows with the worst scores, but they won't be shadowed.
         for (int i = baseRowCount; i < baseRowCount + 10; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(-1, baseRowCount * -1));
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vectorOf(-1, baseRowCount * -1));
 
         // Delete all but the last 10 rows
         for (int i = 0; i < baseRowCount - 10; i++)
@@ -806,17 +806,17 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         // The general design for this test is to shadow the close vectors on a memtable/sstable index forcing the
         // index to resume search. We do that by overwriting the first 50 vectors in the initial sstable.
         for (int i = 0; i < 100; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vectorOf(1, i));
 
         // Add more rows to make sure we filter then sort
         for (int i = 100; i < 1000; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'C', ?)", i, vector(1, i));
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'C', ?)", i, vectorOf(1, i));
 
         flush();
 
         // Overwrite the most similar 50 rows
         for (int i = 0; i < 50; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'B', ?)", i, vector(1, i));
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'B', ?)", i, vectorOf(1, i));
 
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 1"),

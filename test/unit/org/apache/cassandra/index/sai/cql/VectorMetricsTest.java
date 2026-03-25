@@ -94,7 +94,7 @@ public class VectorMetricsTest extends VectorTester
 
         // Insert 10 rows to simplify some of the assertions
         for (int i = 0; i < CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
-            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vector(1 + i, 2 + i, 3 + i));
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vectorOf(1 + i, 2 + i, 3 + i));
         flush();
 
         assertTrue(vectorMetrics.quantizationMemoryBytes.sum() > 0);

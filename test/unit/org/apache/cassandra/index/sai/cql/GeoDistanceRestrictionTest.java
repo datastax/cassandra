@@ -160,8 +160,8 @@ public class GeoDistanceRestrictionTest extends VectorTester
         prepare(query);
 
         beforeAndAfterFlush(() -> {
-            assertRows(execute(query, vector(5,5), 200000f, 2), row(1));
-            assertRows(execute(query, vector(5,5), 200000.0f, 2), row(1));
+            assertRows(execute(query, vectorOf(5, 5), 200000f, 2), row(1));
+            assertRows(execute(query, vectorOf(5, 5), 200000.0f, 2), row(1));
         });
     }
 

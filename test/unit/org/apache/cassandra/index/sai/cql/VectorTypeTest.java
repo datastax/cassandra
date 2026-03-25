@@ -252,7 +252,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
 
         for (int i = 0; i < 100; i++)
             execute("INSERT INTO %s (pk, b, v) VALUES (?, true, ?)",
-                    i, vector(i, i + 1, i + 2));
+                    i, vectorOf(i, i + 1, i + 2));
 
         var result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
         assertThat(result).hasSize(2);
@@ -430,12 +430,12 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1, 2 , 3));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vector(2 , 3, 4));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vector(3, 4, 5));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', ?)", vector(4, 5, 6));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vectorOf(1, 2, 3));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vectorOf(2, 3, 4));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vectorOf(3, 4, 5));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', ?)", vectorOf(4, 5, 6));
 
-        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of ? LIMIT 3", vector(2.5f, 3.5f, 4.5f));
+        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of ? LIMIT 3", vectorOf(2.5f, 3.5f, 4.5f));
         assertThat(result).hasSize(3);
     }
 
@@ -448,11 +448,11 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1, 2 , 3));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vector(2 , 3, 4));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vector(3, 4, 5));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'B', ?)", vector(4, 5, 6));
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', ?)", vector(5, 6, 7));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vectorOf(1, 2, 3));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vectorOf(2, 3, 4));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vectorOf(3, 4, 5));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'B', ?)", vectorOf(4, 5, 6));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', ?)", vectorOf(5, 6, 7));
 
         UntypedResultSet result = execute("SELECT * FROM %s WHERE str_val = 'B' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(2);
@@ -469,11 +469,11 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1, 2 , 3));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vectorOf(1, 2, 3));
         execute("INSERT INTO %s (pk, str_val) VALUES (1, 'B')"); // no vector
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vector(3, 4, 5));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vectorOf(3, 4, 5));
         execute("INSERT INTO %s (pk, str_val) VALUES (3, 'D')"); // no vector
-        execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', ?)", vector(5, 6, 7));
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', ?)", vectorOf(5, 6, 7));
 
         UntypedResultSet result = execute("SELECT * FROM %s WHERE str_val = 'B' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(0);
@@ -522,7 +522,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
 
         var N = 5;
         for (int i = 0; i < N; i++)
-            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vector(1 + i, 2 + i, 3 + i));
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vectorOf(1 + i, 2 + i, 3 + i));
 
         for (int i = 0; i < N; i++)
         {
@@ -555,13 +555,13 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
             for (int j = 1; j <= rowsPerPartition; j++)
             {
                 logger.debug("Inserting partition {} row {}: [{}, {}]", i, j, i, j);
-                execute("INSERT INTO %s (partition, row, val) VALUES (?, ?, ?)", i, j, vector((float) i, (float) j));
+                execute("INSERT INTO %s (partition, row, val) VALUES (?, ?, ?)", i, j, vectorOf(i, j));
                 float[] vector = {(float) i, (float) j};
                 vectorsByPartition.computeIfAbsent(i, k -> new ArrayList<>()).add(vector);
             }
         }
 
-        var queryVector = vector(1.5f, 1.5f);
+        var queryVector = vectorOf(1.5f, 1.5f);
         for (int i = 1; i <= nPartitions; i++)
         {
             UntypedResultSet result = execute("SELECT partition, row FROM %s WHERE partition = ? ORDER BY val ann of ? LIMIT 2", i, queryVector);
@@ -588,8 +588,8 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
 
         // basic functionality
-        Vector<Float> q = vector(1f, 2f);
-        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, 2));
+        Vector<Float> q = vectorOf(1, 2);
+        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vectorOf(1, 2));
         execute("SELECT similarity_cosine(value, value) FROM %s WHERE pk=0");
 
         // type inference checks
@@ -618,7 +618,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [3.0, 4.0, 5.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', [4.0, 5.0, 6.0])");
 
-        Vector<Float> q = vector(1.5f, 2.5f, 3.5f);
+        Vector<Float> q = vectorOf(1.5f, 2.5f, 3.5f);
         var result = execute("SELECT str_val, similarity_cosine(val, ?) FROM %s ORDER BY val ANN OF ? LIMIT 2",
                 q, q);
 
@@ -632,7 +632,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
 
-        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, 2));
+        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vectorOf(1, 2));
         execute("SELECT similarity_cosine(value, (vector<float, 2>) [1.0, 1.0]) FROM %s WHERE pk=0");
         execute("SELECT similarity_cosine((vector<float, 2>) [1.0, 1.0], value) FROM %s WHERE pk=0");
         execute("SELECT similarity_cosine((vector<float, 2>) [1.0, 1.0], (vector<float, 2>) [1.0, 1.0]) FROM %s WHERE pk=0");
@@ -643,7 +643,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
 
-        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, 2));
+        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vectorOf(1, 2));
         assertRows(execute("SELECT similarity_cosine(value, [2.0, 4.0]) FROM %s WHERE pk=0"), row(1f));
         assertRows(execute("SELECT similarity_cosine([2.0, 4.0], value) FROM %s WHERE pk=0"), row(1f));
         assertRows(execute("SELECT similarity_cosine([1.0, 2.0], [2.0, 4.0]) FROM %s WHERE pk=0"), row(1f));
@@ -684,13 +684,13 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
 
         // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
-        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vector(1f, 1f));
+        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vectorOf(1, 1));
         flush();
 
         // Must be enough rows to go to graph
         for (int j = 1; j <= 10; j++)
         {
-            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", j, vector(j, j));
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", j, vectorOf(j, j));
         }
         flush();
 
@@ -705,14 +705,14 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
 
         // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
-        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vector(1f, 1f));
+        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vectorOf(1, 1));
         flush();
 
         // over 1024 vectors to guarantee PQ on disk
         // Must be enough rows to go to graph
         for (int j = 1; j <= 1100; j++)
         {
-            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", j, vector((float) j, (float) j));
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", j, vectorOf(j, j));
         }
         flush();
 
@@ -777,12 +777,12 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
 
         // This row is created so that it matches the query parameters, and so that the PK is before the other PKs.
         // The token for 5 is -7509452495886106294 and the token for 1 is -4069959284402364209.
-        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 5, 1, 1, 2, vector(1, 1));
+        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 5, 1, 1, 2, vectorOf(1, 1));
         // This row is created so that it matches one, but not both, predicates, and so that it has the same token
         // as the third row, but is technically before it when sorting using clustering columns.
-        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 1, 1, 1, 0, vector(1, 1));
+        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 1, 1, 1, 0, vectorOf(1, 1));
         // This row is the only valid match and is the final row in the sstable.
-        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 1, 2, 1, 2, vector(1, 1));
+        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 1, 2, 1, 2, vectorOf(1, 1));
 
         beforeAndAfterFlush(
         () -> {
@@ -813,7 +813,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
             for (int row = 0; row < vectorCountPerSSTable; row++)
                 // Create random vectors, we're only testing internal consistency
                 execute("INSERT INTO %s (pk, constant, val) VALUES (?, ?, ?)", pk++, true,
-                        vector(getRandom().nextIntBetween(1, 400), getRandom().nextIntBetween(1, 400)));
+                        vectorOf(getRandom().nextIntBetween(1, 400), getRandom().nextIntBetween(1, 400)));
             flush();
         }
 
@@ -888,7 +888,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         disableCompaction();
 
         for (int i = 0; i <= CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
-            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(i, i + 1));
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vectorOf(i, i + 1));
         flush();
 
         // By deleting a row, we trigger a key histogram to round its estimate to 0 instead of 1 rows per key, and
@@ -961,7 +961,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
 
         // Insert a complete row. We need at least one row with a vector and an entry for column c to ensure that
         // the query doesn't skip the query portion where we map from Primary Key back to sstable row id.
-        execute("INSERT INTO %s (k, i, v, c) VALUES (0, ?, ?, ?)", 1, vector(1, 1), 1);
+        execute("INSERT INTO %s (k, i, v, c) VALUES (0, ?, ?, ?)", 1, vectorOf(1, 1), 1);
 
         // Insert the first and last row in the table and leave of the vector
         execute("INSERT INTO %s (k, i, c) VALUES (0, 0, 0)");
@@ -1089,12 +1089,12 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
 
         String insert = "INSERT INTO %s (k, c, r, v) VALUES (?, ?, ?, ?)";
-        execute(insert, row(0, 1, vector(0.1f, 0.1f), 0));
-        execute(insert, row(1, 2, vector(0.1f, 0.2f), 0));
+        execute(insert, row(0, 1, vectorOf(0.1f, 0.1f), 0));
+        execute(insert, row(1, 2, vectorOf(0.1f, 0.2f), 0));
         flush();
 
         // update the best vector to make it the worst
-        execute(insert, row(0, 1, vector(0.1f, 0.5f), 0));
+        execute(insert, row(0, 1, vectorOf(0.1f, 0.5f), 0));
 
         // query with ANN only
         assertRows(execute("SELECT c FROM %s ORDER BY r ANN OF [0.1, 0.1] LIMIT 10"), row(2), row(1));

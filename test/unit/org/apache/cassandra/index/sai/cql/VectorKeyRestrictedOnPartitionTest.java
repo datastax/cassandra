@@ -185,7 +185,7 @@ public class VectorKeyRestrictedOnPartitionTest extends VectorKeyRestrictedTeste
         // Insert many rows
         for (int i = 1; i < 1000; i++)
         {
-            execute("INSERT INTO %s (partition, i, v, c) VALUES (?, ?, ?, ?)", i, i, vector(i, i), i);
+            execute("INSERT INTO %s (partition, i, v, c) VALUES (?, ?, ?, ?)", i, i, vectorOf(i, i), i);
             partitionKeys.add(i);
         }
 
