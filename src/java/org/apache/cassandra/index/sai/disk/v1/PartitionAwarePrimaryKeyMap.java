@@ -25,9 +25,9 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
@@ -62,8 +62,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final LongArray.Factory offsetReaderFactory;
-        private final KeyFetcher keyFetcher;
         private final MetadataSource metadata;
+        private final KeyFetcher keyFetcher;
         private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
         private final SSTableId<?> sstableId;
