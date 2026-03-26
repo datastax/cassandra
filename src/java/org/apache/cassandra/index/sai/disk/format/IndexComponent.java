@@ -21,14 +21,11 @@ package org.apache.cassandra.index.sai.disk.format;
 import java.io.IOException;
 import java.nio.ByteOrder;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.store.ChecksumIndexInput;
 
 public interface IndexComponent
@@ -53,16 +50,10 @@ public interface IndexComponent
         @Override
         IndexComponents.ForRead parent();
 
-        FileHandle createFileHandle(Throwables.DiscreteAction<?> cleanup);
-
-        @VisibleForTesting
-        default FileHandle createFileHandle()
-        {
-            return createFileHandle(null);
-        }
+        FileHandle createFileHandle();
 
         /**
-         * Opens a file handle for the provided index component similarly to {@link #createFileHandle(Throwables.DiscreteAction)},
+         * Opens a file handle for the provided index component similarly to {@link #createFileHandle()},
          * but this method shoud be called instead of the aforemented one if the access is done during index building, that is
          * before the full index that this is a part of has been finalized.
          * <p>

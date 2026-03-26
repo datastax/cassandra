@@ -58,7 +58,6 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
-import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.util.IOUtils;
@@ -279,22 +278,6 @@ public class IndexDescriptor
     public IndexComponents.ForWrite newPerSSTableComponentsForWrite()
     {
         return newComponentsForWrite(null, perSSTable);
-    }
-
-    private static RuntimeException handleFileHandleCleanup(Throwable t, @Nullable Throwables.DiscreteAction<?> cleanup)
-    {
-        if (cleanup != null)
-        {
-            try
-            {
-                cleanup.perform();
-            }
-            catch (Exception e)
-            {
-                return Throwables.unchecked(Throwables.merge(t, e));
-            }
-        }
-        return Throwables.unchecked(t);
     }
 
     public IndexComponents.ForWrite newPerIndexComponentsForWrite(IndexContext context)
@@ -659,7 +642,7 @@ public class IndexDescriptor
             }
 
             @Override
-            public FileHandle createFileHandle(Throwables.DiscreteAction<?> cleanup)
+            public FileHandle createFileHandle()
             {
                 try (FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this))
                 {
@@ -670,10 +653,6 @@ public class IndexDescriptor
                     }
                     FileHandle.Builder b = builder.order(byteOrder());
                     return b.complete();
-                }
-                catch (Throwable t)
-                {
-                    throw handleFileHandleCleanup(t, cleanup);
                 }
             }
 
@@ -689,7 +668,7 @@ public class IndexDescriptor
             @Override
             public IndexInput openInput()
             {
-                return IndexFileUtils.instance.openBlockingInput(createFileHandle(null));
+                return IndexFileUtils.instance.openBlockingInput(createFileHandle());
             }
 
             @Override
