@@ -77,7 +77,6 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     public static class Factory implements PrimaryKeyMap.Factory
     {
         private final IndexComponents.ForRead perSSTableComponents;
-        private final FileHandle tokensFile;
         protected final SSTableId<?> sstableId;
         protected final boolean hasStaticColumns;
 
@@ -88,9 +87,10 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         protected final IPartitioner partitioner;
         protected final OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory;
 
-        private final FileHandle partitionsFile;
-        private final FileHandle partitionKeyBlockOffsetsFile;
-        private final FileHandle partitionKeyBlocksFile;
+        private FileHandle tokensFile = null;
+        private FileHandle partitionsFile = null;
+        private FileHandle partitionKeyBlockOffsetsFile = null;
+        private FileHandle partitionKeyBlocksFile = null;
 
         public Factory(IndexComponents.ForRead perSSTableComponents, OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
@@ -116,7 +116,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
             }
             catch (Throwable t)
             {
-                throw Throwables.unchecked(t);
+                throw Throwables.unchecked(Throwables.close(t, tokensFile, partitionsFile, partitionKeyBlocksFile, partitionKeyBlockOffsetsFile));
             }
         }
 
