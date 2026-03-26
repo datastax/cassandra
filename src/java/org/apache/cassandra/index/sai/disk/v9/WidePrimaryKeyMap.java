@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.v9;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Arrays;
+
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -237,8 +238,8 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         private final IndexComponents.ForRead perSSTableComponents;
         private final ClusteringComparator clusteringComparator;
         private final KeyLookup clusteringKeyReader;
-        private final FileHandle clusteringKeyBlockOffsetsFile;
-        private final FileHandle clustingingKeyBlocksFile;
+        private FileHandle clusteringKeyBlockOffsetsFile = null;
+        private FileHandle clustingingKeyBlocksFile = null;
 
         public Factory(IndexComponents.ForRead perSSTableComponents, OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
                        SSTableReader sstable)
@@ -248,21 +249,17 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             try
             {
                 this.perSSTableComponents = perSSTableComponents;
-                this.clusteringKeyBlockOffsetsFile =
-                perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle(this::close);
-                this.clustingingKeyBlocksFile =
-                perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle(this::close);
+                this.clusteringKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle(this::close);
+                this.clustingingKeyBlocksFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle(this::close);
                 this.clusteringComparator = sstable.metadata().comparator;
-                NumericValuesMeta clusteringKeyBlockOffsetsMeta = new NumericValuesMeta(
-                metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)));
-                KeyLookupMeta clusteringKeyMeta = new KeyLookupMeta(
-                metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS)));
+                NumericValuesMeta clusteringKeyBlockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)));
+                KeyLookupMeta clusteringKeyMeta = new KeyLookupMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS)));
                 this.clusteringKeyReader = new KeyLookup(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile,
                                                          clusteringKeyMeta, clusteringKeyBlockOffsetsMeta);
             }
             catch (Throwable t)
             {
-                throw Throwables.unchecked(t);
+                throw Throwables.unchecked(Throwables.close(t, clusteringKeyBlockOffsetsFile, clustingingKeyBlocksFile));
             }
         }
 
