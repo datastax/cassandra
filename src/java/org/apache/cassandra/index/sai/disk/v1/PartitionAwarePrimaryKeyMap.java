@@ -87,8 +87,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadata.get(tokensComponent));
                 this.count = tokensMeta.valueCount;
 
-                token = tokensComponent.createFileHandle(this::close);
-                offset = offsetsComponent.createFileHandle(this::close);
+                token = tokensComponent.createFileHandle();
+                offset = offsetsComponent.createFileHandle();
 
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
                 this.offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta);
