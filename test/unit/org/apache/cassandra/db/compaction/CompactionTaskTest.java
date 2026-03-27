@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import org.junit.Assert;
 import org.junit.Before;
@@ -117,7 +118,7 @@ public class CompactionTaskTest
 
         AbstractCompactionTask task = new CompactionTask(cfs, txn, 0, false, mockStrategy);
         Assert.assertNotNull(task);
-        cfs.getCompactionStrategyContainer().pause();
+        task.cancelIfAffects(cfs, Predicates.alwaysTrue());
         try
         {
             task.execute(CompactionManager.instance.active);

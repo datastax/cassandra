@@ -59,11 +59,17 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
 
     private enum ExecutionState
     {
-        CREATED, // Task is created and ready for execution, possibly waiting in a queue.
-        ACTIVE, // Task has started execution and is listed in the active operations.
-        REJECTED // Task has been rejected, either because of an error or cancelled before becoming active.
+        CREATED,  // Task is created and ready for execution, possibly waiting in a queue.
+                  // If it is rejected, the rejecting thread must clean it up.
+        STARTED,  // Task has started execution, but still hasn't entered the active operations.
+                  // It still accepts cancellation requests that may or may not be honored by the executing thread.
+        ACTIVE,   // Task has started execution and is listed in the active operations.
+        COMPLETE, // Task is complete, cleanup done or to be done by executing thread.
+        ABORT,    // Task has been cancelled after entering STARTED state, before becoming ACTIVE
+        REJECTED, // Task has been rejected, either because of an error or cancelled before becoming active.
+                  // Cleanup done or to be done by rejecting thread.
     }
-    private volatile AtomicReference<ExecutionState> executionState = new AtomicReference<>(ExecutionState.CREATED);
+    private final AtomicReference<ExecutionState> executionState = new AtomicReference<>(ExecutionState.CREATED);
 
     /**
      * @param realm
@@ -147,9 +153,10 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     /** Executes the task */
     public void execute()
     {
-        // Exit immediately if task is already rejected. Note that we don't switch to ACTIVE here, because we want
-        // to do this only if the task moves to the active operations list (which is done by CompactionTask).
-        if (executionState.get() == ExecutionState.REJECTED)
+        // Exit immediately if task is already rejected. Also change the state to STARTED so that a race with rejection
+        // cannot close our resources while we are trying to work; before this point rejecting thread is responsible for
+        // clean-up; after this passes, we are.
+        if (!executionState.compareAndSet(ExecutionState.CREATED, ExecutionState.STARTED))
         {
             cancelledOnStart();
             return;
@@ -177,8 +184,9 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
             // if executeInternal has not switched the task to active state, do it now to remove it from the
             // scheduled set.
             switchToActive();
-
-            Throwables.maybeFail(cleanup(t));
+            // Unless the task has been fully rejected before entering this function, clean it up.
+            if (executionState.getAndSet(ExecutionState.COMPLETE) != ExecutionState.REJECTED)
+                Throwables.maybeFail(cleanup(t));
         }
     }
 
@@ -197,6 +205,13 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         }
         else
         {
+            // We have another chance to request abort if the task has not become ACTIVE yet.
+            // If this works, the executing thread is currently active, may honor the request and will clean up.
+            if (executionState.compareAndSet(ExecutionState.STARTED, ExecutionState.ABORT))
+            {
+                CompactionManager.instance.active.removeTaskFromScheduled(this);
+                logger.debug("Compaction {} aborted", transaction, t);
+            }
             // We are either already rejected, or racing with switching to active.
             // In the latter case, the operation can now be cancelled through the active operations list.
             return t;
@@ -205,7 +220,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
 
     public boolean switchToActive()
     {
-        boolean switched = executionState.compareAndSet(ExecutionState.CREATED, ExecutionState.ACTIVE);
+        boolean switched = executionState.compareAndSet(ExecutionState.STARTED, ExecutionState.ACTIVE);
         if (switched)
             CompactionManager.instance.active.removeTaskFromScheduled(this);
         return switched;
@@ -223,7 +238,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         {
             if (sstablePredicate.test(r))
             {
-                rejected(null);
+                Throwables.maybeFail(rejected(null));
                 return true;
             }
         }
