@@ -38,7 +38,7 @@ public class CompositeCompactionTask extends AbstractCompactionTask
 
     public CompositeCompactionTask(AbstractCompactionTask first)
     {
-        super(first.realm, first.realm.tryModify(Collections.emptyList(), OperationType.COMPACTION, first.transaction.opId()));
+        super(first.realm, first.realm.tryModify(Collections.emptyList(), OperationType.COMPACTION));
         tasks = new ArrayList<>();
         addTask(first);
     }
@@ -81,15 +81,8 @@ public class CompositeCompactionTask extends AbstractCompactionTask
     @Override
     public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
     {
-        if (realm != this.realm)
-            return false;
-
-        boolean allCancelled = true;
-        for (AbstractCompactionTask task : tasks)
-            allCancelled &= task.cancelIfAffects(realm, sstablePredicate);
-        if (allCancelled)
-            super.rejected(null);
-        return allCancelled;
+        // Leave cancellation to the individual tasks.
+        return false;
     }
 
     @Override
