@@ -26,6 +26,8 @@ import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.utils.UUIDs;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -2086,6 +2088,55 @@ public class CollectionsTest extends CQLTester
         assertRows(execute("SELECT c[..'t2'] FROM %s"), row(map("t1", 1, "t2", 2)));
         assertRows(execute("SELECT c['t3'..] FROM %s"), row(map("t3", 3, "t4", 4)));
         assertRows(execute("SELECT c[..'t5'] FROM %s"), row(map("t1", 1, "t2", 2, "t3", 3, "t4", 4)));
+    }
+
+    /**
+     * CNDB-17045: When a row has multiple complex columns (e.g. set + map) and only a subset are
+     * updated, untouched columns carry DeletionTime.LIVE as their complex deletion. A 32-bit
+     * overflow in SerializationHeader.writeLocalDeletionTime caused LIVE's localDeletionTime
+     * (Long.MAX_VALUE) to be corrupted during delta encoding. With corrupted_tombstone_strategy
+     * set to exception, this would surface as CorruptSSTableException during compaction or reads.
+     * <p>
+     * Note: BTreeRow.CellResolver.resolve() currently heals the corrupted InvalidDeletionTime
+     * back to DeletionTime.LIVE during row construction, because the overflowed LIVE deletion
+     * has markedForDeleteAt=Long.MIN_VALUE and Long.MIN_VALUE > Long.MIN_VALUE is false. This
+     * makes the corruption invisible to UnfilteredValidation at the CQL level. The primary
+     * protection is the fix in SerializationHeader.writeDeletionTime; this test serves as an
+     * extra regression guard.
+     *
+     * @see BTreeRow.Builder.CellResolver#resolve(Object[], int, int)
+     */
+    @Test
+    public void testMixedComplexDeletionsWithCorruptedTombstoneException() throws Throwable
+    {
+        Config.CorruptedTombstoneStrategy original = DatabaseDescriptor.getCorruptedTombstoneStrategy();
+        try
+        {
+            DatabaseDescriptor.setCorruptedTombstoneStrategy(Config.CorruptedTombstoneStrategy.exception);
+
+            createTable("CREATE TABLE %s (k int PRIMARY KEY, s set<text>, m map<text, text>)");
+
+            // Insert setting only the set column — the map column's complex deletion will be LIVE
+            execute("INSERT INTO %s (k, s) VALUES (1, {'a', 'b'})");
+            flush();
+
+            // Update only the map column — the set column's complex deletion will be LIVE
+            execute("UPDATE %s SET m = m + {'x': '1'} WHERE k = 1");
+            flush();
+
+            // Compaction reads both sstables and re-serializes the merged row.
+            // Before the fix, the LIVE complex deletion on the untouched column would overflow
+            // the 32-bit delta encoding in writeLocalDeletionTime.
+            compact();
+
+            // Read back to verify no CorruptSSTableException and data integrity
+            assertRows(execute("SELECT k, s, m FROM %s WHERE k = 1"),
+                       row(1, set("a", "b"), map("x", "1")));
+        }
+        finally
+        {
+            DatabaseDescriptor.setCorruptedTombstoneStrategy(original);
+        }
     }
 
     @Test
