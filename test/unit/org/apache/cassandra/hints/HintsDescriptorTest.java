@@ -223,7 +223,7 @@ public class HintsDescriptorTest
             switch (mode)
             {
                 case CASSANDRA_4:
-                case CC_4:
+                case HCD_1:
                     // These modes should use VERSION_40 for storage
                     assertEquals("Mode " + mode + " should use VERSION_40 for hints storage",
                                  MessagingService.VERSION_40, expectedVersion);
@@ -243,9 +243,9 @@ public class HintsDescriptorTest
     @Test
     public void testCurrentStorageVersionCC4ReturnsVersion40()
     {
-        // Explicit test that CC_4 compatibility mode results in VERSION_40 hints format
-        int version = StorageCompatibilityMode.CC_4.storageMessagingVersion();
-        assertEquals("CC_4 mode should produce VERSION_40 hints for rollback compatibility",
+        // Explicit test that HCD_1 compatibility mode results in VERSION_40 hints format
+        int version = StorageCompatibilityMode.HCD_1.storageMessagingVersion();
+        assertEquals("HCD_1 mode should produce VERSION_40 hints for rollback compatibility",
                      MessagingService.VERSION_40, version);
     }
 
@@ -278,8 +278,8 @@ public class HintsDescriptorTest
     @Test
     public void testHintsVersionFromMessagingVersionCC4Compatibility()
     {
-        int messagingVersion = StorageCompatibilityMode.CC_4.storageMessagingVersion();
-        assertEquals("CC_4 should return VERSION_40 messaging version", MessagingService.VERSION_40, messagingVersion);
+        int messagingVersion = StorageCompatibilityMode.HCD_1.storageMessagingVersion();
+        assertEquals("HCD_1 should return VERSION_40 messaging version", MessagingService.VERSION_40, messagingVersion);
 
         int hintsVersion = HintsDescriptor.hintsVersionFromMessagingVersion(messagingVersion);
         assertEquals("VERSION_40 messaging version should translate to hints VERSION_40",
