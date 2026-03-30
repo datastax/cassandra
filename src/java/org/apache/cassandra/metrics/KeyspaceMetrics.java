@@ -196,11 +196,11 @@ public class KeyspaceMetrics
      *
      * @param ks Keyspace to measure metrics
      */
-    public KeyspaceMetrics(final Keyspace ks)
+    public KeyspaceMetrics(final Keyspace ks, CassandraMetricsRegistry metricsRegistry)
     {
         factory = new KeyspaceMetricNameFactory(ks);
         keyspace = ks;
-        this.metricsRegistry = CassandraRelevantProperties.KEYSPACE_METRICS_ENABLED.getBoolean() ? Metrics : CassandraMetricsRegistry.NoOpMetrics;
+        this.metricsRegistry = metricsRegistry;
 
         memtableColumnsCount = createKeyspaceGauge("MemtableColumnsCount",
                 metric -> metric.memtableColumnsCount.getValue());
