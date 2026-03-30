@@ -811,6 +811,14 @@ public enum CassandraRelevantProperties
      */
     SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_table.enabled", "true"),
 
+    /**
+     * If disabled, the query optimizer runs index search to estimate the number of matching keys.
+     * If enabled, the query optimizer uses, if present, the term statistics stored
+     * with the help of histograms in the metadata component of each SSTable index.
+     * Using terms statistics is significantly less costly but less precise.
+     */
+    SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS("cassandra.sai.query_optimization.use_term_statistics", "false"),
+
     SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
 
     /**
