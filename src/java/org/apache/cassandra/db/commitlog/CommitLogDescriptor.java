@@ -102,7 +102,7 @@ public class CommitLogDescriptor
 
     /**
      * Returns the commit log version to use for new segments, respecting storage compatibility mode.
-     * When compatibility mode is set (e.g., CC_4), this ensures commit logs are written in a format
+     * When compatibility mode is set (e.g., HCD_1), this ensures commit logs are written in a format
      * that older versions can read.
      *
      * @return the commit log version appropriate for the current storage compatibility mode
