@@ -453,15 +453,15 @@ public class MemtableParamsTest
     // ========================================================================
 
     /**
-     * Test that asSchemaValueMap() returns a Map in CC_4 and CASSANDRA_4 compatibility modes.
+     * Test that asSchemaValueMap() returns a Map in HCD_1 and CASSANDRA_4 compatibility modes.
      * Both modes should write memtable as {@code frozen<map<text, text>>} for CC4 compatibility.
      * This ensures downgrade to CC4 is safe.
      */
     @Test
     public void testAsSchemaValueMapInCC4CompatibilityModes()
     {
-        // Test both CC_4 and CASSANDRA_4 modes (they should behave identically)
-        for (StorageCompatibilityMode mode : new StorageCompatibilityMode[]{StorageCompatibilityMode.CC_4,
+        // Test both HCD_1 and CASSANDRA_4 modes (they should behave identically)
+        for (StorageCompatibilityMode mode : new StorageCompatibilityMode[]{StorageCompatibilityMode.HCD_1,
                                                                              StorageCompatibilityMode.CASSANDRA_4})
         {
             // Test DEFAULT memtable - CC4 writes empty map {} for "default" configuration
@@ -481,7 +481,7 @@ public class MemtableParamsTest
     }
 
     /**
-     * Test that asSchemaValueMap() rejects incompatible configurations in CC_4 mode.
+     * Test that asSchemaValueMap() rejects incompatible configurations in HCD_1 mode.
      * Tests both CC5-only types (sharded) and unknown configurations.
      */
     @Test
@@ -491,8 +491,8 @@ public class MemtableParamsTest
         MemtableParams shardedParams = MemtableParams.forTesting(MemtableParams.DEFAULT.factory(), "sharded-skiplist");
         try
         {
-            shardedParams.asSchemaValueMap(StorageCompatibilityMode.CC_4);
-            fail("Should have thrown ConfigurationException for sharded memtable in CC_4 mode");
+            shardedParams.asSchemaValueMap(StorageCompatibilityMode.HCD_1);
+            fail("Should have thrown ConfigurationException for sharded memtable in HCD_1 mode");
         }
         catch (ConfigurationException e)
         {
@@ -506,8 +506,8 @@ public class MemtableParamsTest
         MemtableParams unknownParams = MemtableParams.forTesting(MemtableParams.DEFAULT.factory(), "unknown-memtable-type");
         try
         {
-            unknownParams.asSchemaValueMap(StorageCompatibilityMode.CC_4);
-            fail("Should have thrown ConfigurationException for unknown configuration in CC_4 mode");
+            unknownParams.asSchemaValueMap(StorageCompatibilityMode.HCD_1);
+            fail("Should have thrown ConfigurationException for unknown configuration in HCD_1 mode");
         }
         catch (ConfigurationException e)
         {
@@ -536,7 +536,7 @@ public class MemtableParamsTest
     @Test(expected = IllegalStateException.class)
     public void testAsSchemaValueTextThrowsInCC4Mode()
     {
-        MemtableParams.DEFAULT.asSchemaValueText(StorageCompatibilityMode.CC_4);
+        MemtableParams.DEFAULT.asSchemaValueText(StorageCompatibilityMode.HCD_1);
     }
 
 }

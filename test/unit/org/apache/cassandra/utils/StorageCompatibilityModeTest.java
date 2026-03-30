@@ -41,7 +41,7 @@ public class StorageCompatibilityModeTest
         {
             switch (mode)
             {
-                case CC_4:
+                case HCD_1:
                 case UPGRADING:
                 case NONE:
                     mode.validateSstableFormat(big);
@@ -62,9 +62,9 @@ public class StorageCompatibilityModeTest
     @Test
     public void testStorageMessagingVersion()
     {
-        // CASSANDRA_4 and CC_4 should use VERSION_40 for storage compatibility
+        // CASSANDRA_4 and HCD_1 should use VERSION_40 for storage compatibility
         assertEquals(MessagingService.VERSION_40, StorageCompatibilityMode.CASSANDRA_4.storageMessagingVersion());
-        assertEquals(MessagingService.VERSION_40, StorageCompatibilityMode.CC_4.storageMessagingVersion());
+        assertEquals(MessagingService.VERSION_40, StorageCompatibilityMode.HCD_1.storageMessagingVersion());
 
         // UPGRADING and NONE should use the current messaging version
         assertEquals(MessagingService.current_version, StorageCompatibilityMode.UPGRADING.storageMessagingVersion());
@@ -81,7 +81,7 @@ public class StorageCompatibilityModeTest
             switch (mode)
             {
                 case CASSANDRA_4:
-                case CC_4:
+                case HCD_1:
                     assertEquals("Mode " + mode + " should use VERSION_40 for storage",
                                  MessagingService.VERSION_40, version);
                     break;

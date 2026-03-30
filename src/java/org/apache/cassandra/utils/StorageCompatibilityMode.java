@@ -50,7 +50,7 @@ public enum StorageCompatibilityMode
      *   <li>SSTable format: Allows BTI format in {@link #validateSstableFormat}.</li>
      * </ul>
      */
-    CC_4(4),
+    HCD_1(4),
 
     /**
      * Use the storage formats of the current version, but disabling features that are not compatible with any
@@ -101,7 +101,7 @@ public enum StorageCompatibilityMode
 
     /**
      * Returns the messaging version to use for on-disk storage formats (commit log, hints, batch logs).
-     * When a compatibility mode is set (e.g., CC_4), this ensures that on-disk formats are written
+     * When a compatibility mode is set (e.g., HCD_1), this ensures that on-disk formats are written
      * in a way that older versions can read.
      *
      * @return the messaging version appropriate for storage serialization
@@ -112,7 +112,7 @@ public enum StorageCompatibilityMode
         switch (this)
         {
             case CASSANDRA_4:
-            case CC_4:
+            case HCD_1:
                 version = MessagingService.VERSION_40;
                 break;
             case UPGRADING:

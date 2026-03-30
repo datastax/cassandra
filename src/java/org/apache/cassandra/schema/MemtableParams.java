@@ -327,7 +327,7 @@ public final class MemtableParams
      * This defensive approach handles:
      * <ul>
      *   <li>Upgrading from CC4 to CC5 (reads CC4 format, writes CC5 format)</li>
-     *   <li>Running CC5 in CC_4 mode (reads either format, writes CC4 format)</li>
+     *   <li>Running CC5 in HCD_1 mode (reads either format, writes CC4 format)</li>
      *   <li>Mixed clusters during rolling upgrades (reads both formats)</li>
      * </ul>
      *
@@ -425,7 +425,7 @@ public final class MemtableParams
 
     /**
      * Returns the memtable value as a map for CC4 compatibility mode.
-     * Used when storage_compatibility_mode is CC_4 or CASSANDRA_4.
+     * Used when storage_compatibility_mode is HCD_1 or CASSANDRA_4.
      *
      * @return Map representation for CC4 schema (frozen&lt;map&lt;text,text&gt;&gt;)
      * @throws ConfigurationException if the memtable type is not compatible with CC4
@@ -518,7 +518,7 @@ public final class MemtableParams
             throw new ConfigurationException(
                 String.format("Memtable configuration '%s' is not compatible with CC4. " +
                              "Sharded memtable types were introduced in CC5. " +
-                             "Please use 'skiplist' or 'trie' when storage_compatibility_mode is CC_4 or CASSANDRA_4.",
+                             "Please use 'skiplist' or 'trie' when storage_compatibility_mode is HCD_1 or CASSANDRA_4.",
                              configKey));
         }
 

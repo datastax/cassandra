@@ -394,7 +394,7 @@ public class CommitLogDescriptorTest
             switch (mode)
             {
                 case CASSANDRA_4:
-                case CC_4:
+                case HCD_1:
                     // These modes should use VERSION_40 messaging, which maps to commit log VERSION_40
                     Assert.assertEquals("Mode " + mode + " should map to commit log VERSION_40",
                                         CommitLogDescriptor.VERSION_40, expectedVersion);
@@ -414,9 +414,9 @@ public class CommitLogDescriptorTest
     @Test
     public void testCurrentStorageVersionCC4ReturnsVersion40()
     {
-        // Explicit test that CC_4 compatibility mode results in VERSION_40 commit log format
-        int version = CommitLogDescriptor.currentVersion(StorageCompatibilityMode.CC_4.storageMessagingVersion());
-        Assert.assertEquals("CC_4 mode should produce commit log VERSION_40 for rollback compatibility",
+        // Explicit test that HCD_1 compatibility mode results in VERSION_40 commit log format
+        int version = CommitLogDescriptor.currentVersion(StorageCompatibilityMode.HCD_1.storageMessagingVersion());
+        Assert.assertEquals("HCD_1 mode should produce commit log VERSION_40 for rollback compatibility",
                             CommitLogDescriptor.VERSION_40, version);
     }
 }
