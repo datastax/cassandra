@@ -217,7 +217,7 @@ public class SystemKeyspaceTest
             Set<String> v1Columns = v1Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
             assertThat(v1Columns).doesNotContain("compaction_properties");
 
-            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CC_4);
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
             TableMetadata cc4Table = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.COMPACTION_HISTORY);
             assertNotNull(cc4Table);
             Set<String> cc4Columns = cc4Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
@@ -258,7 +258,7 @@ public class SystemKeyspaceTest
             assertEquals(50L, row.getLong("bytes_out"));
             assertThat(row.has("compaction_properties")).isFalse();
 
-            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CC_4);
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
             TimeUUID taskId2 = TimeUUID.Generator.nextTimeUUID();
 
             SystemKeyspace.updateCompactionHistory(taskId2, "ks2", "cf2", System.currentTimeMillis(), 200L, 100L, partitionsMerged, compactionProperties);

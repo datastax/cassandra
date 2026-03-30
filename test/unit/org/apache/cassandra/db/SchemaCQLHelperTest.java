@@ -762,7 +762,7 @@ public class SchemaCQLHelperTest extends CQLTester
         try
         {
             // Test filtering when CC 4.0 backward compatibility mode is enabled
-            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.CC_4;
+            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.HCD_1;
 
             String tableName = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text)");
             ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(tableName);
@@ -893,7 +893,7 @@ public class SchemaCQLHelperTest extends CQLTester
         try
         {
             // Enable CC 4.0 backward compatibility mode to test toMapForCC4() output
-            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.CC_4;
+            TableParams.storageCompatibilityModeOverride = StorageCompatibilityMode.HCD_1;
 
             // Test that standard Cassandra memtables output short class names
             String tableName1 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'trie'");

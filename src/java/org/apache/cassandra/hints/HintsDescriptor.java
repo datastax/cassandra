@@ -145,7 +145,7 @@ final class HintsDescriptor
 
     /**
      * Returns the hints version to use for new hints files, respecting storage compatibility mode.
-     * When compatibility mode is set (e.g., CC_4), this ensures hints are written in a format
+     * When compatibility mode is set (e.g., HCD_1), this ensures hints are written in a format
      * that older versions can read.
      *
      * @return the hints version appropriate for the current storage compatibility mode

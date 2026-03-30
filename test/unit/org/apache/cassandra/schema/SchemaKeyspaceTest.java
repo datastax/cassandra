@@ -99,7 +99,7 @@ public class SchemaKeyspaceTest
     {
         StorageCompatibilityMode[] modes = {
             StorageCompatibilityMode.NONE,      // CC5 mode
-            StorageCompatibilityMode.CC_4,      // CC4 compatibility mode
+            StorageCompatibilityMode.HCD_1,      // CC4 compatibility mode
             StorageCompatibilityMode.CASSANDRA_4 // Cassandra 4 compatibility mode
         };
 
