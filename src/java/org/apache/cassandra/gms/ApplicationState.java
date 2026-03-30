@@ -57,11 +57,6 @@ public enum ApplicationState
     STATUS_WITH_PORT, //Replacement for STATUS
     DISK_USAGE,
     /**
-     * Free style JSON paylod Map<key, value>. Pprevios Enum ordinals approach could easily create
-     * collisions on upgrades, incompatibilities, mismatches, etc.
-     */
-    JSON_PAYLOAD,
-    /**
      * The set of sstable versions on this node. This will usually be only the "current" sstable format (the one with
      * which new sstables are written), but may contain more on newly upgraded nodes before `upgradesstable` has been
      * run.
@@ -71,6 +66,11 @@ public enum ApplicationState
      **/
     SSTABLE_VERSIONS,
     INDEX_STATUS,
+    /**
+     * Free style JSON paylod Map<key, value>. Pprevios Enum ordinals approach could easily create
+     * collisions on upgrades, incompatibilities, mismatches, etc.
+     */
+    JSON_PAYLOAD,
     // DO NOT EDIT OR REMOVE PADDING STATES BELOW - only add new states above.  See CASSANDRA-16484
     X1,
     X2,
@@ -91,11 +91,13 @@ public enum ApplicationState
 
     private static final ObjectMapper jsonMapper = new ObjectMapper();
 
-    public static final Map<String, Object> initialJsonPayload = new HashMap<String, Object>()
-    {{
-        put(JsonPayload.CLUSTER_NAME.name(), DatabaseDescriptor.getClusterName());
-        put(JsonPayload.PARTITIONER_NAME.name(), DatabaseDescriptor.getPartitionerName());
-    }};
+    static final Map<String, Object> initialJsonPayload;
+
+    static {
+        initialJsonPayload = new HashMap<>();
+        initialJsonPayload.put(JsonPayload.CLUSTER_NAME.name(), DatabaseDescriptor.getClusterName());
+        initialJsonPayload.put(JsonPayload.PARTITIONER_NAME.name(), DatabaseDescriptor.getPartitionerName());
+    }
 
     public static Map<String, Object> deserializeJsonPayload(VersionedValue value)
     {

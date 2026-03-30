@@ -129,11 +129,11 @@ public class GossipDigestSynVerbHandler extends GossipVerbHandler<GossipDigestSy
 
         InetAddressAndPort nodeAddress = FBUtilities.getBroadcastAddressAndPort();
         // Send cluster and partitioner names for cluster foreign node checks
-        if (deltaEpStateMap.get(nodeAddress) != null)
+        if (deltaEpStateMap.get(nodeAddress) != null &&
+            !deltaEpStateMap.get(nodeAddress).containsApplicationState(ApplicationState.JSON_PAYLOAD))
         {
-            if (!deltaEpStateMap.get(nodeAddress).containsApplicationState(ApplicationState.JSON_PAYLOAD))
-                deltaEpStateMap.get(nodeAddress).addApplicationState(ApplicationState.JSON_PAYLOAD,
-                                                                     ApplicationState.serializeJsonPayload(ApplicationState.initialJsonPayload));
+            deltaEpStateMap.get(nodeAddress).addApplicationState(ApplicationState.JSON_PAYLOAD,
+                                                                 ApplicationState.serializeJsonPayload(ApplicationState.initialJsonPayload));
 
         }
         deltaEpStateMap = removeForeignClusterNodes(deltaEpStateMap);
@@ -149,11 +149,11 @@ public class GossipDigestSynVerbHandler extends GossipVerbHandler<GossipDigestSy
 
         InetAddressAndPort nodeAddress = FBUtilities.getBroadcastAddressAndPort();
         // Send cluster and partitioner names for cluster foreign node checks
-        if (stateMap.get(nodeAddress) != null)
+        if (stateMap.get(nodeAddress) != null &&
+            !stateMap.get(nodeAddress).containsApplicationState(ApplicationState.JSON_PAYLOAD))
         {
-            if (!stateMap.get(nodeAddress).containsApplicationState(ApplicationState.JSON_PAYLOAD))
-                stateMap.get(nodeAddress).addApplicationState(ApplicationState.JSON_PAYLOAD,
-                                                              ApplicationState.serializeJsonPayload(ApplicationState.initialJsonPayload));
+            stateMap.get(nodeAddress).addApplicationState(ApplicationState.JSON_PAYLOAD,
+                                                          ApplicationState.serializeJsonPayload(ApplicationState.initialJsonPayload));
 
         }
         stateMap = removeForeignClusterNodes(stateMap);
