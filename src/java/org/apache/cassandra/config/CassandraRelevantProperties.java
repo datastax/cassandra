@@ -416,6 +416,14 @@ public enum CassandraRelevantProperties
     /** Whether to optimize query plans */
     SAI_QUERY_OPTIMIZATION_LEVEL("cassandra.sai.query_optimization_level", "1"),
 
+    /**
+     * If disabled, the query optimizer runs index search to estimate the number of matching keys.
+     * If enabled, the query optimizer uses, if present, the term statistics stored
+     * with the help of histograms in the metadata component of each SSTable index.
+     * Using terms statistics is significantly less costly but less precise.
+     */
+    SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS("cassandra.sai.query_optimization.use_term_statistics", "false"),
+
     /** Controls the number of rows read in a single batch when fetching rows for a partition key */
     SAI_PARTITION_ROW_BATCH_SIZE("cassandra.sai.partition_row_batch_size", "100"),
 
