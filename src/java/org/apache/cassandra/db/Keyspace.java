@@ -58,6 +58,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
+import org.apache.cassandra.metrics.MetricsFactory;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.nodes.virtual.NodeConstants;
 import org.apache.cassandra.repair.KeyspaceRepairManager;
@@ -371,7 +372,8 @@ public class Keyspace
             throw new IllegalStateException("Cannot initialize Keyspace with virtual metadata " + keyspaceName);
         createReplicationStrategy(metadata);
 
-        this.metric = new KeyspaceMetrics(this);
+//        this.metric = new KeyspaceMetrics(this);
+        this.metric = MetricsFactory.instance.newKeyspaceMetrics(this);
         this.viewManager = new ViewManager(this);
         for (TableMetadata cfm : metadata.tablesAndViews())
         {
@@ -389,7 +391,7 @@ public class Keyspace
         this.schema = Schema.instance;
         this.metadata = metadata;
         createReplicationStrategy(metadata);
-        this.metric = new KeyspaceMetrics(this);
+        this.metric = MetricsFactory.instance.newKeyspaceMetrics(this);
         this.viewManager = new ViewManager(this);
         this.repairManager = new CassandraKeyspaceRepairManager(this);
         this.writeHandler = new CassandraKeyspaceWriteHandler(this);
