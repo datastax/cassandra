@@ -36,7 +36,6 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.cql3.CQL3Type.Native.DECIMAL;
 import static org.apache.cassandra.cql3.CQL3Type.Native.INT;
@@ -90,30 +89,38 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
 
         for (Version version : versions)
         {
-            RowCountTest test = new RowCountTest(Operator.NEQ, 25);
-            test.doTest(version, INT, 95, 100);
-            test.doTest(version, DECIMAL, 95, version.onOrAfter(Version.EB) ? 99 : 100);
-            test.doTest(version, VARINT, 95, 99);
+            boolean[] useTermStatsTestedValues = new boolean[]{ false };
+            if (version.onOrAfter(Version.EB))
+                useTermStatsTestedValues = new boolean[]{ true, false };
+            for (boolean useTermStats : useTermStatsTestedValues)
+            {
+                QueryController.QUERY_OPT_USE_TERM_STATS = useTermStats;
 
-            test = new RowCountTest(Operator.LT, 50);
-            test.doTest(version, INT, 40, 60);
-            test.doTest(version, DECIMAL, 40, 60);
-            test.doTest(version, VARINT, 40, 60);
+                RowCountTest test = new RowCountTest(Operator.NEQ, 25);
+                test.doTest(version, INT, 95, 99);
+                test.doTest(version, DECIMAL, 95, 99);
+                test.doTest(version, VARINT, 95, 99);
 
-            test = new RowCountTest(Operator.LT, 150);
-            test.doTest(version, INT, 95, 100);
-            test.doTest(version, DECIMAL, 95, 100);
-            test.doTest(version, VARINT, 95, 100);
+                test = new RowCountTest(Operator.LT, 50);
+                test.doTest(version, INT, 40, 60);
+                test.doTest(version, DECIMAL, 40, 60);
+                test.doTest(version, VARINT, 40, 60);
 
-            test = new RowCountTest(Operator.EQ, 31);
-            // For older on-disk formats we expect less accurate estimates due to lack of per-index stats and due to
-            // lazy search on the first shard only; in this scenario each shard iterator will report at least one row,
-            // even if none are matching. We could have run the search on all shards to get more accurate estimates,
-            // but search is expensive, so we accept less accurate estimates for older formats.
-            int maxExpectedRows = version.onOrAfter(Version.EB) ? 1 : TrieMemtable.SHARD_COUNT;
-            test.doTest(version, INT, 1, maxExpectedRows);
-            test.doTest(version, DECIMAL, 1, maxExpectedRows);
-            test.doTest(version, VARINT, 1, maxExpectedRows);
+                test = new RowCountTest(Operator.LT, 150);
+                test.doTest(version, INT, 95, 100);
+                test.doTest(version, DECIMAL, 95, 100);
+                test.doTest(version, VARINT, 95, 100);
+
+                test = new RowCountTest(Operator.EQ, 31);
+                // For older on-disk formats we expect less accurate estimates due to lack of per-index stats and due to
+                // lazy search on the first shard only; in this scenario each shard iterator will report at least one row,
+                // even if none are matching. We could have run the search on all shards to get more accurate estimates,
+                // but search is expensive, so we accept less accurate estimates for older formats.
+                int maxExpectedRows = useTermStats ? 1 : TrieMemtable.SHARD_COUNT;
+                test.doTest(version, INT, 1, maxExpectedRows);
+                test.doTest(version, DECIMAL, 1, maxExpectedRows);
+                test.doTest(version, VARINT, 1, maxExpectedRows);
+            }
         }
     }
 
