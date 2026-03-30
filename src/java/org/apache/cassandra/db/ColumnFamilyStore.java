@@ -30,6 +30,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -438,6 +439,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     private final ReentrantLock longRunningSerializedOperationsLock = new ReentrantLock();
 
+    private final List<Future<?>> initialBuilds = new LinkedList<>();
+
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
         postFlushExecutor.shutdown();
@@ -668,7 +671,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         indexManager = new SecondaryIndexManager(this);
         for (IndexMetadata info : metadata.get().indexes)
         {
-            indexManager.addIndex(info, true);
+            initialBuilds.add(indexManager.addIndex(info, true));
         }
 
         metric = new TableMetrics(this, memtableMetrics);
@@ -702,6 +705,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             topPartitions = null;
         else
             topPartitions = new TopPartitionTracker(metadata());
+    }
+
+    /**
+     * Waits for the completion of index builds created during CFS initialization.
+     * <p>
+     * This method blocks until all initial index builds have been completed or the timeout expires. Note that this method
+     * will throw if initial build tasks failed.
+     *
+     * @param timeout the maximum time to wait before timing out
+     * @param unit    the time unit of the timeout argument
+     */
+    public void awaitInitialIndexBuilds(long timeout, TimeUnit unit)
+    {
+        FBUtilities.waitOnFutures(initialBuilds, timeout, unit);
     }
 
     public static String getTableMBeanName(String ks, String name, boolean isIndex)
