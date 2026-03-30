@@ -54,15 +54,15 @@ public class TrieMemtableMetricsView
 
     public static TrieMemtableMetricsView getOrCreate(String keyspace, String table)
     {
-        return perTableMetrics.computeIfAbsent(getKey(keyspace, table), k -> new TrieMemtableMetricsView(keyspace, table));
+        return perTableMetrics.computeIfAbsent(getKey(keyspace, table), k -> MetricsFactory.instance.newMemtableMetrics(keyspace, table));
     }
 
-    private TrieMemtableMetricsView(String keyspace, String table)
+    public TrieMemtableMetricsView(String keyspace, String table, CassandraMetricsRegistry metricsRegistry)
     {
         this.keyspace = keyspace;
         this.table = table;
         factory = new TrieMemtableMetricNameFactory(keyspace, table);
-        this.metricsRegistry = CassandraRelevantProperties.TABLE_METRICS_ENABLED.getBoolean() ? Metrics : CassandraMetricsRegistry.NoOpMetrics;
+        this.metricsRegistry = metricsRegistry;
         
         uncontendedPuts = metricsRegistry.counter(factory.createMetricName(UNCONTENDED_PUTS));
         contendedPuts = metricsRegistry.counter(factory.createMetricName(CONTENDED_PUTS));
