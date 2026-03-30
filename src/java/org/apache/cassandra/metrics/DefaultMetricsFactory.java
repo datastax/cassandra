@@ -44,4 +44,10 @@ public class DefaultMetricsFactory implements MetricsFactory
     {
         return new TableMetrics(cfs, memtableMetrics, CassandraMetricsRegistry.Metrics);
     }
+
+    @Override
+    public @NonNull TrieMemtableMetricsView newMemtableMetrics(@NonNull String keyspace, @NonNull String table)
+    {
+        return new TrieMemtableMetricsView(keyspace, table, CassandraMetricsRegistry.Metrics);
+    }
 }

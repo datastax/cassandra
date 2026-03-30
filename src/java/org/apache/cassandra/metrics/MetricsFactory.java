@@ -37,6 +37,9 @@ public interface MetricsFactory
     @Nonnull
     TableMetrics newTableMetrics(@Nonnull final ColumnFamilyStore cfs, TableMetrics.ReleasableMetric memtableMetrics);
 
+    @Nonnull
+    TrieMemtableMetricsView newMemtableMetrics(@Nonnull String keyspace, @Nonnull String table);
+
     static MetricsFactory loadFactory()
     {
         MetricsFactory factory = null;
