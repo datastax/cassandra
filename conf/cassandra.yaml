@@ -2310,23 +2310,21 @@ drop_compact_storage_enabled: false
 # This property indicates with what Cassandra major version the storage format will be compatible with.
 #
 # The chosen storage compatibility mode will determine the versions of the written sstables, commitlogs, hints, etc.
-# For example, if we're going to remain compatible with Cassandra 4.x, the value of this property should be 4, which
-# will make us use sstables in the latest N version of the BIG format.
 #
 # This will also determine if certain features that depend on newer formats are available. For example, extended TTL
 # (up to 2106) depends on the sstable, commit-log, hints, and messaging versions introduced by Cassandra 5.0, so that
-# feature won't be available if this property is set to CASSANDRA_4. See the upgrade guide for more details.
+# feature won't be available if this property is set to HCD_1.
 #
 # Possible values are:
 #
-# ** CASSANDRA_4: Stays compatible with the 4.x line in features, formats and component versions.
+# ** HCD_1: Stays compatible with the 4.x line in features, formats and component versions.
 # ** UPGRADING:   The cluster monitors the version of each node during this interim stage. This has a cost but ensures
 #                all new features, formats, versions, etc. are enabled safely.
 # ** NONE:        Start with all the new features and formats enabled.
 #
 # A typical upgrade would be:
 #
-# . Do a rolling upgrade, starting all nodes in CASSANDRA_X compatibility mode.
+# . Do a rolling upgrade, starting all nodes in HCD_1 compatibility mode.
 # . Once the new binary is rendered stable, do a rolling restart with the UPGRADING mode. The cluster will keep new
 #   features disabled until all nodes are started in the UPGRADING mode; when that happens, new features controlled by
 #   the storage compatibility mode are enabled.
@@ -2334,7 +2332,7 @@ drop_compact_storage_enabled: false
 #   and ensures stability. If Cassandra was started at the previous version by accident, a node with disabled
 #   compatibility mode would no longer toggle behaviors as when it was running in the UPGRADING mode.
 #
-storage_compatibility_mode: CASSANDRA_4
+storage_compatibility_mode: HCD_1
 
 # Changes defaults considered production safest for HCD users
 # hcd_guardrail_defaults: false
