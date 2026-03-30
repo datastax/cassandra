@@ -42,6 +42,6 @@ public class DefaultMetricsFactory implements MetricsFactory
     @Override
     public @NonNull TableMetrics newTableMetrics(@NonNull ColumnFamilyStore cfs, TableMetrics.ReleasableMetric memtableMetrics)
     {
-        return new TableMetrics(cfs, memtableMetrics);
+        return new TableMetrics(cfs, memtableMetrics, CassandraMetricsRegistry.Metrics);
     }
 }

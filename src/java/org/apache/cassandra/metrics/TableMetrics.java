@@ -527,7 +527,7 @@ public class TableMetrics
      *
      * @param cfs ColumnFamilyStore to measure metrics
      */
-    public TableMetrics(final ColumnFamilyStore cfs, ReleasableMetric memtableMetrics)
+    public TableMetrics(final ColumnFamilyStore cfs, ReleasableMetric memtableMetrics, CassandraMetricsRegistry metricsRegistry)
     {
         metricsAggregation = MetricsAggregation.fromMetadata(cfs.metadata());
         logger.trace("Using {} histograms for table={}", metricsAggregation, cfs.metadata());
@@ -583,7 +583,7 @@ public class TableMetrics
         samplers.put(SamplerType.CAS_CONTENTIONS, topCasPartitionContention);
         samplers.put(SamplerType.LOCAL_READ_TIME, topLocalReadQueryTime);
 
-        this.metricsRegistry = CassandraRelevantProperties.TABLE_METRICS_ENABLED.getBoolean() ? CassandraMetricsRegistry.Metrics : CassandraMetricsRegistry.NoOpMetrics;
+        this.metricsRegistry = metricsRegistry;
         memtableColumnsCount = createTableGauge("MemtableColumnsCount",
                                                 () -> cfs.getTracker().getView().getCurrentMemtable().getOperations());
 
