@@ -67,6 +67,7 @@ import static java.lang.String.format;
 
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import static org.apache.cassandra.config.CassandraRelevantProperties.IGNORE_CORRUPTED_SCHEMA_TABLES;
 import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
@@ -119,7 +120,7 @@ public final class SchemaKeyspace
               + "PRIMARY KEY ((keyspace_name)))");
 
     // CC4-compatible schema with memtable as frozen<map<text, text>>
-    // Used when storage_compatibility_mode is CC_4 to support downgrade to CC4
+    // Used when storage_compatibility_mode is HCD_1 to support downgrade to CC4
     private static final TableMetadata TablesLegacy =
         parse(TABLES,
               "table definitions",
@@ -376,7 +377,7 @@ public final class SchemaKeyspace
     private static List<TableMetadata> allTableMetadata()
     {
         return ImmutableList.of(Keyspaces,
-                                // Use legacy schema (frozen<map>) when in CC_4 compatibility mode to support downgrade
+                                // Use legacy schema (frozen<map>) when in HCD_1 compatibility mode to support downgrade
                                 tablesTableMetadata(),
                                 Columns,
                                 ColumnMasks,
