@@ -416,6 +416,8 @@ public enum CassandraRelevantProperties
     /** Whether to optimize query plans */
     SAI_QUERY_OPTIMIZATION_LEVEL("cassandra.sai.query_optimization_level", "1"),
 
+    SAI_QUERY_OPTIMIZATION_USE_HISTOGRAMS("cassandra.sai.query_optimization.use_histogram", "false"),
+
     /** Controls the number of rows read in a single batch when fetching rows for a partition key */
     SAI_PARTITION_ROW_BATCH_SIZE("cassandra.sai.partition_row_batch_size", "100"),
 

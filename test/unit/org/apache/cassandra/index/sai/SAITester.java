@@ -234,7 +234,7 @@ public class SAITester extends CQLTester
     {
         // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
         QueryController.QUERY_OPT_LEVEL = 1;
-
+        QueryController.QUERY_OPT_USE_HISTOGRAMS = true;
     }
 
     @Before
