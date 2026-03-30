@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -36,6 +37,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -396,6 +398,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     private final ReentrantLock longRunningSerializedOperationsLock = new ReentrantLock();
 
+    private final List<Future<?>> initialBuilds = new LinkedList<>();
+
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
         postFlushExecutor.shutdown();
@@ -617,7 +621,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         indexManager = new SecondaryIndexManager(this);
         for (IndexMetadata info : metadata.get().indexes)
         {
-            indexManager.addIndex(info, true);
+            initialBuilds.add(indexManager.addIndex(info, true));
         }
 
         metric = new TableMetrics(this, memtableFactory.createMemtableMetrics(metadata));
@@ -646,6 +650,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         streamManager = new CassandraStreamManager(this);
         repairManager = new CassandraTableRepairManager(this);
         sstableImporter = new SSTableImporter(this);
+    }
+
+    /**
+     * Waits for the completion of index builds created during CFS initialization.
+     * <p>
+     * This method blocks until all initial index builds have been completed or the timeout expires. Note that this method
+     * will throw if initial build tasks failed.
+     *
+     * @param timeout the maximum time to wait before timing out
+     * @param unit    the time unit of the timeout argument
+     */
+    public void awaitInitialIndexBuilds(long timeout, TimeUnit unit)
+    {
+        FBUtilities.waitOnFutures(initialBuilds, timeout, unit);
     }
 
     public static String getTableMBeanName(String ks, String name, boolean isIndex)

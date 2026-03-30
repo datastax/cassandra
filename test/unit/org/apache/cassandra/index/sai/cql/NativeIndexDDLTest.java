@@ -81,8 +81,11 @@ import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.mockito.Mockito;
@@ -664,6 +667,68 @@ public class NativeIndexDDLTest extends SAITester
         waitForCompactions();
 
         assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0")).isInstanceOf(ReadFailureException.class);
+    }
+
+    @Test
+    public void testAwaitInitialIndexBuilds() throws Throwable
+    {
+        // setup table and SAI
+        createTable(CREATE_TABLE_TEMPLATE);
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore(KEYSPACE);
+        cfs.awaitInitialIndexBuilds(10, TimeUnit.SECONDS);  // no-ops: no initial index
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+        flush();
+
+        createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        waitForAssert(() -> assertEquals(1, INDEX_BUILD_COUNTER.get()));
+        waitForCompactions();
+        cfs.awaitInitialIndexBuilds(10, TimeUnit.SECONDS); // no-ops:  no initial index
+
+        // create another CFS to simulate startup with SAI
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        TableMetadataRef metadataRef = Schema.instance.getTableMetadataRef(KEYSPACE, currentTable());
+        ColumnFamilyStore recreatedCfs = ColumnFamilyStore.createColumnFamilyStore(keyspace, currentTable(), metadataRef, new Directories(metadataRef.get()), true, false, true);
+        try
+        {
+            recreatedCfs.awaitInitialIndexBuilds(5, TimeUnit.SECONDS);
+        }
+        finally
+        {
+            recreatedCfs.unloadCf();
+        }
+    }
+
+    @Test
+    public void testAwaitInitialIndexBuildsWithFailure() throws Throwable
+    {
+        // setup table and SAI
+        createTable(CREATE_TABLE_TEMPLATE);
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+        flush();
+
+        // inject SAI initialization task failure to fail building SAI files
+        Injections.inject(failNDIInitialializaion);
+        createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        waitForAssert(() -> assertEquals(1, INDEX_BUILD_COUNTER.get()));
+        waitForCompactions();
+        assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0")).isInstanceOf(ReadFailureException.class);
+
+        // create another CFS to simulate startup with SAI to trigger initial build task
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        TableMetadataRef metadataRef = Schema.instance.getTableMetadataRef(KEYSPACE, currentTable());
+        ColumnFamilyStore cfs = ColumnFamilyStore.createColumnFamilyStore(keyspace, currentTable(), metadataRef, new Directories(metadataRef.get()), true, false, true);
+        try
+        {
+            assertThatThrownBy(() -> cfs.awaitInitialIndexBuilds(5, TimeUnit.SECONDS))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasRootCauseMessage("Injected failure!");
+        }
+        finally
+        {
+            cfs.unloadCf();
+        }
     }
 
     @Test
