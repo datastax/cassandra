@@ -707,6 +707,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             // Reject the already constructed task, so that it is not tracked as an operation still expecting to be run.
             compositeTransaction.cancelInitialization();
+            sharedObserver.disableReportingOnComplete();
             UnifiedCompactionTask oneTask = tasks.get(0);
             Throwables.maybeFail(oneTask.rejected(null));
             assert oneTask.inputSSTables().equals(sstables);
