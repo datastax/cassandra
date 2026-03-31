@@ -45,21 +45,23 @@ public class SharedCompactionObserver implements CompactionObserver
     private static final Logger logger = LoggerFactory.getLogger(SharedCompactionObserver.class);
 
     private final AtomicInteger toReportOnComplete = new AtomicInteger(0);
-    private final AtomicReference<Throwable> onCompleteException = new AtomicReference(null);
+    private final AtomicReference<Throwable> onCompleteException = new AtomicReference<>(null);
     private final AtomicReference<CompactionProgress> inProgressReported = new AtomicReference<>(null);
 
     private final List<CompactionObserver> compObservers;
+    private final UUID parentId;
 
-    public SharedCompactionObserver(CompactionObserver observer)
+    public SharedCompactionObserver(UUID parentId, CompactionObserver observer)
     {
-        this(observer, null);
+        this(parentId, observer, null);
     }
 
-    public SharedCompactionObserver(CompactionObserver primary, @Nullable CompactionObserver secondary)
+    public SharedCompactionObserver(UUID parentId, CompactionObserver primary, @Nullable CompactionObserver secondary)
     {
         if (primary == null)
             throw new IllegalArgumentException("Primary observer cannot be null");
 
+        this.parentId = parentId;
         this.compObservers = secondary != null ? ImmutableList.of(primary, secondary) : ImmutableList.of(primary);
     }
 
@@ -82,22 +84,27 @@ public class SharedCompactionObserver implements CompactionObserver
             Throwables.maybeFail(err);
         }
         else
+        {
             assert inProgressReported.get() == progress; // progress object must also be shared
+            assert progress.operationId().equals(parentId) : "progress.operationId() must match parentId";
+        }
     }
 
     @Override
     public void onCompleted(UUID id, Throwable err)
     {
-        onCompleteException.compareAndSet(null, err); // acts like AND
+        if (err != null)
+            onCompleteException.compareAndSet(null, err);
+
         final int remainingToComplete = toReportOnComplete.decrementAndGet();
-        assert inProgressReported.get() != null : "onCompleted called before onInProgress";
         assert remainingToComplete >= 0 : "onCompleted called without corresponding registerExpectedSubtask";
-        // The individual operation ID given here may be different from the shared ID. Pass on the shared one.
+
         if (remainingToComplete == 0)
         {
             Throwable error = null;
+            Throwable finalErr = onCompleteException.get();
             for (CompactionObserver compObserver : compObservers)
-                error = Throwables.perform(error, () -> compObserver.onCompleted(inProgressReported.get().operationId(), onCompleteException.get()));
+                error = Throwables.perform(error, () -> compObserver.onCompleted(parentId, finalErr));
 
             Throwables.maybeFail(error);
         }
