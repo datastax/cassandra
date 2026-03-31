@@ -114,7 +114,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     @VisibleForTesting
     public static int QUERY_OPT_LEVEL = CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_LEVEL.getInt();
 
-    public static volatile boolean QUERY_OPT_USE_HISTOGRAMS = CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_HISTOGRAMS.getBoolean();
+    public static volatile boolean QUERY_OPT_USE_TERM_STATS = CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean();
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
@@ -959,7 +959,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             case NOT_CONTAINS_KEY:
             case NOT_CONTAINS_VALUE:
             case RANGE:
-                return (indexFeatureSet.hasTermsHistogram() && QUERY_OPT_USE_HISTOGRAMS)
+                return (indexFeatureSet.hasTermsHistogram() && QUERY_OPT_USE_TERM_STATS)
                        ? estimateMatchingRowCountUsingHistograms(predicate)
                        : estimateMatchingRowCountUsingIndex(predicate);
             default:
