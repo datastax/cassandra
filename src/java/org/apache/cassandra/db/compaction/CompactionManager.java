@@ -193,7 +193,7 @@ public class CompactionManager implements CompactionManagerMBean
     private final BackgroundCompactionRunner backgroundCompactionRunner = new BackgroundCompactionRunner(executor, active);
 
     // The length of time to wait for task cessation when we want to run with compactions disabled.
-    private final int CESSATION_WAIT_SECONDS = CassandraRelevantProperties.CESSATION_WAIT_SECONDS.getInt(60);
+    private final static int CESSATION_WAIT_SECONDS = CassandraRelevantProperties.CESSATION_WAIT_SECONDS.getInt(60);
 
     // used to temporarily pause non-strategy managed compactions (like index summary redistribution)
     private final AtomicInteger globalCompactionPauseCount = new AtomicInteger(0);

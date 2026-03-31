@@ -72,6 +72,12 @@ public class SharedCompactionObserver implements CompactionObserver
             : "Task started before all subtasks registered for operation " + inProgressReported.get().operationId();
     }
 
+    /// Called to disable sending unwanted messages when the attached subtasks are not going to be used.
+    public void disableReportingOnComplete()
+    {
+        toReportOnComplete.set(Integer.MAX_VALUE);
+    }
+
     @Override
     public void onInProgress(CompactionProgress progress)
     {
