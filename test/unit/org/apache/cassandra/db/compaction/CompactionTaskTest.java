@@ -100,7 +100,7 @@ public class CompactionTaskTest
     }
 
     @Test
-    public void compactionDisabled() throws Exception
+    public void compactionCancelled() throws Exception
     {
         cfs.getCompactionStrategyContainer().disable();
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
@@ -116,15 +116,22 @@ public class CompactionTaskTest
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
         Assert.assertNotNull(txn);
 
-        AbstractCompactionTask task = new CompactionTask(cfs, txn, 0, false, mockStrategy);
+        AbstractCompactionTask task = new CompactionTask(cfs, txn, 0, false, mockStrategy)
+        {
+            @Override
+            public void cancelledOnStart()
+            {
+                throw new RuntimeException("Cancelled");
+            }
+        };
         Assert.assertNotNull(task);
         task.cancelIfAffects(cfs, Predicates.alwaysTrue());
         try
         {
             task.execute(CompactionManager.instance.active);
-            Assert.fail("Expected CompactionInterruptedException");
+            Assert.fail("Expected to be cancelled");
         }
-        catch (CompactionInterruptedException e)
+        catch (RuntimeException e)
         {
             // expected
         }
