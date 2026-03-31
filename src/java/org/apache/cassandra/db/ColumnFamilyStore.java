@@ -398,7 +398,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     private final ReentrantLock longRunningSerializedOperationsLock = new ReentrantLock();
 
-    private List<Future<?>> initialBuilds = new LinkedList<>();
+    private final List<Future<?>> initialBuilds = new LinkedList<>();
 
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
@@ -655,7 +655,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     /**
      * Waits for the completion of index builds created during CFS initialization.
      * <p>
-     * This method blocks until all initial index builds have been completed or the timeout expires.
+     * This method blocks until all initial index builds have been completed or the timeout expires. Note that this method
+     * will throw if initial build tasks failed.
      *
      * @param timeout the maximum time to wait before timing out
      * @param unit    the time unit of the timeout argument
