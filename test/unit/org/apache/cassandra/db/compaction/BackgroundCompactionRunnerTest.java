@@ -129,6 +129,7 @@ public class BackgroundCompactionRunnerTest
 
         when(compactionExecutor.getMaximumPoolSize()).thenReturn(2);
         when(cfs.isAutoCompactionDisabled()).thenReturn(false);
+        when(cfs.isCompactionActive()).thenReturn(true);
         when(cfs.isValid()).thenReturn(true);
         when(checkExecutor.getQueue()).thenReturn(queue);
         when(cfs.getCompactionStrategy()).thenReturn(compactionStrategy);
