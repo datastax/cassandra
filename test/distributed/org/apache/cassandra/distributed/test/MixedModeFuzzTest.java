@@ -270,7 +270,7 @@ public class MixedModeFuzzTest extends TestBaseImpl
                                         SystemKeyspace.loadPreparedStatements((id, query, keyspace) -> {
                                             if (rng.nextBoolean())
                                                 QueryProcessor.instance.evictPrepared(id);
-                                            return true;
+                                            return 0;
                                         });
                                     });
                                     break;
