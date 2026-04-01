@@ -46,6 +46,7 @@ import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -271,6 +272,40 @@ public class IndexDescriptorTest
         assertTrue(components.has(IndexComponentType.META));
         assertTrue(components.has(IndexComponentType.KD_TREE));
         assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
+    }
+
+    @Test
+    public void testLoadIfAbsentLoadsOnlyMissingPerIndexComponents() throws Throwable
+    {
+        SAIUtil.setCurrentVersion(current);
+
+        IndexContext existing = SAITester.createIndexContext("existing_index", Int32Type.instance);
+        IndexContext missing = SAITester.createIndexContext("missing_index", UTF8Type.instance);
+
+        createFakeDataFile(descriptor);
+        createFakePerSSTableComponents(descriptor, current, 0);
+        createFakePerIndexComponents(descriptor, existing, current, 0);
+        createFakePerIndexComponents(descriptor, missing, current, 0);
+
+        IndexDescriptor indexDescriptor = loadDescriptor(existing);
+        IndexComponents.ForRead perSSTableBefore = indexDescriptor.perSSTableComponents();
+        IndexComponents.ForRead existingBefore = indexDescriptor.perIndexComponents(existing);
+        assertEquals(indexDescriptor.includedIndexes(), Set.of(existing));
+
+        SSTableReader sstable = Mockito.mock(SSTableReader.class);
+        Mockito.when(sstable.getDescriptor()).thenReturn(descriptor);
+        indexDescriptor.loadIfAbsent(sstable, Set.of(existing, missing));
+
+        assertSame(perSSTableBefore, indexDescriptor.perSSTableComponents());
+        assertSame(existingBefore, indexDescriptor.perIndexComponents(existing));
+
+        IndexComponents.ForRead missingComponents = indexDescriptor.perIndexComponents(missing);
+        assertTrue(missingComponents.isComplete());
+        assertTrue(missingComponents.has(IndexComponentType.COLUMN_COMPLETION_MARKER));
+        assertTrue(missingComponents.has(IndexComponentType.META));
+        assertTrue(missingComponents.has(IndexComponentType.TERMS_DATA));
+        assertTrue(missingComponents.has(IndexComponentType.POSTING_LISTS));
+        assertTrue(indexDescriptor.includedIndexes().containsAll(Set.of(existing, missing)));
     }
 
     private static void createEmptyFileOnDisk(Descriptor descriptor, String componentStr) throws IOException
