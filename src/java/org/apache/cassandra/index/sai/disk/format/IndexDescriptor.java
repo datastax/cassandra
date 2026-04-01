@@ -28,13 +28,13 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -89,7 +89,7 @@ public class IndexDescriptor
     // The per-sstable components for this descriptor. This is never `null` in practice, but 1) it's a bit easier to
     // initialize it outsides of the ctor, and 2) it can actually change upon calls to `reload`.
     private IndexComponentsImpl perSSTable;
-    private final Map<IndexContext, IndexComponentsImpl> perIndexes = Maps.newHashMap();
+    private final Map<IndexContext, IndexComponentsImpl> perIndexes = new ConcurrentHashMap<>();
 
     private IndexDescriptor(Descriptor descriptor)
     {
@@ -241,6 +241,22 @@ public class IndexDescriptor
 
         // Then reload data.
         initialize(indices, discovered);
+        return this;
+    }
+
+    /**
+     * Loads per-index components for the provided indexes only when they are currently missing from this descriptor.
+     * <p>
+     * This method does not modify per-SSTable components and does not replace already tracked per-index groups.
+     * It is intended for incremental index discovery flows where callers only need to populate indexes that are
+     * not present yet without disturbing existing in-memory references.
+     */
+    public IndexDescriptor loadIfAbsent(SSTableReader sstable, Set<IndexContext> indices)
+    {
+        Preconditions.checkArgument(sstable.getDescriptor().equals(this.descriptor));
+        SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable);
+        for (var context : indices)
+            perIndexes.computeIfAbsent(context, k -> initializeGroup(context, discovered.perIndexBuild(context.getIndexName())));
         return this;
     }
 
