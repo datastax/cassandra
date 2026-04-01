@@ -61,7 +61,6 @@ public class PropertyDefinitionsTest
         logAppender = new ListAppender<>();
         logAppender.start();
         logger.addAppender(logAppender);
-
         lastLoggedTimeField = PropertyDefinitions.class.getDeclaredField("OBSOLETE_PROPERTY_LAST_LOG_TIMES");
         lastLoggedTimeField.setAccessible(true);
     }
