@@ -209,12 +209,31 @@ public class SSTableContextManager
             context.close();
     }
 
+    /**
+     * Returns a descriptor for the given sstable and indexes, reusing a cached one when possible.
+     * <p>
+     * Note that during index initialization, index is added to {@link StorageAttachedIndexGroup} one by one but initialization
+     * tasks are executed concurrently, each task may have a different view of registered indexes. The cache must handle
+     * it and load indexes if they are not already loaded by the cached IndexDescriptor.
+     */
     IndexDescriptor getOrLoadIndexDescriptor(SSTableReader sstable, Set<StorageAttachedIndex> indices)
     {
-        // If we have a SSTableReader, it means the sstable exists, and so if we don't have a descriptor for it,
-        // then create one now. Since the sstable exists, it also means that we will get notified if/when it
-        // is removed (in `update`), so we shouldn't "leak" descriptors.
-        return sstableDescriptors.computeIfAbsent(sstable, __ -> IndexDescriptor.load(sstable, contexts(indices)));
+        Set<IndexContext> requested = contexts(indices);
+        return sstableDescriptors.compute(sstable, (__, existing) -> {
+            // load for the 1st time
+            if (existing == null)
+                return IndexDescriptor.load(sstable, requested);
+
+            // all requested indexes are loaded
+            if (existing.includedIndexes().containsAll(requested))
+                return existing;
+
+            logger.debug("Reloading existing IndexDescriptor for {} because included indexes {} do not include all indexes from {}", sstable.descriptor.id, existing.includedIndexes(), requested);
+            // Load indexes that are not included. Not creating a new IndexDescriptor because existing IndexDescriptor
+            // is already referenced in SSTableContext#perSSTableComponents
+            existing = existing.loadIfAbsent(sstable, requested);
+            return existing;
+        });
     }
 
     private static Set<IndexContext> contexts(Set<StorageAttachedIndex> indices)
