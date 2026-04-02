@@ -168,14 +168,6 @@ public class SharedCompactionObserverTest
     }
 
     @Test
-    public void testErrorNoInProgress()
-    {
-        Util.assumeAssertsEnabled();
-        sharedCompactionObserver.registerExpectedSubtask();
-        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onCompleted(operationId, null));
-    }
-
-    @Test
     public void testErrorWrongProgress()
     {
         Util.assumeAssertsEnabled();
@@ -238,5 +230,39 @@ public class SharedCompactionObserverTest
         assertThatThrownBy(() -> sharedCompactionObserver.onCompleted(operationId, null)).isInstanceOf(RuntimeException.class);
         verify(mockObserver1, times(1)).onCompleted(operationId, null);
         verify(mockObserver2, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
+    public void testNullPrimaryObserver()
+    {
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> new SharedCompactionObserver(operationId, null));
+    }
+
+    @Test
+    public void testErrorWrongProgressId()
+    {
+        Util.assumeAssertsEnabled();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        when(mockProgress.operationId()).thenReturn(UUID.randomUUID());
+        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onInProgress(mockProgress));
+    }
+
+    @Test
+    public void testFirstErrorWins()
+    {
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        Exception firstErr = new RuntimeException("first");
+        sharedCompactionObserver.onCompleted(operationId, firstErr);
+        sharedCompactionObserver.onCompleted(operationId, new RuntimeException("second"));
+
+        verify(mockObserver, times(1)).onCompleted(operationId, firstErr);
     }
 }
