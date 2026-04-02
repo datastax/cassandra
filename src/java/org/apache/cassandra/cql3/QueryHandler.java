@@ -62,6 +62,12 @@ public interface QueryHandler
 
         public final MD5Digest resultMetadataId;
 
+        /**
+         * Timestamp of when this prepared statement was created.  Used in QueryProcessor.preparedStatements cache
+         * to ensure that the deletion timestamp always succeeds the insert timestamp.
+         */
+        public final long timestamp;
+
         public final String keyspace;
         public final boolean fullyQualified;
 
@@ -71,6 +77,7 @@ public interface QueryHandler
             this.resultMetadataId = ResultSet.ResultMetadata.fromPrepared(statement).getResultMetadataId();
             this.fullyQualified = fullyQualified;
             this.keyspace = keyspace;
+            this.timestamp = ClientState.getTimestamp();
         }
     }
 }
