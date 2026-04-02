@@ -147,6 +147,7 @@ public class PropertyDefinitionsTest
         String key = "k";
         PropertyDefinitions pd = new PropertyDefinitions();
         adder.accept(pd, oldValue);
+
         Assertions.assertThat(pd.getProperty(key)).isEqualTo(oldValue);
         Assertions.assertThatThrownBy(() -> adder.accept(pd, newValue))
                   .isInstanceOf(SyntaxException.class)
