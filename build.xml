@@ -97,6 +97,7 @@
     <property name="version.properties.dir"
               value="${build.src.resources}/org/apache/cassandra/config/" />
     <property name="final.name" value="${ant.project.name}-${version}"/>
+    <property name="new.artifact.name" value="db-all-${version}"/>
 
     <property name="local.repository" value="${user.home}/.m2/repository" />
 
@@ -647,6 +648,7 @@
           <dependency groupId="org.apache.ant" artifactId="ant-junit" version="1.10.12" scope="test"/>
 
           <dependency groupId="com.datastax.dse" artifactId="dse-db-all" version="${version}" />
+          <dependency groupId="com.datastax.db" artifactId="db-all" version="${version}" />
           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-core" version="3.1.5" />
           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-jvm" version="3.1.5" />
           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-logback" version="3.1.5" />
@@ -1117,6 +1119,13 @@
 	    <artifact:writepom pomRefId="parent-pom" file="${build.dir}/${final.name}-parent.pom"/>
 	    <artifact:writepom pomRefId="all-pom" file="${build.dir}/${final.name}.pom"/>
 	    <artifact:writepom pomRefId="build-deps-pom" file="${build.dir}/tmp-${final.name}-deps.pom"/>
+
+	    <!-- Generate POM for com.datastax.db:db-all by copying and modifying the dse-db-all POM -->
+	    <copy file="${build.dir}/${final.name}.pom"
+	          tofile="${build.dir}/${new.artifact.name}.pom"/>
+	    <replaceregexp file="${build.dir}/${new.artifact.name}.pom"
+	                   match="(&lt;/parent&gt;[\s\r\n]+)&lt;groupId&gt;com\.datastax\.dse&lt;/groupId&gt;([\s\r\n]+)&lt;artifactId&gt;dse-db-all&lt;/artifactId&gt;"
+	                   replace="\1&lt;groupId&gt;com.datastax.db&lt;/groupId&gt;\2&lt;artifactId&gt;db-all&lt;/artifactId&gt;"/>
 	</target>
 
 	<target name="write-poms" unless="without.maven">
@@ -2420,6 +2429,16 @@
     <install pomFile="${build.dir}/${final.name}.pom"
              file="${build.dir}/${final.name}-javadoc.jar"
              classifier="javadoc"/>
+
+    <!-- the db-all jar (same JARs, new Maven coordinates com.datastax.db:db-all) -->
+    <install pomFile="${build.dir}/${new.artifact.name}.pom"
+             file="${build.dir}/${final.name}.jar"/>
+    <install pomFile="${build.dir}/${new.artifact.name}.pom"
+             file="${build.dir}/${final.name}-sources.jar"
+             classifier="sources"/>
+    <install pomFile="${build.dir}/${new.artifact.name}.pom"
+             file="${build.dir}/${final.name}-javadoc.jar"
+             classifier="javadoc"/>
   </target>
 
   <!-- Publish artifacts to remote Maven repository -->
@@ -2439,6 +2458,16 @@
             file="${build.dir}/${final.name}-sources.jar"
             classifier="sources"/>
     <deploy pomFile="${build.dir}/${final.name}.pom"
+            file="${build.dir}/${final.name}-javadoc.jar"
+            classifier="javadoc"/>
+
+    <!-- the db-all jar (same JARs, new Maven coordinates com.datastax.db:db-all) -->
+    <deploy pomFile="${build.dir}/${new.artifact.name}.pom"
+            file="${build.dir}/${final.name}.jar"/>
+    <deploy pomFile="${build.dir}/${new.artifact.name}.pom"
+            file="${build.dir}/${final.name}-sources.jar"
+            classifier="sources"/>
+    <deploy pomFile="${build.dir}/${new.artifact.name}.pom"
             file="${build.dir}/${final.name}-javadoc.jar"
             classifier="javadoc"/>
 
