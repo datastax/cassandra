@@ -100,18 +100,25 @@ public class DescriptorTest
     {
         File file = original.fileFor(Components.DATA);
 
-        Pair<Descriptor, Component> pair = Descriptor.fromFileWithComponent(file);
-        Descriptor desc = pair.left;
+        Pair<Descriptor, Component> pair = Descriptor.fromFilenameWithComponent(file);
+        checkDescriptor(original, pair.left, pair.right);
 
+        pair = Descriptor.fromFilenameWithComponent(new File(file.parent(), file.name()));
+        checkDescriptor(original, pair.left, pair.right);
+
+        assertEquals(Components.DATA, Descriptor.validFilenameWithComponent(file.name()));
+    }
+
+    private void checkDescriptor(Descriptor original, Descriptor desc, Component component)
+    {
         assertEquals(original.directory, desc.directory);
         assertEquals(original.ksname, desc.ksname);
         assertEquals(original.cfname, desc.cfname);
         assertEquals(original.version, desc.version);
         assertEquals(original.id, desc.id);
-        assertEquals(original.fileFor(Components.DATA).toPath(), desc.pathFor(Components.DATA));
-        assertEquals(Components.DATA, pair.right);
 
-        assertEquals(Components.DATA, Descriptor.validFilenameWithComponent(file.name()));
+        assertEquals(original.fileFor(Components.DATA).toPath(), desc.pathFor(Components.DATA));
+        assertEquals(Components.DATA, component);
     }
 
     @Test
