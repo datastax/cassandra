@@ -109,6 +109,7 @@ ccm remove test || true # in case an old ccm cluster is left behind
 ccm create test -n 1 --install-dir=${CASSANDRA_DIR}
 ccm updateconf "enable_user_defined_functions: true"
 ccm updateconf "cdc_enabled: true"
+ccm updateconf "storage_compatibility_mode: ${TEST_STORAGE_COMPATIBILITY_MODE:-NONE}"
 
 set +e # disable immediate exit from this point
 
