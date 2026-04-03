@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
+import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
@@ -48,6 +49,11 @@ public abstract class MemtablePool
     public final SubPool offHeap;
 
     public final Timer blockedOnAllocating;
+    /**
+     * Counter metric that registers blocked write immediately in contrast to Timer blockedOnAllocating that waits for
+     * allocation to register wait duration.
+     */
+    public final Counter blockedOnAllocatingCount;
     public final Gauge<Long> numPendingTasks;
 
     final WaitQueue hasRoom = newWaitQueue();
@@ -61,6 +67,7 @@ public abstract class MemtablePool
         this.cleaner = getCleaner(cleaner);
         DefaultNameFactory nameFactory = new DefaultNameFactory("MemtablePool");
         blockedOnAllocating = CassandraMetricsRegistry.Metrics.timer(nameFactory.createMetricName("BlockedOnAllocation"));
+        blockedOnAllocatingCount = CassandraMetricsRegistry.Metrics.counter(nameFactory.createMetricName("BlockedOnAllocationTotal"));
         numPendingTasks = CassandraMetricsRegistry.Metrics.register(nameFactory.createMetricName("PendingFlushTasks"),
                                                                     () -> (long) this.cleaner.numPendingTasks());
     }
@@ -249,8 +256,9 @@ public abstract class MemtablePool
             return hasRoom;
         }
 
-        public Timer.Context blockedTimerContext()
+        public Timer.Context markMemoryBlockedOnAllocating()
         {
+            blockedOnAllocatingCount.inc();
             return blockedOnAllocating.time();
         }
     }

@@ -143,8 +143,10 @@ public class NativeAllocatorTest
 
             // allocate above limit, check we block until "marked blocking"
             exec.schedule(markBlocking, 10L, TimeUnit.MILLISECONDS);
+            Assert.assertEquals(0, pool.blockedOnAllocatingCount.getCount());
             allocator.allocate(30, group);
             Assert.assertNotNull(barrier.get());
+            Assert.assertEquals(1, pool.blockedOnAllocatingCount.getCount());
             verifyUsedReclaiming(110, 110);
 
             // release everything
