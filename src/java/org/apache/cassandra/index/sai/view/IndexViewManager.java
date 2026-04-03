@@ -82,6 +82,8 @@ public class IndexViewManager
                                       Collection<SSTableContext> newSSTableContexts,
                                       boolean validate)
     {
+        logger.debug("Updating view of index [{}]. Removed: {}. Added: {}.", context.getIndexName(), oldSSTables, newSSTableContexts);
+
         // Valid indexes on the left and invalid SSTable contexts on the right...
         // The valid indexes are referenced as a part of object initialization.
         Pair<Set<SSTableIndex>, Set<SSTableContext>> indexes = context.getBuiltIndexes(newSSTableContexts, validate);
