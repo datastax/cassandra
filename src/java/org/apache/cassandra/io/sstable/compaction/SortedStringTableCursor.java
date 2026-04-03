@@ -328,7 +328,7 @@ public class SortedStringTableCursor implements SSTableCursor
                         complexDeletion = header.readDeletionTime(dataFile);
                         if (!complexDeletion.validate())
                             UnfilteredValidation.handleInvalid(sstable.metadata(), partitionKey, sstable,
-                                                               "complexColumnDeletion="+complexDeletion.toString());
+                                                               "complexColumnDeletion="+complexDeletion.toString()+" column="+columnMetadata.name);
                         if (helper.isDroppedComplexDeletion(complexDeletion))
                             complexDeletion = DeletionTime.LIVE;
                     }
