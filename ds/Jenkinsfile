@@ -15,6 +15,6 @@
 // This Jenkinsfile uses a shared library from https://github.com/riptano/jenkins-pipeline-lib
 // The pipeline logic is defined in the library rather than in this file.
 
-@Library('ds-pipeline-lib@CNDB-17263-remove-noverify') _
+@Library('ds-pipeline-lib@CNDB-17333-publish-db-all') _
 
 dsCassandraPRGate()
