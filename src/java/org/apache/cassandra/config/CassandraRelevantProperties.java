@@ -399,7 +399,7 @@ public enum CassandraRelevantProperties
     MONITORING_EXECUTION_INFO_ENABLED("cassandra.monitoring_execution_info_enabled", "true"),
 
     /** The current version of the SAI on-disk index format. */
-    SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
+    SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ed"),
 
     /** The class to use for selecting the current version of the SAI on-disk index format on a per-keyspace basis. */
     SAI_VERSION_SELECTOR_CLASS("cassandra.sai.version.selector.class", ""),
