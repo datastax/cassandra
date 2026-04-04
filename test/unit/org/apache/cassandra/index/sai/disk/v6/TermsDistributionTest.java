@@ -23,6 +23,9 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.Random;
 
 import org.junit.Test;
 
@@ -31,12 +34,15 @@ import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.DoubleType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.TimestampType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.ByteArrayIndexInput;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
+import static org.apache.cassandra.db.marshal.ValueGenerator.randomString;
 import static org.junit.Assert.*;
 
 public class TermsDistributionTest
@@ -270,6 +276,60 @@ public class TermsDistributionTest
         }
     }
 
+    @Test
+    public void testTimestampToBigDecimalPreservesOrder()
+    {
+        var tpe = TimestampType.instance;
+        var format = SAIUtil.currentVersion().onDiskFormat();
+        var timestamps = new long[] { Long.MIN_VALUE, -1000000000L, -1L, 0L, 1L, 1000000000L, Long.MAX_VALUE };
+
+        ByteComparable[] encoded = new ByteComparable[timestamps.length];
+        BigDecimal[] decimals = new BigDecimal[timestamps.length];
+
+        for (int i = 0; i < timestamps.length; i++)
+        {
+            encoded[i] = format.encodeForTrie(tpe.decompose(new Date(timestamps[i])), tpe);
+            decimals[i] = TermsDistribution.toBigDecimal(encoded[i], tpe, SAIUtil.currentVersion(), VERSION);
+        }
+
+        // BigDecimal representaitons should sort the same way as the original timestamps:
+        for (int i = 0; i < decimals.length - 1; i++)
+        {
+            assertTrue(ByteComparable.compare(encoded[i], encoded[i + 1], TypeUtil.BYTE_COMPARABLE_VERSION) < 0);
+            assertTrue(decimals[i].compareTo(decimals[i + 1]) < 0);
+        }
+    }
+
+    @Test
+    public void testStringToBigDecimalPreservesOrder()
+    {
+        var tpe = UTF8Type.instance;
+        var format = SAIUtil.currentVersion().onDiskFormat();
+        String[] strings = new String[100];
+        Random random = new Random(1);
+        for (int i = 0; i < strings.length; i++)
+        {
+            strings[i] = randomString(random);
+        }
+        Arrays.sort(strings);
+
+        ByteComparable[] encoded = new ByteComparable[strings.length];
+        BigDecimal[] decimals = new BigDecimal[strings.length];
+
+        for (int i = 0; i < strings.length; i++)
+        {
+            encoded[i] = format.encodeForTrie(tpe.decompose(strings[i]), tpe);
+            decimals[i] = TermsDistribution.toBigDecimal(encoded[i], tpe, SAIUtil.currentVersion(), VERSION);
+        }
+
+        // BigDecimal representations should sort the same way as the original strings:
+        for (int i = 0; i < decimals.length - 1; i++)
+        {
+            assertTrue(ByteComparable.compare(encoded[i], encoded[i + 1], TypeUtil.BYTE_COMPARABLE_VERSION) < 0);
+            assertTrue(decimals[i].compareTo(decimals[i + 1]) < 0);
+        }
+    }
+
     private ByteComparable encode(int value)
     {
         return v -> Int32Type.instance.asComparableBytes(Int32Type.instance.decompose(value), v);
@@ -291,5 +351,4 @@ public class TermsDistributionTest
         ByteBuffer raw = IntegerType.instance.decompose(BigInteger.valueOf(value));
         return v -> TypeUtil.asComparableBytes(TypeUtil.encode(raw, IntegerType.instance), IntegerType.instance, v);
     }
-
 }
