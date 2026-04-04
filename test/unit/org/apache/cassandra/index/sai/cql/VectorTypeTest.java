@@ -1083,17 +1083,19 @@ public class VectorTypeTest extends VectorTester.Versioned
     @Test
     public void testIndexingMultipleVectorColumns() throws Throwable
     {
-        createTable("CREATE TABLE %s (pk int, val1 vector<float, 128>, val2 vector<float, 128>, PRIMARY KEY(pk))");
+        // Test previously used 128d vectors, but those took longer than necessary. Since vector dimension
+        // should be independent of the functionality tested here, we reduced dimension from 128 to 10.
+        createTable("CREATE TABLE %s (pk int, val1 vector<float, 10>, val2 vector<float, 10>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex'");
 
         for (int i = 0; i < 2 * CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
-            execute("INSERT INTO %s (pk, val1, val2) VALUES (?, ?, ?)", i, randomVectorBoxed(128), randomVectorBoxed(128));
+            execute("INSERT INTO %s (pk, val1, val2) VALUES (?, ?, ?)", i, randomVectorBoxed(10), randomVectorBoxed(10));
 
         runThenFlushThenCompact(() -> {
             // Run a search on each as a sanity check
-            assertRowCount(execute("SELECT pk FROM %s ORDER BY val1 ANN OF ? LIMIT 10", randomVectorBoxed(128)), 10);
-            assertRowCount(execute("SELECT pk FROM %s ORDER BY val2 ANN OF ? LIMIT 10", randomVectorBoxed(128)), 10);
+            assertRowCount(execute("SELECT pk FROM %s ORDER BY val1 ANN OF ? LIMIT 10", randomVectorBoxed(10)), 10);
+            assertRowCount(execute("SELECT pk FROM %s ORDER BY val2 ANN OF ? LIMIT 10", randomVectorBoxed(10)), 10);
         });
     }
 
