@@ -25,6 +25,7 @@ import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.Timer;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
@@ -184,6 +185,7 @@ public class KeyspaceMetrics
     public final Timer repairedDataTrackingOverreadTime;
 
     public final MetricNameFactory factory;
+    private final CassandraMetricsRegistry metricsRegistry;
     private Keyspace keyspace;
 
     /** set containing names of all the metrics stored here, for releasing later */
@@ -194,10 +196,12 @@ public class KeyspaceMetrics
      *
      * @param ks Keyspace to measure metrics
      */
-    public KeyspaceMetrics(final Keyspace ks)
+    public KeyspaceMetrics(final Keyspace ks, CassandraMetricsRegistry metricsRegistry)
     {
         factory = new KeyspaceMetricNameFactory(ks);
         keyspace = ks;
+        this.metricsRegistry = metricsRegistry;
+
         memtableColumnsCount = createKeyspaceGauge("MemtableColumnsCount",
                 metric -> metric.memtableColumnsCount.getValue());
         memtableLiveDataSize = createKeyspaceGauge("MemtableLiveDataSize",
@@ -306,7 +310,7 @@ public class KeyspaceMetrics
     private Gauge<Long> createKeyspaceGauge(String name, final ToLongFunction<TableMetrics> extractor)
     {
         allMetrics.add(() -> releaseMetric(name));
-        return Metrics.register(factory.createMetricName(name), new Gauge<Long>()
+        return metricsRegistry.register(factory.createMetricName(name), new Gauge<Long>()
         {
             public Long getValue()
             {
@@ -329,7 +333,7 @@ public class KeyspaceMetrics
     private Counter createKeyspaceCounter(String name, final ToLongFunction<TableMetrics> extractor)
     {
         allMetrics.add(() -> releaseMetric(name));
-        return Metrics.register(factory.createMetricName(name), new Counter()
+        return metricsRegistry.register(factory.createMetricName(name), new Counter()
         {
             @Override
             public long getCount()
@@ -347,37 +351,37 @@ public class KeyspaceMetrics
     protected Counter createKeyspaceCounter(String name)
     {
         allMetrics.add(() -> releaseMetric(name));
-        return Metrics.counter(factory.createMetricName(name));
+        return metricsRegistry.counter(factory.createMetricName(name));
     }
 
     protected Histogram createKeyspaceHistogram(String name, boolean considerZeroes)
     {
         allMetrics.add(() -> releaseMetric(name));
-        return Metrics.histogram(factory.createMetricName(name), considerZeroes);
+        return metricsRegistry.histogram(factory.createMetricName(name), considerZeroes);
     }
 
     protected Timer createKeyspaceTimer(String name)
     {
         allMetrics.add(() -> releaseMetric(name));
-        return Metrics.timer(factory.createMetricName(name));
+        return metricsRegistry.timer(factory.createMetricName(name));
     }
 
     protected Meter createKeyspaceMeter(String name)
     {
         allMetrics.add(() -> releaseMetric(name));
-        return Metrics.meter(factory.createMetricName(name));
+        return metricsRegistry.meter(factory.createMetricName(name));
     }
 
     private LatencyMetrics createLatencyMetrics(String name)
     {
-        LatencyMetrics metric = new LatencyMetrics(factory, name);
+        LatencyMetrics metric = new LatencyMetrics(factory, name, metricsRegistry);
         allMetrics.add(() -> metric.release());
         return metric;
     }
 
     private void releaseMetric(String name)
     {
-        Metrics.remove(factory.createMetricName(name));
+        metricsRegistry.remove(factory.createMetricName(name));
     }
 
     static class KeyspaceMetricNameFactory implements MetricNameFactory

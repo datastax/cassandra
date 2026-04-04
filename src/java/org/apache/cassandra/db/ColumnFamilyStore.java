@@ -151,6 +151,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
+import org.apache.cassandra.metrics.MetricsFactory;
 import org.apache.cassandra.metrics.Sampler;
 import org.apache.cassandra.metrics.Sampler.Sample;
 import org.apache.cassandra.metrics.Sampler.SamplerType;
@@ -447,7 +448,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         if (metric.metricsAggregation != TableMetrics.MetricsAggregation.fromMetadata(metadata()))
         { // Reload the metrics if histogram aggregation has changed
             metric.release(); // release first because of those static tables containing metric names
-            metric = new TableMetrics(this, memtableFactory.createMemtableMetrics(metadata));
+            metric = MetricsFactory.instance.newTableMetrics(this, memtableFactory.createMemtableMetrics(metadata));
         }
     }
 
@@ -620,7 +621,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             indexManager.addIndex(info, true);
         }
 
-        metric = new TableMetrics(this, memtableFactory.createMemtableMetrics(metadata));
+        metric = MetricsFactory.instance.newTableMetrics(this, memtableFactory.createMemtableMetrics(metadata));
 
         if (data.loadsstables && sstables != null)
         {
