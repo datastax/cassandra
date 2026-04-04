@@ -629,6 +629,9 @@ public enum CassandraRelevantProperties
      */
     COMPACTION_SKIP_COMPACTING_STATE_CHECKING("cassandra.compaction.skip_compacting_state_checking", "false"),
 
+    /** The length of time to wait for task cessation when we want to run something with compactions disabled. */
+    CESSATION_WAIT_SECONDS("cassandra.task_cessation_wait_seconds"),
+
     /**
      * If true, the searcher object created when opening a SAI index will be replaced by a dummy object and index
      * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if

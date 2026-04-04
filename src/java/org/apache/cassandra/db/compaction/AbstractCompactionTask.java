@@ -22,8 +22,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 import com.google.common.base.Preconditions;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
@@ -37,11 +42,13 @@ import static com.google.common.base.Throwables.propagate;
 
 public abstract class AbstractCompactionTask extends WrappedRunnable
 {
+    protected static final Logger logger = LoggerFactory.getLogger(AbstractCompactionTask.class);
+
     // See CNDB-10549
     static final boolean SKIP_REPAIR_STATE_CHECKING =
         CassandraRelevantProperties.COMPACTION_SKIP_REPAIR_STATE_CHECKING.getBoolean();
     static final boolean SKIP_COMPACTING_STATE_CHECKING =
-    CassandraRelevantProperties.COMPACTION_SKIP_COMPACTING_STATE_CHECKING.getBoolean();
+        CassandraRelevantProperties.COMPACTION_SKIP_COMPACTING_STATE_CHECKING.getBoolean();
 
     protected final CompactionRealm realm;
     protected ILifecycleTransaction transaction;
@@ -49,6 +56,20 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     protected OperationType compactionType;
     protected TableOperationObserver opObserver;
     protected final List<CompactionObserver> compObservers;
+
+    private enum ExecutionState
+    {
+        CREATED,  // Task is created and ready for execution, possibly waiting in a queue.
+                  // If it is rejected, the rejecting thread must clean it up.
+        STARTED,  // Task has started execution, but still hasn't entered the active operations.
+                  // It still accepts cancellation requests that may or may not be honored by the executing thread.
+        ACTIVE,   // Task has started execution and is listed in the active operations.
+        COMPLETE, // Task is complete, cleanup done or to be done by executing thread.
+        ABORT,    // Task has been cancelled after entering STARTED state, before becoming ACTIVE
+        REJECTED, // Task has been rejected, either because of an error or cancelled before becoming active.
+                  // Cleanup done or to be done by rejecting thread.
+    }
+    private final AtomicReference<ExecutionState> executionState = new AtomicReference<>(ExecutionState.CREATED);
 
     /**
      * @param realm
@@ -79,6 +100,8 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         {
             propagate(cleanup(err));
         }
+
+        CompactionManager.instance.active.addTaskToScheduled(this);
     }
 
     /**
@@ -130,6 +153,15 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     /** Executes the task */
     public void execute()
     {
+        // Exit immediately if task is already rejected. Also change the state to STARTED so that a race with rejection
+        // cannot close our resources while we are trying to work; before this point rejecting thread is responsible for
+        // clean-up; after this passes, we are.
+        if (!executionState.compareAndSet(ExecutionState.CREATED, ExecutionState.STARTED))
+        {
+            cancelledOnStart();
+            return;
+        }
+
         Throwable t = null;
         try
         {
@@ -149,13 +181,68 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         }
         finally
         {
-            Throwables.maybeFail(cleanup(t));
+            // if executeInternal has not switched the task to active state, do it now to remove it from the
+            // scheduled set.
+            switchToActive();
+            // Unless the task has been fully rejected before entering this function, clean it up.
+            if (executionState.getAndSet(ExecutionState.COMPLETE) != ExecutionState.REJECTED)
+                Throwables.maybeFail(cleanup(t));
         }
+    }
+
+    public void cancelledOnStart()
+    {
+        // Called when the task starts after being cancelled. Normally nothing to do, overridden by tests.
     }
 
     public Throwable rejected(Throwable t)
     {
-        return cleanup(t);
+        if (executionState.compareAndSet(ExecutionState.CREATED, ExecutionState.REJECTED))
+        {
+            CompactionManager.instance.active.removeTaskFromScheduled(this);
+            logger.debug("Compaction {} rejected", transaction, t);
+            return cleanup(t);
+        }
+        else
+        {
+            // We have another chance to request abort if the task has not become ACTIVE yet.
+            // If this works, the executing thread is currently active, may honor the request and will clean up.
+            if (executionState.compareAndSet(ExecutionState.STARTED, ExecutionState.ABORT))
+            {
+                CompactionManager.instance.active.removeTaskFromScheduled(this);
+                logger.debug("Compaction {} aborted", transaction, t);
+            }
+            // We are either already rejected, or racing with switching to active.
+            // In the latter case, the operation can now be cancelled through the active operations list.
+            return t;
+        }
+    }
+
+    public boolean switchToActive()
+    {
+        boolean switched = executionState.compareAndSet(ExecutionState.STARTED, ExecutionState.ACTIVE);
+        if (switched)
+            CompactionManager.instance.active.removeTaskFromScheduled(this);
+        return switched;
+    }
+
+    /**
+     * Reject/cancel the task if it affects any sstable that satisfies the given predicate.
+     */
+    public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
+    {
+        if (realm != this.realm)
+            return false;
+
+        for (SSTableReader r : transaction.originals())
+        {
+            if (sstablePredicate.test(r))
+            {
+                Throwables.maybeFail(rejected(null));
+                return true;
+            }
+        }
+        return false;
     }
 
     protected Throwable cleanup(Throwable err)
