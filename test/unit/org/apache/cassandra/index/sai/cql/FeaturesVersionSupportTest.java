@@ -99,12 +99,26 @@ public class FeaturesVersionSupportTest extends VectorTester
         else
         {
             Assertions.assertThatThrownBy(() -> createIndex(createIndexQuery))
-                      .hasMessageContaining(StorageAttachedIndex.vectorUnsupportedByVersionError(version));
+                      .hasMessageContaining(StorageAttachedIndex.vectorUnsupportedByCurrentVersionError(version));
         }
 
-        // vector index creation will be accepted on newer versions, even if there is still another index in the older version
+        // Vector index creation will be accepted on newer versions, unless there are other indexes using a version
+        // that doesn't support jvector. In that case, the vector index will fail until the old sstables are
+        // upgraded, so the old indexes are upgraded too.
         SAIUtil.setCurrentVersion(Version.LATEST);
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        if (version.onOrAfter(Version.JVECTOR_EARLIEST))
+        {
+            createIndex(createIndexQuery);
+        }
+        else
+        {
+            Assertions.assertThatThrownBy(() -> createIndex(createIndexQuery))
+                      .hasMessageContaining(StorageAttachedIndex.vectorUnsupportedByExistingVersionError(version));
+
+            upgradeSSTables();
+            createIndex(createIndexQuery);
+            verifySAIVersionInUse(KEYSPACE, currentTable(), Version.LATEST);
+        }
 
         // once the index has been created, we can query it
         assertRows(execute("SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5, 4.5] LIMIT 3"), row(2), row(1), row(3));
@@ -148,12 +162,26 @@ public class FeaturesVersionSupportTest extends VectorTester
         else
         {
             Assertions.assertThatThrownBy(() -> createIndex(createIndexQuery))
-                      .hasMessageContaining(StorageAttachedIndex.vectorUnsupportedByVersionError(version));
+                      .hasMessageContaining(StorageAttachedIndex.vectorUnsupportedByCurrentVersionError(version));
         }
 
-        // vector index creation will be accepted on newer versions, even if there is still an index in the older version
+        // Geospatial index creation will be accepted on newer versions, unless there are other indexes using a version
+        // that doesn't support jvector. In that case, the geospatial index will fail until the old sstables are
+        // upgraded, so the old indexes are upgraded too.
         SAIUtil.setCurrentVersion(Version.LATEST);
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        if (version.onOrAfter(Version.JVECTOR_EARLIEST))
+        {
+            createIndex(createIndexQuery);
+        }
+        else
+        {
+            Assertions.assertThatThrownBy(() -> createIndex(createIndexQuery))
+                      .hasMessageContaining(StorageAttachedIndex.vectorUnsupportedByExistingVersionError(version));
+
+            upgradeSSTables();
+            createIndex(createIndexQuery);
+            verifySAIVersionInUse(KEYSPACE, currentTable(), Version.LATEST);
+        }
 
         // once the index has been created, we can query it
         assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE GEO_DISTANCE(v, [5,5]) < 157000"), row(2), row(3));

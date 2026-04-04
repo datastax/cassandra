@@ -244,6 +244,16 @@ public class IndexDescriptor
         return this;
     }
 
+    /**
+     * Returns the version that should be used for new components for the sstable of this descriptor.
+     * It is the version of the per-sstable components, which is either the version of the existing per-sstable
+     * components if any, or the current version if there is no existing components.
+     */
+    public Version versionForNewComponents()
+    {
+        return perSSTableComponents().version();
+    }
+
     public IndexComponents.ForRead perSSTableComponents()
     {
         return perSSTable;
@@ -272,7 +282,7 @@ public class IndexDescriptor
 
     private IndexComponents.ForWrite newComponentsForWrite(@Nullable IndexContext context, IndexComponentsImpl currentComponents)
     {
-        Version version = context != null ? context.version() : Version.current(descriptor.ksname);
+        Version version = versionForNewComponents();
         var currentBuildId = currentComponents == null ? null : currentComponents.buildId;
         return new IndexComponentsImpl(context, ComponentsBuildId.forNewBuild(version, currentBuildId, candidateId -> {
             // This checks that there is no existing files on disk we would overwrite by using `candidateId` for our
