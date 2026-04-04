@@ -15,33 +15,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.disk;
+
+package org.apache.cassandra.index.sai.disk.v9.keystore;
 
 import java.io.IOException;
 
-import com.google.common.base.Stopwatch;
-
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.IndexOutput;
 
 /**
- * Writes all SSTable-attached index token and offset structures.
+ * Metadata produced by {@link KeyStoreWriter}, needed by {@link KeyLookup}.
  */
-public interface PerSSTableWriter
+public class KeyLookupMeta
 {
-    PerSSTableWriter NONE = key -> {};
+    public final long keyCount;
+    public final int maxKeyLength;
 
-    default void startPartition(long position) throws IOException
-    {}
+    public KeyLookupMeta(IndexInput input) throws IOException
+    {
+        this.keyCount = input.readLong();
+        this.maxKeyLength = input.readInt();
+    }
 
-    default void startPartition(DecoratedKey decoratedKey) throws IOException
-    {}
-
-    void nextRow(PrimaryKey primaryKey) throws IOException;
-
-    default void complete(Stopwatch stopwatch) throws IOException
-    {}
-
-    default void abort(Throwable accumulator)
-    {}
+    public static void write(IndexOutput output, long keyCount, int maxKeyLength) throws IOException
+    {
+        output.writeLong(keyCount);
+        output.writeInt(maxKeyLength);
+    }
 }

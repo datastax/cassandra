@@ -154,7 +154,7 @@ public class NumericValuesTest extends SaiRandomizedTest
     {
         final long[] array = new long[64_000];
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
-        writeTokens(monotonic, indexDescriptor, array, prev -> monotonic ? prev + nextInt(100) : nextInt(100));
+        writeTokens(monotonic, indexDescriptor, array, prev -> monotonic ? prev + nextInt(100) : nextLong(0, Long.MAX_VALUE));
 
         IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
         final MetadataSource source = MetadataSource.loadMetadata(components);
