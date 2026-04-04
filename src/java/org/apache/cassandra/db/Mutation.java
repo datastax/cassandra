@@ -173,7 +173,7 @@ public class Mutation implements IMutation
         long totalSize = serializedSize(version) + overhead;
         if(totalSize > MAX_MUTATION_SIZE)
         {
-            CommitLog.instance.metrics.oversizedMutations.mark();
+            CommitLog.instance.metrics().oversizedMutations.mark();
             throw new MutationExceededMaxSizeException(this, version, totalSize);
         }
     }
