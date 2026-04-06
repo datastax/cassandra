@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.metrics;
 
 import java.util.EnumMap;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
@@ -291,7 +292,8 @@ public class TableQueryMetrics
     {
         public static final String METRIC_TYPE = "PerQuery";
 
-        public final Timer queryLatency;
+        @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+        public final Optional<Timer> queryLatency;
 
         /**
          * Global metrics for all indices hit during the query.
@@ -339,7 +341,9 @@ public class TableQueryMetrics
         {
             super(table.keyspace, table.name, METRIC_TYPE, queryKind, filter);
 
-            queryLatency = Metrics.timer(createMetricName("QueryLatency"));
+            queryLatency = CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.getBoolean()
+                           ? Optional.of(Metrics.timer(createMetricName("QueryLatency")))
+                           : Optional.empty();
 
             sstablesHit = Metrics.histogram(createMetricName("SSTableIndexesHit"), false);
             segmentsHit = Metrics.histogram(createMetricName("IndexSegmentsHit"), false);
@@ -369,7 +373,7 @@ public class TableQueryMetrics
         @Override
         public void record(QueryContext.Snapshot snapshot)
         {
-            queryLatency.update(snapshot.totalQueryTimeNs, TimeUnit.NANOSECONDS);
+            queryLatency.ifPresent(timer -> timer.update(snapshot.totalQueryTimeNs, TimeUnit.NANOSECONDS));
             sstablesHit.update(snapshot.sstablesHit);
             segmentsHit.update(snapshot.segmentsHit);
             keysFetched.update(snapshot.keysFetched);
