@@ -752,6 +752,16 @@ public enum CassandraRelevantProperties
     // of the encoded graph node at layer 0, which varies based on graph feature settings.
     SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS("cassandra.sai.vector.encode_and_write_graph_in_parallel.use_direct_buffers", "false"),
 
+    /**
+     * Whether to enable SAI histogram metrics added after May 2025 release, including
+     * {@link org.apache.cassandra.index.sai.metrics.IndexMetrics#memtableIndexWriteLatency},
+     * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.TrieIndexMetrics#termsTraversalTotalTime},
+     * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.BKDIndexMetrics#intersectionLatency}, and
+     * {@link org.apache.cassandra.index.sai.metrics.TableQueryMetrics.PerQuery#queryLatency}.
+     * Enabled by default.
+     */
+    SAI_HISTOGRAMS_ENABLED("cassandra.sai.metrics.histograms.enabled", "true"),
+
     /** Controls the hnsw vector cache size, in bytes, per index segment. 0 to disable */
     SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(4 * 1024 * 1024)),
 
