@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.metrics;
 
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -24,6 +25,7 @@ import com.codahale.metrics.Counter;
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.Timer;
 import io.github.jbellis.jvector.graph.SearchResult;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
@@ -41,7 +43,8 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         /**
          * Trie index metrics.
          */
-        public final Timer termsTraversalTotalTime;
+        @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+        public final Optional<Timer> termsTraversalTotalTime;
 
         public final QueryEventListener.PostingListEventListener postingsListener;
 
@@ -49,7 +52,9 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         {
             super(keyspace, table, indexName);
 
-            termsTraversalTotalTime = Metrics.timer(createMetricName("TermsLookupLatency"));
+            termsTraversalTotalTime = CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.getBoolean()
+                                      ? Optional.of(Metrics.timer(createMetricName("TermsLookupLatency")))
+                                      : Optional.empty();
 
             Meter postingDecodes = Metrics.meter(createMetricName("PostingDecodes", TRIE_POSTINGS_TYPE));
 
@@ -62,7 +67,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         @Override
         public void onTraversalComplete(long traversalTotalTime, TimeUnit unit)
         {
-            termsTraversalTotalTime.update(traversalTotalTime, unit);
+            termsTraversalTotalTime.ifPresent(timer -> timer.update(traversalTotalTime, unit));
         }
 
         @Override
@@ -79,7 +84,8 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         /**
          * BKD index metrics.
          */
-        public final Timer intersectionLatency;
+        @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+        public final Optional<Timer> intersectionLatency;
         public final Meter postingsNumPostings;
         public final Meter intersectionEarlyExits;
 
@@ -89,7 +95,9 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         {
             super(keyspace, table, indexName);
 
-            intersectionLatency = Metrics.timer(createMetricName("KDTreeIntersectionLatency"));
+            intersectionLatency = CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.getBoolean()
+                                  ? Optional.of(Metrics.timer(createMetricName("KDTreeIntersectionLatency")))
+                                  : Optional.empty();
             intersectionEarlyExits = Metrics.meter(createMetricName("KDTreeIntersectionEarlyExits"));
 
             postingsNumPostings = Metrics.meter(createMetricName("NumPostings", BKD_POSTINGS_TYPE));
@@ -102,7 +110,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         @Override
         public void onIntersectionComplete(long intersectionTotalTime, TimeUnit unit)
         {
-            intersectionLatency.update(intersectionTotalTime, unit);
+            intersectionLatency.ifPresent(timer -> timer.update(intersectionTotalTime, unit));
         }
 
         @Override
