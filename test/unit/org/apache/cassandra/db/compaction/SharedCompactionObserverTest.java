@@ -51,8 +51,8 @@ public class SharedCompactionObserverTest
     public void setUp()
     {
         mockObserver = Mockito.mock(CompactionObserver.class);
-        sharedCompactionObserver = new SharedCompactionObserver(mockObserver);
         operationId = UUID.randomUUID();
+        sharedCompactionObserver = new SharedCompactionObserver(operationId, mockObserver);
         mockProgress = Mockito.mock(CompactionProgress.class);
         when(mockProgress.operationId()).thenReturn(operationId);
     }
@@ -168,14 +168,6 @@ public class SharedCompactionObserverTest
     }
 
     @Test
-    public void testErrorNoInProgress()
-    {
-        Util.assumeAssertsEnabled();
-        sharedCompactionObserver.registerExpectedSubtask();
-        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onCompleted(operationId, null));
-    }
-
-    @Test
     public void testErrorWrongProgress()
     {
         Util.assumeAssertsEnabled();
@@ -192,7 +184,7 @@ public class SharedCompactionObserverTest
     {
         CompactionObserver mockObserver1 = Mockito.mock(CompactionObserver.class);
         CompactionObserver mockObserver2 = Mockito.mock(CompactionObserver.class);
-        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(mockObserver1, mockObserver2);
+        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(operationId, mockObserver1, mockObserver2);
 
         sharedCompactionObserver.registerExpectedSubtask();
         sharedCompactionObserver.onInProgress(mockProgress);
@@ -211,7 +203,7 @@ public class SharedCompactionObserverTest
         CompactionObserver mockObserver2 = Mockito.mock(CompactionObserver.class);
         Mockito.doThrow(new RuntimeException("Injected Exception")).when(mockObserver1).onInProgress(any());
 
-        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(mockObserver1, mockObserver2);
+        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(operationId, mockObserver1, mockObserver2);
 
         sharedCompactionObserver.registerExpectedSubtask();
         assertThatThrownBy(() -> sharedCompactionObserver.onInProgress(mockProgress)).isInstanceOf(RuntimeException.class);
@@ -228,7 +220,7 @@ public class SharedCompactionObserverTest
         CompactionObserver mockObserver2 = Mockito.mock(CompactionObserver.class);
         Mockito.doThrow(new RuntimeException("Injected Exception")).when(mockObserver1).onCompleted(any(), any());
 
-        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(mockObserver1, mockObserver2);
+        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(operationId, mockObserver1, mockObserver2);
 
         sharedCompactionObserver.registerExpectedSubtask();
         sharedCompactionObserver.onInProgress(mockProgress);
@@ -238,5 +230,39 @@ public class SharedCompactionObserverTest
         assertThatThrownBy(() -> sharedCompactionObserver.onCompleted(operationId, null)).isInstanceOf(RuntimeException.class);
         verify(mockObserver1, times(1)).onCompleted(operationId, null);
         verify(mockObserver2, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
+    public void testNullPrimaryObserver()
+    {
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> new SharedCompactionObserver(operationId, null));
+    }
+
+    @Test
+    public void testErrorWrongProgressId()
+    {
+        Util.assumeAssertsEnabled();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        when(mockProgress.operationId()).thenReturn(UUID.randomUUID());
+        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onInProgress(mockProgress));
+    }
+
+    @Test
+    public void testFirstErrorWins()
+    {
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        Exception firstErr = new RuntimeException("first");
+        sharedCompactionObserver.onCompleted(operationId, firstErr);
+        sharedCompactionObserver.onCompleted(operationId, new RuntimeException("second"));
+
+        verify(mockObserver, times(1)).onCompleted(operationId, firstErr);
     }
 }
