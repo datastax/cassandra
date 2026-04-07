@@ -844,10 +844,10 @@ public abstract class InMemoryReadTrie<T>
             }
         }
 
-        private long advanceToNextChild(int node, int data)
+        long advanceToNextChild(int node, int data)
         {
             assert (!isNull(node));
-            if (isLeaf(node))
+            if (isNullOrLeaf(node))
                 return descendInto(node, data);
 
             switch (offset(node))
@@ -861,12 +861,12 @@ public abstract class InMemoryReadTrie<T>
             }
         }
 
-        private long advanceToNextChildWithTarget(int node, int data, int transition)
+        long advanceToNextChildWithTarget(int node, int data, int transition)
         {
             assert (!isNull(node));
             if (isLeaf(node))
-                return transition <= data ? descendInto(node, data)
-                                          : NOT_FOUND;
+                return direction.le(transition, data) ? descendInto(node, data)
+                                                      : NOT_FOUND;
 
             switch (offset(node))
             {
@@ -1269,15 +1269,18 @@ public abstract class InMemoryReadTrie<T>
             return currentPosition;
         }
 
-
         long descendIntoChain(int child, int transition)
         {
-            ++depth;
-            currentPosition = Cursor.encode(depth, transition, direction);
-            content = null;
-            currentFullNode = child;
-            currentNode = child;
-            return currentPosition;
+            return setNodeState(Cursor.encode(++depth, transition, direction), null, child, child);
+        }
+
+        long setNodeState(long nextPosition, T nodeContent, int fullNode, int node)
+        {
+            currentPosition = nextPosition;
+            content = nodeContent;
+            currentFullNode = fullNode;
+            currentNode = node;
+            return nextPosition;
         }
     }
 
