@@ -18,10 +18,14 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
+import com.codahale.metrics.Clock;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,10 +37,24 @@ public class PropertyDefinitions
     public static final String MULTIPLE_DEFINITIONS_ERROR = "Multiple definitions for property '%s'";
     private static final Pattern POSITIVE_PATTERN = Pattern.compile("(1|true|yes)");
     private static final Pattern NEGATIVE_PATTERN = Pattern.compile("(0|false|no)");
-    
+    private static final Map<String, Long> OBSOLETE_PROPERTY_LAST_LOG_TIMES = new ConcurrentHashMap<>();
+    private static final long OBSOLETE_PROPERTY_LOG_INTERVAL_MS = 30_000;
+
     protected static final Logger logger = LoggerFactory.getLogger(PropertyDefinitions.class);
 
     protected final Map<String, Object> properties = new HashMap<>();
+    // Wrapper around System.currentTimeMillis() to simplify unit testing.
+    private final Clock clock;
+
+    @VisibleForTesting
+    PropertyDefinitions(Clock clock)
+    {
+        this.clock = clock;
+    }
+
+    public PropertyDefinitions() {
+        this.clock = Clock.defaultClock();
+    }
 
     public void addProperty(String name, String value) throws SyntaxException
     {
@@ -64,7 +82,15 @@ public class PropertyDefinitions
                 continue;
 
             if (obsolete.contains(name))
-                logger.warn("Ignoring obsolete property {}", name);
+            {
+                long now = clock.getTime();
+                Long lastLogged = OBSOLETE_PROPERTY_LAST_LOG_TIMES.putIfAbsent(name, now);
+
+                if (lastLogged == null || (now - lastLogged) >= OBSOLETE_PROPERTY_LOG_INTERVAL_MS)
+                {
+                    logger.warn("Ignoring obsolete property {}", name);
+                }
+            }
             else
                 throw new SyntaxException(String.format("Unknown property '%s'", name));
         }
