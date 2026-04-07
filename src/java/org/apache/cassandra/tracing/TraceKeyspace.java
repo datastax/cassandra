@@ -20,12 +20,16 @@ package org.apache.cassandra.tracing;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.Future;
+
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -33,6 +37,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.UUIDGen;
 
 import static java.lang.String.format;
@@ -63,7 +68,7 @@ public final class TraceKeyspace
     public static final String SESSIONS = "sessions";
     public static final String EVENTS = "events";
 
-    private static final TableMetadata Sessions =
+    static final TableMetadata Sessions =
         parse(SESSIONS,
                 "tracing sessions",
                 "CREATE TABLE %s ("
@@ -76,9 +81,10 @@ public final class TraceKeyspace
                 + "parameters map<text, text>,"
                 + "request text,"
                 + "started_at timestamp,"
+                + "context map<text, text>,"
                 + "PRIMARY KEY ((session_id)))");
 
-    private static final TableMetadata Events =
+    static final TableMetadata Events =
         parse(EVENTS,
                 "tracing events",
                 "CREATE TABLE %s ("
@@ -89,9 +95,10 @@ public final class TraceKeyspace
                 + "source_port int,"
                 + "source_elapsed int,"
                 + "thread text,"
+                + "context map<text, text>,"
                 + "PRIMARY KEY ((session_id), event_id))");
 
-    private static TableMetadata parse(String table, String description, String cql)
+    public static TableMetadata parse(String table, String description, String cql)
     {
         return CreateTableStatement.parse(format(cql, table), SchemaConstants.TRACE_KEYSPACE_NAME)
                                    .id(TableId.forSystemTable(SchemaConstants.TRACE_KEYSPACE_NAME, table))
@@ -144,6 +151,13 @@ public final class TraceKeyspace
         PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(Events, sessionId);
         Row.SimpleBuilder rowBuilder = builder.row(UUIDGen.getTimeUUID())
                                               .ttl(ttl);
+        setEventRow(rowBuilder, message, elapsed, threadName, ttl);
+
+        return builder.buildAsMutation();
+    }
+
+    public static Row.SimpleBuilder setEventRow(Row.SimpleBuilder rowBuilder, String message, int elapsed, String threadName, int ttl)
+    {
 
         rowBuilder.add("activity", message)
                   .add("source", FBUtilities.getBroadcastAddressAndPort().address);
@@ -153,7 +167,13 @@ public final class TraceKeyspace
 
         if (elapsed >= 0)
             rowBuilder.add("source_elapsed", elapsed);
+        return rowBuilder;
+    }
 
-        return builder.buildAsMutation();
+    public static TraceStorage asStorage()
+    {
+        TableMetadata eventsTable = TraceKeyspace.metadata().tables.getNullable(EVENTS);
+        TableMetadata sessionsTable = TraceKeyspace.metadata().tables.getNullable(SESSIONS);
+        return new KeyspaceTraceStorage(eventsTable, sessionsTable);
     }
 }

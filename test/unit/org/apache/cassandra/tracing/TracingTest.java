@@ -307,6 +307,7 @@ public final class TracingTest extends CQLTester
     private static final class ClientStateAccumulatingTracing extends Tracing
     {
         Queue<ClientState> states = new LinkedList<>();
+        TraceStorage storage = TraceKeyspace.asStorage();
 
         @Override
         protected void stopSessionImpl()
@@ -319,9 +320,9 @@ public final class TracingTest extends CQLTester
         }
 
         @Override
-        protected TraceState newTraceState(ClientState state, InetAddressAndPort coordinator, UUID sessionId, TraceType traceType)
+        protected TraceState newTraceState(ClientState state, InetAddressAndPort coordinator, UUID sessionId, TraceType traceType, boolean wasProbabilistic)
         {
-            return new TraceStateImpl(state, coordinator, sessionId, traceType);
+            return new TraceStateImpl(state, coordinator, sessionId, traceType, wasProbabilistic, storage);
         }
 
         @Override
