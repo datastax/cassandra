@@ -50,8 +50,8 @@ public class SharedCompactionObserverTest
     public void setUp()
     {
         mockObserver = Mockito.mock(CompactionObserver.class);
-        sharedCompactionObserver = new SharedCompactionObserver(mockObserver);
         operationId = UUID.randomUUID();
+        sharedCompactionObserver = new SharedCompactionObserver(operationId, mockObserver);
         mockProgress = Mockito.mock(CompactionProgress.class);
         when(mockProgress.operationId()).thenReturn(operationId);
     }
@@ -164,14 +164,6 @@ public class SharedCompactionObserverTest
     }
 
     @Test
-    public void testErrorNoInProgress()
-    {
-        Util.assumeAssertsEnabled();
-        sharedCompactionObserver.registerExpectedSubtask();
-        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onCompleted(operationId, true));
-    }
-
-    @Test
     public void testErrorWrongProgress()
     {
         Util.assumeAssertsEnabled();
@@ -181,5 +173,24 @@ public class SharedCompactionObserverTest
         var mockProgress2 = Mockito.mock(CompactionProgress.class);
         when(mockProgress2.operationId()).thenReturn(UUID.randomUUID());
         Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onInProgress(mockProgress2));
+    }
+
+    @Test
+    public void testNullPrimaryObserver()
+    {
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> new SharedCompactionObserver(operationId, null));
+    }
+
+    @Test
+    public void testErrorWrongProgressId()
+    {
+        Util.assumeAssertsEnabled();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        when(mockProgress.operationId()).thenReturn(UUID.randomUUID());
+        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onInProgress(mockProgress));
     }
 }
