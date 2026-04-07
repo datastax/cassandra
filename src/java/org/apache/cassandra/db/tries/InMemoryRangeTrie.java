@@ -209,7 +209,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
         S getAscentPathContent()
         {
-            if (backtrackDepth == 0)
+            if (backtrackDepth <= 0)
                 return null;
             if (depth(backtrackDepth - 1) != depth - 1)
                 return null;

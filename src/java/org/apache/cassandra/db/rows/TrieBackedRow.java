@@ -25,6 +25,7 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -45,11 +46,9 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.MultiCellCapableType;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.Direction;
-import org.apache.cassandra.db.tries.InMemoryBaseTrie;
 import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.RangeTrie;
 import org.apache.cassandra.db.tries.Trie;
@@ -63,7 +62,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.BiLongAccumulator;
 import org.apache.cassandra.utils.LongAccumulator;
 import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -100,10 +98,10 @@ public class TrieBackedRow extends AbstractRow
 
     private static final int COLUMN_NOT_PRESENT = -1;
 
-    static final TrieSet REMOVE_ROOTS_CHILDREN = TrieSet.rangeInclusiveEnd(BYTE_COMPARABLE_VERSION,
-                                                                           v -> ByteSource.oneByte(0),
-                                                                           v -> ByteSource.oneByte(255))
-                                                        .negation();
+    // A column with this ID cannot exist. Used to make sure we don't find anything when we are passed an unknown column definition.
+    public static final ByteComparable MISSING_COLUMN_KEY = encodeUnsignedInt(Long.MAX_VALUE);
+
+    public static final int MAX_RECURSIVE_LENGTH = 128;
 
     /// The row's clustering key.
     private final Clustering<?> clustering;
@@ -163,9 +161,13 @@ public class TrieBackedRow extends AbstractRow
 
     /// Returns true if the given object is a level marker with no meaning of its own. Used to drop unproductive markers
     /// that can remain after deletions.
-    public static boolean isDroppableMarker(TrieTombstoneMarker marker)
+    public static boolean isDroppableMarker(TrieTombstoneMarker m)
     {
-        return marker == TrieTombstoneMarker.LevelMarker.ROW;
+        if (m == TrieTombstoneMarker.LevelMarker.ROW)
+            return true;
+        if (!m.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW))
+            return false;
+        return Objects.equals(m.leftDeletion(), m.rightDeletion());
     }
 
     public static TrieBackedRow create(TableMetadata tableMetadata, Clustering<?> clustering, DeletionAwareTrie<Object, TrieTombstoneMarker> data)
@@ -426,10 +428,11 @@ public class TrieBackedRow extends AbstractRow
     /// Return a cell key (i.e. path in the trie) for the given column and cell path.
     private static ByteComparable cellKey(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column, CellPath path)
     {
-        int id = columnIds.get(column.name);
-        assert id != COLUMN_NOT_PRESENT;
+        int id = columnIds.getValue(column.name);
+        if (id == COLUMN_NOT_PRESENT)
+            return MISSING_COLUMN_KEY; // SAI can call cellKey for static columns on regular rows and vice versa
         if (!column.isComplex())
-            return v -> ByteSource.variableLengthUnsignedInteger(id);
+            return encodeUnsignedInt(id);
         else
             return cellKey(id, column, path);
     }
@@ -474,7 +477,7 @@ public class TrieBackedRow extends AbstractRow
     {
         int id = columnIds.getValue(column.name);
         assert id != COLUMN_NOT_PRESENT;
-        return v -> ByteSource.variableLengthUnsignedInteger(id);
+        return encodeUnsignedInt(id);
     }
 
     /// Convert the cell-path part of the trie path into a cell path to use in a [Cell].
@@ -554,7 +557,7 @@ public class TrieBackedRow extends AbstractRow
     }
 
     /// Combine data in the live and deletion branches to identify column roots.
-    private static Object combineDataAndDeletionForColumnIterator(Object content, TrieTombstoneMarker marker)
+    private static Object combineDataAndDeletionForColumnIterator(Object content, TrieTombstoneMarker marker, Direction direction)
     {
         if (content instanceof Cell)
             return content;
@@ -562,11 +565,23 @@ public class TrieBackedRow extends AbstractRow
             return content;
         if (content instanceof LivenessInfo)
             return null; // skip row marker
-        if (marker.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW))
-            return null; // skip row marker and row deletion
-        // This must be a complex column deletion marker. Return it, which will also result in skipping the return path
+        // skip any deletion that may be covering the row
+        TrieTombstoneMarker.Covering introducedDeletion = marker.succedingState(direction);
+        if (introducedDeletion == null || introducedDeletion.deletionKind() != TrieTombstoneMarker.Kind.COLUMN)
+            return null;
+        // This is a complex column deletion marker. Return it, which will also result in skipping the return path
         // marker.
         return marker;
+    }
+
+    private static Object combineDataAndDeletionForColumnIteratorForward(Object content, TrieTombstoneMarker marker)
+    {
+        return combineDataAndDeletionForColumnIterator(content, marker, Direction.FORWARD);
+    }
+
+    private static Object combineDataAndDeletionForColumnIteratorReverse(Object content, TrieTombstoneMarker marker)
+    {
+        return combineDataAndDeletionForColumnIterator(content, marker, Direction.REVERSE);
     }
 
     static class ColumnDataIterator extends TrieTailsIterator.DeletionAware<Object, TrieTombstoneMarker, Object, ColumnData>
@@ -575,7 +590,11 @@ public class TrieBackedRow extends AbstractRow
 
         ColumnDataIterator(Columns columns, DeletionAwareTrie<Object, TrieTombstoneMarker> trie, Direction direction)
         {
-            super(trie, direction, TrieBackedRow::combineDataAndDeletionForColumnIterator, false);
+            super(trie,
+                  direction,
+                  direction.select(TrieBackedRow::combineDataAndDeletionForColumnIteratorForward,
+                                   TrieBackedRow::combineDataAndDeletionForColumnIteratorReverse),
+                  false);
             this.columns = columns;
         }
 
@@ -721,11 +740,11 @@ public class TrieBackedRow extends AbstractRow
         // at the root. The intersection below moves it down to the cell level.
         TrieTombstoneMarker.Covering rowDeletion = TrieTombstoneMarker.applicableDeletion(data, ByteComparable.EMPTY);
 
-        // Add the fetched columns with the liveness info.
+        // Restrict to the fetched columns with the liveness info.
         if (!fetchedIds.isEmpty())
             data = data.intersect(TrieSet.ranges(BYTE_COMPARABLE_VERSION, true, true, mapIdsToColumnKeys(fetchedIds)));
         else
-            data = data.intersect(REMOVE_ROOTS_CHILDREN);
+            data = DeletionAwareTrie.singleton(ByteComparable.EMPTY, BYTE_COMPARABLE_VERSION, data.get(ByteComparable.EMPTY));
 
         // Re-add the row deletion and the ascent-side Level.ROW marker, which we lose in the intersection above.
         if (rowDeletion != null)
@@ -779,7 +798,7 @@ public class TrieBackedRow extends AbstractRow
         for (int i = fetchedIds.nextSetBit(0); i >= 0; i = fetchedIds.nextSetBit(i + 1))
         {
             final int id = i;
-            ByteComparable columnKey = v -> ByteSource.variableLengthUnsignedInteger(id);
+            ByteComparable columnKey = encodeUnsignedInt(id);
             keys[keyPos++] = columnKey; // add twice for inclusive start and end
             keys[keyPos++] = columnKey;
         }
@@ -787,12 +806,17 @@ public class TrieBackedRow extends AbstractRow
         return keys;
     }
 
+    private static ByteComparable encodeUnsignedInt(long id)
+    {
+        return v -> ByteSource.variableLengthUnsignedInteger(id);
+    }
+
     private BitSet getColumnIds(Columns fetched)
     {
         BitSet fetchedIds = new BitSet();
         for (ColumnMetadata c : fetched)
         {
-            int idx = columnIds.get(c.name);
+            int idx = columnIds.getValue(c.name);
             if (idx == COLUMN_NOT_PRESENT)
                 continue;
             fetchedIds.set(idx);
@@ -1310,7 +1334,8 @@ public class TrieBackedRow extends AbstractRow
         public void addCell(Cell<?> cell)
         {
             assert cell.column().isStatic() == (clustering == Clustering.STATIC_CLUSTERING) : "Column is " + cell.column() + ", clustering = " + clustering;
-            ByteComparable key = cellKey(columnIds, cell.column, cell.path());
+            CellPath path = cell.path();
+            ByteComparable key = cellKey(columnIds, cell.column, path);
 
             // TODO: Use apply to take care of this?
             DeletionTime cellDeletion = TrieTombstoneMarker.applicableDeletion(data, key);
@@ -1319,9 +1344,14 @@ public class TrieBackedRow extends AbstractRow
 
             try
             {
-                data.putRecursive(key, cell.withPath(null), (x, y) -> Cells.reconcile((Cell<?>) x, y));
-                if (cell.column.isComplex())
+                if (path == null || path.dataSize() <= MAX_RECURSIVE_LENGTH)
+                    data.putRecursive(key, cell.withPath(null), (x, y) -> Cells.reconcile((Cell<?>) x, y));
+                else // long path, avoid stack overflow by using the apply path
+                    mutator.apply(DeletionAwareTrie.singleton(key, BYTE_COMPARABLE_VERSION, cell));
+
+                if (path != null)
                     data.putRecursive(columnKey(columnIds, cell.column), COMPLEX_COLUMN_MARKER, (x, y) -> y);
+
                 if (data.get(ByteComparable.EMPTY) == null)
                     data.putRecursive(ByteComparable.EMPTY, LivenessInfo.EMPTY, (x, y) -> y);
             }
