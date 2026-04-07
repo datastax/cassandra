@@ -308,7 +308,10 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         MutableDeletionInfo.Builder builder = MutableDeletionInfo.builder(partitionLevelDeletion, metadata.comparator, false);
         for (Map.Entry<ByteComparable.Preencoded, TrieTombstoneMarker> entry : trie.deletionOnlyTrie().entrySet())
         {
-            RangeTombstoneMarker marker = entry.getValue().toRangeTombstoneMarker(entry.getKey(), BYTE_COMPARABLE_VERSION, metadata.comparator, partitionLevelDeletion);
+            TrieTombstoneMarker trieMarker = entry.getValue();
+            if (trieMarker.hasPointData())
+                continue;
+            RangeTombstoneMarker marker = trieMarker.toRangeTombstoneMarker(entry.getKey(), BYTE_COMPARABLE_VERSION, metadata.comparator, partitionLevelDeletion);
             if (marker != null)
                 builder.add(marker);
         }
