@@ -209,13 +209,13 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
     @Override
     LivenessInfo applyIncomingRowMarker(@Nullable LivenessInfo existing, LivenessInfo insert)
     {
+        Clustering<?> clustering = clusteringForCurrentKey();
         if (existing == null)
         {
-            indexer.onInserted(TrieBackedRow.create(metadata, clusteringForCurrentKey(), mutator.getMutationTailTrie()));
+            indexer.onInserted(TrieBackedRow.create(metadata, clustering, mutator.getMutationTailTrie()));
         }
         else
         {
-            Clustering<?> clustering = clusteringForCurrentKey();
             indexer.onUpdated(TrieBackedRow.create(metadata, clustering, mutator.getExistingTailTrie()),
                               TrieBackedRow.create(metadata, clustering, mutator.getMutationTailTrie()));
         }
