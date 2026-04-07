@@ -1,0 +1,389 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.distributed.test;
+
+import java.io.IOException;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BiFunction;
+import java.util.function.IntFunction;
+import java.util.stream.Collectors;
+
+import org.apache.commons.io.FileUtils;
+import org.assertj.core.api.Assertions;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.JSONValue;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
+import org.junit.Ignore;
+import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.Session;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.distributed.api.ConsistencyLevel;
+import org.apache.cassandra.distributed.api.ICoordinator;
+import org.apache.cassandra.distributed.api.IInstance;
+import org.apache.cassandra.distributed.api.IInvokableInstance;
+import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.tools.SSTableExport;
+import org.apache.cassandra.tools.ToolRunner;
+import org.apache.cassandra.utils.Collectors3;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.nio.file.StandardOpenOption.CREATE;
+import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
+import static java.util.Arrays.asList;
+
+import static org.apache.cassandra.config.DatabaseDescriptor.getCommitLogLocation;
+import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
+import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
+import static org.apache.cassandra.distributed.shared.AssertUtils.assertRows;
+import static org.apache.cassandra.distributed.shared.AssertUtils.row;
+import static org.assertj.core.api.Assertions.assertThat;
+
+public class CNDB_16146_Test extends TestBaseImpl
+{
+    private final static Logger logger = LoggerFactory.getLogger(CNDB_16146_Test.class);
+
+    private final static Path TEST_DATA_UDT_PATH = Paths.get("test/data/udt");
+    private final static Path TMP_PRODUCT_PATH = TEST_DATA_UDT_PATH.resolve("tmp");
+    private final static String KS = "ks";
+    private final static String SCHEMA_TXT = "schema.txt";
+    private final static String SCHEMA0_TXT = "schema0.txt";
+    private final static String DATA_JSON = "data.json";
+
+    private Cluster startCluster() throws IOException
+    {
+        Cluster cluster = Cluster.build(1).withConfig(config -> config.set("auto_snapshot", "false")
+                                                                      .set("uuid_sstable_identifiers_enabled", "false")
+                                                                      .with(NATIVE_PROTOCOL)).start();
+        cluster.setUncaughtExceptionsFilter(t -> {
+            String cause = Optional.ofNullable(t.getCause()).map(c -> c.getClass().getName()).orElse("");
+            return t.getClass().getName().equals(FSWriteError.class.getName()) && cause.equals(AccessDeniedException.class.getName());
+        });
+        return cluster;
+    }
+
+    private static List<Path> getDataDirectories(IInvokableInstance node)
+    {
+        // Get ALL directories for each table, SSTables may be spread across multiple data directories
+        return node.callOnInstance(() -> Keyspace.open(KS).getColumnFamilyStores().stream()
+                                                          .flatMap(cfs -> cfs.getDirectories().getCFDirectories().stream())
+                                                          .map(File::toPath)
+                                                          .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testMissingRows() throws Throwable
+    {
+        Files.createDirectories(TMP_PRODUCT_PATH);
+        try (Cluster cluster = startCluster())
+        {
+            IInvokableInstance node = cluster.get(1);
+            node.executeInternal("DROP KEYSPACE IF EXISTS " + KS);
+            node.executeInternal("CREATE KEYSPACE " + KS + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}");
+            createTables(node);
+            cluster.disableAutoCompaction(KS);
+
+            List<Path> dataDirs = getDataDirectories(node);
+
+            Map<String, String> schema0 = getSchemaDesc(node);
+            Files.writeString(TMP_PRODUCT_PATH.resolve(SCHEMA0_TXT),
+                              String.join(";\n", schema0.values()).replaceAll(";;", ";"),
+                              UTF_8,
+                              CREATE, TRUNCATE_EXISTING);
+
+            insertData(node, 0, true);
+            insertData(node, 256, true);
+            node.flush(KS);
+
+            // both rows already written and those written after the drop column can be missing
+            dropComplexColumn(node);
+
+            insertData(node, 128, false);
+            insertData(node, 256 + 17, false);
+
+            Map<String, String> schema1 = getSchemaDesc(node);
+            Files.writeString(TMP_PRODUCT_PATH.resolve(SCHEMA_TXT),
+                              String.join(";\n", schema1.values()).replaceAll(";;", ";"),
+                              UTF_8,
+                              CREATE, TRUNCATE_EXISTING);
+
+            node.flush(KS);
+
+            for (String table : schema1.keySet())
+                if (table.startsWith("tab"))
+                    node.forceCompact(KS, table);
+
+            Map<String, List<List<Object>>> data = selectData(node);
+            Files.writeString(TMP_PRODUCT_PATH.resolve(DATA_JSON), JSONObject.toJSONString(data), UTF_8, CREATE, TRUNCATE_EXISTING);
+
+            node.shutdown(true).get(10, TimeUnit.SECONDS);
+
+            Path ksTargetPath = TMP_PRODUCT_PATH.resolve(KS);
+            Files.createDirectories(ksTargetPath);
+            PathUtils.deleteContent(ksTargetPath);
+            for (Path dir : dataDirs)
+            {
+                // Use ONLY the table directory name (which includes UUID) since data directory
+                // names (data0, data1, data2) may differ between cluster instances.
+                // Merge all SSTables from multiple data directories into one target directory per table.
+                String tableDir = dir.getFileName().toString(); // tab5_tuple-UUID
+                Path targetDir = ksTargetPath.resolve(tableDir);
+                Files.createDirectories(targetDir);
+                FileUtils.copyDirectory(dir.toFile(), targetDir.toFile(), pathname -> !pathname.toString().endsWith(".log"));
+            }
+        }
+        Thread.sleep(2000);
+
+        // new cluster
+        try (Cluster cluster = startCluster())
+        {
+            IInvokableInstance node = cluster.get(1);
+            node.executeInternal("DROP KEYSPACE IF EXISTS " + KS);
+            node.executeInternal("CREATE KEYSPACE " + KS + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}");
+
+            for (String stmt : Files.readString(TMP_PRODUCT_PATH.resolve(SCHEMA_TXT), UTF_8).split(";"))
+            {
+                if (!stmt.isBlank())
+                {
+                    logger.info("Executing: {}", stmt);
+                    node.executeInternal(stmt);
+                }
+            }
+
+            cluster.disableAutoCompaction(KS);
+
+            List<Path> dataDirs = getDataDirectories(node);
+
+            node.shutdown(true).get(10, TimeUnit.SECONDS);
+
+            Path ksSourcePath = TMP_PRODUCT_PATH.resolve(KS);
+            for (Path dir : dataDirs)
+            {
+                // Copy from the flat temp structure (just table dir) to whichever data directory
+                // this cluster has assigned for the table
+                String tableDir = dir.getFileName().toString(); // tab5_tuple-UUID
+                Path sourceDir = ksSourcePath.resolve(tableDir);
+                if (Files.exists(sourceDir))
+                    FileUtils.copyDirectory(sourceDir.toFile(), dir.toFile());
+            }
+
+            logger.info("Restarting node");
+            node.startup();
+
+            // verify same data new cluster and schema recreated
+            Map<String, List<List<Object>>> data1 = selectData(node);
+            String jsonData0 = Files.readString(TMP_PRODUCT_PATH.resolve(DATA_JSON), UTF_8);
+            for (String table1 : data1.keySet())
+            {
+                List<List<Object>> table1Data =  data1.get(table1);
+                JSONArray table1Json = new JSONArray();
+                table1Json.addAll(table1Data);
+                String table0Json = JSONValue.toJSONString(((JSONObject) new JSONParser().parse(jsonData0)).get(table1));
+                String missingRows = table0Json;
+                int originalRowCount = (missingRows.length() - missingRows.replace("[", "").length() -1);
+                for (List<Object> row1 : table1Data)
+                {
+                    JSONArray row1Json = new JSONArray();
+                    row1Json.addAll(row1);
+                    missingRows = missingRows.replace(row1Json.toJSONString(), "");
+                }
+                String missingMsg = String.format("missing %s/%s rows in %s: %s",
+                              (missingRows.length() - missingRows.replace("[", "").length() -1),
+                              originalRowCount, table1, missingRows.replaceAll(",+", ","));
+
+                assertThat(table1Json.toJSONString()).as(missingMsg).isEqualTo(table0Json);
+            }
+            // JSON comparison won't work because the existing data.json was generated with HashMap ordering
+        }
+    }
+
+    private Map<String, String> getSchemaDesc(IInvokableInstance node)
+    {
+        return Arrays.stream(node.executeInternal("DESCRIBE " + KS + " WITH INTERNALS"))
+                     .filter(r -> r[1].equals("table") || r[1].equals("type"))
+                     .collect(Collectors3.toImmutableMap(r -> r[2].toString(),
+                                                         r -> Arrays.stream(r[3].toString().split("\\n"))
+                                                                    .filter(s -> !s.strip().startsWith("AND") || s.contains("DROPPED COLUMN RECORD"))
+                                                                    .collect(Collectors.joining("\n"))));
+    }
+
+    private static String udtValue(int i, List<Integer> bits, BiFunction<Integer, Integer, String> vals)
+    {
+        List<String> cols = asList("foo", "bar", "baz");
+        ArrayList<String> udtVals = new ArrayList<>();
+        for (int j = 0; j < bits.size(); j++)
+        {
+            if ((i & bits.get(j)) != 0)
+                udtVals.add(cols.get(j) + ": " + vals.apply(i, j));
+        }
+        return '{' + String.join(", ", udtVals) + '}';
+    }
+
+    private static String tupleValue(int i, List<Integer> bits, BiFunction<Integer, Integer, String> vals)
+    {
+        ArrayList<String> tupleVals = new ArrayList<>();
+        for (int j = 0; j < bits.size(); j++)
+        {
+            if ((i & bits.get(j)) != 0)
+                tupleVals.add(vals.apply(i, j));
+            else
+                tupleVals.add("null");
+        }
+        return '(' + String.join(", ", tupleVals) + ')';
+    }
+
+    private static String genInsert(int pk, int i, List<Integer> bits, BiFunction<Integer, Integer, String> vals)
+    {
+        List<String> cols = asList("a_int", "b_complex", "c_int");
+        ArrayList<String> c = new ArrayList<>();
+        ArrayList<String> v = new ArrayList<>();
+        for (int j = 0; j < bits.size(); j++)
+        {
+            if ((i & bits.get(j)) != 0)
+            {
+                c.add(cols.get(j));
+                v.add(vals.apply(i, j));
+            }
+        }
+        if (c.isEmpty())
+            return String.format("(pk) VALUES (%d)", pk);
+        else
+            return String.format("(pk, %s) VALUES (%d, %s)", String.join(", ", c), pk, String.join(", ", v));
+    }
+
+    private static BiFunction<Integer, Integer, String> valsFunction(IntFunction<String> nonIntFunction)
+    {
+        return (i, j) -> {
+            if (j == 0)
+                return Integer.toString(i);
+            if (j == 1)
+                return nonIntFunction.apply(i);
+            if (j == 2)
+                return Integer.toString(i * 2);
+            assert false;
+            return null;
+        };
+    }
+
+    private static BiFunction<Integer, Integer, String> valsFunction()
+    {
+        return (i, j) -> {
+            if (j == 0)
+                return Integer.toString(i);
+            if (j == 1)
+                return String.format("'bar%d'", i);
+            if (j == 2)
+                return Integer.toString(i * 2);
+            assert false;
+            return null;
+        };
+    }
+
+    private void insertData(IInstance node, int offset, boolean withComplex)
+    {
+        for (int pk = offset; pk < offset + (1 << 2); pk++)
+        {
+            int i = withComplex ? (pk - offset) : (pk - offset) & ~(2 + 4 + 8);
+            node.executeInternal("INSERT INTO " + KS + ".tab1_udt1 " + genInsert(pk, i, asList(1, 2 + 4 + 8, 16), valsFunction(j -> udtValue(j, asList(2, 4, 8), valsFunction()))));
+            node.executeInternal("INSERT INTO " + KS + ".tab2_frozen_udt1 " + genInsert(pk, i, asList(1, 2 + 4 + 8, 16), valsFunction(j -> udtValue(j, asList(2, 4, 8), valsFunction()))));
+            node.executeInternal("INSERT INTO " + KS + ".tab5_tuple " + genInsert(pk, i, asList(1, 2 + 4 + 8, 16), valsFunction(j -> tupleValue(j, asList(2, 4, 8), valsFunction()))));
+            node.executeInternal("INSERT INTO " + KS + ".tab6_frozen_tuple " + genInsert(pk, i, asList(1, 2 + 4 + 8, 16), valsFunction(j -> tupleValue(j, asList(2, 4, 8), valsFunction()))));
+        }
+
+        for (int pk = offset; pk < offset + (1 << 2); pk++)
+        {
+            int i = withComplex ? (pk - offset) : (pk - offset) & ~(2 + 4 + 8 + 16 + 32);
+            node.executeInternal("INSERT INTO " + KS + ".tab4_frozen_udt2 " + genInsert(pk, i, asList(1, 2 + 4 + 8 + 16 + 32, 64),
+                                                                                        valsFunction(j -> udtValue(j, asList(2, 4 + 8 + 16, 32), valsFunction(k -> udtValue(k, asList(4, 8, 16), valsFunction()))))));
+            node.executeInternal("INSERT INTO " + KS + ".tab7_tuple_with_udt " + genInsert(pk, i, asList(1, 2 + 4 + 8 + 16 + 32, 64),
+                                                                                           valsFunction(j -> tupleValue(j, asList(2, 4 + 8 + 16, 32), valsFunction(k -> udtValue(k, asList(4, 8, 16), valsFunction()))))));
+            node.executeInternal("INSERT INTO " + KS + ".tab8_frozen_tuple_with_udt " + genInsert(pk, i, asList(1, 2 + 4 + 8 + 16 + 32, 64),
+                                                                                                  valsFunction(j -> tupleValue(j, asList(2, 4 + 8 + 16, 32), valsFunction(k -> udtValue(k, asList(4, 8, 16), valsFunction()))))));
+            node.executeInternal("INSERT INTO " + KS + ".tab9_udt_with_tuple " + genInsert(pk, i, asList(1, 2 + 4 + 8 + 16 + 32, 64),
+                                                                                           valsFunction(j -> udtValue(j, asList(2, 4 + 8 + 16, 32), valsFunction(k -> tupleValue(k, asList(4, 8, 16), valsFunction()))))));
+            node.executeInternal("INSERT INTO " + KS + ".tab10_frozen_udt_with_tuple " + genInsert(pk, i, asList(1, 2 + 4 + 8 + 16 + 32, 64),
+                                                                                                   valsFunction(j -> udtValue(j, asList(2, 4 + 8 + 16, 32), valsFunction(k -> tupleValue(k, asList(4, 8, 16), valsFunction()))))));
+        }
+    }
+
+    private static void dropComplexColumn(IInvokableInstance node)
+    {
+        List<String> tables = node.callOnInstance(() -> Schema.instance.getKeyspaceMetadata(KS).tables.stream().map(t -> t.name).collect(Collectors.toList()));
+        for (String table : tables)
+            node.executeInternal("ALTER TABLE " + KS + "." + table + " DROP b_complex");
+    }
+
+    private Map<String, List<List<Object>>> selectData(IInvokableInstance node)
+    {
+        // Use TreeMap for deterministic ordering in JSON output
+        Map<String, List<List<Object>>> results = new TreeMap<>();
+        List<String> tables = node.callOnInstance(() -> Schema.instance.getKeyspaceMetadata(KS).tables.stream().map(t -> t.name).collect(Collectors.toList()));
+        for (String table : tables)
+        {
+            Object[][] rows = node.executeInternal("SELECT * FROM " + KS + "." + table);
+            Arrays.sort(rows, Comparator.comparing(a -> ((Integer) a[0])));
+            results.put(table, Arrays.stream(rows).map(Arrays::asList).collect(Collectors.toList()));
+        }
+        return results;
+    }
+
+    private static void createTables(IInvokableInstance node)
+    {
+        node.executeInternal("CREATE TYPE " + KS + ".udt1(foo int, bar text, baz int)");
+        node.executeInternal("CREATE TYPE " + KS + ".udt2(foo int, bar udt1, baz int)");
+        node.executeInternal("CREATE TYPE " + KS + ".udt3(foo int, bar tuple<int, text, int>, baz int)");
+
+        node.executeInternal("CREATE TABLE " + KS + ".tab1_udt1                   (pk int PRIMARY KEY, a_int int, b_complex udt1, c_int int) WITH ID = 513f2627-9356-41c4-a379-7ad42be97432");
+        node.executeInternal("CREATE TABLE " + KS + ".tab2_frozen_udt1            (pk int PRIMARY KEY, a_int int, b_complex frozen<udt1>, c_int int) WITH ID = 450f91fe-7c47-41c9-97bf-fdad854fa7e5");
+        Assertions.assertThatExceptionOfType(RuntimeException.class).isThrownBy(
+          () -> node.executeInternal("CREATE TABLE " + KS + ".tab3_udt2             (pk int PRIMARY KEY, a_int int, b_complex udt2, c_int int) WITH ID = b613aee8-645c-4384-90d2-fc9e82fb1a59"));
+        node.executeInternal("CREATE TABLE " + KS + ".tab4_frozen_udt2            (pk int PRIMARY KEY, a_int int, b_complex frozen<udt2>, c_int int) WITH ID = 9c03c71c-6775-4357-9173-0f8808901afa");
+        node.executeInternal("CREATE TABLE " + KS + ".tab5_tuple                  (pk int PRIMARY KEY, a_int int, b_complex tuple<int, text, int>, c_int int) WITH ID = 90826dd3-8437-4585-9de4-15908236687f");
+        node.executeInternal("CREATE TABLE " + KS + ".tab6_frozen_tuple           (pk int PRIMARY KEY, a_int int, b_complex frozen<tuple<int, text, int>>, c_int int) WITH ID = 54185f9a-a6fd-487c-abc3-c01bd5835e48");
+        node.executeInternal("CREATE TABLE " + KS + ".tab7_tuple_with_udt         (pk int PRIMARY KEY, a_int int, b_complex tuple<int, udt1, int>, c_int int) WITH ID = 4e78f403-7b63-4e0d-a231-42e42cba7cb5");
+        node.executeInternal("CREATE TABLE " + KS + ".tab8_frozen_tuple_with_udt  (pk int PRIMARY KEY, a_int int, b_complex frozen<tuple<int, udt1, int>>, c_int int) WITH ID = 8660f235-0816-4019-9cc9-1798fa7beb17");
+        node.executeInternal("CREATE TABLE " + KS + ".tab9_udt_with_tuple         (pk int PRIMARY KEY, a_int int, b_complex udt3, c_int int) WITH ID = f670fd5a-8145-4669-aceb-75667c000ea6");
+        node.executeInternal("CREATE TABLE " + KS + ".tab10_frozen_udt_with_tuple (pk int PRIMARY KEY, a_int int, b_complex frozen<udt3>, c_int int) WITH ID = 6a5cff4e-2f94-4c8b-9aa2-0fbd65292caa");
+    }
+
+}
