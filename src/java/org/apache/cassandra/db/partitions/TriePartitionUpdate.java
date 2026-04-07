@@ -226,6 +226,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                         if (o instanceof Cell<?>)
                             return ((Cell<?>) o).updateAllTimestamp(newTimestamp);
 
+                        if (o == TrieBackedRow.COMPLEX_COLUMN_MARKER)
+                            return o;
+
                         if (o instanceof LivenessInfo)
                             return ((LivenessInfo) o).withUpdatedTimestamp(newTimestamp);
 
