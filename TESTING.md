@@ -17,7 +17,7 @@
 # limitations under the License.
 #
 -->
-
+TEST DO NOT MERGE
 The goal of this document is to establish guidelines on writing tests that drive incremental improvement of the test coverage and testability of 
 Cassandra, without overly burdening day to day work. While not every point here will be immediately practical to implement or relevant for every 
 contribution, it errs on the side of not making rules out of potential exceptions. It provides guidelines on test scope, style, and goals, as
