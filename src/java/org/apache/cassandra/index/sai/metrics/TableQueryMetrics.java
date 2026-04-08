@@ -19,6 +19,9 @@ package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.TimeUnit;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Timer;
@@ -32,12 +35,12 @@ public class TableQueryMetrics extends AbstractMetrics
 {
     public static final String TABLE_QUERY_METRIC_TYPE = "TableQueryMetrics";
 
-    private final PerQueryMetrics perQueryMetrics;
+    public final PerQueryMetrics perQueryMetrics;
 
-    private final Counter totalQueryTimeouts;
-    private final Counter totalPartitionReads;
-    private final Counter totalRowsFiltered;
-    private final Counter totalQueriesCompleted;
+    public final Counter totalQueryTimeouts;
+    public final Counter totalPartitionReads;
+    public final Counter totalRowsFiltered;
+    public final Counter totalQueriesCompleted;
 
     private final Counter sortThenFilterQueriesCompleted;
     private final Counter filterThenSortQueriesCompleted;
@@ -77,6 +80,8 @@ public class TableQueryMetrics extends AbstractMetrics
 
     public class PerQueryMetrics extends AbstractMetrics
     {
+        private final Logger logger = LoggerFactory.getLogger(PerQueryMetrics.class);
+
         private final Timer queryLatency;
 
         /**
@@ -181,6 +186,13 @@ public class TableQueryMetrics extends AbstractMetrics
                 sortThenFilterQueriesCompleted.inc();
             else if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SEARCH_THEN_ORDER)
                 filterThenSortQueriesCompleted.inc();
+
+            logger.debug("Query took {} ms; Fetched {} rows; Read {} partitions; Hit {} segments in {} sstables.",
+                         queryLatencyMicros / 1000,
+                         rowsFiltered,
+                         partitionsRead,
+                         segmentsHit,
+                         ssTablesHit);
 
             if (Tracing.isTracing())
             {

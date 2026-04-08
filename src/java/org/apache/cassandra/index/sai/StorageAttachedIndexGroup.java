@@ -109,6 +109,11 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         tracker.subscribe(this);
     }
 
+    public TableQueryMetrics queryMetrics()
+    {
+        return queryMetrics;
+    }
+
     @Nullable
     public static StorageAttachedIndexGroup getIndexGroup(ColumnFamilyStore cfs)
     {
