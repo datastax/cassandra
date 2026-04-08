@@ -38,9 +38,13 @@ public class SharedCompactionObserver implements CompactionObserver
     private final AtomicBoolean onCompleteIsSuccess = new AtomicBoolean(true);
     private final AtomicReference<CompactionProgress> inProgressReported = new AtomicReference<>(null);
     private final CompactionObserver observer;
+    private final UUID parentId;
 
-    public SharedCompactionObserver(CompactionObserver observer)
+    public SharedCompactionObserver(UUID parentId, CompactionObserver observer)
     {
+        if (observer == null)
+            throw new IllegalArgumentException("Observer cannot be null");
+        this.parentId = parentId;
         this.observer = observer;
     }
 
@@ -51,13 +55,22 @@ public class SharedCompactionObserver implements CompactionObserver
             : "Task started before all subtasks registered for operation " + inProgressReported.get().operationId();
     }
 
+    /// Called to disable sending unwanted messages when the attached subtasks are not going to be used.
+    public void disableReportingOnComplete()
+    {
+        toReportOnComplete.set(Integer.MAX_VALUE);
+    }
+
     @Override
     public void onInProgress(CompactionProgress progress)
     {
         if (inProgressReported.compareAndSet(null, progress))
             observer.onInProgress(progress);
         else
+        {
             assert inProgressReported.get() == progress; // progress object must also be shared
+            assert progress.operationId().equals(parentId) : "progress.operationId() must match parentId";
+        }
     }
 
     @Override
@@ -65,10 +78,9 @@ public class SharedCompactionObserver implements CompactionObserver
     {
         onCompleteIsSuccess.compareAndSet(true, isSuccess); // acts like AND
         final int remainingToComplete = toReportOnComplete.decrementAndGet();
-        assert inProgressReported.get() != null : "onCompleted called before onInProgress";
         assert remainingToComplete >= 0 : "onCompleted called without corresponding registerExpectedSubtask";
-        // The individual operation ID given here may be different from the shared ID. Pass on the shared one.
+
         if (remainingToComplete == 0)
-            observer.onCompleted(inProgressReported.get().operationId(), onCompleteIsSuccess.get());
+            observer.onCompleted(parentId, onCompleteIsSuccess.get());
     }
 }
