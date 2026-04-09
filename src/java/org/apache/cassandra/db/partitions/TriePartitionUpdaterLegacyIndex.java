@@ -112,7 +112,8 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
                                                    DeletionAwareTrie.deletionBranch(ByteComparable.EMPTY,
                                                                                     TrieBackedPartition.BYTE_COMPARABLE_VERSION,
                                                                                     mutator.getExistingDeletionTailTrie()));
-            indexer.onUpdated(existingRow, updateRow);
+            // FIXME: this is doing double the work; change indexer.onUpdated to accept cells.
+            indexer.onUpdated(existingRow, existingRow.mergeWith(updateRow));
         }
         else
             indexer.onInserted(updateRow);
@@ -186,8 +187,9 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
         // needs to be able to receive these updates separately because the database can receive them separately and
         // have, for example, the data written in one memtable and a deletion in another.
         Clustering<?> clustering = clusteringForCurrentKey();
-        indexer.onUpdated(TrieBackedRow.create(metadata, clustering, mutator.getExistingTailTrie()),
-                          TrieBackedRow.emptyDeletedRow(clustering, deletion));
+        // FIXME: this is doing double the work; change indexer.onUpdated to accept cells.
+        TrieBackedRow existingRow = TrieBackedRow.create(metadata, clustering, mutator.getExistingTailTrie());
+        indexer.onUpdated(existingRow, existingRow.mergeWith(TrieBackedRow.emptyDeletedRow(clustering, deletion)));
 
         return super.applyRowDeletion(existing, deletion);
     }
@@ -210,14 +212,16 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
     LivenessInfo applyIncomingRowMarker(@Nullable LivenessInfo existing, LivenessInfo insert)
     {
         Clustering<?> clustering = clusteringForCurrentKey();
+        TrieBackedRow insertedRow = TrieBackedRow.create(metadata, clustering, mutator.getMutationTailTrie());
         if (existing == null)
         {
-            indexer.onInserted(TrieBackedRow.create(metadata, clustering, mutator.getMutationTailTrie()));
+            indexer.onInserted(insertedRow);
         }
         else
         {
-            indexer.onUpdated(TrieBackedRow.create(metadata, clustering, mutator.getExistingTailTrie()),
-                              TrieBackedRow.create(metadata, clustering, mutator.getMutationTailTrie()));
+            // FIXME: this is doing double the work; change indexer.onUpdated to accept cells.
+            TrieBackedRow existingRow = TrieBackedRow.create(metadata, clustering, mutator.getExistingTailTrie());
+            indexer.onUpdated(existingRow, existingRow.mergeWith(insertedRow));
         }
         return super.applyIncomingRowMarker(existing, insert);
     }
