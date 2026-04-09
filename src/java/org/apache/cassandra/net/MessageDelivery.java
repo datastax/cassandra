@@ -31,6 +31,6 @@ public interface MessageDelivery
     public <V> void respond(V response, Message<?> message);
     public default void respondWithFailure(RequestFailureReason reason, Message<?> message)
     {
-        send(Message.failureResponse(message.id(), message.expiresAtNanos(), reason), message.respondTo());
+        send(Message.failureResponse(message.id(), message.expiresAtNanos(), reason, message.verb()), message.respondTo());
     }
 }
