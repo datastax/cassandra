@@ -15,6 +15,6 @@
 // This Jenkinsfile uses a shared library from https://github.com/riptano/jenkins-pipeline-lib
 // The pipeline logic is defined in the library rather than in this file.
 
-@Library('ds-pipeline-lib') _
+@Library('ds-pipeline-lib@origin/CNDB-17375-remove-stargazerDSPublishDockerPipeline') _
 
 dsCassandraPRGate()
