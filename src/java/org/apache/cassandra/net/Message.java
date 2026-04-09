@@ -290,12 +290,12 @@ public class Message<T>
     /** Builds a failure response Message with an explicit reason, and fields inferred from request Message */
     public Message<RequestFailureReason> failureResponse(RequestFailureReason reason)
     {
-        return failureResponse(id(), expiresAtNanos(), reason);
+        return failureResponse(id(), expiresAtNanos(), reason, verb());
     }
 
-    static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason)
+    static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason, Verb requestVerb)
     {
-        return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null).build();
+        return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, ParamType.REQUEST_VERB_NAME, requestVerb.name()).build();
     }
 
     Message<T> withCallBackOnFailure()
