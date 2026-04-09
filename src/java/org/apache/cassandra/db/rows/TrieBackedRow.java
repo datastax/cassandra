@@ -612,13 +612,16 @@ public class TrieBackedRow extends AbstractRow
             if (value instanceof CellData)
                 return cellFromCellData((CellData<?, ?>) value, bytes, byteLength, columns);
 
-            long columnIndex = ByteSourceInverse.getVariableLengthUnsignedInteger(ByteSource.preencoded(bytes, 0, byteLength));
-            assert ((int) columnIndex) == columnIndex;
-
-            return new TrieBackedComplexColumn(columns.getSimple((int) columnIndex),
-                                               tailTrie);
+            return new TrieBackedComplexColumn(columnMetadataFromPath(bytes, byteLength, columns), tailTrie);
         }
 
+    }
+
+    public static ColumnMetadata columnMetadataFromPath(byte[] bytes, int byteLength, Columns columns)
+    {
+        long columnIndex = ByteSourceInverse.getVariableLengthUnsignedInteger(ByteSource.preencoded(bytes, 0, byteLength));
+        assert ((int) columnIndex) == columnIndex;
+        return columns.getSimple((int) columnIndex);
     }
 
     public static Cell<?> cellFromCellData(CellData<?, ?> value, byte[] bytes, int byteLength, Columns columns)

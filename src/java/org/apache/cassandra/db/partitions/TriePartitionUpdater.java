@@ -126,7 +126,7 @@ public class TriePartitionUpdater
             throw new AssertionError("Unexpected content in trie " + existingContent + " for deletion " + updateMarker);
     }
 
-    private CellData<?, ?> applyCellDeletion(CellData<?, ?> existingContent, DeletionTime deletion)
+    protected CellData<?, ?> applyCellDeletion(CellData<?, ?> existingContent, DeletionTime deletion)
     {
         if (!deletion.deletes(existingContent))
             return existingContent;
@@ -140,7 +140,7 @@ public class TriePartitionUpdater
         return existing;
     }
 
-    Object applyRowDeletion(LivenessInfo existing, DeletionTime deletion)
+    LivenessInfo applyRowDeletion(LivenessInfo existing, DeletionTime deletion)
     {
         if (deletion.deletes(existing))
         {
