@@ -501,51 +501,21 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
             return deletionMutator.getCurrentKeyBytes();
         }
 
-        /// Get a tail trie of the existing data branch rooted at the current position. This can be called from
-        /// `dataTransformer` or `existingDeleter` and will represent the state of the trie _before_ the incoming
-        /// modifications are made (note that the same position may be affected by both deletions and data, in which
-        /// case the second call will have the deletions reflected).
-        public DeletionAwareTrie<T, D> getExistingTailTrie()
-        {
-            // Make sure the returned trie doesn't reference variables that can change.
-            int branchRoot = state.existingFullNode();
-            InMemoryBaseTrie<T> trie = state.trie;
-
-            return dir -> new DeletionAwareInMemoryCursor<>(trie, dir, branchRoot);
-        }
-
-        /// Get a tail trie of the incoming data branch rooted at the current position. This can be called from
-        /// `dataTransformer`.
-        public DeletionAwareTrie<V, E> getMutationTailTrie()
-        {
-            // Fix the position of the mutation cursor.
-            var cursor = mutationCursor.tailCursor(Direction.FORWARD);
-            return cursor::tailCursor;
-        }
-
-        /// Get a tail trie of the existing deletion branch rooted at the current position. This can be called from
-        /// `deletionTransformer` _when the existing state is a boundary_ and will represent the state of the trie
-        /// _before_ the incoming modifications are made.
+        /// Get the bytes of the key in the deletion branch from the given depth, which must be obtained using
+        /// [#getDeletionBranchDepth()]. The returned array can be safely modified and/or stored.
         ///
-        /// The returned tail trie is only valid until the return from the current transformer call.
-        public RangeTrie<D> getExistingDeletionTailTrie()
+        /// This method may be called by `deletionTransformer` to get information about the current state.
+        public byte[] getDeletionBranchKeyBytes(int startDepth)
         {
-            // We need to take ongoing deletions into account to make a valid tail trie.
-            // InMemoryRangeCursor.tailCursor will do this, so first make a cursor of the given node, then taking its
-            // tail will apply the covering deletions on both sides.
-            // This also makes sure changes to deletionState do not affect the returned cursor.
-            RangeCursor<D> cursor = new InMemoryRangeTrie.InMemoryRangeCursor<>(deletionState.trie, Direction.FORWARD, deletionState.existingFullNode());
-            return cursor::tailCursor;
+            return deletionMutator.getCurrentKeyBytes(startDepth);
         }
 
-        /// Get a tail trie of the incoming deletion branch rooted at the current position. This can be called from
-        /// `deletionTransformer` or `existingDeleter` _when the incoming state is a boundary_ (if not, the result
-        /// is undefined).
-        public RangeTrie<E> getMutationDeletionTailTrie()
+        /// Return the depth of the currently processed node in the deletion branch.
+        ///
+        /// This method may be called by the upsert transformer to get information about the current state.
+        public int getDeletionBranchDepth()
         {
-            // Fix the position of the mutation cursor.
-            var cursor = deleter.mutationCursor.tailCursor(Direction.FORWARD);
-            return cursor::tailCursor;
+            return deletionMutator.currentDepth();
         }
     }
 
