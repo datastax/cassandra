@@ -62,7 +62,11 @@ public enum ParamType
     /**
      * Messages with tracing sessions are decorated with the traced keyspace.
      */
-    TRACE_KEYSPACE                   (18, StringSerializer.serializer);
+    TRACE_KEYSPACE                   (18, StringSerializer.serializer),
+    /**
+     * Failure response messages contain verb name of the incoming message.
+     */
+    REQUEST_VERB_NAME                (19, StringSerializer.serializer);
 
     final int id;
     final IVersionedSerializer serializer;
