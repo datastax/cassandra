@@ -86,6 +86,39 @@ public class SinglePartitionReadCommandCQLTest extends ReadCommandCQLTester<Sing
                           "SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 1 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE k = ? AND c <= ? AND v = ? ALLOW FILTERING");
 
+        // test with a secondary index
+        createIndex("CREATE INDEX ON %s(v)");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND  v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ",
+                          "SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c = ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0 AND v = 0 ",
+                          "SELECT * FROM %s WHERE k = 0 AND c > 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c > ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 0 ",
+                          "SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c < ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 0 ",
+                          "SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c >= ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c <= ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c IN (0) AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c = ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c IN (0, 1) AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c IN (0, 1) AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c IN (?, ?) AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ",
+                          "SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c = ? AND v = ? ALLOW FILTERING");
+
         // test clustering-based ORDER BY
         createTable("CREATE TABLE %s (k int, c1 int, c2 int, PRIMARY KEY (k, c1, c2))");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY c1",
@@ -127,6 +160,75 @@ public class SinglePartitionReadCommandCQLTest extends ReadCommandCQLTester<Sing
         assertToCQLString("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3",
                           "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE k1 = ? AND k2 = ? AND c = ? ALLOW FILTERING");
+
+        // test with multi-column partition key and index
+        createIndex("CREATE INDEX ON %s(v)");
+        assertToCQLString("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v = 1",
+                          "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v = 1 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k1 = ? AND k2 = ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3 AND v = 1",
+                          "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3 AND v = 1 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k1 = ? AND k2 = ? AND c = ? AND v = ? ALLOW FILTERING");
+
+        // test generic index-based ORDER BY
+        createTable("CREATE TABLE %s (k int, c int, n int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY n LIMIT 10",
+                          "SELECT * FROM %s WHERE k = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 ORDER BY n LIMIT 10",
+                          "SELECT * FROM %s WHERE k = 0 AND c = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c = ? ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c IN (0, 1) ORDER BY n LIMIT 10",
+                          "SELECT * FROM %s WHERE k = 0 AND c IN (0, 1) ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c IN (?, ?) ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
+
+        // test ANN index-based ORDER BY
+        createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
+                          "SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
+                          "no viable alternative at input '..'");
+
+        // test with index and multi-column clustering
+        createTable("CREATE TABLE %s (k int, c1 int, c2 int,v int, PRIMARY KEY (k, c1, c2))");
+        createIndex("CREATE INDEX ON %s(v)");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 > 1 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c1 > 1 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c1 > ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 < 1 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c1 < 1 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c1 < ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 >= 1 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c1 >= 1 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c1 >= ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 <= 1 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c1 <= 1 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c1 <= ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 2 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND (c1, c2) = (1, 2) AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND (c1, c2) = (?, ?) AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 > 2 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 > 2 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND c2 > ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 < 2 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 < 2 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND c2 < ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 >= 2 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 >= 2 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND c2 >= ? AND v = ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 <= 2 AND v = 0",
+                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 <= 2 AND v = 0 ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND c2 <= ? AND v = ? ALLOW FILTERING");
 
         // test literals
         createTable("CREATE TABLE %s (k text, c text, m map<text, text>, PRIMARY KEY (k, c))");

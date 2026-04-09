@@ -97,35 +97,11 @@ public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<Parti
                           "SELECT * FROM %s WHERE token(k) >= " + token + " AND token(k) <= " + token + " ALLOW FILTERING",
                           "SELECT * FROM %s WHERE token(k) >= ? AND token(k) <= ? ALLOW FILTERING");
 
-        // test with a secondary index (indexed queries are always mapped to range commands)
+        // test with a secondary index
         createIndex("CREATE INDEX ON %s(v)");
         assertToCQLString("SELECT * FROM %s WHERE v = 0",
                           "SELECT * FROM %s WHERE v = 0 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND  v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ",
-                          "SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c = ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0 AND v = 0 ",
-                          "SELECT * FROM %s WHERE k = 0 AND c > 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c > ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 0 ",
-                          "SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c < ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 0 ",
-                          "SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c >= ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c <= ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c IN (0) AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c = ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c IN (0, 1) AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c IN (0, 1) AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c IN (?, ?) AND v = ? ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE token(k) > token(0) AND v = 0",
                           "SELECT * FROM %s WHERE token(k) > " + token + " AND v = 0 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE token(k) > ? AND v = ? ALLOW FILTERING");
@@ -135,53 +111,6 @@ public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<Parti
         assertToCQLString("SELECT * FROM %s WHERE token(k) >= token(0) AND token(k) <= token(0) AND v = 0",
                           "SELECT * FROM %s WHERE token(k) >= " + token + " AND token(k) <= " + token + " AND v = 0 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE token(k) >= ? AND token(k) <= ? AND v = ? ALLOW FILTERING");
-
-        // test with multi-column partition key and index
-        createTable("CREATE TABLE %s (k1 int, k2 int, c int, v int, PRIMARY KEY ((k1, k2), c))");
-        createIndex("CREATE INDEX ON %s(v)");
-        assertToCQLString("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v = 1",
-                          "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v = 1 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k1 = ? AND k2 = ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3 AND v = 1",
-                          "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3 AND v = 1 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k1 = ? AND k2 = ? AND c = ? AND v = ? ALLOW FILTERING");
-
-        // test with index and multi-column clustering
-        createTable("CREATE TABLE %s (k int, c1 int, c2 int,v int, PRIMARY KEY (k, c1, c2))");
-        createIndex("CREATE INDEX ON %s(v)");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 > 1 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c1 > 1 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c1 > ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 < 1 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c1 < 1 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c1 < ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 >= 1 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c1 >= 1 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c1 >= ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 <= 1 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c1 <= 1 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c1 <= ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 2 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND (c1, c2) = (1, 2) AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND (c1, c2) = (?, ?) AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 > 2 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 > 2 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND c2 > ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 < 2 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 < 2 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND c2 < ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 >= 2 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 >= 2 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND c2 >= ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 <= 2 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 <= 2 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c1 = ? AND c2 <= ? AND v = ? ALLOW FILTERING");
 
         // test generic index-based ORDER BY
         createTable("CREATE TABLE %s (k int, c int, n int, PRIMARY KEY (k, c))");
@@ -193,15 +122,6 @@ public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<Parti
         assertToCQLString("SELECT * FROM %s ORDER BY n DESC LIMIT 10",
                           "SELECT * FROM %s ORDER BY n DESC LIMIT 10 ALLOW FILTERING",
                           "SELECT * FROM %s ORDER BY n DESC LIMIT 10 ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY n LIMIT 10",
-                          "SELECT * FROM %s WHERE k = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 ORDER BY n LIMIT 10",
-                          "SELECT * FROM %s WHERE k = 0 AND c = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c = ? ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c IN (0, 1) ORDER BY n LIMIT 10",
-                          "SELECT * FROM %s WHERE k = 0 AND c IN (0, 1) ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c IN (?, ?) ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE n = 0 ORDER BY n LIMIT 10",
                           "SELECT * FROM %s WHERE n = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE n = ? ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
@@ -214,10 +134,6 @@ public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<Parti
         assertToCQLString("SELECT * FROM %s ORDER BY v ANN OF [1, 2] LIMIT 10",
                           "SELECT * FROM %s ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
                           "SELECT * FROM %s ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
-                          truncationError);
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
-                          "SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
                           truncationError);
         assertToCQLString("SELECT * FROM %s WHERE n = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
                           "SELECT * FROM %s WHERE n = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
