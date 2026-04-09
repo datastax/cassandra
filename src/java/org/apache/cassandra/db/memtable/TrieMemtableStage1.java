@@ -79,26 +79,23 @@ import org.github.jamm.Unmetered;
 
 import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
 
-/**
- * Previous TrieMemtable implementation, provided for two reasons:
- * <ul>
- * <li> to easily compare current and earlier implementations of the trie memtable
- * <li> to have an option to change a database back to the older implementation if we find a bug or a performance problem
- *   with the new code.
- *   </ul>
- * <p>
- * To switch a table to this version, use
- * <code><pre>
- *   ALTER TABLE ... WITH memtable = {'class': 'TrieMemtableStage1'}
- * </pre></code>
- * or add
- * <code><pre>
- *   memtable:
- *     class: TrieMemtableStage1
- * </pre></code>
- * in <code>cassandra.yaml</code> to switch a node to it as default.
- *
- */
+/// Previous TrieMemtable implementation, provided for two reasons:
+///
+///   -  to easily compare current and earlier implementations of the trie memtable
+///   -  to have an option to change a database back to the older implementation if we find a bug or a performance
+///      problem with the new code.
+///
+///
+/// To switch a table to this version, use
+/// ```
+///   ALTER TABLE ... WITH memtable = {'class': 'TrieMemtableStage1'}
+/// ```
+/// or add
+/// ```
+///   memtable:
+///     class: TrieMemtableStage1
+/// ```
+/// in `cassandra.yaml` to switch a node to it as default.
 public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtableStage1.class);
@@ -137,14 +134,6 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 
     @Unmetered
     private final TrieMemtableMetricsView metrics;
-
-    /**
-     * Keeps an estimate of the average row size in this memtable, computed from a small sample of rows.
-     * Because computing this estimate is potentially costly, as it requires iterating the rows,
-     * the estimate is updated only whenever the number of operations on the memtable increases significantly from the
-     * last update. This estimate is not very accurate but should be ok for planning or diagnostic purposes.
-     */
-    private volatile MemtableAverageRowSize estimatedAverageRowSize;
 
     // only to be used by init(), to setup the very first memtable for the cfs
     TrieMemtableStage1(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
@@ -308,14 +297,6 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     }
 
     @Override
-    public long getEstimatedAverageRowSize()
-    {
-        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
-            estimatedAverageRowSize = new MemtableAverageRowSize(this);
-        return estimatedAverageRowSize.rowSize;
-    }
-
-    @Override
     public UnfilteredRowIterator rowIterator(DecoratedKey key, Slices slices, ColumnFilter columnFilter, boolean reversed, SSTableReadsListener listener)
     {
         Partition p = getPartition(key);
@@ -406,13 +387,19 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
 
-        Trie<BTreePartitionData> subMap = mergedTrie.subtrie(left, includeStart, right, includeStop);
+        Trie<BTreePartitionData> subMap = mergedTrie.subtrie(toComparableBound(left, includeStart),
+                                                             toComparableBound(right, !includeStop));
 
         return new MemtableUnfilteredPartitionIterator(metadata(),
                                                        allocator.ensureOnHeap(),
                                                        subMap,
                                                        columnFilter,
                                                        dataRange);
+    }
+
+    private static ByteComparable toComparableBound(PartitionPosition position, boolean before)
+    {
+        return position == null || position.isMinimum() ? null : position.asComparableBound(before);
     }
 
     public Partition getPartition(DecoratedKey key)
@@ -445,7 +432,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 
     public FlushablePartitionSet<MemtablePartition> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
-        Trie<BTreePartitionData> toFlush = mergedTrie.subtrie(from, true, to, false);
+        Trie<BTreePartitionData> toFlush = mergedTrie.subtrie(toComparableBound(from, true), toComparableBound(to, true));
         long keySize = 0;
         int keyCount = 0;
 

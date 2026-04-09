@@ -101,6 +101,11 @@ public interface PartitionUpdate extends Partition
      */
     int dataSize();
 
+    /**
+     * The size of the data contained in this update.
+     *
+     * @return the size of the data contained in this update.
+     */
     long unsharedHeapSize();
 
     @Override
@@ -148,6 +153,20 @@ public interface PartitionUpdate extends Partition
         IndexRegistry.obtain(metadata()).validate(this, state);
     }
 
+    /**
+     * Modify this update to set every timestamp for live data to {@code newTimestamp} and
+     * every deletion timestamp to {@code newTimestamp - 1}.
+     *
+     * There is no reason to use that except on the Paxos code path, where we need to ensure that
+     * anything inserted uses the ballot timestamp (to respect the order of updates decided by
+     * the Paxos algorithm). We use {@code newTimestamp - 1} for deletions because tombstones
+     * always win on timestamp equality and we don't want to delete our own insertions
+     * (typically, when we overwrite a collection, we first set a complex deletion to delete the
+     * previous collection before adding new elements. If we were to set that complex deletion
+     * to the same timestamp that the new elements, it would delete those elements). And since
+     * tombstones always wins on timestamp equality, using -1 guarantees our deletion will still
+     * delete anything from a previous update.
+     */
     PartitionUpdate withUpdatedTimestamps(long timestamp);
 
     static Builder builder(TableMetadata metadata, DecoratedKey partitionKey, RegularAndStaticColumns columns, int initialRowCapacity)
@@ -533,12 +552,14 @@ public interface PartitionUpdate extends Partition
      */
     class CounterMark
     {
+        private final PartitionUpdate update;
         private final Row row;
         private final ColumnMetadata column;
         private final CellPath path;
 
-        protected CounterMark(Row row, ColumnMetadata column, CellPath path)
+        protected CounterMark(PartitionUpdate update, Row row, ColumnMetadata column, CellPath path)
         {
+            this.update = update;
             this.row = row;
             this.column = column;
             this.path = path;
@@ -547,6 +568,11 @@ public interface PartitionUpdate extends Partition
         public Clustering<?> clustering()
         {
             return row.clustering();
+        }
+
+        Row row()
+        {
+            return row;
         }
 
         public ColumnMetadata column()
@@ -570,10 +596,16 @@ public interface PartitionUpdate extends Partition
         {
             // This is a bit of a giant hack as this is the only place where we mutate a Row object. This makes it more efficient
             // for counters however and this won't be needed post-#6506 so that's probably fine.
-            assert row instanceof BTreeRow;
-            ((BTreeRow)row).setValue(column, path, value);
+            update.setCounterMarkValue(this, value);
         }
     }
+
+    /**
+     * This method should be used only by CounterMark to efficiently update counter values.
+     *
+     * This method violates the immutability expectations of PartitionUpdate. Use with extreme care.
+     */
+    void setCounterMarkValue(CounterMark mark, ByteBuffer value);
 
     /**
      * Builder for PartitionUpdates
@@ -613,10 +645,59 @@ public interface PartitionUpdate extends Partition
     interface Factory
     {
         Builder builder(TableMetadata metadata, DecoratedKey partitionKey, RegularAndStaticColumns columns, int initialRowCapacity);
+
+        /**
+         * Creates a empty immutable partition update.
+         *
+         * @param metadata the metadata for the created update.
+         * @param partitionKey the partition key for the created update.
+         *
+         * @return the newly created empty (and immutable) update.
+         */
         PartitionUpdate emptyUpdate(TableMetadata metadata, DecoratedKey partitionKey);
-        PartitionUpdate singleRowUpdate(TableMetadata metadata, DecoratedKey valueKey, Row row);
+
+        /**
+         * Creates an immutable partition update that contains a single row update.
+         *
+         * @param metadata the metadata for the created update.
+         * @param key the partition key for the partition to update.
+         * @param row the row for the update, may be a regular or static row and cannot be null.
+         *
+         * @return the newly created partition update containing only {@code row}.
+         */
+        PartitionUpdate singleRowUpdate(TableMetadata metadata, DecoratedKey key, Row row);
+
+        /**
+         * Creates an immutable partition update that entirely deletes a given partition.
+         *
+         * @param metadata the metadata for the created update.
+         * @param key the partition key for the partition that the created update should delete.
+         * @param timestamp the timestamp for the deletion.
+         * @param nowInSec the current time in seconds to use as local deletion time for the partition deletion.
+         *
+         * @return the newly created partition deletion update.
+         */
         PartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, long nowInSec);
+
+        /**
+         * Turns the given iterator into an update.
+         *
+         * @param iterator the iterator to turn into updates.
+         *
+         * Warning: this method does not close the provided iterator, it is up to
+         * the caller to close it.
+         */
         PartitionUpdate fromIterator(UnfilteredRowIterator iterator);
+
+        /**
+         * Turns the given iterator into an update, filtering data through the given column filter.
+         *
+         * @param iterator the iterator to turn into updates.
+         * @param filter the column filter to apply (e.g. queried columns).
+         *
+         * Warning: this method does not close the provided iterator, it is up to
+         * the caller to close it.
+         */
         PartitionUpdate fromIterator(UnfilteredRowIterator iterator, ColumnFilter filter);
 
         /**

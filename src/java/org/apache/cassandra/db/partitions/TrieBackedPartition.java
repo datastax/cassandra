@@ -20,72 +20,57 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.Iterator;
 import java.util.NavigableSet;
+import java.util.function.BiFunction;
+import java.util.function.Predicate;
 
-import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Predicates;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.MutableDeletionInfo;
-import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
-import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
-import org.apache.cassandra.db.rows.BTreeRow;
-import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.RowAndDeletionMergeIterator;
 import org.apache.cassandra.db.rows.Rows;
+import org.apache.cassandra.db.rows.TrieBackedRow;
+import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.Direction;
+import org.apache.cassandra.db.tries.InMemoryBaseTrie;
+import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.InMemoryTrie;
-import org.apache.cassandra.db.tries.Trie;
-import org.apache.cassandra.db.tries.TrieEntriesIterator;
+import org.apache.cassandra.db.tries.RangeTrie;
+import org.apache.cassandra.db.tries.TrieSet;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
+import org.apache.cassandra.db.tries.TrieTailsIterator;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
-import org.apache.cassandra.utils.memory.Cloner;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 
-/**
- * In-memory partition backed by a trie. The rows of the partition are values in the leaves of the trie, where the key
- * to the row is only stored as the path to reach that leaf; static rows are also treated as a row with STATIC_CLUSTERING
- * path; the deletion information is placed as a metadata object at the root of the trie -- this matches how Memtable
- * stores partitions within the larger map, so that TrieBackedPartition objects can be created directly from Memtable
- * tail tries.
- *
- * This object also holds the partition key, as well as some metadata (columns and statistics).
- *
- * Currently all descendants and instances of this class are immutable (even tail tries from mutable memtables are
- * guaranteed to not change as we use forced copying below the partition level), though this may change in the future.
- */
+/// In-memory partition backed by a deletion-aware trie. The rows of the partition are values in the leaves of the trie,
+/// where the key to the row is only stored as the path to reach that leaf; static rows are also treated as a row with
+/// `STATIC_CLUSTERING` path; the deletion information is placed in a deletion branch of the trie which starts at the
+/// root of the partition. This matches how `TrieMemtable` stores partitions within the larger map, so that
+/// `TrieBackedPartition` objects can be created directly from `TrieMemtable` tail tries.
+///
+/// This object also holds the partition key, as well as some metadata (columns and statistics).
+/// Currently, all descendants and instances of this class are immutable (even tail tries from mutable memtables are
+/// guaranteed to not change as we use forced copying below the partition level), though this may change in the future.
 public class TrieBackedPartition implements Partition
 {
-    /**
-     * If keys are below this length, we will use a recursive procedure for inserting data when building the backing
-     * trie.
-     */
-    @VisibleForTesting
-    public static final int MAX_RECURSIVE_KEY_LENGTH = 128;
-
     public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS50;
 
     /** Pre-made path for STATIC_CLUSTERING, to avoid creating path object when querying static path. */
@@ -93,86 +78,44 @@ public class TrieBackedPartition implements Partition
     /** Pre-made path for BOTTOM, to avoid creating path object when iterating rows. */
     public static final ByteComparable BOTTOM_PATH = v -> ByteSource.oneByte(ClusteringPrefix.Kind.INCL_START_BOUND.asByteComparableValue(v));
 
-    /**
-     * The representation of a row stored at the leaf of a trie. Does not contain the row key.
-     *
-     * The methods toRow and copyToOnHeapRow combine this with a clustering for the represented Row.
-     */
-    public static class RowData
+    /// Interface implemented by partition markers, both the singleton below used for standalone [TrieBackedPartition],
+    /// and the marker used in tail tries in `TrieMemtable`s.
+    public interface PartitionMarker {}
+
+    /// Singleton partition marker used for standalone [TrieBackedPartition] and [TriePartitionUpdate] objects.
+    public static final PartitionMarker PARTITION_MARKER = new PartitionMarker()
     {
-        final Object[] columnsBTree;
-        final LivenessInfo livenessInfo;
-        final DeletionTime deletion;
-        final long minLocalDeletionTime;
-
-        RowData(Object[] columnsBTree, LivenessInfo livenessInfo, DeletionTime deletion)
-        {
-            this(columnsBTree, livenessInfo, deletion, BTreeRow.minDeletionTime(columnsBTree, livenessInfo, deletion));
-        }
-
-        RowData(Object[] columnsBTree, LivenessInfo livenessInfo, DeletionTime deletion, long minLocalDeletionTime)
-        {
-            this.columnsBTree = columnsBTree;
-            this.livenessInfo = livenessInfo;
-            this.deletion = deletion;
-            this.minLocalDeletionTime = minLocalDeletionTime;
-        }
-
-        Row toRow(Clustering<?> clustering)
-        {
-            return BTreeRow.create(clustering,
-                                   livenessInfo,
-                                   Row.Deletion.regular(deletion),
-                                   columnsBTree,
-                                   minLocalDeletionTime);
-        }
-
-        public int dataSize()
-        {
-            int dataSize = livenessInfo.dataSize() + deletion.dataSize();
-
-            return Ints.checkedCast(BTree.accumulate(columnsBTree, (ColumnData cd, long v) -> v + cd.dataSize(), dataSize));
-        }
-
-        public long unsharedHeapSizeExcludingData()
-        {
-            long heapSize = EMPTY_ROWDATA_SIZE
-                            + BTree.sizeOfStructureOnHeap(columnsBTree)
-                            + livenessInfo.unsharedHeapSize()
-                            + deletion.unsharedHeapSize();
-
-            return BTree.accumulate(columnsBTree, (ColumnData cd, long v) -> v + cd.unsharedHeapSizeExcludingData(), heapSize);
-        }
-
         public String toString()
         {
-            return "row " + livenessInfo + " size " + dataSize();
+            return "PARTITION_MARKER";
         }
+    };
 
-        public RowData clone(Cloner cloner)
-        {
-            Object[] tree = BTree.<ColumnData, ColumnData>transform(columnsBTree, c -> c.clone(cloner));
-            return new RowData(tree, livenessInfo, deletion, minLocalDeletionTime);
-        }
+    /// Predicate to identify partition boundaries in tries. This accepts any [PartitionMarker], not just the
+    /// [#PARTITION_MARKER] used for standalone trie-backed partitions.
+    public static final Predicate<Object> IS_PARTITION_BOUNDARY = TrieBackedPartition::isPartitionBoundary;
+
+    /// Returns true if the given content is a partition marker.
+    public static boolean isPartitionBoundary(Object content)
+    {
+        return content instanceof TrieBackedPartition.PartitionMarker;
     }
 
-    private static final long EMPTY_ROWDATA_SIZE = ObjectSizes.measure(new RowData(null, null, null, 0));
-
-    protected final Trie<Object> trie;
+    protected final DeletionAwareTrie<Object, TrieTombstoneMarker> trie;
     protected final DecoratedKey partitionKey;
     protected final TableMetadata metadata;
     protected final RegularAndStaticColumns columns;
     protected final EncodingStats stats;
     protected final int rowCountIncludingStatic;
-    protected final boolean canHaveShadowedData;
+    protected final int tombstoneCount;
 
     public TrieBackedPartition(DecoratedKey partitionKey,
                                RegularAndStaticColumns columns,
                                EncodingStats stats,
                                int rowCountIncludingStatic,
-                               Trie<Object> trie,
-                               TableMetadata metadata,
-                               boolean canHaveShadowedData)
+                               int tombstoneCount,
+                               DeletionAwareTrie<Object, TrieTombstoneMarker> trie,
+                               TableMetadata metadata)
     {
         this.partitionKey = partitionKey;
         this.trie = trie;
@@ -180,9 +123,8 @@ public class TrieBackedPartition implements Partition
         this.columns = columns;
         this.stats = stats;
         this.rowCountIncludingStatic = rowCountIncludingStatic;
-        this.canHaveShadowedData = canHaveShadowedData;
-        // There must always be deletion info metadata.
-        // Note: we can't use deletionInfo() because WithEnsureOnHeap's override is not yet set up.
+        this.tombstoneCount = tombstoneCount;
+        // There must always be a partition marker.
         assert trie.get(ByteComparable.EMPTY) != null;
         assert stats != null;
     }
@@ -194,9 +136,9 @@ public class TrieBackedPartition implements Partition
                                        iterator.columns(),
                                        iterator.stats(),
                                        builder.rowCountIncludingStatic(),
+                                       builder.tombstoneCount(),
                                        builder.trie(),
-                                       iterator.metadata(),
-                                       false);
+                                       iterator.metadata());
     }
 
     protected static ContentBuilder build(UnfilteredRowIterator iterator, boolean collectDataSize)
@@ -218,142 +160,185 @@ public class TrieBackedPartition implements Partition
         }
     }
 
-    /**
-     * Create a row with the given properties and content, making sure to copy all off-heap data to keep it alive when
-     * the given access mode requires it.
-     */
+    /// Create a row with the given properties and content, making sure to copy all off-heap data to keep it alive when
+    /// the given access mode requires it.
     public static TrieBackedPartition create(DecoratedKey partitionKey,
                                              RegularAndStaticColumns columnMetadata,
                                              EncodingStats encodingStats,
                                              int rowCountIncludingStatic,
-                                             Trie<Object> trie,
+                                             int tombstoneCount,
+                                             DeletionAwareTrie<Object, TrieTombstoneMarker> trie,
                                              TableMetadata metadata,
                                              EnsureOnHeap ensureOnHeap)
     {
         return ensureOnHeap == EnsureOnHeap.NOOP
-               ? new TrieBackedPartition(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, trie, metadata, true)
-               : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, trie, metadata, true, ensureOnHeap);
+               ? new TrieBackedPartition(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata)
+               : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata, ensureOnHeap);
     }
 
-    class RowIterator extends TrieEntriesIterator<Object, Row>
+    /// Implementation of an iterator over rows. Note that because the legacy containers store deleted rows as [Row]s
+    /// with a row deletion time and empty content and present them here, we must also present fully deleted rows
+    /// (but not range deletions).
+    class RowIterator extends TrieTailsIterator.DeletionAware<Object, TrieTombstoneMarker, Object, Row>
     {
-        public RowIterator(Trie<Object> trie, Direction direction)
+        public RowIterator(DeletionAwareTrie<Object, TrieTombstoneMarker> trie, Direction direction)
         {
-            super(trie, direction, RowData.class::isInstance);
+            super(trie,
+                  direction,
+                  (live, marker) ->
+                      live instanceof LivenessInfo ? live
+                                                   : marker != null && marker.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW) ? marker
+                                                                                                                                  : null,
+                  false);
         }
 
         @Override
-        protected Row mapContent(Object content, byte[] bytes, int byteLength)
+        protected Row mapContent(Object content, DeletionAwareTrie<Object, TrieTombstoneMarker> tailTrie, byte[] bytes, int byteLength)
         {
-            var rd = (RowData) content;
-            return toRow(rd,
-                         metadata.comparator.clusteringFromByteComparable(
-                             ByteBufferAccessor.instance,
-                             ByteComparable.preencoded(BYTE_COMPARABLE_VERSION, bytes, 0, byteLength)));
+            return toRow(tailTrie, getClustering(bytes, byteLength));
         }
     }
 
-    private Iterator<Row> rowIterator(Trie<Object> trie, Direction direction)
+    private Iterator<Row> rowIterator(DeletionAwareTrie<Object, TrieTombstoneMarker> trie, Direction direction)
     {
         return new RowIterator(trie, direction);
     }
 
-    static RowData rowToData(Row row)
+    /// Conversion from row branch to [Row]. [WithEnsureOnHeap] overrides this to do the necessary copying
+    /// (hence the non-static method).
+    Row toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> rowContent, Clustering<?> clustering)
     {
-        BTreeRow brow = (BTreeRow) row;
-        return new RowData(brow.getBTree(), row.primaryKeyLivenessInfo(), row.deletion().time(), brow.getMinLocalDeletionTime());
+        return rowContent != null ? TrieBackedRow.create(metadata, clustering, rowContent) : null;
     }
 
-    /**
-     * Conversion from RowData to Row. TrieBackedPartitionOnHeap overrides this to do the necessary copying
-     * (hence the non-static method).
-     */
-    Row toRow(RowData data, Clustering clustering)
+    /// Put the given row in the trie, used by methods to build stand-alone partitions.
+    ///
+    /// @param comparator for converting key to byte-comparable
+    /// @param trie destination
+    /// @param untypedRow content to put
+    protected static void putInTrie(TableMetadata metadata,
+                                    ClusteringComparator comparator,
+                                    InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie,
+                                    Row untypedRow)
+    throws TrieSpaceExhaustedException
     {
-        return data.toRow(clustering);
+        TrieBackedRow row;
+        if (untypedRow instanceof TrieBackedRow)
+            row = (TrieBackedRow) untypedRow;
+        else
+            row = TrieBackedRow.from(metadata, untypedRow);
+
+        ByteComparable comparableClustering = comparator.asByteComparable(row.clustering());
+        makeMutator(trie).apply(row.trie().prefixedBySeparately(comparableClustering, true));
     }
 
-    /**
-     * Put the given unfiltered in the trie.
-     * @param comparator for converting key to byte-comparable
-     * @param useRecursive whether the key length is guaranteed short and recursive put can be used
-     * @param trie destination
-     * @param row content to put
-     */
-    protected static void putInTrie(ClusteringComparator comparator, boolean useRecursive, InMemoryTrie<Object> trie, Row row) throws TrieSpaceExhaustedException
+    private static
+    InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>.Mutator<Object, TrieTombstoneMarker>
+    makeMutator(InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
-        trie.putSingleton(comparator.asByteComparable(row.clustering()), rowToData(row), NO_CONFLICT_RESOLVER, useRecursive);
+        return trie.mutator(noConflictInData(),
+                            mergeTombstoneRanges(),
+                            noIncomingSelfDeletion(),
+                            noExistingSelfDeletion(),
+                            true,
+                            Predicates.alwaysFalse());
     }
 
-    /**
-     * Check if we can use recursive operations when putting a value in tries.
-     * True if all types in the clustering keys are fixed length, and total size is small enough.
-     */
-    protected static boolean useRecursive(ClusteringComparator comparator)
+    protected static void putRangeDeletionInTrie(ClusteringComparator comparator,
+                                                 InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie,
+                                                 RangeTombstoneMarker openMarker,
+                                                 RangeTombstoneMarker closeMarker)
     {
-        int length = 1; // terminator
-        for (AbstractType type : comparator.subtypes())
-            if (!type.isValueLengthFixed())
-                return false;
-            else
-                length += 1 + type.valueLengthIfFixed();    // separator + value
-
-        return length <= MAX_RECURSIVE_KEY_LENGTH;
+        DeletionTime deletionTime = openMarker.openDeletionTime(false);
+        assert deletionTime.equals(closeMarker.closeDeletionTime(false));
+        ByteComparable start = comparator.asByteComparable(openMarker.clustering());
+        ByteComparable end = comparator.asByteComparable(closeMarker.clustering());
+        assert !deletionTime.isLive();
+        try
+        {
+            makeMutator(trie).delete(RangeTrie.range(start, true,
+                                                     end, false,
+                                                     BYTE_COMPARABLE_VERSION,
+                                                     TrieTombstoneMarker.covering(deletionTime, TrieTombstoneMarker.Kind.RANGE)));
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            throw new AssertionError(e);
+        }
     }
 
+    protected static void putPartitionDeletionInTrie(InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie,
+                                                     DeletionTime deletionTime)
+    {
+        if (deletionTime.isLive())
+            return;
+        try
+        {
+            makeMutator(trie).delete(RangeTrie.branch(ByteComparable.EMPTY,
+                                                      BYTE_COMPARABLE_VERSION,
+                                                      TrieTombstoneMarker.covering(deletionTime, TrieTombstoneMarker.Kind.PARTITION)));
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            throw new AssertionError(e);
+        }
+    }
+
+
+    @Override
     public TableMetadata metadata()
     {
         return metadata;
     }
 
+    @Override
     public DecoratedKey partitionKey()
     {
         return partitionKey;
     }
 
+    @Override
     public DeletionTime partitionLevelDeletion()
     {
-        return deletionInfo().getPartitionDeletion();
+        return TrieTombstoneMarker.applicableDeletionOrLive(trie, ByteComparable.EMPTY);
     }
 
+    @Override
     public RegularAndStaticColumns columns()
     {
         return columns;
     }
 
+    @Override
     public EncodingStats stats()
     {
         return stats;
     }
 
+    @Override
     public int rowCount()
     {
         return rowCountIncludingStatic - (hasStaticRow() ? 1 : 0);
     }
 
-    public DeletionInfo deletionInfo()
-    {
-        return (DeletionInfo) trie.get(ByteComparable.EMPTY);
-    }
-
-    public ByteComparable path(ClusteringPrefix clustering)
+    public ByteComparable path(ClusteringPrefix<?> clustering)
     {
         return metadata.comparator.asByteComparable(clustering);
     }
 
+    @Override
     public Row staticRow()
     {
-        RowData staticRow = (RowData) trie.get(STATIC_CLUSTERING_PATH);
-
-        if (staticRow != null)
-            return toRow(staticRow, Clustering.STATIC_CLUSTERING);
-        else
-            return Rows.EMPTY_STATIC_ROW;
+        // Unlike getRow, this method does not apply any covering deletion to the returned row.
+        DeletionAwareTrie<Object, TrieTombstoneMarker> staticRow = trie.tailTrie(STATIC_CLUSTERING_PATH, false);
+        Row row = toRow(staticRow, Clustering.STATIC_CLUSTERING);
+        return row != null ? row : Rows.EMPTY_STATIC_ROW;
     }
 
+    @Override
     public boolean isEmpty()
     {
-        return rowCountIncludingStatic == 0 && deletionInfo().isLive();
+        return rowCountIncludingStatic + tombstoneCount == 0;
     }
 
     private boolean hasStaticRow()
@@ -361,20 +346,19 @@ public class TrieBackedPartition implements Partition
         return trie.get(STATIC_CLUSTERING_PATH) != null;
     }
 
+    @Override
     public boolean hasRows()
     {
         return rowCountIncludingStatic > 1 || rowCountIncludingStatic > 0 && !hasStaticRow();
     }
 
-    /**
-     * Provides read access to the trie for users that can take advantage of it directly (e.g. Memtable).
-     */
-    public Trie<Object> trie()
+    /// Provides read access to the trie for users that can take advantage of it directly (e.g. `TrieMemtable`).
+    public DeletionAwareTrie<Object, TrieTombstoneMarker> trie()
     {
         return trie;
     }
 
-    private Trie<Object> nonStaticSubtrie()
+    private DeletionAwareTrie<Object, TrieTombstoneMarker> nonStaticSubtrie()
     {
         // skip static row if present - the static clustering sorts before BOTTOM so that it's never included in
         // any slices (we achieve this by using the byte ByteSource.EXCLUDED for its representation, which is lower
@@ -382,11 +366,13 @@ public class TrieBackedPartition implements Partition
         return trie.subtrie(BOTTOM_PATH, null);
     }
 
+    @Override
     public Iterator<Row> rowIterator()
     {
         return rowIterator(nonStaticSubtrie(), Direction.FORWARD);
     }
 
+    /// Iterator over all rows of the partition including the static one.
     public Iterator<Row> rowsIncludingStatic()
     {
         return rowIterator(trie, Direction.FORWARD);
@@ -399,126 +385,194 @@ public class TrieBackedPartition implements Partition
         return reverseIterator.hasNext() ? reverseIterator.next() : null;
     }
 
-    public Row getRow(Clustering clustering)
+    @Override
+    public Row getRow(Clustering<?> clustering)
     {
-        RowData data = (RowData) trie.get(path(clustering));
-
-        DeletionInfo deletionInfo = deletionInfo();
-        RangeTombstone rt = deletionInfo.rangeCovering(clustering);
-
-        // The trie only contains rows, so it doesn't allow to directly account for deletion that should apply to row
-        // (the partition deletion or the deletion of a range tombstone that covers it). So if needs be, reuse the row
-        // deletion to carry the proper deletion on the row.
-        DeletionTime partitionDeletion = deletionInfo.getPartitionDeletion();
-        DeletionTime activeDeletion = partitionDeletion;
-        if (rt != null && rt.deletionTime().supersedes(activeDeletion))
-            activeDeletion = rt.deletionTime();
-
-        if (data == null)
-        {
-            // this means our partition level deletion supersedes all other deletions and we don't have to keep the row deletions
-            if (activeDeletion == partitionDeletion)
-                return null;
-            // no need to check activeDeletion.isLive here - if anything superseedes the partitionDeletion
-            // it must be non-live
-            return BTreeRow.emptyDeletedRow(clustering, Row.Deletion.regular(activeDeletion));
-        }
-
-        Row row = toRow(data, clustering);
-        if (!activeDeletion.isLive())
-            row = row.filter(ColumnFilter.selection(columns()), activeDeletion, true, metadata());
-        return row;
+        // getRow must return range and partition deletion applicable to the row
+        return toRow(trie.tailTrie(path(clustering), true), clustering);
     }
 
+    @Override
     public UnfilteredRowIterator unfilteredIterator()
     {
         return unfilteredIterator(ColumnFilter.selection(columns()), Slices.ALL, false);
     }
 
+    private Clustering<?> getClustering(byte[] bytes, int byteLength)
+    {
+        return metadata.comparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
+                                                                ByteComparable.preencoded(BYTE_COMPARABLE_VERSION,
+                                                                                          bytes, 0, byteLength),
+                                                                BYTE_COMPARABLE_VERSION);
+    }
+
+    /// Combine live and deletion branch markers to identify row roots in the trie. Must return non-null when a row
+    /// is identified; the actual value is passed on to [UnfilteredIterator#mapContent] below.
+    private static Object combineDataAndDeletionForUnfilteredIterator(Object data, TrieTombstoneMarker deletion)
+    {
+        if (data instanceof LivenessInfo)
+            return data; // We don't need to return the deletion marker as it will be included in the tail trie.
+
+        if (deletion != null)
+        {
+            // There are several ways we can end up here:
+            // - The partition deletion starts or ends. This is treated like a range deletion here but thrown away in
+            //   mapContent.
+            // - A range deletion starts or ends. In this case we don't care about the tail trie as it only contains
+            //   the marker we return.
+            // - We have a row level marker in the deletion path for a row that has no live data but row, column or cell
+            //   deletion. We will return this branch as a deleted row; since we skip the branch, we will also skip the
+            //   return path marker.
+
+            if (deletion.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW))
+                return LivenessInfo.EMPTY; // Treat this branch as a row.
+            else
+                return deletion; // Range or partition deletion marker.
+        }
+
+        return null;
+    }
+
+    /// Implementation of [UnfilteredRowIterator] for this partition.
+    ///
+    /// Looks for row and tombstone markers in the trie and presents each branch as a [TrieBackedRow] or
+    /// [RangeTombstoneMarker]. Because the legacy convention is that the static row and partition-level deletion are
+    /// given separately by methods of the iterator, they are filtered out from the returned content -- the former by
+    /// excluding the static key from the translation of [Slice#ALL], and the latter by excluding covering deletions
+    /// in the returned trie and filtering out the non-range sides of all tombstone boundaries.
+    class UnfilteredIterator
+    extends TrieTailsIterator.DeletionAware<Object, TrieTombstoneMarker, Object, Unfiltered>
+    implements UnfilteredRowIterator
+    {
+        final boolean reversed;
+        final ColumnFilter selection;
+        final Row staticRow;
+
+        protected UnfilteredIterator(ColumnFilter selection, DeletionAwareTrie<Object, TrieTombstoneMarker> trie, boolean reversed)
+        {
+            super(trie, Direction.fromBoolean(reversed), TrieBackedPartition::combineDataAndDeletionForUnfilteredIterator, false);
+            this.selection = selection;
+            this.reversed = reversed;
+            Row staticRow = TrieBackedPartition.this.staticRow().filter(selection, metadata());
+            this.staticRow = staticRow != null ? staticRow : Rows.EMPTY_STATIC_ROW;
+        }
+
+        @Override
+        protected Unfiltered mapContent(Object content, DeletionAwareTrie<Object, TrieTombstoneMarker> tailTrie, byte[] bytes, int byteLength)
+        {
+            // content is as prepared by combineDataAndDeletionForUnfilteredIterator above.
+            if (content instanceof LivenessInfo)
+            {
+                // Row.
+                Row row = toRow(tailTrie, getClustering(bytes, byteLength));
+                return row != null ? row.filter(selection, metadata()) : null;
+            }
+            else
+            {
+                // Range or partition deletion marker.
+                // The method below will present only range tombstones, identified by their marker kind.
+                return ((TrieTombstoneMarker) content).toRangeTombstoneMarker(
+                    ByteComparable.preencoded(BYTE_COMPARABLE_VERSION, bytes, 0, byteLength),
+                    BYTE_COMPARABLE_VERSION,
+                    metadata.comparator);
+            }
+        }
+
+        @Override
+        public DeletionTime partitionLevelDeletion()
+        {
+            return TrieTombstoneMarker.applicableDeletionOrLive(trie, ByteComparable.EMPTY);
+        }
+
+        @Override
+        public EncodingStats stats()
+        {
+            return stats;
+        }
+
+        @Override
+        public TableMetadata metadata()
+        {
+            return metadata;
+        }
+
+        @Override
+        public boolean isReverseOrder()
+        {
+            return reversed;
+        }
+
+        @Override
+        public RegularAndStaticColumns columns()
+        {
+            return selection.fetchedColumns();
+        }
+
+        @Override
+        public DecoratedKey partitionKey()
+        {
+            return partitionKey;
+        }
+
+        @Override
+        public Row staticRow()
+        {
+            return staticRow;
+        }
+
+        @Override
+        public void close()
+        {
+            // nothing to close
+        }
+
+        @Override
+        public boolean stopIssuingTombstones()
+        {
+            stopIssuingDeletions(current -> !current.isRow() || ((Row) current).isEmptyAfterDeletion());
+            return true;
+        }
+    }
+
+    private UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, ByteComparable[] bounds, boolean reversed)
+    {
+        if (bounds.length == 0)
+            return UnfilteredRowIterators.noRowsIterator(metadata, partitionKey, staticRow(), partitionLevelDeletion(), reversed);
+
+        DeletionAwareTrie<Object, TrieTombstoneMarker> slicedTrie =
+            trie.intersect(TrieSet.ranges(BYTE_COMPARABLE_VERSION, bounds));
+        return new UnfilteredIterator(selection, slicedTrie, reversed);
+    }
+
+    @Override
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, Slices slices, boolean reversed)
     {
-        Row staticRow = staticRow(selection, false);
-        if (slices.size() == 0)
+        ByteComparable[] bounds = new ByteComparable[slices.size() * 2];
+        int index = 0;
+        for (Slice slice : slices)
         {
-            DeletionTime partitionDeletion = deletionInfo().getPartitionDeletion();
-            return UnfilteredRowIterators.noRowsIterator(metadata(), partitionKey(), staticRow, partitionDeletion, reversed);
+            bounds[index++] = metadata.comparator.asByteComparable(slice.start());
+            bounds[index++] = metadata.comparator.asByteComparable(slice.end());
         }
-
-        return slices.size() == 1
-               ? sliceIterator(selection, slices.get(0), reversed, staticRow)
-               : new SlicesIterator(selection, slices, reversed, staticRow);
+        return unfilteredIterator(selection, bounds, reversed);
     }
 
+    @Override
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, NavigableSet<Clustering<?>> clusteringsInQueryOrder, boolean reversed)
     {
-        Row staticRow = staticRow(selection, false);
-        if (clusteringsInQueryOrder.isEmpty())
+        ByteComparable[] bounds = new ByteComparable[clusteringsInQueryOrder.size() * 2];
+        // Trie intersection requires the boundaries to be given in forward order. Our clusterings are given in query
+        // order, which is why we have to reverse them if we are making a reversed iterator.
+        int index = reversed ? (clusteringsInQueryOrder.size() - 1) * 2 : 0;
+        int indexInc = reversed ? -2 : +2;
+        for (Clustering<?> clustering : clusteringsInQueryOrder)
         {
-            DeletionTime partitionDeletion = deletionInfo().getPartitionDeletion();
-            return UnfilteredRowIterators.noRowsIterator(metadata(), partitionKey(), staticRow, partitionDeletion, reversed);
+            bounds[index + 0] = metadata.comparator.asByteComparable(clustering.asStartBound());
+            bounds[index + 1] = metadata.comparator.asByteComparable(clustering.asEndBound());
+            index += indexInc;
         }
-
-        Iterator<Row> rowIter = new AbstractIterator<Row>() {
-
-            Iterator<Clustering<?>> clusterings = clusteringsInQueryOrder.iterator();
-
-            @Override
-            protected Row computeNext()
-            {
-                while (clusterings.hasNext())
-                {
-                    Clustering<?> clustering = clusterings.next();
-                    Object rowData = trie.get(path(clustering));
-                    if (rowData instanceof RowData)
-                        return toRow((RowData) rowData, clustering);
-                }
-                return endOfData();
-            }
-        };
-
-        // not using DeletionInfo.rangeCovering(Clustering), because it returns the original range tombstone,
-        // but we need DeletionInfo.rangeIterator(Set<Clustering>) that generates tombstones based on given clustering bound.
-        Iterator<RangeTombstone> deleteIter = deletionInfo().rangeIterator(clusteringsInQueryOrder, reversed);
-
-        return merge(rowIter, deleteIter, selection, reversed, staticRow);
+        return unfilteredIterator(selection, bounds, reversed);
     }
-
-    private UnfilteredRowIterator sliceIterator(ColumnFilter selection, Slice slice, boolean reversed, Row staticRow)
-    {
-        ClusteringBound start = slice.start();
-        ClusteringBound end = slice.end() == ClusteringBound.TOP ? null : slice.end();
-        Iterator<Row> rowIter = slice(start, end, reversed);
-        Iterator<RangeTombstone> deleteIter = deletionInfo().rangeIterator(slice, reversed);
-        return merge(rowIter, deleteIter, selection, reversed, staticRow);
-    }
-
-    private Iterator<Row> slice(ClusteringBound start, ClusteringBound end, boolean reversed)
-    {
-        ByteComparable endPath = end != null ? path(end) : null;
-        // use BOTTOM as bound to skip over static rows
-        ByteComparable startPath = start != null ? path(start) : BOTTOM_PATH;
-        return rowIterator(trie.subtrie(startPath, endPath), Direction.fromBoolean(reversed));
-    }
-
-    private Row staticRow(ColumnFilter columns, boolean setActiveDeletionToRow)
-    {
-        DeletionTime partitionDeletion = deletionInfo().getPartitionDeletion();
-        Row staticRow = staticRow();
-        if (columns.fetchedColumns().statics.isEmpty() || (staticRow.isEmpty() && partitionDeletion.isLive()))
-            return Rows.EMPTY_STATIC_ROW;
-
-        Row row = staticRow.filter(columns, partitionDeletion, setActiveDeletionToRow, metadata());
-        return row == null ? Rows.EMPTY_STATIC_ROW : row;
-    }
-
-    private RowAndDeletionMergeIterator merge(Iterator<Row> rowIter, Iterator<RangeTombstone> deleteIter,
-                                              ColumnFilter selection, boolean reversed, Row staticRow)
-    {
-        return new RowAndDeletionMergeIterator(metadata(), partitionKey(), deletionInfo().getPartitionDeletion(),
-                                               selection, staticRow, reversed, stats(),
-                                               rowIter, deleteIter, canHaveShadowedData);
-    }
-
 
     @Override
     public String toString()
@@ -526,88 +580,37 @@ public class TrieBackedPartition implements Partition
         return Partition.toString(this);
     }
 
-    class SlicesIterator extends AbstractUnfilteredRowIterator
-    {
-        private final Slices slices;
-
-        private int idx;
-        private Iterator<Unfiltered> currentSlice;
-        private final ColumnFilter selection;
-
-        private SlicesIterator(ColumnFilter selection,
-                               Slices slices,
-                               boolean isReversed,
-                               Row staticRow)
-        {
-            super(TrieBackedPartition.this.metadata(), TrieBackedPartition.this.partitionKey(),
-                  TrieBackedPartition.this.partitionLevelDeletion(),
-                  selection.fetchedColumns(), staticRow, isReversed, TrieBackedPartition.this.stats());
-            this.selection = selection;
-            this.slices = slices;
-        }
-
-        protected Unfiltered computeNext()
-        {
-            while (true)
-            {
-                if (currentSlice == null)
-                {
-                    if (idx >= slices.size())
-                        return endOfData();
-
-                    int sliceIdx = isReverseOrder ? slices.size() - idx - 1 : idx;
-                    currentSlice = sliceIterator(selection, slices.get(sliceIdx), isReverseOrder, Rows.EMPTY_STATIC_ROW);
-                    idx++;
-                }
-
-                if (currentSlice.hasNext())
-                    return currentSlice.next();
-
-                currentSlice = null;
-            }
-        }
-    }
-
-
-    /**
-     * An snapshot of the current TrieBackedPartition data, copied on heap when retrieved.
-     */
+    /// A snapshot of the current [TrieBackedPartition] data, copied on heap when retrieved.
     private static final class WithEnsureOnHeap extends TrieBackedPartition
     {
-        final DeletionInfo onHeapDeletion;
         EnsureOnHeap ensureOnHeap;
 
         public WithEnsureOnHeap(DecoratedKey partitionKey,
                                 RegularAndStaticColumns columns,
                                 EncodingStats stats,
                                 int rowCountIncludingStatic,
-                                Trie<Object> trie,
+                                int tombstoneCount,
+                                DeletionAwareTrie<Object, TrieTombstoneMarker> trie,
                                 TableMetadata metadata,
-                                boolean canHaveShadowedData,
                                 EnsureOnHeap ensureOnHeap)
         {
-            super(partitionKey, columns, stats, rowCountIncludingStatic, trie, metadata, canHaveShadowedData);
+            super(partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata);
             this.ensureOnHeap = ensureOnHeap;
-            this.onHeapDeletion = ensureOnHeap.applyToDeletionInfo(super.deletionInfo());
         }
 
         @Override
-        public Row toRow(RowData data, Clustering clustering)
+        public Row toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> data, Clustering<?> clustering)
         {
-            return ensureOnHeap.applyToRow(super.toRow(data, clustering));
-        }
-
-        @Override
-        public DeletionInfo deletionInfo()
-        {
-            return onHeapDeletion;
+            Row row = super.toRow(data, clustering);
+            if (row == null)
+                return null;
+            return ensureOnHeap.applyToRow(row);
         }
     }
 
-    /**
-     * Resolver for operations with trie-backed partitions. We don't permit any overwrites/merges.
-     */
-    public static final InMemoryTrie.UpsertTransformer<Object, Object> NO_CONFLICT_RESOLVER =
+    /// Resolver for operations with trie-backed partitions. We don't permit any overwrites/merges.
+    @SuppressWarnings("rawtypes")
+    private static final InMemoryTrie.UpsertTransformer NO_CONFLICT_RESOLVER =
             (existing, update) ->
             {
                 if (existing != null)
@@ -615,40 +618,79 @@ public class TrieBackedPartition implements Partition
                 return update;
             };
 
-    /**
-     * Helper class for constructing tries and deletion info from an iterator or flowable partition.
-     *
-     * Note: This is not collecting any stats or columns!
-     */
+    /// Resolver for data in trie-backed partitions. We don't permit any overwrites/merges.
+    @SuppressWarnings("unchecked")
+    public static InMemoryTrie.UpsertTransformer<Object, Object> noConflictInData()
+    {
+        return NO_CONFLICT_RESOLVER;
+    }
+
+    /// Tombstone merging resolver. Even though we don't support overwrites, we get requests to add the two sides
+    /// of a boundary separately and must join them.
+    private static final InMemoryTrie.UpsertTransformer<TrieTombstoneMarker, TrieTombstoneMarker> MERGE_TOMBSTONE_RANGES =
+        (existing, update) -> existing != null ? existing.mergeWith(update) : update;
+
+    /// Tombstone merging resolver. Even though we don't support overwrites, we get requests to add the two sides
+    /// of a boundary separately and must join them.
+    public static InMemoryTrie.UpsertTransformer<TrieTombstoneMarker, TrieTombstoneMarker> mergeTombstoneRanges()
+    {
+        return MERGE_TOMBSTONE_RANGES;
+    }
+
+    private static final InMemoryBaseTrie.UpsertTransformer<Object, TrieTombstoneMarker> IGNORE_UPDATE = (left, right) -> left;
+
+    /// Resolver for applying incoming deletions to existing data in trie-backed partitions. We assume that the data is
+    /// not affected by the deletion.
+    public static InMemoryTrie.UpsertTransformer<Object, TrieTombstoneMarker> noIncomingSelfDeletion()
+    {
+        return IGNORE_UPDATE;
+    }
+
+    private static final BiFunction<TrieTombstoneMarker, Object, Object> IGNORE_EXISTING = (left, right) -> right;
+
+    /// Resolver for applying existing deletions to incoming data in trie-backed partitions. We assume that the data is
+    /// not affected by the deletion.
+    public static BiFunction<TrieTombstoneMarker, Object, Object> noExistingSelfDeletion()
+    {
+        return IGNORE_EXISTING;
+    }
+
+    /// Helper class for constructing tries and deletion info from an iterator.
     public static class ContentBuilder
     {
         final TableMetadata metadata;
         final ClusteringComparator comparator;
 
-        private final MutableDeletionInfo.Builder deletionBuilder;
-        private final InMemoryTrie<Object> trie;
+        private final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie;
 
-        private final boolean useRecursive;
         private final boolean collectDataSize;
 
         private int rowCountIncludingStatic;
+        private int tombstoneCount;
         private long dataSize;
+
+        private RangeTombstoneMarker openMarker = null;
+        private final boolean isReverseOrder;
 
         public ContentBuilder(TableMetadata metadata, DeletionTime partitionLevelDeletion, boolean isReverseOrder, boolean collectDataSize)
         {
             this.metadata = metadata;
             this.comparator = metadata.comparator;
 
-            this.deletionBuilder = MutableDeletionInfo.builder(partitionLevelDeletion,
-                                                               comparator,
-                                                               isReverseOrder);
-            this.trie = InMemoryTrie.shortLived(BYTE_COMPARABLE_VERSION);
+            this.trie = InMemoryDeletionAwareTrie.shortLived(BYTE_COMPARABLE_VERSION);
 
-            this.useRecursive = useRecursive(comparator);
             this.collectDataSize = collectDataSize;
 
             rowCountIncludingStatic = 0;
+            tombstoneCount = 0;
             dataSize = 0;
+            this.isReverseOrder = isReverseOrder;
+
+            if (!partitionLevelDeletion.isLive())
+            {
+                putPartitionDeletionInTrie(trie, partitionLevelDeletion);
+                ++tombstoneCount;
+            }
         }
 
         public ContentBuilder addStatic(Row staticRow) throws TrieSpaceExhaustedException
@@ -661,16 +703,34 @@ public class TrieBackedPartition implements Partition
 
         public ContentBuilder addRow(Row row) throws TrieSpaceExhaustedException
         {
-            putInTrie(comparator, useRecursive, trie, row);
+            putInTrie(metadata, comparator, trie, row);
             ++rowCountIncludingStatic;
             if (collectDataSize)
                 dataSize += row.dataSize();
+            if (!row.deletion().isLive())
+                ++tombstoneCount;
             return this;
         }
 
         public ContentBuilder addRangeTombstoneMarker(RangeTombstoneMarker unfiltered)
         {
-            deletionBuilder.add(unfiltered);
+            if (openMarker != null)
+            {
+                // This will check that unfiltered closes openMarker
+                putRangeDeletionInTrie(comparator, trie,
+                                isReverseOrder ? unfiltered : openMarker,
+                                isReverseOrder ? openMarker : unfiltered);
+                ++tombstoneCount;
+                if (unfiltered.isOpen(isReverseOrder))
+                    openMarker = unfiltered;
+                else
+                    openMarker = null;
+            }
+            else
+            {
+                assert unfiltered.isOpen(isReverseOrder);
+                openMarker = unfiltered;
+            }
             return this;
         }
 
@@ -684,13 +744,12 @@ public class TrieBackedPartition implements Partition
 
         public ContentBuilder complete() throws TrieSpaceExhaustedException
         {
-            MutableDeletionInfo deletionInfo = deletionBuilder.build();
-            trie.putRecursive(ByteComparable.EMPTY, deletionInfo, NO_CONFLICT_RESOLVER);    // will throw if called more than once
-            // dataSize does not include the deletion info bytes
+            assert openMarker == null;
+            trie.putRecursive(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());    // will throw if called more than once
             return this;
         }
 
-        public Trie<Object> trie()
+        public InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie()
         {
             return trie;
         }
@@ -698,6 +757,11 @@ public class TrieBackedPartition implements Partition
         public int rowCountIncludingStatic()
         {
             return rowCountIncludingStatic;
+        }
+
+        public int tombstoneCount()
+        {
+            return tombstoneCount;
         }
 
         public int dataSize()

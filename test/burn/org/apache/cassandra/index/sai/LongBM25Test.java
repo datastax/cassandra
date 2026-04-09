@@ -32,9 +32,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.junit.Before;
+import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
 
@@ -81,12 +86,13 @@ public class LongBM25Test extends SAITester
     }
 
     KeySet keysInserted = new KeySet();
-    private final int threadCount = 12;
+    private static final int threadCount = 12;
 
-    @Before
-    public void setup() throws Throwable
+    @BeforeClass
+    public static void setUpClass()
     {
         MEMTABLE_SHARD_COUNT.setInt(4 * threadCount);
+        SAITester.setUpClass();
     }
 
     @FunctionalInterface
@@ -97,6 +103,7 @@ public class LongBM25Test extends SAITester
 
     public void testConcurrentOps(Op op) throws ExecutionException, InterruptedException
     {
+        Assert.assertEquals(4 * threadCount, AbstractShardedMemtable.getDefaultShardCount());
         createTable("CREATE TABLE %s (key int primary key, value text)");
         // Create analyzed index following BM25Test pattern
         createIndex("CREATE CUSTOM INDEX ON %s(value) " +
