@@ -337,6 +337,10 @@
       <artifactId>HdrHistogram</artifactId>
     </dependency>
     <dependency>
+      <groupId>com.dynatrace.hash4j</groupId>
+      <artifactId>hash4j</artifactId>
+    </dependency>
+    <dependency>
       <groupId>com.googlecode.concurrent-trees</groupId>
       <artifactId>concurrent-trees</artifactId>
     </dependency>
