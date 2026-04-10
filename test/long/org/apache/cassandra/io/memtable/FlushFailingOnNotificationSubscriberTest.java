@@ -209,6 +209,7 @@ public class FlushFailingOnNotificationSubscriberTest extends CQLTester
         {
             failFlushProbability.set(0.0);
             getCurrentColumnFamilyStore().forceFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS).get();
+            lastTimePoolNeededCleaning = System.nanoTime();
             failFlushProbability.set(FLUSH_FAILURE_PROBABILITY);
         }
         catch (InterruptedException | ExecutionException e)
