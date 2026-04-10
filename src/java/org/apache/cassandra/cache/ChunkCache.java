@@ -31,6 +31,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
+import com.dynatrace.hash4j.hashing.Hasher64;
+import com.dynatrace.hash4j.hashing.Hashing;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
@@ -52,8 +55,6 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.PrefetchingRebufferer;
-import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
@@ -297,12 +298,16 @@ public class ChunkCache
         synchronousCache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> (x.readerId & mask) == fileId));
     }
 
-    static class Key
+    @VisibleForTesting
+    public static class Key
     {
+        private static final Hasher64 hasher = Hashing.metroHash64();
+
         final long readerId;
         final long position;
 
-        private Key(long readerId, long position)
+        @VisibleForTesting
+        public Key(long readerId, long position)
         {
             super();
             this.position = position;
@@ -312,11 +317,7 @@ public class ChunkCache
         @Override
         public int hashCode()
         {
-            final int prime = 31;
-            int result = 1;
-            result = prime * result + Long.hashCode(readerId);
-            result = prime * result + Long.hashCode(position);
-            return result;
+            return hasher.hashLongLongToInt(readerId, position);
         }
 
         @Override
@@ -324,7 +325,7 @@ public class ChunkCache
         {
             if (this == obj)
                 return true;
-            if (obj == null)
+            if (obj == null || getClass() != obj.getClass())
                 return false;
 
             Key other = (Key) obj;
