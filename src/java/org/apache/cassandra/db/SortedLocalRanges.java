@@ -28,6 +28,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
@@ -98,6 +99,12 @@ public class SortedLocalRanges
      */
     static SortedLocalRanges create(ColumnFamilyStore cfs)
     {
+        // If the table's partitioner differs from the system partitioner, the TokenMetadata
+        // ranges will contain incompatible token types. Fall back to a full range using the
+        // table's own partitioner. This can happen when CQLSSTableWriter overrides the partitioner.
+        if (cfs.getPartitioner() != DatabaseDescriptor.getPartitioner())
+            return new SortedLocalRanges(cfs, 0, null);
+
         RangesAtEndpoint localRanges;
         List<Splitter.WeightedRange> weightedRanges;
         long ringVersion;
