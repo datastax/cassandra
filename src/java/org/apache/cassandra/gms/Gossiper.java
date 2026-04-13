@@ -1069,7 +1069,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
             throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, heartbeat changed while trying to reviving it");
 
         epState.updateTimestamp(); // make sure we don't evict it too soon
-        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+        epState.forceNewerGenerationUnsafe();
 
         // using the tokens from the endpoint-state as that is the real source of truth
         Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
@@ -1125,7 +1125,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         }
 
         epState.updateTimestamp(); // make sure we don't evict it too soon
-        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+        epState.forceNewerGenerationUnsafe();
 
         epState.addApplicationState(ApplicationState.STATUS, newStatus);
         epState.addApplicationState(ApplicationState.STATUS_WITH_PORT, newStatus);
