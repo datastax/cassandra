@@ -194,6 +194,7 @@ import org.json.simple.JSONObject;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_ALL_COMPACTIONS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
@@ -609,8 +610,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                         storageHandler.enableAutoCompaction());
         getTracker().subscribe(strategyContainer);
 
-        if (!strategyContainer.isEnabled() || DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean())
+        if (DISABLED_ALL_COMPACTIONS.getBoolean())
         {
+            this.strategyContainer.shutdown();
+            this.strategyContainer.disable();
+        } else if (!strategyContainer.isEnabled() || DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean())
+        {
+            //don't shut down the compaction system, but do turn off auto compactions.
+            
             logger.info("Strategy driven background compactions for {} are disabled: strategy container={}, {}={}",
                         metadata, strategyContainer.isEnabled(), DISABLED_AUTO_COMPACTION_PROPERTY.getKey(),
                         DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean());
