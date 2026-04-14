@@ -24,13 +24,19 @@ import static org.junit.Assert.*;
 
 import java.lang.management.ManagementFactory;
 import java.util.Collection;
+import java.util.SortedMap;
 
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
+
+import com.codahale.metrics.Gauge;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
 import org.junit.Test;
 
 import com.codahale.metrics.jvm.BufferPoolMetricSet;
 import com.codahale.metrics.jvm.GarbageCollectorMetricSet;
 import com.codahale.metrics.jvm.MemoryUsageGaugeSet;
+import org.apache.cassandra.utils.MBeanWrapper;
 
 
 public class CassandraMetricsRegistryTest
@@ -106,5 +112,39 @@ public class CassandraMetricsRegistryTest
         long[] count = new long[]{0, 1, 2, 3, 4, 5};
         assertArrayEquals(count, CassandraMetricsRegistry.delta(count, new long[3]));
         assertArrayEquals(new long[6], CassandraMetricsRegistry.delta(count, new long[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}));
+    }
+
+
+    @Test
+    public void testNoOpMetricsDoesNotRegisterTypes()
+    {
+        // verify that JMX does not register metrics created with the no-op metrics element.
+        CassandraMetricsRegistry registry = CassandraMetricsRegistry.NoOpMetrics;
+        MBeanWrapper mbeanWrapper = MBeanWrapper.instance;
+
+        //check gauges
+        MetricName gaugeName = new MetricName("testGroup","testType","testGauge");
+        registry.register(gaugeName, (Gauge<Long>) () -> 0L);
+        assertFalse("Should not have registered the mbean with JMX", mbeanWrapper.isRegistered(gaugeName.getMBeanName()));
+
+        //check counters
+        MetricName counterName = new MetricName("testGroup","testType","testCounter");
+        registry.counter(counterName);
+        assertFalse("Should not have registered the mbean with JMX", mbeanWrapper.isRegistered(counterName.getMBeanName()));
+
+        //check meters
+        MetricName meterName = new MetricName("testGroup","testType","testMeter");
+        registry.meter(meterName);
+        assertFalse("Should not have registered the mbean with JMX", mbeanWrapper.isRegistered(meterName.getMBeanName()));
+
+        //check histograms
+        MetricName histName = new MetricName("testGroup","testType","testHist");
+        registry.meter(histName);
+        assertFalse("Should not have registered the mbean with JMX", mbeanWrapper.isRegistered(histName.getMBeanName()));
+
+        //check timers
+        MetricName timerName = new MetricName("testGroup","testType","testTimer");
+        registry.meter(timerName);
+        assertFalse("Should not have registered the mbean with JMX", mbeanWrapper.isRegistered(timerName.getMBeanName()));
     }
 }
