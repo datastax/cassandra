@@ -20,12 +20,10 @@ package org.apache.cassandra.db.commitlog;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.FileStore;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +33,6 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -184,16 +181,16 @@ public class CommitLog implements CommitLogMBean
     }
 
     /**
-     * Updates the commit log storage directory and re-initializes the segment manager accordingly.
+     * Updates the commit log segment manager accordingly.
      * <p/>
      * Used by CNDB.
      *
-     * @param commitLogLocation storage directory to update to
+     * @param manager commitlog segment manager to update to
      * @return this commit log with updated storage directory
      */
-    public CommitLog forPath(File commitLogLocation)
+    public CommitLog forSegmentManager(AbstractCommitLogSegmentManager manager)
     {
-        segmentManager = new CommitLogSegmentManagerStandard(this, commitLogLocation);
+        segmentManager = manager;
         return this;
     }
 
