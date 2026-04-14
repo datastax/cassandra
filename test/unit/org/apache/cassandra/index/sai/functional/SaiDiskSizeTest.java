@@ -30,8 +30,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
@@ -43,21 +41,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 @RunWith(Parameterized.class)
 public class SaiDiskSizeTest extends SAITester
 {
-    private static final Logger logger = LoggerFactory.getLogger(SaiDiskSizeTest.class);
-
     @Parameterized.Parameter
     public Version version;
 
     @Parameterized.Parameter(1)
-    public int size;
+    public int expectedDiskSize;
 
     @Parameterized.Parameter(2)
-    public String pkSuffix;
+    public String pkColumns;
 
     @Parameterized.Parameter(3)
     public int rowsPerPartition;
 
-    @Parameterized.Parameters(name = "{0}, size={1}, pk={2}, partitionSize={3}")
+    @Parameterized.Parameters(name = "saiFormat={0}, expectedDiskSize={1}, pkColumns={2}, partitionSize={3}")
     public static Collection<Object[]> data()
     {
         return Version.ALL.stream()
@@ -66,34 +62,30 @@ public class SaiDiskSizeTest extends SAITester
                               {
                                   case "aa":
                                       return Stream.of(
-                                      new Object[]{ v, 13014, "pk", 1 },
-                                      new Object[]{ v, 13016, "pk, v_int", 2 },
-                                      new Object[]{ v, 14266, "pk, v_int", 100 });
+                                      new Object[]{ v, 24991, "pk", 1 },
+                                      new Object[]{ v, 26183, "pk, v_int", 2 },
+                                      new Object[]{ v, 28530, "pk, v_int", 100 });
                                   case "ba":
                                   case "ca":
                                   case "db":
                                   case "dc":
                                       return Stream.of(
-                                      new Object[]{ v, 65734, "pk", 1 },
-                                      new Object[]{ v, 57627, "pk, v_int", 2 },
-                                      new Object[]{ v, 28004, "pk, v_int", 100 });
+                                      new Object[]{ v, 131493, "pk", 1 },
+                                      new Object[]{ v, 115252, "pk, v_int", 2 },
+                                      new Object[]{ v, 55996, "pk, v_int", 100 });
                                   case "eb":
                                   case "ec":
                                       return Stream.of(
-                                      new Object[]{ v, 67370, "pk", 1 },
-                                      new Object[]{ v, 59263, "pk, v_int", 2 },
-                                      new Object[]{ v, 29640, "pk, v_int", 100 });
+                                      new Object[]{ v, 134765, "pk", 1 },
+                                      new Object[]{ v, 118524, "pk, v_int", 2 },
+                                      new Object[]{ v, 59268, "pk, v_int", 100 });
                                   case "ed":
-                                      return Stream.of(
-                                      new Object[]{ v, 67378, "pk", 1 },
-                                      new Object[]{ v, 59271, "pk, v_int", 2 },
-                                      new Object[]{ v, 29648, "pk, v_int", 100 });
+                                  case "fa":
                                   default:
-                                      return // A new version assumes the latest size by default
-                                      Stream.of(
-                                      new Object[]{ v, 67378, "pk", 1 },
-                                      new Object[]{ v, 59271, "pk, v_int", 2 },
-                                      new Object[]{ v, 29648, "pk, v_int", 100 });
+                                      return Stream.of(
+                                      new Object[]{ v, 134781, "pk", 1 },
+                                      new Object[]{ v, 118540, "pk, v_int", 2 },
+                                      new Object[]{ v, 59284, "pk, v_int", 100 });
                               }
                           })
                           .collect(Collectors.toList());
@@ -110,6 +102,7 @@ public class SaiDiskSizeTest extends SAITester
     {
         createTable("CREATE TABLE %s (" +
                     "pk int, " +
+                    "v_int int, " +
                     "v_ascii ascii, " +
                     "v_bigint bigint, " +
                     "v_blob blob, " +
@@ -117,7 +110,6 @@ public class SaiDiskSizeTest extends SAITester
                     "v_decimal decimal, " +
                     "v_double double, " +
                     "v_float float, " +
-                    "v_int int, " +
                     "v_text text, " +
                     "v_timestamp timestamp, " +
                     "v_uuid uuid, " +
@@ -130,7 +122,7 @@ public class SaiDiskSizeTest extends SAITester
                     "v_smallint smallint, " +
                     "v_tinyint tinyint, " +
                     "v_duration duration, " +
-                    "PRIMARY KEY (" + pkSuffix + "))");
+                    "PRIMARY KEY (" + pkColumns + "))");
 
         verifyNoIndexFiles();
         createIndex("CREATE CUSTOM INDEX ON %s(v_int) USING 'StorageAttachedIndex'");
@@ -138,37 +130,36 @@ public class SaiDiskSizeTest extends SAITester
         waitForTableIndexesQueryable();
 
         // Split data into 2 sstable segments
-        insertRows(0, 1000);
+        insertRows(1000, 0);
         flush();
         insertRows(1000, 1000);
         flush();
 
         long diskSize = indexDiskSpaceUse();
-        logger.info("SAI Version: {}, Index Disk Size: {} bytes", version, diskSize);
         assertThat(diskSize)
-        .as("Disk size for SAI version %s", version)
-        .isLessThanOrEqualTo(size)
-        .isGreaterThan((long) (size * 0.8));
+        .as("Disk size for SAI version %s before compaction", version)
+        .isLessThanOrEqualTo(expectedDiskSize)
+        .isGreaterThan((long) (expectedDiskSize * 0.8));
 
         compact();
 
         diskSize = indexDiskSpaceUse();
-        logger.info("SAI Version: {}, Index Disk Size: {} bytes", version, diskSize);
         assertThat(diskSize)
-        .as("Disk size for SAI version %s", version)
-        .isLessThanOrEqualTo(size)
-        .isGreaterThan((long) (size * 0.8));
+        .as("Disk size for SAI version %s after compaction", version)
+        .isLessThanOrEqualTo(expectedDiskSize)
+        .isGreaterThan((long) (expectedDiskSize * 0.8));
     }
 
     private void insertRows(int size, int start) throws UnknownHostException
     {
         for (int i = start; i < start + size; i++)
         {
-            execute("INSERT INTO %s (pk, v_ascii, v_bigint, v_blob, v_boolean, v_decimal, " +
-                    "v_double, v_float, v_int, v_text, v_timestamp, v_uuid, v_varchar, " +
+            execute("INSERT INTO %s (pk, v_int, v_ascii, v_bigint, v_blob, v_boolean, " +
+                    "v_decimal, v_double, v_float, v_text, v_timestamp, v_uuid, v_varchar, " +
                     "v_varint, v_timeuuid, v_inet, v_date, v_time, v_smallint, v_tinyint, v_duration) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    i % (size / rowsPerPartition), // Have 2 rows per partition
+                    start + i % (size / rowsPerPartition),
+                    i,
                     "ascii_" + i,
                     (long) i * 1000000,
                     ByteBuffer.wrap(("blob_" + i).getBytes()),
@@ -176,7 +167,6 @@ public class SaiDiskSizeTest extends SAITester
                     new BigDecimal(i + ".123"),
                     i * 1.5,
                     (float) (i * 2.5),
-                    i * 2,
                     "text_value_" + i,
                     new Date(System.currentTimeMillis() + i * 1000L),
                     UUID.randomUUID(),
