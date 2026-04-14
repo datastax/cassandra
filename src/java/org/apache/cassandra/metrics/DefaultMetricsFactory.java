@@ -24,13 +24,13 @@ import org.checkerframework.checker.nullness.qual.NonNull;
 
 public class DefaultMetricsFactory implements MetricsFactory
 {
-    private static final DefaultMetricsFactory instance = new DefaultMetricsFactory();
+    private static final DefaultMetricsFactory factoryInstance = new DefaultMetricsFactory();
 
     private DefaultMetricsFactory(){}
 
     public static MetricsFactory instance()
     {
-        return instance;
+        return factoryInstance;
     }
 
     @Override

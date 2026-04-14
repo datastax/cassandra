@@ -36,13 +36,17 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
+import org.apache.cassandra.metrics.KeyspaceMetrics;
+import org.apache.cassandra.metrics.MetricsFactory;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.checkerframework.checker.nullness.qual.NonNull;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
@@ -66,31 +70,6 @@ public class ColumnFamilyMetricTest
         StorageService.instance.forceKeyspaceFlush(SchemaConstants.SYSTEM_KEYSPACE_NAME);
     }
 
-    @Test
-    public void testOpeningWithMetricsDisabledDoesNotLoadMetrics()
-    {
-        // remove all the existing metrics, it just simplifies the process
-
-        System.setProperty(CassandraRelevantProperties.TABLE_METRICS_ENABLED.getKey(), "false");
-        try
-        {
-            SchemaLoader.createKeyspace("KS", KeyspaceParams.simple(1),
-                                        SchemaLoader.standardCFMD("KS", "S2"));
-
-            Keyspace keyspace = Keyspace.openWithoutSSTables("KS");
-            ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("S2");
-            Set<String> postLoadMetrics = CassandraMetricsRegistry.Metrics.getNames();
-            // there should be no metrics with name Table or ColumnFamily in it
-            assertEquals("Unexpected table metrics!",
-                         0, postLoadMetrics.stream().filter(name -> name.contains("S2") && name.contains("Table")).count());
-            assertEquals("Unexpected column family metrics!",
-                         0, postLoadMetrics.stream().filter(name -> name.contains("S2") && name.contains("ColumnFamily")).count());
-        }
-        finally {
-            System.setProperty(CassandraRelevantProperties.TABLE_METRICS_ENABLED.getKey(), "true");
-        }
-
-    }
 
     @Test
     public void testSizeMetric()

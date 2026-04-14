@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.processing.Generated;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
