@@ -26,6 +26,7 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
@@ -355,7 +356,7 @@ public class CassandraDaemon
         // Replay any CommitLogSegments found on disk
         try
         {
-            CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
+            CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP, Optional.empty());
         }
         catch (IOException e)
         {

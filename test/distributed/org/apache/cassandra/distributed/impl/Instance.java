@@ -30,6 +30,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -586,7 +587,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 // Replay any CommitLogSegments found on disk
                 try
                 {
-                    CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
+                    CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP, Optional.empty());
                 }
                 catch (IOException e)
                 {
