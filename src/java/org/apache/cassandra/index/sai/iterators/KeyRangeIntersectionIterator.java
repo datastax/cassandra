@@ -102,7 +102,7 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
                     // More specific keys should win over full partitions,
                     // because they match a single row instead of the whole partition.
                     // However, because this key matches with the earlier keys, we can continue the inner loop.
-                    if (!nextKey.hasEmptyClustering())
+                    if (nextKey.hasClustering())
                     {
                         highestKey = nextKey;
                         indexOfHighestKey = index;
@@ -113,13 +113,13 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
 
             // Now we need to advance the iterators to avoid returning the same key again.
             // This is tricky because of empty clustering keys that match the whole partition.
-            // We must not advance ranges at keys with empty clustering because they
+            // We must not advance ranges at keys with no clustering because they
             // may still match the next keys returned by other iterators in the next cycles.
-            // However, if all ranges are at the same partition with empty clustering (highestKey.hasEmptyClustering()),
+            // However, if all ranges are at the same partition with no clustering (!highestKey.hasClustering()),
             // we must advance all of them, because we return the key for the whole partition and that partition is done.
             for (var range : ranges)
             {
-                if (highestKey.hasEmptyClustering() || !range.peek().hasEmptyClustering())
+                if (!highestKey.hasClustering() || range.peek().hasClustering())
                     range.next();
             }
 

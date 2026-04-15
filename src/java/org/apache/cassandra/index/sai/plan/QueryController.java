@@ -799,7 +799,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     public boolean selects(PrimaryKey key)
     {
-        return key.hasEmptyClustering() ||
+        return !key.hasClustering() ||
                command.clusteringIndexFilter(key.partitionKey()).selects(key.clustering());
     }
 
@@ -816,7 +816,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         ClusteringIndexFilter clusteringIndexFilter = command.clusteringIndexFilter(key.partitionKey());
 
-        if (!indexFeatureSet.isRowAware() || key.hasEmptyClustering())
+        if (!indexFeatureSet.isRowAware() || !key.hasClustering())
             return clusteringIndexFilter;
         else
             return new ClusteringIndexNamesFilter(FBUtilities.singleton(key.clustering(), cfs.metadata().comparator),
@@ -828,12 +828,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         PrimaryKey firstKey = keys.get(0);
 
         assert !indexFeatureSet.isRowAware() ||
-               cfs.metadata().comparator.size() == 0 && firstKey.hasEmptyClustering() ||
-               cfs.metadata().comparator.size() > 0 && (!firstKey.hasEmptyClustering() || cfs.metadata().hasStaticColumns()):
+               cfs.metadata().comparator.size() == 0 && !firstKey.hasClustering() ||
+               cfs.metadata().comparator.size() > 0 && (firstKey.hasClustering() || cfs.metadata().hasStaticColumns()) :
         "PrimaryKey " + firstKey + " clustering does not match table. There should be a clustering of size " + cfs.metadata().comparator.size();
 
         ClusteringIndexFilter clusteringIndexFilter = command.clusteringIndexFilter(firstKey.partitionKey());
-        if (cfs.metadata().comparator.size() == 0 || firstKey.hasEmptyClustering())
+        if (cfs.metadata().comparator.size() == 0 || !firstKey.hasClustering())
         {
             return clusteringIndexFilter;
         }
