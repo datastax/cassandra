@@ -29,7 +29,10 @@ import java.util.SortedMap;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
+import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
 import org.junit.Test;
 
@@ -139,12 +142,39 @@ public class CassandraMetricsRegistryTest
 
         //check histograms
         MetricName histName = new MetricName("testGroup","testType","testHist");
-        registry.meter(histName);
+        registry.histogram(histName, true);
         assertFalse("Should not have registered the mbean with JMX", mbeanWrapper.isRegistered(histName.getMBeanName()));
 
         //check timers
         MetricName timerName = new MetricName("testGroup","testType","testTimer");
-        registry.meter(timerName);
+        registry.timer(timerName);
         assertFalse("Should not have registered the mbean with JMX", mbeanWrapper.isRegistered(timerName.getMBeanName()));
+    }
+
+    @Test
+    public void testNoOpMetricsDontDoAnything()
+    {
+        // a bit of a silly test, but it confirms that adding to counters, histograms, timers etc. don't
+        // throw any errors
+
+        CassandraMetricsRegistry registry = CassandraMetricsRegistry.NoOpMetrics;
+        Counter c = registry.counter(new MetricName("testGroup", "testType", "testCounter"));
+        c.inc();
+        assertEquals("no-op Counter should not record values!", 0, c.getCount());
+        c.inc(10L);
+        assertEquals("no-op Counter should not record values!", 0, c.getCount());
+
+        Histogram h = registry.histogram(new MetricName("testGroup", "testType", "testHist"), true);
+        h.update(10);
+        assertEquals(0L, h.getCount());
+        h.update(10L);
+        assertEquals(0L, h.getCount());
+        Snapshot s = h.getSnapshot();
+        assertEquals(0, s.getMax());
+        assertEquals(0, s.getMin());
+        //snapshots have to have size 1 or else the underlying codahale logic breaks
+        assertEquals(1, s.size());
+        assertEquals(0d, s.getMean(), 0.000001d);
+        assertEquals(0d, s.getMedian(), 0.000001d);
     }
 }

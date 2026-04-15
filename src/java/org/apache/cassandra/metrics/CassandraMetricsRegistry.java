@@ -988,6 +988,7 @@ public abstract class CassandraMetricsRegistry extends MetricRegistry
             return NoOpHistogram.instance;
         }
 
+
         @Override
         public Timer timer(MetricName name)
         {
