@@ -118,6 +118,8 @@ public class IndexDescriptor
     {
         this.perSSTable = initializeGroup(null, discovered.perSSTableBuild());
         initializeIndexes(indices, discovered);
+        logger.debug("Initialized IndexDescriptor for SSTable {} with per-sstable components {} and per-index components: {}",
+                     descriptor, perSSTable, perIndexes);
     }
 
     private void initializeIndexes(Set<IndexContext> indices, SSTableIndexComponentsState discovered)
@@ -229,6 +231,7 @@ public class IndexDescriptor
     {
         Preconditions.checkArgument(sstable.getDescriptor().equals(this.descriptor));
         SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable);
+        logger.debug("Discovered index components for sstable {}: {}", sstable.descriptor, discovered);
 
         // We want to make sure the descriptor only has data for the provided `indices` on reload, so we remove any
         // index data that is not in the ones provided. This essentially make sure we don't hold up memory for
