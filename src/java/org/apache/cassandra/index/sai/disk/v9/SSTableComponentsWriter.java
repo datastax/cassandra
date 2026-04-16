@@ -61,7 +61,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
         this.partitionKeysWriter = new KeyStoreWriter(perSSTableComponents.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
                                                       metadataWriter,
                                                       partitionKeyBlockOffsetWriter,
-                                                      CassandraRelevantProperties.SAI_SORTED_TERMS_PARTITION_BLOCK_SHIFT.getInt(),
+                                                      CassandraRelevantProperties.SAI_KEY_STORE_PARTITION_BLOCK_SHIFT.getInt(),
                                                       false);
         if (perSSTableComponents.hasClustering())
         {
@@ -69,7 +69,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
             this.clusteringKeysWriter = new KeyStoreWriter(perSSTableComponents.addOrGet(IndexComponentType.CLUSTERING_KEY_BLOCKS),
                                                            metadataWriter,
                                                            clusteringKeyBlockOffsetWriter,
-                                                           CassandraRelevantProperties.SAI_SORTED_TERMS_CLUSTERING_BLOCK_SHIFT.getInt(),
+                                                           CassandraRelevantProperties.SAI_KEY_STORE_CLUSTERING_BLOCK_SHIFT.getInt(),
                                                            true);
         }
         else
