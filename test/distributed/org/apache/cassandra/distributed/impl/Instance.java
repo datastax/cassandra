@@ -67,8 +67,6 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.SystemKeyspaceMigrator40;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
@@ -586,7 +584,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 // Replay any CommitLogSegments found on disk
                 try
                 {
-                    CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
+                    CommitLog.instance.recoverSegmentsOnDiskWithArchive(ColumnFamilyStore.FlushReason.STARTUP);
                 }
                 catch (IOException e)
                 {

@@ -53,7 +53,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SizeEstimatesRecorder;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.SystemKeyspaceMigrator40;
 import org.apache.cassandra.db.WindowsFailedSnapshotTracker;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.virtual.SystemViewsKeyspace;
@@ -81,11 +80,11 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.security.ThreadAwareSecurityManager;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.JMXServerUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.Mx4jTool;
-import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.WindowsTimer;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -355,7 +354,7 @@ public class CassandraDaemon
         // Replay any CommitLogSegments found on disk
         try
         {
-            CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
+            CommitLog.instance.recoverSegmentsOnDiskWithArchive(ColumnFamilyStore.FlushReason.STARTUP);
         }
         catch (IOException e)
         {
