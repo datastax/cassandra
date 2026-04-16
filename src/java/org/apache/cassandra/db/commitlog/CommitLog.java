@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -180,9 +181,25 @@ public class CommitLog implements CommitLogMBean
 
     public File[] getUnmanagedFiles()
     {
-        File[] files = segmentManager.storageDirectory.tryList(unmanagedFilesFilter);
+        return getFilteredFiles(Optional.empty());
+    }
+
+    /**
+     * Returns segment files to replay according to the configured segment manager.
+     *
+     * @param filter An optional filter to apply to segment files returned by the segment manager.
+     * @return Segment files to replay, optionally filtered.
+     */
+    public File[] getFilteredFiles(Optional<BiPredicate<File, String>> filter)
+    {
+        BiPredicate<File, String> compositeFilter = (path, name) ->
+                                                    filter.orElse((ignored1, ignored2) -> true).test(path, name)
+                                                    && unmanagedFilesFilter.test(path, name);
+
+        File[] files = segmentManager.storageDirectory.tryList(compositeFilter);
         if (files == null)
             return new File[0];
+
         return files;
     }
 
@@ -201,7 +218,8 @@ public class CommitLog implements CommitLogMBean
     }
 
     /**
-     * Perform recovery on commit logs located in the directory specified by the config file.
+     * Perform recovery on commit logs located in the directory specified by the config file,
+     * performing archive and restore before.
      * The recovery is executed as a commit log read followed by a flush.
      *
      * @param flushReason the reason for flushing that fallows commit log reading, use
@@ -211,12 +229,9 @@ public class CommitLog implements CommitLogMBean
      * @return keyspaces and the corresponding number of partition updates
      * @throws IOException
      */
-    public Map<Keyspace, Integer> recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason flushReason) throws IOException
+    public Map<Keyspace, Integer> recoverSegmentsOnDiskWithArchive(ColumnFamilyStore.FlushReason flushReason) throws IOException
     {
-        // submit all files for this segment manager for archiving prior to recovery - CASSANDRA-6904
-        // The files may have already been archived by normal CommitLog operation. This may cause errors in this
-        // archiving pass, which we should not treat as serious.
-        for (File file : getUnmanagedFiles())
+        for (File file : getFilteredFiles(Optional.empty()))
         {
             archiver.maybeArchive(file.path(), file.name());
             archiver.maybeWaitForArchiving(file.name());
@@ -226,7 +241,23 @@ public class CommitLog implements CommitLogMBean
         archiver.maybeRestoreArchive();
 
         // List the files again as archiver may have added segments.
-        File[] files = getUnmanagedFiles();
+        return recoverSegmentsOnDiskNoArchive(flushReason, getFilteredFiles(Optional.empty()));
+    }
+
+    /**
+     * Perform recovery on commit logs located in the directory specified by the config file, without archiving.
+     * The recovery is executed as a commit log read followed by a flush.
+     *
+     * @param flushReason the reason for flushing that fallows commit log reading, use
+     *                    {@link org.apache.cassandra.db.ColumnFamilyStore.FlushReason#STARTUP} when recovering on a
+     *                    node start. Use {@link org.apache.cassandra.db.ColumnFamilyStore.FlushReason#REMOTE_REPLAY}
+     *                    when replying commit logs to a remote storage.
+     * @param files THe segment files to recovery.
+     * @return keyspaces and the corresponding number of partition updates
+     * @throws IOException
+     */
+    public Map<Keyspace, Integer> recoverSegmentsOnDiskNoArchive(ColumnFamilyStore.FlushReason flushReason, File[] files) throws IOException
+    {
         Map<Keyspace, Integer> replayedKeyspaces = Collections.emptyMap();
         if (files.length == 0)
         {
@@ -631,7 +662,7 @@ public class CommitLog implements CommitLogMBean
     synchronized public Map<Keyspace, Integer> restartUnsafe() throws IOException
     {
         started = false;
-        return start().recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
+        return start().recoverSegmentsOnDiskWithArchive(ColumnFamilyStore.FlushReason.STARTUP);
     }
 
     public static long freeDiskSpace()
