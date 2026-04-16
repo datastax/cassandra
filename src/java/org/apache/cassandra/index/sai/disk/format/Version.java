@@ -80,8 +80,8 @@ public class Version implements Comparable<Version>
     public static final Version ED = new Version("ed", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ed"));
     // jvector file format version 6 (skipped 5)
     public static final Version FA = new Version("fa", V8OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "fa"));
-    // Replaces primary key components with partition key and clustering key
-    // components and uses key lookup store instead of sorted terms.
+    // Replaces primary key components with partition key and clustering key components and
+    // uses key lookup store instead of sorted terms.
     public static final Version HA = new Version("ha", V9OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ha"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests

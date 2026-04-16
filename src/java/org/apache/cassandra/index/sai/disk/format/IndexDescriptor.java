@@ -436,6 +436,7 @@ public class IndexDescriptor
             return IndexDescriptor.this.hasClustering;
         }
 
+        @Override
         public ClusteringComparator comparator()
         {
             return IndexDescriptor.this.comparator;

@@ -438,14 +438,14 @@ public enum CassandraRelevantProperties
     SAI_MONITORING_EXECUTION_INFO_ENABLED("cassandra.sai.monitoring_execution_info_enabled", "true"),
 
     /**
-     * Used to determine the block size and block mask for the clustering sorted terms.
+     * Used to determine the block size and block mask for the clustering key store writer.
      */
-    SAI_SORTED_TERMS_CLUSTERING_BLOCK_SHIFT("cassandra.sai.sorted_terms_clustering_block_shift", "4"),
+    SAI_KEY_STORE_CLUSTERING_BLOCK_SHIFT("cassandra.sai.key_store_clustering_block_shift", "4"),
 
     /**
-     * Used to determine the block size and block mask for the partition sorted terms.
+     * Used to determine the block size and block mask for the partition key store writer.
      */
-    SAI_SORTED_TERMS_PARTITION_BLOCK_SHIFT("cassandra.sai.sorted_terms_partition_block_shift", "4"),
+    SAI_KEY_STORE_PARTITION_BLOCK_SHIFT("cassandra.sai.key_store_partition_block_shift", "4"),
 
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),

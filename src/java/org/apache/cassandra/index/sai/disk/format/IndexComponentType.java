@@ -121,31 +121,31 @@ public enum IndexComponentType
     /**
      * An on-disk block-packed index containing the starting and ending rowIds for each partition.
      * <p>
-     * V8
+     * V9
      */
     PARTITION_SIZES("PartitionSizes"),
     /**
      * Prefix-compressed blocks of partition keys used for rowId to partition key lookups
      * <p>
-     * V8
+     * V9
      */
     PARTITION_KEY_BLOCKS("PKBlocks"),
     /**
      * Encoded sequence of offsets to partition key blocks
      * <p>
-     * V8
+     * V9
      */
     PARTITION_KEY_BLOCK_OFFSETS("PKBlockOffsets"),
     /**
      * Prefix-compressed blocks of clustering keys used for rowId to clustering key lookups
      * <p>
-     * V8
+     * V9
      */
     CLUSTERING_KEY_BLOCKS("CKBlocks"),
     /**
      * Encoded sequence of offsets to clustering key blocks
      * <p>
-     * V8
+     * V9
      */
     CLUSTERING_KEY_BLOCK_OFFSETS("CKBlockOffsets");
 

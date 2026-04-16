@@ -130,8 +130,8 @@ public class KeyLookupBench
 
         indexDescriptor = IndexDescriptor.empty(descriptor, metadata.comparator);
 
-        CassandraRelevantProperties.SAI_SORTED_TERMS_PARTITION_BLOCK_SHIFT.setInt(partitionBlockShift);
-        CassandraRelevantProperties.SAI_SORTED_TERMS_CLUSTERING_BLOCK_SHIFT.setInt(clusteringBlockShift);
+        CassandraRelevantProperties.SAI_KEY_STORE_PARTITION_BLOCK_SHIFT.setInt(partitionBlockShift);
+        CassandraRelevantProperties.SAI_KEY_STORE_CLUSTERING_BLOCK_SHIFT.setInt(clusteringBlockShift);
         Assert.assertTrue("Version must be at least HA", Version.current(keyspaceName).onOrAfter(Version.HA));
         PerSSTableWriter writer = Version.current(keyspaceName).onDiskFormat().newPerSSTableWriter(indexDescriptor);
         OptimizedRowAwarePrimaryKeyFactory factory = new OptimizedRowAwarePrimaryKeyFactory(metadata.comparator);
