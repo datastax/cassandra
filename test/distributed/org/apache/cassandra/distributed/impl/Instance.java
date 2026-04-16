@@ -684,7 +684,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 // Replay any CommitLogSegments found on disk
                 try
                 {
-                    CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
+                    CommitLog.instance.recoverSegmentsOnDiskWithArchive(ColumnFamilyStore.FlushReason.STARTUP);
                 }
                 catch (IOException e)
                 {
