@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.disk.v9;
 
+import java.util.Arrays;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.db.Clustering;
@@ -56,46 +57,11 @@ public class OptimizedRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactor
         }
 
         @Override
-        public ByteSource asComparableBytes(ByteComparable.Version version)
+        protected ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
         {
-            return asComparableBytes(version == ByteComparable.Version.LEGACY ? ByteSource.END_OF_STREAM : ByteSource.TERMINATOR, version, false);
-        }
-
-        @Override
-        public ByteSource asComparableBytesMinPrefix(ByteComparable.Version version)
-        {
-            return asComparableBytes(ByteSource.LT_NEXT_COMPONENT, version, true);
-        }
-
-        @Override
-        public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
-        {
-            return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, true);
-        }
-
-        private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
-        {
-            // We need to make sure that the key is loaded before returning a
-            // byte comparable representation. If we don't we won't get a correct
-            // comparison because we potentially won't be using the partition key
-            // and clustering for the lookup
-            loadDeferred();
-
-            ByteSource keyComparable = ByteSource.of(partitionKey.getKey(), version);
-
-            // It is important that the ClusteringComparator.asBytesComparable method is used
-            // to maintain the correct clustering sort order
-            ByteSource clusteringComparable = clusteringComparator.size() == 0 ||
-                                              clustering == null ||
-                                              clustering.isEmpty() ? null
-                                                                   : clusteringComparator.asByteComparable(clustering)
-                                                                                         .asComparableBytes(version);
-
-            // prefix doesn't include null components
-            if (isPrefix && clusteringComparable == null)
-                return ByteSource.withTerminator(terminator, keyComparable);
-            else
-                return ByteSource.withTerminator(terminator, keyComparable, clusteringComparable);
+            ByteSource[] sources = buildComparableSources(version, isPrefix);
+            // Exclude tokenComparable
+            return ByteSource.withTerminator(terminator, Arrays.copyOfRange(sources, 1, sources.length));
         }
     }
 }
