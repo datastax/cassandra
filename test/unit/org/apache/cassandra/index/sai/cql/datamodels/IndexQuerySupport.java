@@ -33,8 +33,11 @@ import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.db.marshal.TimeType;
 import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.utils.Pair;
+import org.assertj.core.api.Assertions;
 import org.hamcrest.Matchers;
 
 import static org.apache.cassandra.distributed.test.TestBaseImpl.list;
@@ -122,9 +125,58 @@ public class IndexQuerySupport
         // queries after compacting updates into to a single SSTable index
         dataModel.compact(executor);
         executeQueries(dataModel, executor, sets);
+
+        dataModel.truncateTables(executor);
     }
 
-    public static void rowDeletions(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
+    /**
+     * Tests inserts and updates after upgrade from AA index version (non-row-aware) to the current version.
+     * Inserts data in two parts to create a mix of AA and current version SSTable indexes.
+     * Then validates the query results at multiple stages: before flush, after flush,
+     * after updates, after another flush, after compaction.
+     */
+    public static void writeLifecycleAfterUpgrade(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
+    {
+        Version targetVersion = SAIUtil.currentVersion();
+        if (targetVersion == Version.AA)
+            return; // no need to test multiversion AA -> AA
+
+        executor.setCurrentVersion(Version.AA);
+        dataModel.createTables(executor);
+        dataModel.disableCompaction(executor);
+        dataModel.createIndexes(executor);
+
+        // create an AA indexed sstable
+        dataModel.insertRowsPartA(executor);
+        dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(Version.AA);
+
+        // create a current version indexed sstable
+        executor.setCurrentVersion(targetVersion);
+        dataModel.insertRowsPartB(executor);
+
+        // queries against AA sstables and memtable of current version
+        executeQueries(dataModel, executor, sets);
+
+        // queries w/ multiple SSTable indexes, one AA and one current
+        dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(targetVersion);
+        executeQueries(dataModel, executor, sets);
+
+        // queries against Memtable updates and the existing SSTable indexes of mixed versions
+        dataModel.updateCells(executor);
+        executeQueries(dataModel, executor, sets);
+
+        // queries against the newly flushed SSTable index with updates and the existing SSTable indexes (AA + current)
+        dataModel.flush(executor);
+        executeQueries(dataModel, executor, sets);
+
+        // queries after compacting to a single SSTable index of the current version
+        dataModel.compact(executor);
+        executeQueries(dataModel, executor, sets);
+    }
+
+    public static void rowDeletions(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable 
     {
         dataModel.createTables(executor);
 
@@ -156,7 +208,58 @@ public class IndexQuerySupport
         executeQueries(dataModel, executor, sets);
     }
 
-    public static void cellDeletions(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
+    /**
+     * Tests row deletions after upgrade from AA index version (non-row-aware) to the currently set version.
+     * Inserts data in two parts to create a mix of AA and current version SSTable indexes.
+     * Then deletes rows and validates the query results in each stage: before flush, after flush, after compaction.
+     */
+    public static void rowDeletionsAfterUpgrade(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
+    {
+        Version targetVersion = SAIUtil.currentVersion();
+        if (targetVersion == Version.AA)
+            return; // no need to test multiversion AA -> AA
+
+        executor.setCurrentVersion(Version.AA);
+        dataModel.createTables(executor);
+        dataModel.disableCompaction(executor);
+        dataModel.createIndexes(executor);
+
+        // create an AA indexed sstable
+        dataModel.insertRowsPartA(executor);
+        dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(Version.AA);
+
+        // create a current version indexed sstable
+        executor.setCurrentVersion(targetVersion);
+        dataModel.insertRowsPartB(executor);
+
+        // queries against AA sstables and memtable of current version
+        executeQueries(dataModel, executor, sets);
+
+        // queries w/ multiple SSTable indexes, one AA and one current
+        dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(targetVersion);
+        executeQueries(dataModel, executor, sets);
+
+        // queries against Memtable deletes and the existing SSTable indexes of mixed versions
+        dataModel.deleteRows(executor);
+        executeQueries(dataModel, executor, sets);
+
+        // queries against the newly flushed SSTable index with updates and the existing SSTable indexes (AA + current)
+        dataModel.flush(executor);
+        executeQueries(dataModel, executor, sets);
+
+        // queries after compacting to a single SSTable index of the current version
+        dataModel.compact(executor);
+        executeQueries(dataModel, executor, sets);
+
+        // truncate, reload, and verify that the load is clean
+        dataModel.truncateTables(executor);
+        dataModel.insertRows(executor);
+        executeQueries(dataModel, executor, sets);
+    }
+
+    public static void cellDeletions(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable 
     {
         dataModel.createTables(executor);
 
@@ -183,6 +286,47 @@ public class IndexQuerySupport
         executeQueries(dataModel, executor, sets);
     }
 
+    /**
+     * Tests row deletions after upgrade from AA index version (non-row-aware) to the currently set version.
+     * Inserts data in two parts to create a mix of AA and current version SSTable indexes.
+     * Then deletes cells and validates the query results in each stage: before flush, after flush, after compaction.
+     */
+    public static void cellDeletionsAfterUpgrade(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
+    {
+
+        Version targetVersion = SAIUtil.currentVersion();
+        if (targetVersion == Version.AA)
+            return; // no need to test multiversion AA -> AA
+
+        executor.setCurrentVersion(Version.AA);
+        dataModel.createTables(executor);
+        dataModel.disableCompaction(executor);
+        dataModel.createIndexes(executor);
+
+        dataModel.insertRowsPartA(executor);
+        dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(Version.AA);
+
+        executor.setCurrentVersion(targetVersion);
+        dataModel.insertRowsPartB(executor);
+
+        // baseline queries against AA sstables and memtable of current version
+        executeQueries(dataModel, executor, sets);
+
+        // queries against Memtable deletes and the existing SSTable indexes of mixed versions
+        dataModel.deleteCells(executor);
+        executeQueries(dataModel, executor, sets);
+
+        // queries against the newly flushed SSTable index with deletes and the existing SSTable indexes (AA + current)
+        dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(targetVersion);
+        executeQueries(dataModel, executor, sets);
+
+        // queries after compacting to a single SSTable index of the current version
+        dataModel.compact(executor);
+        executeQueries(dataModel, executor, sets);
+    }
+
     public static void timeToLive(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
     {
         dataModel.createTables(executor);
@@ -200,6 +344,51 @@ public class IndexQuerySupport
 
         // Make sure TTLs are reflected in our query results from SSTables:
         dataModel.flush(executor);
+        executeQueries(dataModel, executor, sets);
+
+        // Make sure fresh overwrites invalidate TTLs:
+        dataModel.insertRows(executor);
+        executeQueries(dataModel, executor, sets);
+    }
+
+    /**
+     * Tests the TTL behavior after upgrade from AA index version (non-row-aware) to the currently set version.
+     * First inserts rows in AA version without TTLs to create an AA indexed sstable.
+     * Then switches the version back to the original one and overwrites the rows with TTLs in Memtable.
+     * Tests rows with TTLs behave correctly before flush, after flush, and after overwrites with non-TTL rows.
+     */
+    public static void timeToLiveAfterUpgrade(DataModel.Executor executor, DataModel dataModel, List<BaseQuerySet> sets) throws Throwable
+    {
+        Version targetVersion = SAIUtil.currentVersion();
+        if (targetVersion == Version.AA)
+            return; // no need to test multiversion AA -> AA
+
+        executor.setCurrentVersion(Version.AA);
+
+        dataModel.createTables(executor);
+
+        dataModel.disableCompaction(executor);
+
+        // Create an AA indexed sstable with no TTLs first
+        dataModel.createIndexes(executor);
+        dataModel.insertRows(executor);
+        dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(Version.AA);
+
+        executor.setCurrentVersion(targetVersion);
+
+        // Overrwrite with TTLs in Memtable of current version
+        dataModel.insertRowsWithTTL(executor);
+
+        // Wait for the TTL to become effective:
+        TimeUnit.SECONDS.sleep(DataModel.DEFAULT_TTL_SECONDS);
+
+        // Make sure TTLs are reflected in our query results from the Memtable:
+        executeQueries(dataModel, executor, sets);
+
+        // Make sure TTLs are reflected in our query results from SSTables:
+        dataModel.flush(executor);
+        Assertions.assertThat(dataModel.getSSTableIndexVersions(executor)).contains(targetVersion);
         executeQueries(dataModel, executor, sets);
 
         // Make sure fresh overwrites invalidate TTLs:
