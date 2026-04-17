@@ -66,7 +66,7 @@ public enum ParamType
     /**
      * Failure response messages contain verb name of the incoming message.
      */
-    REQUEST_VERB_NAME   (9, "RequestVerbName", StringSerializer.serializer),
+    REQUEST_VERB_NAME   (10, "RequestVerbName", StringSerializer.serializer),
 
     CUSTOM_MAP          (14, "CUSTOM",       CustomParamsSerializer.serializer);
 
