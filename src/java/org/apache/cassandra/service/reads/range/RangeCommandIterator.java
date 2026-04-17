@@ -221,7 +221,7 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
             long latency = endTime - startTime;
             rangeMetrics.executionTimeMetrics.addNano(latency);
             rangeMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
-            Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
+            Keyspace.openAndGetStore(command.metadata()).metric.ifPresent(m -> m.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS));
         }
     }
 

@@ -670,7 +670,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                        LifecycleNewTracker lifecycleNewTracker)
     {
         ShardManager shardManager = getShardManager();
-        double flushDensity = realm.metrics().flushSizeOnDisk().get() * shardManager.shardSetCoverage() / shardManager.localSpaceCoverage();
+        // TODO: proper fix needed if metrics is disabled
+        double flushDensity = realm.metrics().map( m -> m.flushSizeOnDisk().get() * shardManager.shardSetCoverage() / shardManager.localSpaceCoverage()).orElse(0.0);
         ShardTracker boundaries = shardManager.boundaries(controller.getFlushShards(flushDensity));
         return new ShardedMultiWriter(realm,
                                       descriptor,

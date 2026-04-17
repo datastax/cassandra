@@ -48,7 +48,7 @@ public class RealEnvironment implements Environment
 
     private TableMetrics metrics()
     {
-        return realm.metrics();
+        return realm.metrics().orElse(null);
     }
 
     @Override

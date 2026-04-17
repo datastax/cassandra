@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -119,7 +120,7 @@ public interface CompactionRealm
      * @return metrics object for the realm. This can be null during the initial construction of a compaction strategy,
      * but should be set when the strategy is asked to select or run compactions.
      */
-    TableMetrics metrics();
+    java.util.Optional<TableMetrics> metrics();
 
     /**
      * Return the estimated partition count, used when the number of partitions in an sstable is not sufficient to give
@@ -128,9 +129,9 @@ public interface CompactionRealm
     default long estimatedPartitionCountInSSTables()
     {
         final long INITIAL_ESTIMATED_PARTITION_COUNT = 1 << 16; // If we don't yet have a count, use a sensible default.
-        if (metrics() == null)
+        if (!metrics().isPresent())
             return INITIAL_ESTIMATED_PARTITION_COUNT;
-        final Long estimation = metrics().estimatedPartitionCountInSSTablesCached.getValue();
+        final Long estimation = metrics().get().estimatedPartitionCountInSSTablesCached.getValue();
         if (estimation == null || estimation == 0)
             return INITIAL_ESTIMATED_PARTITION_COUNT;
         return estimation;
@@ -184,12 +185,12 @@ public interface CompactionRealm
      */
     default double getWA()
     {
-        TableMetrics metric = metrics();
-        if (metric == null)
+        Optional<TableMetrics> metric = metrics();
+        if (!metric.isPresent())
             return 0;
 
-        double bytesCompacted = metric.compactionBytesWritten.getCount();
-        double bytesFlushed = metric.bytesFlushed.getCount();
+        double bytesCompacted = metric.get().compactionBytesWritten.getCount();
+        double bytesFlushed = metric.get().bytesFlushed.getCount();
         return bytesFlushed <= 0 ? 0 : (bytesFlushed + bytesCompacted) / bytesFlushed;
     }
 

@@ -192,7 +192,10 @@ public class TableMetricTables
             // Iterate over all tables and get metric by function
             for (ColumnFamilyStore cfs : ColumnFamilyStore.all())
             {
-                Metric metric = func.apply(cfs.metric);
+                if (!cfs.metric.isPresent())
+                    continue;
+                
+                Metric metric = func.apply(cfs.metric.get());
 
                 // set new partition for this table
                 result.row(cfs.keyspace.getName(), cfs.name);
@@ -241,7 +244,10 @@ public class TableMetricTables
 
         // get a table from system keyspace and get metric from it for determining type of metric
         Keyspace system = Keyspace.system().iterator().next();
-        Metric test = func.apply(system.getColumnFamilyStores().iterator().next().metric);
+        ColumnFamilyStore cfs = system.getColumnFamilyStores().iterator().next();
+        if (!cfs.metric.isPresent())
+            throw new IllegalStateException("System keyspace table metrics not available");
+        Metric test = func.apply(cfs.metric.get());
 
         if (test instanceof Counting)
         {

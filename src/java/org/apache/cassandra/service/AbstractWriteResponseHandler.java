@@ -355,11 +355,11 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
             // Only mark it as failed if the requested CL was achieved.
             if (!condition.isSignaled() && requestedCLAchieved)
             {
-                replicaPlan.keyspace().metric.writeFailedIdealCL.inc();
+                replicaPlan.keyspace().metric.ifPresent(m -> m.writeFailedIdealCL.inc());
             }
             else
             {
-                replicaPlan.keyspace().metric.idealCLWriteLatency.addNano(System.nanoTime() - queryStartNanoTime);
+                replicaPlan.keyspace().metric.ifPresent(m -> m.idealCLWriteLatency.addNano(System.nanoTime() - queryStartNanoTime));
             }
         }
     }
@@ -389,7 +389,7 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
             if (!condition.await(timeout, NANOSECONDS))
             {
                 for (ColumnFamilyStore cf : cfs)
-                    cf.metric.additionalWrites.inc();
+                    cf.metric.ifPresent(m -> m.additionalWrites.inc());
 
                 writePerformer.apply(mutation, replicaPlan.withContact(uncontacted),
                                      (AbstractWriteResponseHandler<IMutation>) this,

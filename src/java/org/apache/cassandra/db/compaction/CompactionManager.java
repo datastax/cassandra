@@ -766,9 +766,15 @@ public class CompactionManager implements CompactionManagerMBean
         {
             protected void runMayThrow() throws Exception
             {
-                try (TableMetrics.TableTimer.Context ctx = cfs.metric.anticompactionTime.time())
+                TableMetrics.TableTimer.Context ctx = cfs.metric.map(m -> m.anticompactionTime.time()).orElse(null);
+                try
                 {
                     performAnticompaction(cfs, tokenRanges, sstables, txn, sessionId, isCancelled);
+                }
+                finally
+                {
+                    if (ctx != null)
+                        ctx.close();
                 }
             }
         };
@@ -808,7 +814,7 @@ public class CompactionManager implements CompactionManagerMBean
 
         Set<SSTableReader> fullyContainedSSTables = findSSTablesToAnticompact(sstableIterator, normalizedRanges, sessionID);
 
-        cfs.metric.bytesMutatedAnticompaction.inc(CompactionSSTable.getTotalDataBytes(fullyContainedSSTables));
+        cfs.metric.ifPresent(m -> m.bytesMutatedAnticompaction.inc(CompactionSSTable.getTotalDataBytes(fullyContainedSSTables)));
         cfs.mutateRepaired(fullyContainedSSTables, UNREPAIRED_SSTABLE, sessionID, isTransient);
         // since we're just re-writing the sstable metdata for the fully contained sstables, we don't want
         // them obsoleted when the anti-compaction is complete. So they're removed from the transaction here
@@ -1616,7 +1622,7 @@ public class CompactionManager implements CompactionManagerMBean
         // repairedAt values for these, we still avoid anti-compacting already repaired sstables, as we currently don't
         // make use of any actual repairedAt value and splitting up sstables just for that is not worth it at this point.
         Set<SSTableReader> unrepairedSSTables = sstables.stream().filter((s) -> !s.isRepaired()).collect(Collectors.toSet());
-        cfs.metric.bytesAnticompacted.inc(CompactionSSTable.getTotalDataBytes(unrepairedSSTables));
+        cfs.metric.ifPresent(m -> m.bytesAnticompacted.inc(CompactionSSTable.getTotalDataBytes(unrepairedSSTables)));
         Collection<Collection<CompactionSSTable>> groupedSSTables = cfs.getCompactionStrategy().groupSSTablesForAntiCompaction(unrepairedSSTables);
 
         // iterate over sstables to check if the full / transient / unrepaired ranges intersect them.

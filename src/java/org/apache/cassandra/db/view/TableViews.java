@@ -194,7 +194,7 @@ public class TableViews extends AbstractCollection<View>
         {
             mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false));
         }
-        Keyspace.openAndGetStore(update.metadata()).metric.viewReadTime.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+        Keyspace.openAndGetStore(update.metadata()).metric.ifPresent(m -> m.viewReadTime.update(System.nanoTime() - start, TimeUnit.NANOSECONDS));
 
         if (!mutations.isEmpty())
             StorageProxy.mutateMV(update.partitionKey().getKey(), mutations, writeOptions, baseComplete, queryStartNanoTime);

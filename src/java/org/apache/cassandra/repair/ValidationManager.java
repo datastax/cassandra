@@ -140,8 +140,12 @@ public class ValidationManager
         }
         finally
         {
-            cfs.metric.bytesValidated.update(estimatedTotalBytes);
-            cfs.metric.partitionsValidated.update(partitionCount);
+            final long estimatedTotalBytesCopy = estimatedTotalBytes;
+            final long partitionCountCopy = partitionCount;
+            cfs.metric.ifPresent(m -> {
+                m.bytesValidated.update(estimatedTotalBytesCopy);
+                m.partitionsValidated.update(partitionCountCopy);
+            });
         }
         if (logger.isDebugEnabled())
         {
@@ -163,7 +167,7 @@ public class ValidationManager
         {
             public Object call() throws IOException
             {
-                try (TableMetrics.TableTimer.Context c = cfs.metric.validationTime.time())
+                try (TableMetrics.TableTimer.Context c = cfs.metric.map(m -> m.validationTime.time()).orElse(null))
                 {
                     doValidation(cfs, validator);
                 }

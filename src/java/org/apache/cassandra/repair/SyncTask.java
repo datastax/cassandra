@@ -104,7 +104,7 @@ public abstract class SyncTask extends AbstractFuture<SyncStat> implements Runna
     protected void finished()
     {
         if (startTime != Long.MIN_VALUE)
-            Keyspace.open(desc.keyspace).getColumnFamilyStore(desc.columnFamily).metric.repairSyncTime.update(System.currentTimeMillis() - startTime, TimeUnit.MILLISECONDS);
+            Keyspace.open(desc.keyspace).getColumnFamilyStore(desc.columnFamily).metric.ifPresent(m -> m.repairSyncTime.update(System.currentTimeMillis() - startTime, TimeUnit.MILLISECONDS));
     }
 
     public void abort() {}

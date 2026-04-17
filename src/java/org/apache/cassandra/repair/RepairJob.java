@@ -99,7 +99,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
     {
         Keyspace ks = Keyspace.open(desc.keyspace);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(desc.columnFamily);
-        cfs.metric.repairsStarted.inc();
+        cfs.metric.ifPresent(m -> m.repairsStarted.inc());
         List<InetAddressAndPort> allEndpoints = new ArrayList<>(session.commonRange.endpoints);
         allEndpoints.add(FBUtilities.getBroadcastAddressAndPort());
 
@@ -147,7 +147,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
                     logger.info("{} {}.{} is fully synced", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
                     RepairProgressReporter.instance.onRepairSucceeded(session.getId(), desc.keyspace, desc.columnFamily);
                 }
-                cfs.metric.repairsCompleted.inc();
+                cfs.metric.ifPresent(m -> m.repairsCompleted.inc());
                 set(new RepairResult(desc, stats));
             }
 
@@ -164,7 +164,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
                     logger.warn("{} {}.{} sync failed", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
                     RepairProgressReporter.instance.onRepairFailed(session.getId(), desc.keyspace, desc.columnFamily, t);
                 }
-                cfs.metric.repairsCompleted.inc();
+                cfs.metric.ifPresent(m -> m.repairsCompleted.inc());
                 setException(t);
             }
         }, taskExecutor);

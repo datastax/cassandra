@@ -603,7 +603,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.casWriteMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
-            Keyspace.openAndGetStore(metadata).metric.coordinatorCasWriteLatency.update(latency, NANOSECONDS);
+            Keyspace.openAndGetStore(metadata).metric.ifPresent(m -> m.coordinatorCasWriteLatency.update(latency, NANOSECONDS));
         }
     }
 
@@ -619,8 +619,7 @@ public class StorageProxy implements StorageProxyMBean
         Keyspace.open(table.keyspace)
                 .getColumnFamilyStore(table.name)
                 .metric
-                .topCasPartitionContention
-                .addSample(key.getKey(), contentions);
+                .ifPresent(m -> m.topCasPartitionContention.addSample(key.getKey(), contentions));
     }
 
     /**
@@ -1405,7 +1404,7 @@ public class StorageProxy implements StorageProxyMBean
             mutations.stream()
                      .flatMap(m -> m.getTableIds().stream().map(tableId -> Keyspace.open(m.getKeyspaceName()).getColumnFamilyStore(tableId)))
                      .distinct()
-                     .forEach(store -> store.metric.coordinatorWriteLatency.update(latency, TimeUnit.NANOSECONDS));
+                     .forEach(store -> store.metric.ifPresent(m -> m.coordinatorWriteLatency.update(latency, TimeUnit.NANOSECONDS)));
         }
         catch (Exception ex)
         {
@@ -2112,7 +2111,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.casReadMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             metrics.readMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
             metrics.readMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
-            Keyspace.openAndGetStore(metadata).metric.coordinatorCasReadLatency.update(latency, TimeUnit.NANOSECONDS);
+            Keyspace.openAndGetStore(metadata).metric.ifPresent(m -> m.coordinatorCasReadLatency.update(latency, TimeUnit.NANOSECONDS));
         }
         return result;
     }
@@ -2169,7 +2168,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.readMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
             for (ReadCommand command : group.queries)
-                Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+                Keyspace.openAndGetStore(command.metadata()).metric.ifPresent(m -> m.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS));
         }
     }
 

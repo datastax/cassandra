@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -607,7 +608,7 @@ public abstract class ReadCommand extends AbstractReadQuery
      * Wraps the provided iterator so that metrics on what is scanned by the command are recorded.
      * This also log warning/trow TombstoneOverwhelmingException if appropriate.
      */
-    private UnfilteredPartitionIterator withMetricsRecording(UnfilteredPartitionIterator iter, final TableMetrics metric, final long startTimeNanos)
+    private UnfilteredPartitionIterator withMetricsRecording(UnfilteredPartitionIterator iter, final Optional<TableMetrics> metric, final long startTimeNanos)
     {
         class MetricRecording extends Transformation<UnfilteredRowIterator>
         {
@@ -628,7 +629,7 @@ public abstract class ReadCommand extends AbstractReadQuery
 
             private MetricRecording()
             {
-                recordReadRequest(metric);
+                metric.ifPresent(m -> recordReadRequest(m));
             }
 
             @Override
@@ -685,7 +686,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 }
                 catch (InvalidRequestException e)
                 {
-                    metric.tombstoneFailures.inc();
+                    metric.ifPresent(m -> m.tombstoneFailures.inc());
                     throw new TombstoneOverwhelmingException(tombstones.get(),
                                                              ReadCommand.this.toRedactedCQLString(),
                                                              ReadCommand.this.metadata(),
@@ -697,9 +698,11 @@ public abstract class ReadCommand extends AbstractReadQuery
             @Override
             public void onClose()
             {
-                recordReadLatency(metric, System.nanoTime() - startTimeNanos);
-                metric.incLiveRows(liveRows);
-                metric.incTombstones(tombstones.get(), tombstones.checkAndTriggerWarning());
+                metric.ifPresent(m -> {
+                    recordReadLatency(m, System.nanoTime() - startTimeNanos);
+                    m.incLiveRows(liveRows);
+                    m.incTombstones(tombstones.get(), tombstones.checkAndTriggerWarning());
+                });
 
                 Tracing.trace("Read {} live rows and {} tombstone ones", liveRows, tombstones.get());
             }

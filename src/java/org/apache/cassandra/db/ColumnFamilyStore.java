@@ -366,7 +366,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     private final Directories directories;
 
-    public volatile TableMetrics metric;
+    public volatile Optional<TableMetrics> metric;
     public volatile long sampleReadLatencyNanos;
     public volatile long additionalWriteLatencyNanos;
 
@@ -448,10 +448,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 currentMemtable.metadataUpdated();
         }
 
-        if (metric.metricsAggregation != TableMetrics.MetricsAggregation.fromMetadata(metadata()))
+        if (metric.isPresent() && metric.get().metricsAggregation != TableMetrics.MetricsAggregation.fromMetadata(metadata()))
         { // Reload the metrics if histogram aggregation has changed
-            metric.release(); // release first because of those static tables containing metric names
-            metric = new TableMetrics(this, memtableFactory.createMemtableMetrics(metadata));
+            metric.get().release(); // release first because of those static tables containing metric names
+            metric = CassandraRelevantProperties.TABLE_METRICS_ENABLED.getBoolean()
+                     ? Optional.of(new TableMetrics(this, memtableFactory.createMemtableMetrics(metadata)))
+                     : Optional.empty();
         }
     }
 
@@ -624,7 +626,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             initialBuilds.add(indexManager.addIndex(info, true));
         }
 
-        metric = new TableMetrics(this, memtableFactory.createMemtableMetrics(metadata));
+        metric = CassandraRelevantProperties.TABLE_METRICS_ENABLED.getBoolean()
+                 ? Optional.of(new TableMetrics(this, memtableFactory.createMemtableMetrics(metadata)))
+                 : Optional.empty();
 
         if (data.loadsstables && sstables != null)
         {
@@ -684,8 +688,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         try
         {
-            sampleReadLatencyNanos = metadata().params.speculativeRetry.calculateThreshold(metric.coordinatorReadLatency.tableOrKeyspaceTimer().getSnapshot(), sampleReadLatencyNanos);
-            additionalWriteLatencyNanos = metadata().params.additionalWritePolicy.calculateThreshold(metric.coordinatorWriteLatency.tableOrKeyspaceTimer().getSnapshot(), additionalWriteLatencyNanos);
+            sampleReadLatencyNanos = metric.map(m -> metadata().params.speculativeRetry.calculateThreshold(m.coordinatorReadLatency.tableOrKeyspaceTimer().getSnapshot(), sampleReadLatencyNanos)).orElse(sampleReadLatencyNanos);
+            additionalWriteLatencyNanos = metric.map(m -> metadata().params.additionalWritePolicy.calculateThreshold(m.coordinatorWriteLatency.tableOrKeyspaceTimer().getSnapshot(), additionalWriteLatencyNanos)).orElse(additionalWriteLatencyNanos);
         }
         catch (Throwable e)
         {
@@ -724,7 +728,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return metadata;
     }
 
-    public TableMetrics metrics()
+    public Optional<TableMetrics> metrics()
     {
         return metric;
     }
@@ -887,7 +891,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
 
         // unregister metrics
-        metric.release();
+        metric.ifPresent(m -> m.release());
     }
 
 
@@ -1085,7 +1089,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return keyspace.getName();
     }
 
-    public KeyspaceMetrics getKeyspaceMetrics()
+    public Optional<KeyspaceMetrics> getKeyspaceMetrics()
     {
         return keyspace.metric;
     }
@@ -1270,7 +1274,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 CommitLog.instance.discardCompletedSegments(metadata.id, mainMemtable.getCommitLogLowerBound(), commitLogUpperBound);
             }
 
-            metric.pendingFlushes.dec();
+            metric.ifPresent(m -> m.pendingFlushes.dec());
 
             if (flushFailure != null)
                 throw Throwables.propagate(flushFailure);
@@ -1302,7 +1306,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             // if true, we won't flush, we'll just wait for any outstanding writes, switch the memtable, and discard
             this.truncate = truncate;
 
-            metric.pendingFlushes.inc();
+            metric.ifPresent(m -> m.pendingFlushes.inc());
             /*
              * To ensure correctness of switch without blocking writes, run() needs to wait for all write operations
              * started prior to the switch to complete. We do this by creating a Barrier on the writeOrdering
@@ -1360,7 +1364,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             for (Map.Entry<ColumnFamilyStore, Memtable> entry : memtables.entrySet())
                 entry.getKey().data.markFlushing(entry.getValue());
 
-            metric.memtableSwitchCount.inc();
+            metric.ifPresent(m -> m.memtableSwitchCount.inc());
 
             try
             {
@@ -1504,7 +1508,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 for (SSTableMultiWriter writer : flushResults)
                 {
                     accumulate = writer.commit(accumulate);
-                    metric.flushSizeOnDisk().update(writer.getOnDiskBytesWritten());
+                    metric.ifPresent(m -> m.flushSizeOnDisk().update(writer.getOnDiskBytesWritten()));
                 }
 
                 maybeFail(txn.commit(accumulate));
@@ -1524,7 +1528,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         }
                     }
                 }
-                metric.memTableFlushCompleted(System.nanoTime() - start);
+                metric.ifPresent(m -> m.memTableFlushCompleted(System.nanoTime() - start));
 
                 cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
             }
@@ -1623,7 +1627,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public void apply(PartitionUpdate update, CassandraWriteContext context, boolean updateIndexes)
     {
         long start = System.nanoTime();
-        metric.writeRequests.inc();
+        metric.ifPresent(m -> m.writeRequests.inc());
         OpOrder.Group opGroup = context.getGroup();
         CommitLogPosition commitLogPosition = context.getPosition();
         try
@@ -1633,20 +1637,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             long timeDelta = mt.put(update, indexer, opGroup);
             DecoratedKey key = update.partitionKey();
             invalidateCachedPartition(key);
-            metric.topWritePartitionFrequency.addSample(key.getKey(), 1);
+            metric.ifPresent(m -> m.topWritePartitionFrequency.addSample(key.getKey(), 1));
             int dataSize = update.dataSize();
-            if (metric.topWritePartitionSize.isEnabled()) // dont compute datasize if not needed
-                metric.topWritePartitionSize.addSample(key.getKey(), dataSize);
-            metric.bytesInserted.inc(dataSize);
+            if (metric.map(m -> m.topWritePartitionSize.isEnabled()).orElse(false)) // dont compute datasize if not needed
+                metric.ifPresent(m -> m.topWritePartitionSize.addSample(key.getKey(), dataSize));
+            metric.ifPresent(m -> m.bytesInserted.inc(dataSize));
             StorageHook.instance.reportWrite(metadata.id, update);
-            metric.writeLatency.addNano(System.nanoTime() - start);
+            metric.ifPresent(m -> m.writeLatency.addNano(System.nanoTime() - start));
             // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
             // large time deltas, either through a variety of sentinel timestamps (used for empty values, ensuring
             // a minimal write, etc). This limits the time delta to the max value the histogram
             // can bucket correctly. This also filters the Long.MAX_VALUE case where there was no previous value
             // to update.
             if(timeDelta < Long.MAX_VALUE)
-                metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
+                metric.ifPresent(m -> m.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta)));
 
             if (!isIndex())
             {
@@ -1839,7 +1843,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 expectedFileSize += position.upperPosition - position.lowerPosition;
         }
 
-        double compressionRatio = metric.compressionRatio.getValue();
+        double compressionRatio = metric.map(m -> m.compressionRatio.getValue()).orElse(0.0);
         if (compressionRatio > 0d)
             expectedFileSize *= compressionRatio;
 
@@ -2138,16 +2142,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public void beginLocalSampling(String sampler, int capacity, int durationMillis)
     {
-        metric.samplers.get(SamplerType.valueOf(sampler)).beginSampling(capacity, durationMillis);
+        metric.ifPresent(m -> m.samplers.get(SamplerType.valueOf(sampler)).beginSampling(capacity, durationMillis));
     }
 
     @SuppressWarnings({ "rawtypes", "unchecked" })
     public List<CompositeData> finishLocalSampling(String sampler, int count) throws OpenDataException
     {
-        Sampler samplerImpl = metric.samplers.get(SamplerType.valueOf(sampler));
-        List<Sample> samplerResults = samplerImpl.finishSampling(count);
+        Optional<Sampler> samplerImpl = metric.map( m -> m.samplers.get(SamplerType.valueOf(sampler)));
+        Optional<List<Sample>> samplerResults = samplerImpl.map( s -> s.finishSampling(count));
         List<CompositeData> result = new ArrayList<>(count);
-        for (Sample counter : samplerResults)
+        for (Sample counter : samplerResults.orElse(Collections.emptyList()))
         {
             //Not duplicating the buffer for safety because AbstractSerializer and ByteBufferUtil.bytesToHex
             //don't modify position or limit
@@ -2155,7 +2159,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                     keyspace.getName() + "." + name,
                     counter.count,
                     counter.error,
-                    samplerImpl.toString(counter.value) })); // string
+                    samplerImpl.get().toString(counter.value) })); // string
         }
         return result;
     }
@@ -3282,12 +3286,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public long getReadRequests()
     {
-        return metric == null ? 0 : metric.readRequests.getCount();
+        return metric.map(m -> m.readRequests.getCount()).orElse(0L);
     }
 
     public long getBytesInserted()
     {
-        return metric == null ? 0 : metric.bytesInserted.getCount();
+        return metric.map(m -> m.bytesInserted.getCount()).orElse(0L);
     }
 
     /** true if this CFS contains secondary index data */
@@ -3507,14 +3511,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public static TableMetrics metricsFor(TableId tableId)
     {
-        return Objects.requireNonNull(getIfExists(tableId)).metric;
+        return Objects.requireNonNull(getIfExists(tableId)).metric.orElse(null);
     }
 
     @Nullable
     public static TableMetrics metricsForIfPresent(TableId tableId)
     {
         ColumnFamilyStore cfs = getIfExists(tableId);
-        return cfs == null ? null : cfs.metric;
+        return cfs == null ? null : cfs.metric.orElse(null);
     }
 
     // Used by CNDB

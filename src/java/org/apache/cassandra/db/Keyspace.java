@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,6 +43,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -91,7 +93,7 @@ public class Keyspace
     private static final boolean TEST_FAIL_WRITES = !TEST_FAIL_WRITES_KS.isEmpty();
     private static int TEST_FAIL_MV_LOCKS_COUNT = Integer.getInteger("cassandra.test.fail_mv_locks_count", 0);
 
-    public final KeyspaceMetrics metric;
+    public final Optional<KeyspaceMetrics> metric;
 
     // It is possible to call Keyspace.open without a running daemon, so it makes sense to ensure
     // proper directories here as well as in CassandraDaemon.
@@ -371,7 +373,9 @@ public class Keyspace
             throw new IllegalStateException("Cannot initialize Keyspace with virtual metadata " + keyspaceName);
         createReplicationStrategy(metadata);
 
-        this.metric = new KeyspaceMetrics(this);
+        this.metric = CassandraRelevantProperties.KEYSPACE_METRICS_ENABLED.getBoolean()
+                      ? Optional.of(new KeyspaceMetrics(this))
+                      : Optional.empty();
         this.viewManager = new ViewManager(this);
         for (TableMetadata cfm : metadata.tablesAndViews())
         {
@@ -389,7 +393,9 @@ public class Keyspace
         this.schema = Schema.instance;
         this.metadata = metadata;
         createReplicationStrategy(metadata);
-        this.metric = new KeyspaceMetrics(this);
+        this.metric = CassandraRelevantProperties.KEYSPACE_METRICS_ENABLED.getBoolean()
+                      ? Optional.of(new KeyspaceMetrics(this))
+                      : Optional.empty();
         this.viewManager = new ViewManager(this);
         this.repairManager = new CassandraKeyspaceRepairManager(this);
         this.writeHandler = new CassandraKeyspaceWriteHandler(this);
@@ -443,7 +449,7 @@ public class Keyspace
     {
         for (ColumnFamilyStore cfs : getColumnFamilyStores())
             unloadCf(cfs, dropData);
-        metric.release();
+        metric.ifPresent(KeyspaceMetrics::release);
     }
 
     /**
@@ -680,7 +686,7 @@ public class Keyspace
             if (writeOptions.isDroppable)
             {
                 for (TableId tableId : tableIds)
-                    columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, MILLISECONDS);
+                    columnFamilyStores.get(tableId).metric.ifPresent(m -> m.viewLockAcquireTime.update(acquireTime, MILLISECONDS));
             }
         }
         try (WriteContext ctx = getWriteHandler().beginWrite(mutation, writeOptions))

@@ -46,7 +46,8 @@ public class TableStateMetrics extends AbstractMetrics
             @Override
             protected Ratio getRatio()
             {
-                return Ratio.of(group.totalDiskUsage(), group.table().metric.liveDiskSpaceUsed.getCount());
+                return Ratio.of(group.totalDiskUsage(),
+                               group.table().metric.map(m -> m.liveDiskSpaceUsed.getCount()).orElse(0L));
             }
         });
     }

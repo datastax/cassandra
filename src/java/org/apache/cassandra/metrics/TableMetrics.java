@@ -712,7 +712,9 @@ public class TableMetrics
             }
         }, null);
 
-        sstablesPerReadHistogram = createTableHistogram("SSTablesPerReadHistogram", cfs.getKeyspaceMetrics().sstablesPerReadHistogram, true);
+        sstablesPerReadHistogram = createTableHistogram("SSTablesPerReadHistogram",
+                                                        cfs.getKeyspaceMetrics().map(km -> km.sstablesPerReadHistogram).orElse(null),
+                                                        true);
         sstablePartitionReadLatency = ExpMovingAverage.decayBy100();
         compressionRatio = createTableGauge("CompressionRatio", new Gauge<Double>()
         {
@@ -786,9 +788,10 @@ public class TableMetrics
             }
         });
 
-        readLatency = createLatencyMetrics("Read", cfs.getKeyspaceMetrics().readLatency, GLOBAL_READ_LATENCY);
-        writeLatency = createLatencyMetrics("Write", cfs.getKeyspaceMetrics().writeLatency, GLOBAL_WRITE_LATENCY);
-        rangeLatency = createLatencyMetrics("Range", cfs.getKeyspaceMetrics().rangeLatency, GLOBAL_RANGE_LATENCY);
+        Optional<KeyspaceMetrics> keyspaceMetrics = cfs.getKeyspaceMetrics();
+        readLatency = createLatencyMetrics("Read", keyspaceMetrics.map(km -> km.readLatency).orElse(null), GLOBAL_READ_LATENCY);
+        writeLatency = createLatencyMetrics("Write", keyspaceMetrics.map(km -> km.writeLatency).orElse(null), GLOBAL_WRITE_LATENCY);
+        rangeLatency = createLatencyMetrics("Range", keyspaceMetrics.map(km -> km.rangeLatency).orElse(null), GLOBAL_RANGE_LATENCY);
 
         readRequests = createTableCounter("ReadRequests");
         rangeRequests = createTableCounter("RangeRequests");
@@ -1060,19 +1063,19 @@ public class TableMetrics
                 return Math.max(requests, 1); // to avoid NaN.
             }
         }, null);
-        tombstoneScannedHistogram = createTableHistogram("TombstoneScannedHistogram", cfs.getKeyspaceMetrics().tombstoneScannedHistogram, false);
-        shadowedKeysScannedHistogram = createTableHistogram("ShadowedKeysScannedHistogram", cfs.getKeyspaceMetrics().shadowedKeysScannedHistogram, false);
-        shadowedKeysLoopsHistogram = createTableHistogram("ShadowedKeysLoopsHistogram", cfs.getKeyspaceMetrics().shadowedKeysLoopsHistogram, false);
+        tombstoneScannedHistogram = createTableHistogram("TombstoneScannedHistogram", keyspaceMetrics.map(km -> km.tombstoneScannedHistogram).orElse(null), false);
+        shadowedKeysScannedHistogram = createTableHistogram("ShadowedKeysScannedHistogram", keyspaceMetrics.map(km -> km.shadowedKeysScannedHistogram).orElse(null), false);
+        shadowedKeysLoopsHistogram = createTableHistogram("ShadowedKeysLoopsHistogram", keyspaceMetrics.map(km -> km.shadowedKeysLoopsHistogram).orElse(null), false);
         tombstoneScannedCounter = createTableCounter("TombstoneScannedCounter");
-        liveScannedHistogram = createTableHistogram("LiveScannedHistogram", cfs.getKeyspaceMetrics().liveScannedHistogram, false);
-        colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", cfs.getKeyspaceMetrics().colUpdateTimeDeltaHistogram, false);
-        coordinatorReadLatency = createTableTimer("CoordinatorReadLatency", cfs.getKeyspaceMetrics().coordinatorReadLatency);
-        coordinatorCasReadLatency = createTableTimer("CoordinatorCasReadLatency", cfs.getKeyspaceMetrics().coordinatorCasReadLatency);
-        coordinatorScanLatency = createTableTimer("CoordinatorScanLatency", cfs.getKeyspaceMetrics().coordinatorScanLatency);
-        coordinatorWriteLatency = createTableTimer("CoordinatorWriteLatency", cfs.getKeyspaceMetrics().coordinatorWriteLatency);
-        coordinatorCasWriteLatency = createTableTimer("CoordinatorCasWriteLatency", cfs.getKeyspaceMetrics().coordinatorCasWriteLatency);
-        waitingOnFreeMemtableSpace = createTableHistogram("WaitingOnFreeMemtableSpace", cfs.getKeyspaceMetrics().waitingOnFreeMemtableSpace, false);
-        coordinatorReadSize = createTableHistogram("CoordinatorReadSize", cfs.getKeyspaceMetrics().coordinatorReadSize, false);
+        liveScannedHistogram = createTableHistogram("LiveScannedHistogram", keyspaceMetrics.map(km -> km.liveScannedHistogram).orElse(null), false);
+        colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", keyspaceMetrics.map(km -> km.colUpdateTimeDeltaHistogram).orElse(null), false);
+        coordinatorReadLatency = createTableTimer("CoordinatorReadLatency", keyspaceMetrics.map(km -> km.coordinatorReadLatency).orElse(null));
+        coordinatorCasReadLatency = createTableTimer("CoordinatorCasReadLatency", keyspaceMetrics.map(km -> km.coordinatorCasReadLatency).orElse(null));
+        coordinatorScanLatency = createTableTimer("CoordinatorScanLatency", keyspaceMetrics.map(km -> km.coordinatorScanLatency).orElse(null));
+        coordinatorWriteLatency = createTableTimer("CoordinatorWriteLatency", keyspaceMetrics.map(km -> km.coordinatorWriteLatency).orElse(null));
+        coordinatorCasWriteLatency = createTableTimer("CoordinatorCasWriteLatency", keyspaceMetrics.map(km -> km.coordinatorCasWriteLatency).orElse(null));
+        waitingOnFreeMemtableSpace = createTableHistogram("WaitingOnFreeMemtableSpace", keyspaceMetrics.map(km -> km.waitingOnFreeMemtableSpace).orElse(null), false);
+        coordinatorReadSize = createTableHistogram("CoordinatorReadSize", keyspaceMetrics.map(km -> km.coordinatorReadSize).orElse(null), false);
 
         // We do not want to capture view mutation specific metrics for a view
         // They only makes sense to capture on the base table
@@ -1083,8 +1086,8 @@ public class TableMetrics
         }
         else
         {
-            viewLockAcquireTime = createTableTimer("ViewLockAcquireTime", cfs.getKeyspaceMetrics().viewLockAcquireTime);
-            viewReadTime = createTableTimer("ViewReadTime", cfs.getKeyspaceMetrics().viewReadTime);
+            viewLockAcquireTime = createTableTimer("ViewLockAcquireTime", keyspaceMetrics.map(km -> km.viewLockAcquireTime).orElse(null));
+            viewReadTime = createTableTimer("ViewReadTime", keyspaceMetrics.map(km -> km.viewReadTime).orElse(null));
         }
 
         trueSnapshotsSize = createTableGauge("SnapshotsSize", cfs::trueSnapshotsSize);
@@ -1097,19 +1100,19 @@ public class TableMetrics
 
         droppedMutations = createTableCounter("DroppedMutations");
 
-        casPrepare = createLatencyMetrics("CasPrepare", cfs.getKeyspaceMetrics().casPrepare, Optional.empty());
-        casPropose = createLatencyMetrics("CasPropose", cfs.getKeyspaceMetrics().casPropose, Optional.empty());
-        casCommit = createLatencyMetrics("CasCommit", cfs.getKeyspaceMetrics().casCommit, Optional.empty());
+        casPrepare = createLatencyMetrics("CasPrepare", keyspaceMetrics.map(km -> km.casPrepare).orElse(null), Optional.empty());
+        casPropose = createLatencyMetrics("CasPropose", keyspaceMetrics.map(km -> km.casPropose).orElse(null), Optional.empty());
+        casCommit = createLatencyMetrics("CasCommit", keyspaceMetrics.map(km -> km.casCommit).orElse(null), Optional.empty());
 
         repairsStarted = createTableCounter("RepairJobsStarted");
         repairsCompleted = createTableCounter("RepairJobsCompleted");
 
-        anticompactionTime = createTableTimer("AnticompactionTime", cfs.getKeyspaceMetrics().anticompactionTime);
-        validationTime = createTableTimer("ValidationTime", cfs.getKeyspaceMetrics().validationTime);
-        repairSyncTime = createTableTimer("RepairSyncTime", cfs.getKeyspaceMetrics().repairSyncTime);
+        anticompactionTime = createTableTimer("AnticompactionTime", keyspaceMetrics.map(km -> km.anticompactionTime).orElse(null));
+        validationTime = createTableTimer("ValidationTime", keyspaceMetrics.map(km -> km.validationTime).orElse(null));
+        repairSyncTime = createTableTimer("RepairSyncTime", keyspaceMetrics.map(km -> km.repairSyncTime).orElse(null));
 
-        bytesValidated = createTableHistogram("BytesValidated", cfs.getKeyspaceMetrics().bytesValidated, false);
-        partitionsValidated = createTableHistogram("PartitionsValidated", cfs.getKeyspaceMetrics().partitionsValidated, false);
+        bytesValidated = createTableHistogram("BytesValidated", keyspaceMetrics.map(km -> km.bytesValidated).orElse(null), false);
+        partitionsValidated = createTableHistogram("PartitionsValidated", keyspaceMetrics.map(km -> km.partitionsValidated).orElse(null), false);
         bytesAnticompacted = createTableCounter("BytesAnticompacted");
         bytesMutatedAnticompaction = createTableCounter("BytesMutatedAnticompaction");
         mutatedAnticompactionGauge = createTableGauge("MutatedAnticompactionGauge", () ->
@@ -1126,11 +1129,11 @@ public class TableMetrics
         replicaFilteringProtectionRequests = createTableMeter("ReplicaFilteringProtectionRequests");
         rfpRowsCachedPerQuery = createHistogram("ReplicaFilteringProtectionRowsCachedPerQuery", true);
 
-        confirmedRepairedInconsistencies = createTableMeter("RepairedDataInconsistenciesConfirmed", cfs.getKeyspaceMetrics().confirmedRepairedInconsistencies);
-        unconfirmedRepairedInconsistencies = createTableMeter("RepairedDataInconsistenciesUnconfirmed", cfs.getKeyspaceMetrics().unconfirmedRepairedInconsistencies);
+        confirmedRepairedInconsistencies = createTableMeter("RepairedDataInconsistenciesConfirmed", keyspaceMetrics.map(km -> km.confirmedRepairedInconsistencies).orElse(null));
+        unconfirmedRepairedInconsistencies = createTableMeter("RepairedDataInconsistenciesUnconfirmed", keyspaceMetrics.map(km -> km.unconfirmedRepairedInconsistencies).orElse(null));
 
-        repairedDataTrackingOverreadRows = createTableHistogram("RepairedDataTrackingOverreadRows", cfs.getKeyspaceMetrics().repairedDataTrackingOverreadRows, false);
-        repairedDataTrackingOverreadTime = createTableTimer("RepairedDataTrackingOverreadTime", cfs.getKeyspaceMetrics().repairedDataTrackingOverreadTime);
+        repairedDataTrackingOverreadRows = createTableHistogram("RepairedDataTrackingOverreadRows", keyspaceMetrics.map(km -> km.repairedDataTrackingOverreadRows).orElse(null), false);
+        repairedDataTrackingOverreadTime = createTableTimer("RepairedDataTrackingOverreadTime", keyspaceMetrics.map(km -> km.repairedDataTrackingOverreadTime).orElse(null));
 
         unleveledSSTables = createTableGauge("UnleveledSSTables", cfs::getUnleveledSSTables, () -> {
             // global gauge
@@ -1471,7 +1474,7 @@ public class TableMetrics
         TableLatencyMetrics metric;
         if (metricsAggregation == MetricsAggregation.INDIVIDUAL)
         {
-            LatencyMetrics[] parents = Stream.of(Optional.of(keyspace), global).filter(Optional::isPresent)
+            LatencyMetrics[] parents = Stream.of(Optional.ofNullable(keyspace), global).filter(Optional::isPresent)
                                              .map(Optional::get).toArray(LatencyMetrics[]::new);
             LatencyMetrics innerMetrics = new LatencyMetrics(factory, namePrefix, parents);
             metric = new TableLatencyMetrics.IndividualTableLatencyMetrics(innerMetrics);
@@ -1625,9 +1628,8 @@ public class TableMetrics
          * @param keyspace meter
          * @param global meter that is {@code null} if global metrics are not collected, see {@link TableMetrics#EXPORT_GLOBAL_METRICS}
          */
-        private TableMeter(@Nullable Meter table, Meter keyspace, @Nullable Meter global)
+        private TableMeter(@Nullable Meter table, @Nullable Meter keyspace, @Nullable Meter global)
         {
-            Preconditions.checkState(keyspace != null, "Keyspace meter can't be null");
             this.table = table;
             this.keyspace = keyspace;
             this.all = Stream.of(table, keyspace, global).filter(Objects::nonNull).toArray(Meter[]::new);
@@ -1643,7 +1645,11 @@ public class TableMetrics
 
         public Meter tableOrKeyspaceMeter()
         {
-            return table == null ? keyspace : table;
+            if (table != null)
+                return table;
+            if (keyspace != null)
+                return keyspace;
+            throw new IllegalStateException("Both table and keyspace meters are null");
         }
     }
 
@@ -1661,9 +1667,8 @@ public class TableMetrics
          * @param keyspace histogram
          * @param global histogram that is {@code null} if global metrics are not collected, see {@link TableMetrics#EXPORT_GLOBAL_METRICS}
          */
-        private TableHistogram(@Nullable Histogram table, Histogram keyspace, @Nullable Histogram global)
+        private TableHistogram(@Nullable Histogram table, @Nullable Histogram keyspace, @Nullable Histogram global)
         {
-            Preconditions.checkState(keyspace != null, "Keyspace histogram can't be null");
             this.table = table;
             this.keyspace = keyspace;
             this.all = Stream.of(table, keyspace, global).filter(Objects::nonNull).toArray(Histogram[]::new);
@@ -1679,7 +1684,11 @@ public class TableMetrics
 
         public Histogram tableOrKeyspaceHistogram()
         {
-            return table == null ? keyspace : table;
+            if (table != null)
+                return table;
+            if (keyspace != null)
+                return keyspace;
+            throw new IllegalStateException("Both table and keyspace histograms are null");
         }
     }
 
@@ -1697,9 +1706,8 @@ public class TableMetrics
          * @param keyspace timer
          * @param global timer that is {@code null} if global metrics are not collected, see {@link TableMetrics#EXPORT_GLOBAL_METRICS}
          */
-        private TableTimer(@Nullable Timer cf, Timer keyspace, @Nullable Timer global)
+        private TableTimer(@Nullable Timer cf, @Nullable Timer keyspace, @Nullable Timer global)
         {
-            Preconditions.checkState(keyspace != null, "Keyspace timer can't be null");
             this.cf = cf;
             this.keyspace = keyspace;
             this.all = Stream.of(cf, keyspace, global).filter(Objects::nonNull).toArray(Timer[]::new);
@@ -1720,7 +1728,11 @@ public class TableMetrics
 
         public Timer tableOrKeyspaceTimer()
         {
-            return cf == null ? keyspace : cf;
+            if (cf != null)
+                return cf;
+            if (keyspace != null)
+                return keyspace;
+            throw new IllegalStateException("Both table and keyspace timers are null");
         }
 
         public static class Context implements AutoCloseable

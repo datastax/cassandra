@@ -243,7 +243,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
             Tracing.instance.stopSession();
         }
 
-        Keyspace.open(keyspace).metric.repairTime.update(durationMillis, TimeUnit.MILLISECONDS);
+        Keyspace.open(keyspace).metric.ifPresent(m -> m.repairTime.update(durationMillis, TimeUnit.MILLISECONDS));
     }
 
     public Future<?> getResult()
@@ -440,7 +440,8 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
 
     private void prepare(List<ColumnFamilyStore> columnFamilies, Set<InetAddressAndPort> allNeighbors, boolean force)
     {
-        try (Timer.Context ignore = Keyspace.open(keyspace).metric.repairPrepareTime.time())
+        Timer.Context timerContext = Keyspace.open(keyspace).metric.map(m -> m.repairPrepareTime.time()).orElse(null);
+        try
         {
             ActiveRepairService.instance.prepareForRepair(parentSession, FBUtilities.getBroadcastAddressAndPort(), allNeighbors, options, force, columnFamilies);
             progressCounter.incrementAndGet();

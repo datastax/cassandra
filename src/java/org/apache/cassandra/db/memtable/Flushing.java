@@ -170,14 +170,14 @@ public class Flushing
         private final Memtable.FlushCollection<?> toFlush;
 
         private final SSTableMultiWriter writer;
-        private final TableMetrics metrics;
+        private final java.util.Optional<org.apache.cassandra.metrics.TableMetrics> metrics;
         private final boolean isBatchLogTable;
         private final boolean logCompletion;
         private final AtomicReference<FlushRunnableWriterState> state;
 
         public FlushRunnable(Memtable.FlushCollection<?> flushSet,
                              SSTableMultiWriter writer,
-                             TableMetrics metrics,
+                             java.util.Optional<org.apache.cassandra.metrics.TableMetrics> metrics,
                              boolean logCompletion)
         {
             this.toFlush = flushSet;
@@ -243,8 +243,10 @@ public class Flushing
                                          segmentCount,
                                          toFlush.memtable().getFinalCommitLogUpperBound());
                             // Update the metrics
-                            metrics.incBytesFlushed(toFlush.memtable().getLiveDataSize(), bytesFlushed, System.nanoTime() - before);
-                            metrics.flushSegmentCount.update(segmentCount);
+                            metrics.ifPresent(m -> {
+                                m.incBytesFlushed(toFlush.memtable().getLiveDataSize(), bytesFlushed, System.nanoTime() - before);
+                                m.flushSegmentCount.update(segmentCount);
+                            });
                         }
 
                         break;

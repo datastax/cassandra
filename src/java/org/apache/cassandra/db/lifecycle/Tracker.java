@@ -231,17 +231,21 @@ public class Tracker
         }
 
         StorageMetrics.load.inc(add - subtract);
-        cfstore.metric.liveDiskSpaceUsed.inc(add - subtract);
+        final long addCopy = add;
+        final long substractCopy = subtract;
+        cfstore.metric.ifPresent(m -> m.liveDiskSpaceUsed.inc(addCopy - substractCopy));
 
         // we don't subtract from total until the sstable is deleted, see TransactionLogs.SSTableTidier
-        cfstore.metric.totalDiskSpaceUsed.inc(add);
+        cfstore.metric.ifPresent(m -> m.totalDiskSpaceUsed.inc(addCopy));
         return accumulate;
     }
 
     public void updateSizeTracking(long adjustment)
     {
-        cfstore.metric.liveDiskSpaceUsed.inc(adjustment);
-        cfstore.metric.totalDiskSpaceUsed.inc(adjustment);
+        cfstore.metric.ifPresent(m -> {
+            m.liveDiskSpaceUsed.inc(adjustment);
+            m.totalDiskSpaceUsed.inc(adjustment);
+        });
     }
 
     // SETUP / CLEANUP

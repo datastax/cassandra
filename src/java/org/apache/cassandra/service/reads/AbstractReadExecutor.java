@@ -273,7 +273,7 @@ public abstract class AbstractReadExecutor
         {
             if (shouldSpeculateAndMaybeWait() && logFailedSpeculation)
             {
-                cfs.metric.speculativeInsufficientReplicas.inc();
+                cfs.metric.ifPresent(m -> m.speculativeInsufficientReplicas.inc());
             }
         }
     }
@@ -299,7 +299,7 @@ public abstract class AbstractReadExecutor
             if (shouldSpeculateAndMaybeWait())
             {
                 //Handle speculation stats first in case the callback fires immediately
-                cfs.metric.speculativeRetries.inc();
+                cfs.metric.ifPresent(m -> m.speculativeRetries.inc());
                 speculated = true;
 
                 ReplicaPlan.ForTokenRead replicaPlan = replicaPlan();
@@ -322,7 +322,7 @@ public abstract class AbstractReadExecutor
                     retryCommand = command;
                     if (extraReplica == null)
                     {
-                        cfs.metric.speculativeInsufficientReplicas.inc();
+                        cfs.metric.ifPresent(m -> m.speculativeInsufficientReplicas.inc());
                         // cannot safely speculate a new data request, without more work - requests assumed to be
                         // unique per endpoint, and we have no full nodes left to speculate against
                         return;
@@ -347,7 +347,7 @@ public abstract class AbstractReadExecutor
             //Shouldn't be possible to get here without first attempting to speculate even if the
             //timing is bad
             assert speculated;
-            cfs.metric.speculativeFailedRetries.inc();
+            cfs.metric.ifPresent(m -> m.speculativeFailedRetries.inc());
         }
     }
 
@@ -373,13 +373,13 @@ public abstract class AbstractReadExecutor
         public void executeAsync()
         {
             super.executeAsync();
-            cfs.metric.speculativeRetries.inc();
+            cfs.metric.ifPresent(m -> m.speculativeRetries.inc());
         }
 
         @Override
         void onReadTimeout()
         {
-            cfs.metric.speculativeFailedRetries.inc();
+            cfs.metric.ifPresent(m -> m.speculativeFailedRetries.inc());
         }
     }
 

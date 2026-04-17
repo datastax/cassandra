@@ -98,7 +98,7 @@ public class PaxosState
         }
         finally
         {
-            Keyspace.open(toPrepare.update.metadata().keyspace).getColumnFamilyStore(toPrepare.update.metadata().id).metric.casPrepare.addNano(System.nanoTime() - start);
+            Keyspace.open(toPrepare.update.metadata().keyspace).getColumnFamilyStore(toPrepare.update.metadata().id).metric.ifPresent(m -> m.casPrepare.addNano(System.nanoTime() - start));
         }
 
     }
@@ -133,7 +133,7 @@ public class PaxosState
         }
         finally
         {
-            Keyspace.open(proposal.update.metadata().keyspace).getColumnFamilyStore(proposal.update.metadata().id).metric.casPropose.addNano(System.nanoTime() - start);
+            Keyspace.open(proposal.update.metadata().keyspace).getColumnFamilyStore(proposal.update.metadata().id).metric.ifPresent(m -> m.casPropose.addNano(System.nanoTime() - start));
         }
     }
 
@@ -165,7 +165,7 @@ public class PaxosState
         }
         finally
         {
-            Keyspace.open(proposal.update.metadata().keyspace).getColumnFamilyStore(proposal.update.metadata().id).metric.casCommit.addNano(System.nanoTime() - start);
+            Keyspace.open(proposal.update.metadata().keyspace).getColumnFamilyStore(proposal.update.metadata().id).metric.ifPresent(m -> m.casCommit.addNano(System.nanoTime() - start));
         }
     }
 

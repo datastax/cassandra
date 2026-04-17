@@ -447,26 +447,26 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             {
                 // Some other read is trying to cache the value, just do a normal non-caching read
                 Tracing.trace("Row cache miss (race)");
-                cfs.metric.rowCacheMiss.inc();
+                cfs.metric.ifPresent(m -> m.rowCacheMiss.inc());
                 return queryMemtableAndDisk(cfs, executionController);
             }
 
             CachedPartition cachedPartition = (CachedPartition)cached;
             if (cfs.isFilterFullyCoveredBy(clusteringIndexFilter(), limits(), cachedPartition, nowInSec(), metadata().enforceStrictLiveness()))
             {
-                cfs.metric.rowCacheHit.inc();
+                cfs.metric.ifPresent(m -> m.rowCacheHit.inc());
                 Tracing.trace("Row cache hit");
                 UnfilteredRowIterator unfilteredRowIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), cachedPartition);
-                cfs.metric.updateSSTableIterated(0, 0, 0);
+                cfs.metric.ifPresent(m -> m.updateSSTableIterated(0, 0, 0));
                 return unfilteredRowIterator;
             }
 
-            cfs.metric.rowCacheHitOutOfRange.inc();
+            cfs.metric.ifPresent(m -> m.rowCacheHitOutOfRange.inc());
             Tracing.trace("Ignoring row cache as cached value could not satisfy query");
             return queryMemtableAndDisk(cfs, executionController);
         }
 
-        cfs.metric.rowCacheMiss.inc();
+        cfs.metric.ifPresent(m -> m.rowCacheMiss.inc());
         Tracing.trace("Row cache miss");
 
         // Note that on tables with no clustering keys, any positive value of
@@ -819,7 +819,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     private UnfilteredRowIterator withSSTablesIterated(List<UnfilteredRowIterator> iterators,
                                                        ReadExecutionController controller,
                                                        int totalIntersectingSSTables,
-                                                       TableMetrics metrics,
+                                                       Optional<TableMetrics> metrics,
                                                        SSTableReadMetricsCollector metricsCollector,
                                                        long startTimeNanos)
     {
@@ -832,14 +832,14 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     private UnfilteredRowIterator withSSTablesIterated(UnfilteredRowIterator iterator,
                                                        ReadExecutionController controller,
                                                        int totalIntersectingSSTables,
-                                                       TableMetrics metrics,
+                                                       Optional<TableMetrics> metrics,
                                                        SSTableReadMetricsCollector metricsCollector,
                                                        long startTimeNanos)
     {
         if (!iterator.isEmpty())
         {
             DecoratedKey key = iterator.partitionKey();
-            metrics.topReadPartitionFrequency.addSample(key.getKey(), 1);
+            metrics.ifPresent(m -> m.topReadPartitionFrequency.addSample(key.getKey(), 1));
         }
 
         class UpdateSstablesIterated extends Transformation<UnfilteredRowIterator>
@@ -847,7 +847,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             public void onPartitionClose()
             {
                 int mergedSSTablesIterated = metricsCollector.getMergedSSTables();
-                metrics.updateSSTableIterated(mergedSSTablesIterated, totalIntersectingSSTables, System.nanoTime() - startTimeNanos);
+                metrics.ifPresent(m -> m.updateSSTableIterated(mergedSSTablesIterated, totalIntersectingSSTables, System.nanoTime() - startTimeNanos));
                 controller.updateSstablesIteratedPerRow(mergedSSTablesIterated);
             }
         }
@@ -974,13 +974,13 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             }
         }
 
-        cfs.metric.updateSSTableIterated(metricsCollector.getMergedSSTables(), view.sstables.size(), System.nanoTime() - startTimeNanos);
+        cfs.metric.ifPresent(m -> m.updateSSTableIterated(metricsCollector.getMergedSSTables(), view.sstables.size(), System.nanoTime() - startTimeNanos));
 
         if (result == null || result.isEmpty())
             return EmptyIterators.unfilteredRow(metadata(), partitionKey(), false);
 
         DecoratedKey key = result.partitionKey();
-        cfs.metric.topReadPartitionFrequency.addSample(key.getKey(), 1);
+        cfs.metric.ifPresent(m -> m.topReadPartitionFrequency.addSample(key.getKey(), 1));
         StorageHook.instance.reportRead(cfs.metadata.id, partitionKey());
 
         var iterator = result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed());

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.Collection;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -63,7 +64,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     private final Stopwatch stopwatch = Stopwatch.createUnstarted();
     private final RowMapping rowMapping;
     private final OperationType opType;
-    private final TableMetrics tableMetrics;
+    private final Optional<TableMetrics> tableMetrics;
 
     private DecoratedKey currentKey;
     private boolean tokenOffsetWriterCompleted = false;
@@ -77,7 +78,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                                       Collection<StorageAttachedIndex> indices,
                                       LifecycleNewTracker lifecycleNewTracker,
                                       long keyCount,
-                                      TableMetrics tableMetrics) throws IOException
+                                      Optional<TableMetrics> tableMetrics) throws IOException
     {
         this(indexDescriptor, tableMetadata, indices, lifecycleNewTracker, keyCount, false, tableMetrics);
     }
@@ -88,7 +89,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                                       LifecycleNewTracker lifecycleNewTracker,
                                       long keyCount,
                                       boolean perIndexComponentsOnly,
-                                      TableMetrics tableMetrics) throws IOException
+                                      Optional<TableMetrics> tableMetrics) throws IOException
     {
         // We always write at the latest version (through what that version is can be configured for specific cases)
         var onDiskFormat = Version.current(indexDescriptor.descriptor.ksname).onDiskFormat();
@@ -296,7 +297,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         finally
         {
             totalTimeSpent += (ApproximateTime.nanoTime() - startComplete);
-            tableMetrics.updateStorageAttachedIndexWritingTime(totalTimeSpent, opType);
+            tableMetrics.ifPresent(m -> m.updateStorageAttachedIndexWritingTime(totalTimeSpent, opType));
         }
     }
 

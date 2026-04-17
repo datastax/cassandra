@@ -113,7 +113,7 @@ public class RepairedDataInfo
     void prepare(ColumnFamilyStore cfs, int nowInSec, int oldestUnrepairedTombstone)
     {
         this.purger = new RepairedDataPurger(cfs, nowInSec, oldestUnrepairedTombstone);
-        this.metrics = cfs.metric;
+        this.metrics = cfs.metric.orElse(null);
     }
 
     void finalize(UnfilteredPartitionIterator postLimitPartitions)

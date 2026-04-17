@@ -313,7 +313,7 @@ public class KeyspaceMetrics
                 long sum = 0;
                 for (ColumnFamilyStore cf : keyspace.getColumnFamilyStores())
                 {
-                    sum += extractor.applyAsLong(cf.metric);
+                    sum += cf.metric.map(extractor::applyAsLong).orElse(0L);
                 }
                 return sum;
             }
@@ -337,7 +337,7 @@ public class KeyspaceMetrics
                 long sum = 0;
                 for (ColumnFamilyStore cf : keyspace.getColumnFamilyStores())
                 {
-                    sum += extractor.applyAsLong(cf.metric);
+                    sum += extractor.applyAsLong(cf.metric.get());
                 }
                 return sum;
             }

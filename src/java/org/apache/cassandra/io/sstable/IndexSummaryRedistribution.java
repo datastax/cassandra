@@ -274,15 +274,19 @@ public class IndexSummaryRedistribution extends AbstractTableOperation
         txn.runOnCommit(() -> {
             // The new size will be added in Transactional.commit() as an updated SSTable, more details: CASSANDRA-13738
             StorageMetrics.load.dec(oldSize);
-            cfs.metric.liveDiskSpaceUsed.dec(oldSize);
-            cfs.metric.totalDiskSpaceUsed.dec(oldSize);
+            cfs.metric.ifPresent(m -> {
+                m.liveDiskSpaceUsed.dec(oldSize);
+                m.totalDiskSpaceUsed.dec(oldSize);
+            });
         });
         txn.runOnAbort(() -> {
             // the local disk was modified but book keeping couldn't be commited, apply the delta
             long delta = oldSize - newSize; // if new is larger this will be negative, so dec will become a inc
             StorageMetrics.load.dec(delta);
-            cfs.metric.liveDiskSpaceUsed.dec(delta);
-            cfs.metric.totalDiskSpaceUsed.dec(delta);
+            cfs.metric.ifPresent(m -> {
+                m.liveDiskSpaceUsed.dec(delta);
+                m.totalDiskSpaceUsed.dec(delta);
+            });
         });
     }
 

@@ -523,9 +523,9 @@ public class CompactionTask extends AbstractCompactionTask
                 if (completed)
                 {
                     // update basic metrics
-                    realm.metrics().incBytesCompacted(adjustedInputDiskSize(),
+                    realm.metrics().ifPresent(m -> m.incBytesCompacted(adjustedInputDiskSize(),
                                                       outputDiskSize(),
-                                                      elapsedTimeMillis);
+                                                      elapsedTimeMillis));
                 }
                 Throwables.maybeFail(err);
                 return;
@@ -562,9 +562,9 @@ public class CompactionTask extends AbstractCompactionTask
                                                               newSStables);
 
                 // update the metrics
-                realm.metrics().incBytesCompacted(adjustedInputDiskSize(),
+                realm.metrics().ifPresent(m -> m.incBytesCompacted(adjustedInputDiskSize(),
                                                   outputDiskSize(),
-                                                  elapsedTimeMillis);
+                                                  elapsedTimeMillis));
             }
 
             Throwables.maybeFail(err);

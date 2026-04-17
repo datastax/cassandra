@@ -146,7 +146,7 @@ public class ReadExecutionController implements AutoCloseable
         ColumnFamilyStore baseCfs = Keyspace.openAndGetStore(command.metadata());
         ColumnFamilyStore indexCfs = maybeGetIndexCfs(command);
 
-        long createdAtNanos = baseCfs.metric.topLocalReadQueryTime.isEnabled() ? clock.now() : NO_SAMPLING;
+        long createdAtNanos = baseCfs.metric.map(m -> m.topLocalReadQueryTime.isEnabled()).orElse(false) ? clock.now() : NO_SAMPLING;
 
         OperationContextTracker.start(OperationContext.FACTORY.forRead(command, baseCfs));
 
@@ -269,7 +269,7 @@ public class ReadExecutionController implements AutoCloseable
         int timeMicros = (int) Math.min(TimeUnit.NANOSECONDS.toMicros(clock.now() - createdAtNanos), Integer.MAX_VALUE);
         ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(baseMetadata.id);
         if (cfs != null)
-            cfs.metric.topLocalReadQueryTime.addSample(cql, timeMicros);
+            cfs.metric.ifPresent(m -> m.topLocalReadQueryTime.addSample(cql, timeMicros));
     }
 
     public void updateSstablesIteratedPerRow(int mergedSSTablesIterated)
