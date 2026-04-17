@@ -21,8 +21,11 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
+
+import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
 
@@ -315,6 +318,15 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
      * by CNDB.
      */
     public abstract long getSpaceOverhead();
+
+    /**
+     * Allows subclasses to route the task to a dedicated executor instead of the shared compaction executor.
+     */
+    @Nullable
+    public Executor getCustomExecutor()
+    {
+        return null;
+    }
 
     /**
      * @return The compaction observers for this task. Used by CNDB.
