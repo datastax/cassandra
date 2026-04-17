@@ -141,7 +141,12 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, true);
         }
 
-        private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
+        protected ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
+        {
+            return ByteSource.withTerminator(terminator, buildComparableSources(version, isPrefix));
+        }
+
+        protected ByteSource[] buildComparableSources(ByteComparable.Version version, boolean isPrefix)
         {
             // We need to make sure that the key is loaded before returning a
             // byte comparable representation. If we don't we won't get a correct
@@ -162,9 +167,9 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 
             // prefix doesn't include null components
             if (isPrefix && clusteringComparable == null)
-                return ByteSource.withTerminator(terminator, tokenComparable, keyComparable);
+                return new ByteSource[]{ tokenComparable, keyComparable };
             else
-                return ByteSource.withTerminator(terminator, tokenComparable, keyComparable, clusteringComparable);
+                return new ByteSource[]{ tokenComparable, keyComparable, clusteringComparable };
         }
 
         @Override
