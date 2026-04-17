@@ -19,10 +19,13 @@
 package org.apache.cassandra.index.sai.cql.datamodels;
 
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.datastax.driver.core.SimpleStatement;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.inject.Injections;
 
 public class SingleNodeExecutor implements DataModel.Executor
@@ -52,6 +55,12 @@ public class SingleNodeExecutor implements DataModel.Executor
     public void compact(String keyspace, String table)
     {
         tester.compact(keyspace, table);
+    }
+
+    @Override
+    public void setCurrentVersion(Version version)
+    {
+        SAIUtil.setCurrentVersion(version);
     }
 
     @Override
@@ -90,5 +99,11 @@ public class SingleNodeExecutor implements DataModel.Executor
     public long getCounter()
     {
         return counter.get();
+    }
+
+    @Override
+    public Set<Version> getSSTableIndexVersions(String keyspace, String indexedTable)
+    {
+        return SAITester.getSSTableIndexVersions(keyspace, indexedTable);
     }
 }
