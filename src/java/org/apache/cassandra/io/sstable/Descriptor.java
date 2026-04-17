@@ -373,7 +373,6 @@ public class Descriptor
         if (!file.isAbsolute())
             file = file.toAbsolute();
 
-        SSTableInfo info = validateAndExtractInfo(file);
         String filename = file.name();
         File tableDirectory = parentOf(filename, file);
         
@@ -433,7 +432,6 @@ public class Descriptor
         }
         else if (validateDirs)
         {
-            logger.debug("Could not extract keyspace/table info from sstable directory {}", file.toString());
             logger.debug("Could not extract keyspace/table info from sstable directory {}", fullPath);
             throw invalidSSTable(name, String.format("cannot extract keyspace and table name from %s; make sure the sstable is in the proper sub-directories", fullPath));
         }

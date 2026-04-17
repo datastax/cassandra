@@ -390,7 +390,7 @@ public class Directories
     {
         Preconditions.checkArgument(dirNumber < dataPaths.length, "Invalid dir number: " + dirNumber);
         File dir = dataPaths[dirNumber];
-        return Descriptor.fromFileWithComponent(new File(dir, filename), true).left;
+        return Descriptor.fromFileWithComponent(dir, filename, true).left;
     }
 
     /**
