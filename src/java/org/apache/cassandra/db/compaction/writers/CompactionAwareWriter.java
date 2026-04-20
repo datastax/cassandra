@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import org.apache.cassandra.utils.Throwables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -182,7 +183,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
     @Override
     protected Throwable doPostCleanup(Throwable accumulate)
     {
-        sstableWriter.close();
+        accumulate = Throwables.close(accumulate, sstableWriter);
         return super.doPostCleanup(accumulate);
     }
 

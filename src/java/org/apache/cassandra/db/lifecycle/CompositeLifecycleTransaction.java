@@ -90,6 +90,17 @@ public class CompositeLifecycleTransaction
             logger.trace("Composite transaction {} initialized with {} parts.", mainTransaction.opIdString(), partsCount);
     }
 
+    /// Abort the initialization of the composite transaction. This disconnects the attached operations from the
+    /// transaction, so that they can be properly cancelled.
+    public void cancelInitialization()
+    {
+        wasAborted = true;
+        initializationComplete = true;
+        partsCount = partsToCommitOrAbort.getAndSet(0); // so that no commit or abort fires
+        if (logger.isTraceEnabled())
+            logger.trace("Composite transaction {} with {} parts cancelled.", mainTransaction.opIdString(), partsCount);
+    }
+
     /// Get the number of parts in the composite transaction. 0 if the transaction is not yet initialized.
     public int partsCount()
     {

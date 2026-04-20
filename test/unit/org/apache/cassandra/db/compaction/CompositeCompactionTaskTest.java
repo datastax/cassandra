@@ -27,15 +27,13 @@ import java.util.stream.Stream;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -53,11 +51,13 @@ public class CompositeCompactionTaskTest
 
     @Before
     public void setUp() {
+        DatabaseDescriptor.toolInitialization(false);
+
         mockRealm = Mockito.mock(CompactionRealm.class);
         mockTransaction = Mockito.mock(LifecycleTransaction.class);
         when(mockTransaction.isOffline()).thenReturn(true);
         when(mockTransaction.opId()).thenReturn(UUID.randomUUID());
-        when(mockRealm.tryModify(any(), any(), any())).thenReturn(mockTransaction);
+        when(mockRealm.tryModify(any(), any())).thenReturn(mockTransaction);
 
         mockTask1 = Mockito.mock(AbstractCompactionTask.class, Mockito.withSettings().useConstructor(mockRealm, mockTransaction));
         mockTask2 = Mockito.mock(AbstractCompactionTask.class, Mockito.withSettings().useConstructor(mockRealm, mockTransaction));

@@ -25,14 +25,17 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
 
 import javax.annotation.concurrent.ThreadSafe;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.NonThrowingCloseable;
 
@@ -43,6 +46,9 @@ public class ActiveOperations implements TableOperationObserver
 
     // The operations ordered by keyspace.table for all the operations that are currently in progress.
     private static final Set<TableOperation> operations = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+
+    // Compaction tasks that have been created but aren't executing yet.
+    private static final Set<AbstractCompactionTask> scheduledTasks = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
 
     // Keep registered listeners to be called onStart and close
     private final List<CompactionProgressListener> listeners = new CopyOnWriteArrayList<>();
@@ -158,5 +164,37 @@ public class ActiveOperations implements TableOperationObserver
     public boolean isActive(TableOperation op)
     {
         return getTableOperations().contains(op);
+    }
+
+    public void addTaskToScheduled(AbstractCompactionTask task)
+    {
+        scheduledTasks.add(task);
+    }
+
+    public void removeTaskFromScheduled(AbstractCompactionTask task)
+    {
+        scheduledTasks.remove(task);
+    }
+
+    public void cancelScheduledTasksAffecting(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> predicate)
+    {
+        Iterable<AbstractCompactionTask> tasksCopy;
+        synchronized (scheduledTasks)
+        {
+            tasksCopy = new ArrayList<>(scheduledTasks);
+        }
+
+        for (AbstractCompactionTask task : tasksCopy)
+            for (ColumnFamilyStore cfs : cfss)
+                task.cancelIfAffects(cfs, predicate);
+    }
+
+    @VisibleForTesting
+    List<AbstractCompactionTask> getScheduledTasks()
+    {
+        synchronized (scheduledTasks)
+        {
+            return new ArrayList<>(scheduledTasks);
+        }
     }
 }

@@ -73,6 +73,7 @@ import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -190,6 +191,9 @@ public class CompactionManager implements CompactionManagerMBean
     public final ActiveOperations active = new ActiveOperations();
 
     private final BackgroundCompactionRunner backgroundCompactionRunner = new BackgroundCompactionRunner(executor, active);
+
+    // The length of time to wait for task cessation when we want to run with compactions disabled.
+    private static final int CESSATION_WAIT_SECONDS = CassandraRelevantProperties.CESSATION_WAIT_SECONDS.getInt(60);
 
     // used to temporarily pause non-strategy managed compactions (like index summary redistribution)
     private final AtomicInteger globalCompactionPauseCount = new AtomicInteger(0);
@@ -2425,6 +2429,29 @@ public class CompactionManager implements CompactionManagerMBean
         return interrupted;
     }
 
+    public Collection<TableOperation.Progress> getOperationsInvolving(Iterable<TableMetadata> columnFamilies,
+                                                                      Predicate<SSTableReader> sstablePredicate)
+    {
+        List<TableOperation.Progress> result = new ArrayList<>();
+        for (TableOperation operationSource : active.getTableOperations())
+        {
+            TableOperation.Progress info = operationSource.getProgress();
+
+            if (info.metadata() == null || Iterables.contains(columnFamilies, info.metadata()))
+            {
+                for (SSTableReader ssTableReader : info.sstables())
+                {
+                    if (sstablePredicate.test(ssTableReader))
+                    {
+                        result.add(info);
+                        break;
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
     public boolean interruptCompactionFor(Iterable<TableMetadata> tables, TableOperation.StopTrigger trigger)
     {
         return interruptCompactionFor(tables, Predicates.alwaysTrue(), true, trigger);
@@ -2445,7 +2472,7 @@ public class CompactionManager implements CompactionManagerMBean
     public void waitForCessation(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> sstablePredicate)
     {
         long start = System.nanoTime();
-        long delay = TimeUnit.MINUTES.toNanos(1);
+        long delay = TimeUnit.SECONDS.toNanos(CESSATION_WAIT_SECONDS);
 
         while (System.nanoTime() - start < delay)
         {
