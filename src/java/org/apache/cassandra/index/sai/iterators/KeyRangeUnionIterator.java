@@ -125,7 +125,7 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
     private void skipPartition(KeyRangeIterator iterator, DecoratedKey partitionKey)
     {
         // TODO: Push this logic down to the iterator where it can be more efficient
-        while (iterator.hasNext() && iterator.peek().partitionKey() != null && iterator.peek().partitionKey().compareTo(partitionKey) <= 0)
+        while (iterator.hasNext() && !iterator.peek().isTokenOnly() && iterator.peek().partitionKey().compareTo(partitionKey) <= 0)
             iterator.next();
     }
 

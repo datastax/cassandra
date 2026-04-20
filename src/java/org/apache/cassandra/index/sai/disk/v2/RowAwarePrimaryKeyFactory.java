@@ -51,12 +51,6 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
     }
 
     @Override
-    public PrimaryKey createTokenOnly(Token token)
-    {
-        return new RowAwarePrimaryKey(token, null, null, null);
-    }
-
-    @Override
     public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
     {
         return new RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
@@ -117,12 +111,14 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public PrimaryKey loadDeferred()
         {
-            if (primaryKeySupplier != null && partitionKey == null)
+            if (primaryKeySupplier != null)
             {
+                assert partitionKey == null : "While applying existing primaryKeySupplier to load deferred primaryKey the partition key was unexpectedly already set";
                 PrimaryKey deferredPrimaryKey = primaryKeySupplier.get();
                 this.partitionKey = deferredPrimaryKey.partitionKey();
                 this.clustering = deferredPrimaryKey.clustering();
                 primaryKeySupplier = null;
+                assert this.token.equals(this.partitionKey.getToken()) : "Deferred primary key must contain the same token";
             }
             return this;
         }
@@ -154,8 +150,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             loadDeferred();
 
             ByteSource tokenComparable = token.asComparableBytes(version);
-            ByteSource keyComparable = partitionKey == null ? null
-                                                            : ByteSource.of(partitionKey.getKey(), version);
+            ByteSource keyComparable = ByteSource.of(partitionKey.getKey(), version);
 
             // It is important that the ClusteringComparator.asBytesComparable method is used
             // to maintain the correct clustering sort order
@@ -166,14 +161,10 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
                                                                                          .asComparableBytes(version);
 
             // prefix doesn't include null components
-            if (isPrefix)
-            {
-                if (keyComparable == null)
-                    return ByteSource.withTerminator(terminator, tokenComparable);
-                else if (clusteringComparable == null)
-                    return ByteSource.withTerminator(terminator, tokenComparable, keyComparable);
-            }
-            return ByteSource.withTerminator(terminator, tokenComparable, keyComparable, clusteringComparable);
+            if (isPrefix && clusteringComparable == null)
+                return ByteSource.withTerminator(terminator, tokenComparable, keyComparable);
+            else
+                return ByteSource.withTerminator(terminator, tokenComparable, keyComparable, clusteringComparable);
         }
 
         @Override
@@ -182,10 +173,9 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             int cmp = token().compareTo(o.token());
 
             // If the tokens don't match then we don't need to compare any more of the key.
-            // Otherwise if this key has no deferred loader and it's partition key is null
-            // or the other partition key is null then one or both of the keys
-            // are token only so we can only compare tokens
-            if ((cmp != 0) || (primaryKeySupplier == null && partitionKey == null) || o.partitionKey() == null)
+            // Otherwise if either this key or given key are token only,
+            // then we can only compare tokens
+            if ((cmp != 0) || isTokenOnly() || o.isTokenOnly())
                 return cmp;
 
             // Next compare the partition keys. If they are not equal or
