@@ -202,7 +202,7 @@ public class RandomizedCancelCompactionsTest extends CQLTester
                                 return true;
                             },
                             predicate,
-                            OperationType.P0,
+                            OperationType.ANTICOMPACTION,
                             false,
                             false,
                             false,
@@ -415,7 +415,11 @@ public class RandomizedCancelCompactionsTest extends CQLTester
 
                 scanners = sstables.stream().map(SSTableReader::getScanner).collect(Collectors.toList());
                 controller = new CompactionController(cfs, sstables, Integer.MIN_VALUE);
-                ci = new CompactionIterator(transaction.opType(), scanners, controller, FBUtilities.nowInSeconds(), org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID());
+                ci = new CompactionIterator(transaction.opType(),
+                                            scanners,
+                                            controller,
+                                            FBUtilities.nowInSeconds(),
+                                            org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID());
                 TableOperation op = ci.getOperation();
                 closeable = opObserver.onOperationStart(op);
                 switchToActive();

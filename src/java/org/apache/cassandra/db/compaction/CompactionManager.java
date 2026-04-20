@@ -2516,7 +2516,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         }
     }
 
-    public List<TableOperation> getCompactionsMatching(Iterable<TableMetadata> columnFamilies, Predicate<TableOperation.Progress> predicate)
+    public List<TableOperation> getCompactionsMatching(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, Predicate<TableOperation.Progress> progressPredicate)
     {
         Preconditions.checkArgument(columnFamilies != null, "Attempted to getCompactionsMatching in CompactionManager with no columnFamilies specified.");
 
@@ -2527,7 +2527,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
             TableOperation.Progress progress = holder.getProgress();
             if (progress.metadata() == null || Iterables.contains(columnFamilies, progress.metadata()))
             {
-                if (predicate.test(progress))
+                if (progressPredicate.test(progress) && holder.shouldStop(sstablePredicate))
                     matched.add(holder);
             }
         }

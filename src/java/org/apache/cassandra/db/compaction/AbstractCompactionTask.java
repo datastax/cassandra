@@ -231,16 +231,24 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
      */
     public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
     {
+        boolean affects = affectsAny(realm, sstablePredicate);
+        if (affects)
+            Throwables.maybeFail(rejected(null));
+        return affects;
+    }
+
+    /**
+     * Returns true iff the task affects any sstable that satisfies the given predicate.
+     */
+    public boolean affectsAny(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
+    {
         if (realm != this.realm)
             return false;
 
         for (SSTableReader r : transaction.originals())
         {
             if (sstablePredicate.test(r))
-            {
-                Throwables.maybeFail(rejected(null));
                 return true;
-            }
         }
         return false;
     }
