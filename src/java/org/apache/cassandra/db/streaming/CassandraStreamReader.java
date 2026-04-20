@@ -86,7 +86,7 @@ public class CassandraStreamReader implements IStreamReader
         {
             // we should only ever be streaming pending repair
             // sstables if the session has a pending repair id
-            assert session.getPendingRepair().equals(header.pendingRepair);
+            assert session.getPendingRepair().equals(header.pendingRepair) : session.getPendingRepair() + " != " + header.pendingRepair;
         }
         this.session = session;
         this.tableId = header.tableId;

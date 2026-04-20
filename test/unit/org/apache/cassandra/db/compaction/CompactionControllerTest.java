@@ -461,7 +461,7 @@ public class CompactionControllerTest extends SchemaLoader
         //the overlap iterator should contain sstable2
         //this compaction will be paused by the BMRule
         Thread t = new Thread(() -> {
-            task.executeInternal();
+            task.execute();
         });
 
         //start a compaction for the second sstable (compaction2)

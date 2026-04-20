@@ -223,9 +223,13 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
         }
         catch (Exception e)
         {
-            logger.error("Got error processing {}, removing parent repair session", message.verb());
             if (desc != null && desc.parentSessionId != null)
+            {
+                logger.error("Got error processing {}, removing parent repair session {}", message.verb(), desc.parentSessionId);
                 ActiveRepairService.instance.removeParentRepairSession(desc.parentSessionId);
+            }
+            else
+                logger.error("Got error processing {}, removing parent repair session", message.verb());
             throw new RuntimeException(e);
         }
     }

@@ -756,7 +756,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                 sharedObserver,
                                                                 sharedOperation)
         );
-        compositeTransaction.completeInitialization();
         assert tasks.size() <= parallelism : "Task size: " + tasks.size() + " vs parallelism of: " + parallelism;
         assert tasks.size() <= coveredShardCount : "Task size: " + tasks.size() + " vs covered shard count: " + coveredShardCount;
 
@@ -765,11 +764,19 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
         if (tasks.size() == 1) // if there's just one range, make it a non-ranged task (to apply early open etc.)
         {
-            assert tasks.get(0).inputSSTables().equals(sstables);
+            // Reject the already constructed task, so that it is not tracked as an operation still expecting to be run.
+            compositeTransaction.cancelInitialization();
+            sharedObserver.disableReportingOnComplete();
+            UnifiedCompactionTask oneTask = tasks.get(0);
+            Throwables.maybeFail(oneTask.rejected(null));
+            assert oneTask.inputSSTables().equals(sstables);
             return Collections.singletonList(createCompactionTask(transaction, operationRange, keepOriginals, shardingStats, gcBefore, additionalObserver));
         }
         else
+        {
+            compositeTransaction.completeInitialization();
             return tasks;
+        }
     }
 
     private ExpirationTask createExpirationTask(LifecycleTransaction transaction)
