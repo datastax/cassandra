@@ -1270,18 +1270,21 @@ public class NativeIndexDDLTest extends SAITester
                                              boolean rebuild) throws Throwable
     {
         // The completion markers are valid if they exist on the file system, so we only need to test
-        // their removal. If we are testing with encryption then we don't want to test any components
+        // their removal. If we are testing with encryption, then we don't want to test any components
         // that are encryptable unless they have been removed because encrypted components aren't
         // checksum validated.
 
-        if (component == IndexComponentType.PARTITION_SIZES || component == IndexComponentType.PARTITION_KEY_BLOCKS ||
-            component == IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS || component == IndexComponentType.CLUSTERING_KEY_BLOCKS ||
-            component == IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)
+        if (component == IndexComponentType.PRIMARY_KEY_TRIE || component == IndexComponentType.PRIMARY_KEY_BLOCKS || component == IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)
             return;
 
         if (((component == IndexComponentType.GROUP_COMPLETION_MARKER) ||
              (component == IndexComponentType.COLUMN_COMPLETION_MARKER)) &&
             (corruptionType != CorruptionType.REMOVED))
+            return;
+
+        if (component == IndexComponentType.PARTITION_SIZES || component == IndexComponentType.PARTITION_KEY_BLOCKS ||
+            component == IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS || component == IndexComponentType.CLUSTERING_KEY_BLOCKS ||
+            component == IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)
             return;
 
         logger.info("CORRUPTING: {}, corruption type = {}", component, corruptionType);
