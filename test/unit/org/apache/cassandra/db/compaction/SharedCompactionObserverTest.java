@@ -168,6 +168,15 @@ public class SharedCompactionObserverTest
     }
 
     @Test
+    public void testNoInProgressIsAccepted()
+    {
+        Util.assumeAssertsEnabled();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
     public void testErrorWrongProgress()
     {
         Util.assumeAssertsEnabled();

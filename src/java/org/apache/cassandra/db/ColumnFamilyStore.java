@@ -3157,7 +3157,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         longRunningSerializedOperationsLock.lock();
         try
         {
-            logger.debug("Cancelling in-progress compactions for {}", metadata.name);
+            logger.debug("Started cancelling in-progress compactions for {}", metadata.name);
             Iterable<ColumnFamilyStore> toInterruptFor = concatWith(interruptIndexes, interruptViews);
 
             Iterable<TableMetadata> toInterruptForMetadata = Iterables.transform(toInterruptFor, ColumnFamilyStore::metadata);
@@ -3178,8 +3178,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                     return null;
                 }
 
+                // Cancel scheduled compactions matching predicate. This must be done first because tasks progress from
+                // scheduled to active.
+                CompactionManager.instance.active.cancelScheduledTasksAffecting(toInterruptFor, sstablesPredicate);
                 // interrupt in-progress compactions
                 CompactionManager.instance.interruptCompactionForCFs(toInterruptFor, sstablesPredicate, interruptValidation, trigger);
+
                 CompactionManager.instance.waitForCessation(toInterruptFor, sstablesPredicate);
 
                 // doublecheck that we finished, instead of timing out
@@ -3198,6 +3202,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                     throw new RuntimeException(e);
                 }
             }
+            finally
+            {
+                logger.debug("Finished cancelling in-progress compactions for {}", metadata.name);
+            }
         }
         finally
         {
@@ -3209,11 +3217,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         for (ColumnFamilyStore cfs : cfss)
         {
-            if (cfs.getTracker().getCompacting().stream().anyMatch(sstablesPredicate))
+            List<SSTableReader> compactingSatisfyingPredicate = cfs.getCompactingSSTables().stream().filter(sstablesPredicate).collect(Collectors.toList());
+            if (!compactingSatisfyingPredicate.isEmpty())
             {
                 logger.warn("Unable to cancel in-progress compactions for {}.{}.  Perhaps there is an unusually " +
                             "large row in progress somewhere, or the system is simply overloaded.", metadata.keyspace, metadata.name);
-                logger.debug("In-flight compactions: {}", Arrays.toString(cfs.getTracker().getCompacting().toArray()));
+                logger.debug("SSTables in in-flight operations: {}", compactingSatisfyingPredicate);
+                logger.debug("Operations involving these sstables: {}", CompactionManager.instance.getOperationsInvolving(List.of(cfs.metadata()), sstablesPredicate));
                 return false;
             }
         }
