@@ -25,6 +25,7 @@ import java.util.stream.Stream;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.utils.TimeUUID;
 import org.mockito.Mockito;
@@ -49,11 +50,13 @@ public class CompositeCompactionTaskTest
 
     @Before
     public void setUp() {
+        DatabaseDescriptor.toolInitialization(false);
+
         mockRealm = Mockito.mock(CompactionRealm.class);
         mockTransaction = Mockito.mock(LifecycleTransaction.class);
         when(mockTransaction.isOffline()).thenReturn(true);
         when(mockTransaction.opId()).thenReturn(TimeUUID.Generator.nextTimeUUID());
-        when(mockRealm.tryModify(any(), any(), any())).thenReturn(mockTransaction);
+        when(mockRealm.tryModify(any(), any())).thenReturn(mockTransaction);
 
         mockTask1 = Mockito.mock(AbstractCompactionTask.class, Mockito.withSettings().useConstructor(mockRealm, mockTransaction));
         mockTask2 = Mockito.mock(AbstractCompactionTask.class, Mockito.withSettings().useConstructor(mockRealm, mockTransaction));

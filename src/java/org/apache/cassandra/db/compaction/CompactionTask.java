@@ -233,6 +233,11 @@ public class CompactionTask extends AbstractCompactionTask
         try (CompactionController controller = getCompactionController(inputSSTables());
              CompactionOperation operation = createCompactionOperation(controller, strategy))
         {
+            // Mark the operation as active, rechecking that it has not been cancelled.
+            if (!switchToActive())
+                throw new CompactionInterruptedException(operation.op.getProgress(), TableOperation.StopTrigger.NONE);
+            // If not, the operation is now in the active operations list and can be interrupted from there.
+
             operation.execute();
         }
     }
@@ -477,9 +482,6 @@ public class CompactionTask extends AbstractCompactionTask
                 {
                     debugLogCompactingMessage(taskIdString);
                 }
-
-                if (!controller.realm.isCompactionActive())
-                    throw new CompactionInterruptedException(op.getProgress(), op.trigger());
 
                 estimatedKeys = writer.estimatedKeys();
 
@@ -1032,7 +1034,7 @@ public class CompactionTask extends AbstractCompactionTask
                 for (File directory : newCompactionDatadirs)
                     expectedNewWriteSize.put(directory, writeSizePerOutputDatadir);
 
-                Map<File, Long> expectedWriteSize = CompactionManager.instance.active.estimatedRemainingWriteToDiskBytes();
+                Map<File, Long> expectedWriteSize = CompactionManager.instance.active.estimatedRemainingWriteBytes();
 
                 // todo: abort streams if they block compactions
                 if (realm.getDirectories().hasDiskSpaceForCompactionsAndStreams(expectedNewWriteSize, expectedWriteSize))
