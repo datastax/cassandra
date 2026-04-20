@@ -21,9 +21,11 @@ package org.apache.cassandra.db.compaction;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
 
 /// A composition of several compaction tasks into one. This object executes the given tasks sequentially and
@@ -36,7 +38,7 @@ public class CompositeCompactionTask extends AbstractCompactionTask
 
     public CompositeCompactionTask(AbstractCompactionTask first)
     {
-        super(first.realm, first.realm.tryModify(Collections.emptyList(), OperationType.COMPACTION, first.transaction.opId()));
+        super(first.realm, first.realm.tryModify(Collections.emptyList(), OperationType.COMPACTION));
         tasks = new ArrayList<>();
         addTask(first);
     }
@@ -74,6 +76,13 @@ public class CompositeCompactionTask extends AbstractCompactionTask
         for (AbstractCompactionTask task : tasks)
             t = task.rejected(t);
         return super.rejected(t);
+    }
+
+    @Override
+    public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
+    {
+        // Leave cancellation to the individual tasks.
+        return false;
     }
 
     @Override
