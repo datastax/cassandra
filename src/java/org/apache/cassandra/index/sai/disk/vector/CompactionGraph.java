@@ -91,10 +91,6 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
 import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -191,8 +187,7 @@ public class CompactionGraph implements Closeable, Accountable
         this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings(context.version()) || !allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
-        Component tmpComponent = new Component(SSTableFormat.Components.Types.CUSTOM, "chronicle" + Descriptor.TMP_EXT);
-        postingsFile = dd.fileFor(tmpComponent);
+        postingsFile = perIndexComponents.tmpFileFor("postings_chonicle_map");
         postingsMap = ChronicleMapBuilder.of((Class<VectorFloat<?>>) (Class) VectorFloat.class, (Class<CompactionVectorPostings>) (Class) CompactionVectorPostings.class)
                                          .averageKeySize(dimension * Float.BYTES)
                                          .keySizeMarshaller(SizeMarshaller.constant((long) dimension * Float.BYTES))
@@ -203,8 +198,7 @@ public class CompactionGraph implements Closeable, Accountable
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         // Formatted so that the full resolution vector is written at the ordinal * vector dimension offset
-        Component vectorsByOrdinalComponent = new Component(Components.Types.CUSTOM, "vectors_by_ordinal");
-        vectorsByOrdinalTmpFile = dd.tmpFileFor(vectorsByOrdinalComponent);
+        vectorsByOrdinalTmpFile = perIndexComponents.tmpFileFor("vectors_by_ordinal");
         vectorsByOrdinalBufferedWriter = new BufferedRandomAccessWriter(vectorsByOrdinalTmpFile.toPath());
 
         // VSTODO add LVQ
