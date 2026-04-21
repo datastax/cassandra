@@ -103,7 +103,7 @@ public class DescriptorTest
         Pair<Descriptor, Component> pair = Descriptor.fromFilenameWithComponent(file);
         checkDescriptor(original, pair.left, pair.right);
 
-        pair = Descriptor.fromFilenameWithComponent(new File(file.parent(), file.name()));
+        pair = Descriptor.fromFileWithComponent(file.parent(), file.name(), true);
         checkDescriptor(original, pair.left, pair.right);
 
         assertEquals(Components.DATA, Descriptor.validFilenameWithComponent(file.name()));

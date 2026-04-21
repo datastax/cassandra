@@ -353,6 +353,7 @@ public class Descriptor
 
     /**
      * Parse a sstable file, extracting both the {@code Descriptor} and {@code Component} part.
+     * The keyspace/table name will be extracted from the directory path.
      *
      * @param file the {@code File} object for the filename to parse.
      * @return a pair of the descriptor and component corresponding to the provided {@code file}.
