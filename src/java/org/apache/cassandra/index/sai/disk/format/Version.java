@@ -84,11 +84,11 @@ public class Version implements Comparable<Version>
     public static final Version FB = new Version("fb", V8OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "fb"));
     // Replaces primary key components with partition key and clustering key components and
     // uses key lookup store instead of sorted terms.
-    public static final Version HA = new Version("ha", V9OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ha"));
+    public static final Version GA = new Version("ga", V9OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ha"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version, so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(HA, FB, FA, ED, EC, EB, DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(GA, FB, FA, ED, EC, EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
