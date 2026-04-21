@@ -23,13 +23,13 @@ import org.junit.BeforeClass;
 import org.apache.cassandra.index.sai.disk.format.Version;
 
 /**
- * {@link FeaturesVersionSupportTester} for {@link Version#HA}.
+ * {@link FeaturesVersionSupportTester} for {@link Version#GA}.
  */
-public class FeaturesVersionSupportHATest extends FeaturesVersionSupportTester
+public class FeaturesVersionSupportGATest extends FeaturesVersionSupportTester
 {
     @BeforeClass
     public static void setup() throws IOException
     {
-        initCluster(Version.HA);
+        initCluster(Version.GA);
     }
 }

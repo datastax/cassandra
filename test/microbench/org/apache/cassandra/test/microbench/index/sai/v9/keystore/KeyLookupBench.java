@@ -110,7 +110,7 @@ public class KeyLookupBench
     @Setup(Level.Trial)
     public void trialSetup() throws Exception
     {
-        Version version = Version.LATEST.onOrAfter(Version.HA) ? Version.LATEST : Version.HA;
+        Version version = Version.LATEST.onOrAfter(Version.GA) ? Version.LATEST : Version.GA;
         SAIUtil.setCurrentVersion(version);
         String keyspaceName = "ks";
         String tableName = this.getClass().getSimpleName();
@@ -132,7 +132,7 @@ public class KeyLookupBench
 
         CassandraRelevantProperties.SAI_KEY_STORE_PARTITION_BLOCK_SHIFT.setInt(partitionBlockShift);
         CassandraRelevantProperties.SAI_KEY_STORE_CLUSTERING_BLOCK_SHIFT.setInt(clusteringBlockShift);
-        Assert.assertTrue("Version must be at least HA", Version.current(keyspaceName).onOrAfter(Version.HA));
+        Assert.assertTrue("Version must be at least GA", Version.current(keyspaceName).onOrAfter(Version.GA));
         PerSSTableWriter writer = Version.current(keyspaceName).onDiskFormat().newPerSSTableWriter(indexDescriptor);
         OptimizedRowAwarePrimaryKeyFactory factory = new OptimizedRowAwarePrimaryKeyFactory(metadata.comparator);
 
