@@ -23,7 +23,7 @@ import org.junit.Test;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
 
-public class OptimizedRowAwarePrimaryKeyFactoryTest extends RowAwarePrimaryKeyFactoryTest
+public class StaticClusteringRowAwarePrimaryKeyFactoryTest extends RowAwarePrimaryKeyFactoryTest
 {
     @Test
     public void simplePartitonStaticAndSingleClusteringAscTest()
