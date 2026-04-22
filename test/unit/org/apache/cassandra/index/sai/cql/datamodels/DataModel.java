@@ -32,11 +32,14 @@ import com.google.common.collect.Sets;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.utils.CqlDataGenerator;
 import org.apache.cassandra.utils.Pair;
 
 public interface DataModel
 {
     static final String KEYSPACE = "sai_query_keyspace";
+
+    int LARGE_DATA_SET_ROW_COUNT = 1000;
 
     String SIMPLE_SELECT_TEMPLATE = "SELECT %s FROM %%s WHERE %s %s ? LIMIT ?";
     String SIMPLE_SELECT_WITH_FILTERING_TEMPLATE = "SELECT %s FROM %%s WHERE %s %s ? LIMIT ? ALLOW FILTERING";
@@ -108,6 +111,22 @@ public interface DataModel
                     .add("'WY', 10000000000, false, '2015-06-17', 550.25,  97093.14,  2.7,  '192.146.215.91',   586107,   57,   5,       'Wyoming', '00:15:50', '2015-06-17T00:00:00', e8a3c287-78cf-46b5-b554-42562e7dcfb3, 2576612e-d17d-11e8-a8d5-f2801f1b9fd1, 2")
                     .build();
 
+    List<String> NORMAL_COLUMN_DATA_LARGE =
+        generateRows(NORMAL_COLUMNS.stream().map(p -> p.right).collect(Collectors.toList()), LARGE_DATA_SET_ROW_COUNT);
+
+    static List<String> generateRows(List<String> columnTypes, int count)
+    {
+        CqlDataGenerator.Factory factory = new CqlDataGenerator.Factory();
+        CqlDataGenerator.RowGenerator rowGenerator =
+            new CqlDataGenerator.RowGenerator(columnTypes.stream()
+                                                         .map(factory::forType)
+                                                         .toArray(CqlDataGenerator[]::new));
+
+        return IntStream.range(0, count)
+                        .mapToObj(i -> rowGenerator.generateRow())
+                        .collect(Collectors.toList());
+    }
+
     String STATIC_INT_COLUMN = "entered";
 
     List<Pair<String, String>> STATIC_COLUMNS =
@@ -131,6 +150,9 @@ public interface DataModel
                                                        "1845, " + NORMAL_COLUMN_DATA.get(14),
                                                        "1845, " + NORMAL_COLUMN_DATA.get(15),
                                                        "1905, " + NORMAL_COLUMN_DATA.get(16));
+
+    List<String> STATIC_COLUMN_DATA_LARGE =
+        generateRows(STATIC_COLUMNS.stream().map(p -> p.right).collect(Collectors.toList()), LARGE_DATA_SET_ROW_COUNT);
 
     static AtomicInteger seq = new AtomicInteger();
 

@@ -279,6 +279,10 @@ public class TermsDistribution
         // For non numbers we just reinterpret the bytecomparable representation as decimal of fixed width.
         // Therefore, we don't need to decode anything.
         byte[] fixedLengthBytes = Arrays.copyOf(ByteSourceInverse.readBytes(value.asComparableBytes(byteComparableVersion)), 20);
+        // Flip the first bit to get a correct order for negative values,
+        // because the first bit is interpreted by BigInteger as a sign bit, but bytecomparable interpret all byts as unsigned.
+        // By flipping it, we correctly get values starting with 0 bit smaller than the ones starting with 1.
+        fixedLengthBytes[0] ^= (byte) 0x80;
         return new BigDecimal(new BigInteger(fixedLengthBytes));
     }
 

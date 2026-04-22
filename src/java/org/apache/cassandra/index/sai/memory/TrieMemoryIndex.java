@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.HashMap;
@@ -439,73 +440,41 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private long estimateNumRowsMatchingRange(Expression expression)
     {
-        final Trie<PrimaryKeys> subtrie = getSubtrie(expression);
-
-        // We could compute the number of matching rows by iterating the subtrie
-        // and summing the sizes of PrimaryKeys collections. But this could be very costly
-        // if the subtrie is large. Instead, we iterate a limited number of entries, and then we
-        // check how far we got by inspecting the term and comparing it to the start term and the end term.
-        // For now, we assume that term values are distributed uniformly.
-
-        var iterator = subtrie.entryIterator();
-        if (!iterator.hasNext())
+        if (minTerm == null || maxTerm == null)
             return 0;
 
         AbstractType<?> termType = indexContext.getValidator();
-        ByteBuffer endTerm = expression.upper != null && TypeUtil.compare(expression.upper.value.encoded, maxTerm, termType, version) < 0
-                             ? expression.upper.value.encoded
-                             : maxTerm;
+        ByteComparable minTermComparable = version.onDiskFormat().encodeForTrie(minTerm, termType);
+        ByteComparable maxTermComparable = version.onDiskFormat().encodeForTrie(maxTerm, termType);
+        BigDecimal indexLowerBound = toBigDecimal(minTermComparable);
+        BigDecimal indexUpperBound = toBigDecimal(maxTermComparable);
 
-        long pointCount = 0;
-        long keyCount = 0;
+        BigDecimal queryLowerBound = expression.lower != null
+                                     ? toBigDecimal(expression.getEncodedLowerBoundByteComparable(version))
+                                     : indexLowerBound;
+        BigDecimal queryUpperBound = expression.upper != null
+                                     ? toBigDecimal(expression.getEncodedUpperBoundByteComparable(version))
+                                     : indexUpperBound;
 
-        ByteComparable startTerm = null;
-        ByteComparable currentTerm = null;
+        if (queryLowerBound.compareTo(indexUpperBound) > 0 || queryUpperBound.compareTo(indexLowerBound) < 0)
+            return 0;
+        if (queryLowerBound.compareTo(indexUpperBound) == 0 && expression.lower != null && !expression.lower.inclusive)
+            return 0;
+        if (queryUpperBound.compareTo(indexLowerBound) == 0 && expression.upper != null && !expression.upper.inclusive)
+            return 0;
+        if (queryLowerBound.compareTo(indexLowerBound) <= 0 && queryUpperBound.compareTo(indexUpperBound) >= 0)
+            return indexedRows;
 
-        while (iterator.hasNext() && pointCount < 64)
-        {
-            var entry = iterator.next();
-            pointCount += 1;
-            keyCount += entry.getValue().size();
-            currentTerm = entry.getKey();
-            if (startTerm == null)
-                startTerm = currentTerm;
-        }
-        assert currentTerm != null;
+        queryUpperBound = queryUpperBound.min(indexUpperBound).max(indexLowerBound);
+        queryLowerBound = queryLowerBound.max(indexLowerBound).min(indexUpperBound);
+        assert queryLowerBound.compareTo(queryUpperBound) <= 0
+            : "query lower bound (" + queryLowerBound + ") should be less than or equal to query upper bound (" + queryUpperBound + ')';
 
-        // We iterated all points matched by the query, so keyCount contains the exact value of keys.
-        // This is a happy path, because the returned value will be accurate.
-        if (!iterator.hasNext())
-            return keyCount;
-
-        // There are some points remaining; let's estimate their count by extrapolation.
-        // Express the distance we iterated as a double value and the whole subtrie range also as a double.
-        // Then the ratio of those two values would give us a hint on how many total points there
-        // are in the subtrie. This should be fairly accurate assuming values are distributed uniformly.
-        BigDecimal startValue = toBigDecimal(startTerm);
-        BigDecimal endValue = toBigDecimal(endTerm);
-        BigDecimal currentValue = toBigDecimal(currentTerm);
-        double totalDistance = endValue.subtract(startValue).doubleValue() + Double.MIN_NORMAL;
-        double iteratedDistance = currentValue.subtract(startValue).doubleValue() + Double.MIN_NORMAL;
-        assert totalDistance > 0.0;
-        assert iteratedDistance > 0.0;
-
-        double extrapolatedPointCount = Math.min((pointCount - 1) * (totalDistance / iteratedDistance), this.data.valuesCount());
-        double keysPerPoint = (double) keyCount / pointCount;
-        return (long) (extrapolatedPointCount * keysPerPoint);
-    }
-
-    /**
-     * Converts the term to a BigDecimal in a way that it keeps the sort order
-     * (so terms comparing larger yield larger numbers).
-     * Works on raw representation (as passed to the index).
-     *
-     * @see #toBigDecimal(ByteComparable)
-     */
-    private BigDecimal toBigDecimal(ByteBuffer endTerm)
-    {
-        ByteComparable bc = version.onDiskFormat().encodeForTrie(endTerm, indexContext.getValidator());
-        return toBigDecimal(bc);
+        double indexRangeSize = indexUpperBound.subtract(indexLowerBound).doubleValue() + Double.MIN_NORMAL;
+        double queryRangeSize = queryUpperBound.subtract(queryLowerBound).doubleValue() + Double.MIN_NORMAL;
+        double selectivity = queryRangeSize / indexRangeSize;
+        assert selectivity >= 0.0 && selectivity <= 1.0 : "selectivity (" + selectivity + ") should be between 0.0 and 1.0";
+        return Math.round(selectivity * indexedRows);
     }
 
     /**
