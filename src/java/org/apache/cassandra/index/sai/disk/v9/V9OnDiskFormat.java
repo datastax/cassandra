@@ -48,7 +48,7 @@ public class V9OnDiskFormat extends V8OnDiskFormat
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     @VisibleForTesting
-    public static final Set<IndexComponentType> SKINNY_PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
+    protected static final Set<IndexComponentType> SKINNY_PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
                                                                                            IndexComponentType.GROUP_META,
                                                                                            IndexComponentType.TOKEN_VALUES,
                                                                                            IndexComponentType.PARTITION_SIZES,
@@ -56,7 +56,7 @@ public class V9OnDiskFormat extends V8OnDiskFormat
                                                                                            IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS);
 
     @VisibleForTesting
-    public static final Set<IndexComponentType> WIDE_PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
+    protected static final Set<IndexComponentType> WIDE_PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
                                                                                          IndexComponentType.GROUP_META,
                                                                                          IndexComponentType.TOKEN_VALUES,
                                                                                          IndexComponentType.PARTITION_SIZES,
