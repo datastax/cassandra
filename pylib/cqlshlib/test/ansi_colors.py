@@ -17,7 +17,6 @@
 from __future__ import unicode_literals
 
 import re
-import six
 
 LIGHT = 0o10
 
@@ -106,7 +105,7 @@ class ColoredChar(object):
 
 class ColoredText(object):
     def __init__(self, source=''):
-        if isinstance(source, six.text_type):
+        if isinstance(source, str):
             plain, colors = self.parse_ansi_colors(source)
             self.chars = list(map(ColoredChar, plain, colors))
         else:

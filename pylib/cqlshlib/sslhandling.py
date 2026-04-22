@@ -18,7 +18,7 @@ import os
 import sys
 import ssl
 
-from six.moves import configparser
+import configparser
 
 
 def ssl_settings(host, config_file, env=os.environ):
