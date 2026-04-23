@@ -47,7 +47,7 @@ public class SaiDiskSizeTest extends SAITester
     private static final Logger logger = LoggerFactory.getLogger(SaiDiskSizeTest.class);
 
     @Parameterized.Parameter
-    public Version version;
+    public Version saiFormat;
 
     @Parameterized.Parameter(1)
     public int expectedDiskSize;
@@ -65,7 +65,7 @@ public class SaiDiskSizeTest extends SAITester
      *
      * @return a collection of parameters to test
      */
-    @Parameterized.Parameters(name = "saiFormat={0}, expectedDiskSize={1}, pkColumns={2}, partitionSize={3}")
+    @Parameterized.Parameters(name = "saiFormat={0}, expectedDiskSize={1}, pkColumns={2}, rowsPerPartition={3}")
     public static Collection<Object[]> generateParameters()
     {
         return Version.ALL.stream()
@@ -106,7 +106,7 @@ public class SaiDiskSizeTest extends SAITester
     @Before
     public void setVersion()
     {
-        SAIUtil.setCurrentVersion(version);
+        SAIUtil.setCurrentVersion(saiFormat);
     }
 
     @Test
@@ -148,9 +148,9 @@ public class SaiDiskSizeTest extends SAITester
         flush();
 
         long diskSize = indexDiskSpaceUse();
-        logger.info("Disk size for SAI version {}: {}", version, diskSize);
+        logger.info("Disk size for SAI version {}: {}", saiFormat, diskSize);
         assertThat(diskSize)
-        .as("Disk size for SAI version %s before compaction", version)
+        .as("Disk size for SAI version %s before compaction", saiFormat)
         .isLessThanOrEqualTo(expectedDiskSize)
         .isGreaterThan((long) (expectedDiskSize * 0.8));
 
@@ -158,7 +158,7 @@ public class SaiDiskSizeTest extends SAITester
 
         diskSize = indexDiskSpaceUse();
         assertThat(diskSize)
-        .as("Disk size for SAI version %s after compaction", version)
+        .as("Disk size for SAI version %s after compaction", saiFormat)
         .isLessThanOrEqualTo(expectedDiskSize)
         .isGreaterThan((long) (expectedDiskSize * 0.8));
     }
@@ -166,15 +166,15 @@ public class SaiDiskSizeTest extends SAITester
     private void insertRowsIntoOneSegment(int nrRows, int startRow) throws UnknownHostException
     {
         assert nrRows % rowsPerPartition == 0;
-        int partitionSize = nrRows / rowsPerPartition;
-        assert partitionSize > 0;
+        int nrOfPartitions = nrRows / rowsPerPartition;
+        assert nrOfPartitions > 0;
         for (int i = startRow; i < startRow + nrRows; i++)
         {
             execute("INSERT INTO %s (pk, v_int, v_ascii, v_bigint, v_blob, v_boolean, " +
                     "v_decimal, v_double, v_float, v_text, v_timestamp, v_uuid, v_varchar, " +
                     "v_varint, v_timeuuid, v_inet, v_date, v_time, v_smallint, v_tinyint, v_duration) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    startRow + i % partitionSize, // StartRow allows starting new partitions for new segment
+                    startRow + i % nrOfPartitions, // StartRow allows starting new partitions for new segment
                     i,
                     "ascii_" + i,
                     (long) i * 1000000,
