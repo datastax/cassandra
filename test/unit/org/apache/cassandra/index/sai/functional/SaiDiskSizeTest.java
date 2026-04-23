@@ -31,6 +31,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -41,6 +44,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @RunWith(Parameterized.class)
 public class SaiDiskSizeTest extends SAITester
 {
+    private static final Logger logger = LoggerFactory.getLogger(SaiDiskSizeTest.class);
+
     @Parameterized.Parameter
     public Version version;
 
@@ -53,8 +58,15 @@ public class SaiDiskSizeTest extends SAITester
     @Parameterized.Parameter(3)
     public int rowsPerPartition;
 
+    /**
+     * The expected sizes were determined empirically to satisfy the result of both flush and compaction.
+     * To understand the difference check {@link Version} and on disk components.
+     * There are no vectors involved, thus the expected sizes are not affected by chenges to Vector format.
+     *
+     * @return a collection of parameters to test
+     */
     @Parameterized.Parameters(name = "saiFormat={0}, expectedDiskSize={1}, pkColumns={2}, partitionSize={3}")
-    public static Collection<Object[]> data()
+    public static Collection<Object[]> generateParameters()
     {
         return Version.ALL.stream()
                           .flatMap(v -> {
@@ -129,13 +141,14 @@ public class SaiDiskSizeTest extends SAITester
 
         waitForTableIndexesQueryable();
 
-        // Split data into 2 sstable segments
-        insertRows(1000, 0);
+        // Split generateParameters into 2 sstable segments
+        insertRowsIntoOneSegment(1000, 0);
         flush();
-        insertRows(1000, 1000);
+        insertRowsIntoOneSegment(1000, 1000);
         flush();
 
         long diskSize = indexDiskSpaceUse();
+        logger.info("Disk size for SAI version {}: {}", version, diskSize);
         assertThat(diskSize)
         .as("Disk size for SAI version %s before compaction", version)
         .isLessThanOrEqualTo(expectedDiskSize)
@@ -150,15 +163,18 @@ public class SaiDiskSizeTest extends SAITester
         .isGreaterThan((long) (expectedDiskSize * 0.8));
     }
 
-    private void insertRows(int size, int start) throws UnknownHostException
+    private void insertRowsIntoOneSegment(int nrRows, int startRow) throws UnknownHostException
     {
-        for (int i = start; i < start + size; i++)
+        assert nrRows % rowsPerPartition == 0;
+        int partitionSize = nrRows / rowsPerPartition;
+        assert partitionSize > 0;
+        for (int i = startRow; i < startRow + nrRows; i++)
         {
             execute("INSERT INTO %s (pk, v_int, v_ascii, v_bigint, v_blob, v_boolean, " +
                     "v_decimal, v_double, v_float, v_text, v_timestamp, v_uuid, v_varchar, " +
                     "v_varint, v_timeuuid, v_inet, v_date, v_time, v_smallint, v_tinyint, v_duration) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    start + i % (size / rowsPerPartition),
+                    startRow + i % partitionSize, // StartRow allows starting new partitions for new segment
                     i,
                     "ascii_" + i,
                     (long) i * 1000000,
