@@ -298,6 +298,7 @@ public class InboundConnectionInitiator
                     assert initiate.type.isMessaging();
 
                     // Second message to DSE is sent with version 10 (oss 3.0)
+                    logger.trace("Sending back Pre40 message with accept min {} to {}", settings.acceptMessaging.min, ctx.channel().remoteAddress());
                     ByteBuf response = HandshakeProtocol.Accept.respondPre40(settings.acceptMessaging.min, ctx.alloc());
                     AsyncChannelPromise.writeAndFlush(ctx, response,
                                                       (ChannelFutureListener) future -> {
@@ -307,8 +308,10 @@ public class InboundConnectionInitiator
                 }
                 else
                 {
+
                     int useMessagingVersion = max(accept.min, min(accept.max, initiate.acceptVersions.max));
                     ByteBuf flush = new HandshakeProtocol.Accept(useMessagingVersion, accept.max).encode(ctx.alloc());
+                    logger.trace("Sending back Accept message with messaging version {} and accept max {} to {}", useMessagingVersion, accept.max, ctx.channel().remoteAddress());
                     AsyncChannelPromise.writeAndFlush(ctx, flush, (ChannelFutureListener) future -> {
                         if (!future.isSuccess())
                             exceptionCaught(future.channel(), future.cause());
