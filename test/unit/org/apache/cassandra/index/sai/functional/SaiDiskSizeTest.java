@@ -46,6 +46,9 @@ public class SaiDiskSizeTest extends SAITester
 {
     private static final Logger logger = LoggerFactory.getLogger(SaiDiskSizeTest.class);
 
+    // Fixed base timestamp for deterministic test data (2024-01-01 00:00:00 UTC)
+    private static final long BASE_TIMESTAMP_MILLIS = 1704067200000L;
+
     @Parameterized.Parameter
     public Version saiFormat;
 
@@ -184,7 +187,7 @@ public class SaiDiskSizeTest extends SAITester
                     i * 1.5,
                     (float) (i * 2.5),
                     "text_value_" + i,
-                    new Date(System.currentTimeMillis() + i * 1000L),
+                    new Date(BASE_TIMESTAMP_MILLIS + i * 1000L),
                     UUID.randomUUID(),
                     "varchar_" + i,
                     BigInteger.valueOf(i).multiply(BigInteger.valueOf(100)),
