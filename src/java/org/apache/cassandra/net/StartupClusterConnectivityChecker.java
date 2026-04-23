@@ -209,6 +209,14 @@ public class StartupClusterConnectivityChecker
         Message<PingRequest> large = Message.out(PING_REQ, PingRequest.forLarge);
         for (InetAddressAndPort peer : peers)
         {
+            boolean known = MessagingService.instance().versions.knows(peer);
+            logger.debug("Peer {} is known with version {}", peer, known ? MessagingService.instance().versions.getRaw(peer) : "null");
+            // DSE 6.8/6.9 advertises itself with value higher than VERSION_40, thus we need to compare it with VERSION_DSE_68
+            boolean detectedDse = known && MessagingService.instance().versions.getRaw(peer) >= MessagingService.VERSION_DSE_68;
+            if (MessagingService.instance().versions.get(peer) < MessagingService.VERSION_40 || detectedDse)
+                // DSE 6.x doesn't support PING_REQ, and while C* 3.x does, PING only improves rolling restart times. CASSANDRA-13993 → CASSANDRA-14447
+                continue;
+
             MessagingService.instance().sendWithCallback(small, peer, responseHandler, SMALL_MESSAGES);
             MessagingService.instance().sendWithCallback(large, peer, responseHandler, LARGE_MESSAGES);
         }
