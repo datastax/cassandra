@@ -345,6 +345,12 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 int peerMessagingVersion = msg.maxMessagingVersion;
                 logger.trace("received second handshake message from peer {}, msg = {}", settings.connectTo, msg);
 
+                logger.debug("Summary of messaging versions while connecting to {} " +
+                             "peer messaging version {} request messaging version {} " +
+                             "max accept version {} min accept version {}",
+                             settings.connectTo, peerMessagingVersion, settings.acceptVersions.max,
+                             settings.acceptVersions.max, settings.acceptVersions.min);
+
                 FrameEncoder frameEncoder = null;
                 Result<SuccessType> result;
                 assert useMessagingVersion > 0;
@@ -378,6 +384,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                         result = (Result<SuccessType>) streamingSuccess(ctx.channel(), useMessagingVersion);
                     }
                 }
+
+                logger.debug("Result of connection initiation for {} is {}", settings.connectTo, result.outcome);
 
                 ChannelPipeline pipeline = ctx.pipeline();
                 if (result.isSuccess())
