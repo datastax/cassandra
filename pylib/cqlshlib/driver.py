@@ -14,7 +14,6 @@
 
 import os
 import random
-import six
 import stat
 from cassandra.cluster import Cluster
 from cassandra.connection import UnixSocketEndPoint
@@ -114,7 +113,7 @@ def cluster_factory(host, whitelist_lbp=True, **kwargs):
 
 
 def is_unix_socket(hostname):
-    if isinstance(hostname, six.string_types) and os.path.exists(hostname):
+    if isinstance(hostname, str) and os.path.exists(hostname):
         mode = os.stat(hostname).st_mode
         return stat.S_ISSOCK(mode)
     return False
