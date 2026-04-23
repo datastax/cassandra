@@ -484,6 +484,8 @@ public class EndpointState
 
 class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
 {
+    private static final Logger logger = LoggerFactory.getLogger(EndpointStateSerializer.class);
+
     public void serialize(EndpointState epState, DataOutputPlus out, int version) throws IOException
     {
         /* serialize the HeartBeatState */
@@ -491,13 +493,12 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         HeartBeatState.serializer.serialize(hbState, out, version);
 
         /* serialize the map of ApplicationState objects */
-        Set<Map.Entry<ApplicationState, VersionedValue>> states = epState.states();
+        Set<Map.Entry<ApplicationState, VersionedValue>> states = filterOutgoingStates(epState.states(), version);
         out.writeInt(states.size());
         for (Map.Entry<ApplicationState, VersionedValue> state : states)
         {
-            VersionedValue value = filterValue(state.getKey(), state.getValue(), version);
             out.writeInt(state.getKey().ordinal());
-            VersionedValue.serializer.serialize(value, out, version);
+            VersionedValue.serializer.serialize(state.getValue(), out, version);
         }
     }
 
@@ -514,19 +515,18 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
             states.put(Gossiper.STATES[key], value);
         }
 
-        return new EndpointState(hbState, states);
+        return new EndpointState(hbState, filterIncomingStates(states, version));
     }
 
     public long serializedSize(EndpointState epState, int version)
     {
         long size = HeartBeatState.serializer.serializedSize(epState.getHeartBeatState(), version);
-        Set<Map.Entry<ApplicationState, VersionedValue>> states = epState.states();
+        Set<Map.Entry<ApplicationState, VersionedValue>> states = filterOutgoingStates(epState.states(), version);
         size += TypeSizes.sizeof(states.size());
         for (Map.Entry<ApplicationState, VersionedValue> state : states)
         {
-            VersionedValue value = filterValue(state.getKey(), state.getValue(), version);
             size += TypeSizes.sizeof(state.getKey().ordinal());
-            size += VersionedValue.serializer.serializedSize(value, version);
+            size += VersionedValue.serializer.serializedSize(state.getValue(), version);
         }
         return size;
     }
@@ -538,5 +538,106 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         return version < MessagingService.VERSION_40 && ApplicationState.RELEASE_VERSION == state
                 ? VersionedValue.unsafeMakeVersionedValue(value.value.replaceFirst("-[0-9a-f]{7,40}$", ""), value.version)
                 : value;
+    }
+
+    @VisibleForTesting
+    static Set<Map.Entry<ApplicationState, VersionedValue>> filterOutgoingStates(Set<Map.Entry<ApplicationState, VersionedValue>> states, int version)
+    {
+        if (version < MessagingService.VERSION_40)
+        {
+            Set<Map.Entry<ApplicationState, VersionedValue>> filteredStates = new HashSet<>();
+            for (Map.Entry<ApplicationState, VersionedValue> state : states)
+                filteredStates.addAll(filterOutgoingState(state, version).entrySet());
+            return filteredStates;
+        }
+        return states;
+    }
+
+    private static Map<ApplicationState, VersionedValue> filterOutgoingState(Map.Entry<ApplicationState, VersionedValue> state, int version)
+    {
+        assert version < MessagingService.VERSION_40;
+        VersionedValue vv = state.getValue();
+        if (logger.isTraceEnabled())
+            logger.trace("Fetching the key from state {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
+        String[] values;
+        switch (state.getKey())
+        {
+            case INTERNAL_ADDRESS_AND_PORT:
+                values = splitAddressAndPort(vv);
+                if (values.length > 1)
+                    return Map.of(ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version),
+                                  ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
+            case NATIVE_ADDRESS_AND_PORT:
+                values = splitAddressAndPort(vv);
+                if (values.length > 1)
+                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
+            case STATUS_WITH_PORT:
+                values = splitStatusAndPort(vv);
+                if (values.length > 1)
+                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version));
+                else
+                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
+            case DISK_USAGE:
+                return Map.of(ApplicationState.values()[21], state.getValue());
+            case SSTABLE_VERSIONS:
+                return Map.of();
+            case INDEX_STATUS:
+                return Map.of();
+            case RELEASE_VERSION:
+                return Map.of(ApplicationState.RELEASE_VERSION, filterValue(state.getKey(), vv, version));
+            default:
+                return Map.of(state.getKey(), state.getValue());
+        }
+    }
+
+    private static String[] splitStatusAndPort(VersionedValue vv)
+    {
+        return vv.value.split("[:,]");
+    }
+
+    private static String[] splitAddressAndPort(VersionedValue vv)
+    {
+        return vv.value.split(":");
+    }
+
+    @VisibleForTesting
+    static Map<ApplicationState, VersionedValue> filterIncomingStates(Map<ApplicationState, VersionedValue> states, int version)
+    {
+        if (version < MessagingService.VERSION_40)
+        {
+            Map<ApplicationState, VersionedValue> filteredStates = new EnumMap<>(ApplicationState.class);
+            for (Map.Entry<ApplicationState, VersionedValue> state : states.entrySet())
+            {
+                VersionedValue vv = state.getValue();
+                if (logger.isTraceEnabled())
+                    logger.trace("Storing the key to state {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
+                switch (state.getKey().ordinal())
+                {
+                    case 15:
+                        filteredStates.put(ApplicationState.NATIVE_ADDRESS_AND_PORT, vv);
+                        break;
+                    case 16:
+                        break;
+                    case 17:
+                        filteredStates.put(ApplicationState.INTERNAL_ADDRESS_AND_PORT, vv);
+                        break;
+                    case 18:
+                    case 19:
+                    case 20:
+                        break;
+                    case 21:
+                        filteredStates.put(ApplicationState.DISK_USAGE, vv);
+                        break;
+                    default:
+                        filteredStates.put(state.getKey(), vv);
+                }
+            }
+            return filteredStates;
+        }
+        return states;
     }
 }
