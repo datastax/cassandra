@@ -294,7 +294,7 @@ public class Descriptor
      * @param file the {@code File} object for the filename to parse.
      * @return the descriptor for the parsed file.
      *
-     * @throws IllegalArgumentException if the provided {@code file} does point to a valid sstable filename. This could
+     * @throws IllegalArgumentException if the provided {@code file} does not point to a valid sstable filename. This could
      * mean either that the filename doesn't look like a sstable file, or that it is for an old and unsupported
      * versions.
      */
@@ -352,13 +352,13 @@ public class Descriptor
     }
 
     /**
-     * Parse a sstable filename, extracting both the {@code Descriptor} and {@code Component} part.
+     * Parse a sstable file, extracting both the {@code Descriptor} and {@code Component} part.
      * The keyspace/table name will be extracted from the directory path.
      *
      * @param file the {@code File} object for the filename to parse.
      * @return a pair of the descriptor and component corresponding to the provided {@code file}.
      *
-     * @throws IllegalArgumentException if the provided {@code file} does point to a valid sstable filename. This could
+     * @throws IllegalArgumentException if the provided {@code file} does not point to a valid sstable filename. This could
      * mean either that the filename doesn't look like a sstable file, or that it is for an old and unsupported
      * versions.
      */
@@ -374,18 +374,51 @@ public class Descriptor
         if (!file.isAbsolute())
             file = file.toAbsolute();
 
-        SSTableInfo info = validateAndExtractInfo(file);
-        String name = file.name();
+        String filename = file.name();
+        File tableDirectory = parentOf(filename, file);
+        
+        // Delegate to the new method that accepts directory and filename separately
+        return fromFileWithComponent(tableDirectory, filename, validateDirs);
+    }
+
+    /**
+     * Parse a table directory and sstable file name, extracting both the {@code Descriptor} and {@code Component} part.
+     *
+     * @param tableDirectory the {@code File} object for the sstable directory
+     * @param name the name of the sstable file to parse
+     * @param validateDirs whether to validate that the directory structure matches expected patterns
+     * @return a pair of the descriptor and component corresponding to the provided directory and filename.
+     *
+     * @throws IllegalArgumentException if the provided {@code filename} does not point to a valid sstable filename. This could
+     * mean either that the filename doesn't look like a sstable file, or that it is for an old and unsupported
+     * versions.
+     */
+    public static Pair<Descriptor, Component> fromFileWithComponent(File tableDirectory, String name, boolean validateDirs)
+    {
+        checkNotNull(tableDirectory);
+        checkNotNull(name);
+
+        // We need to extract the keyspace and table names from the parent directories, so make sure we deal with the
+        // absolute path.
+        if (!tableDirectory.isAbsolute())
+            tableDirectory = tableDirectory.toAbsolute();
+
+        SSTableInfo info = validateAndExtractInfo(name);
 
         String keyspaceName = "";
         String tableName = "";
 
-        Matcher sstableDirMatcher = SSTABLE_DIR_PATTERN.matcher(file.toString());
+        String fullPath = tableDirectory.toString();
+        if (!fullPath.endsWith(File.pathSeparator()))
+            fullPath = fullPath + File.pathSeparator();
+        fullPath = fullPath + name;
+
+        Matcher sstableDirMatcher = SSTABLE_DIR_PATTERN.matcher(fullPath);
 
         // Use pre-2.1 SSTable format if current one does not match it
         if (!sstableDirMatcher.find(0))
         {
-            sstableDirMatcher = LEGACY_SSTABLE_DIR_PATTERN.matcher(file.toString());
+            sstableDirMatcher = LEGACY_SSTABLE_DIR_PATTERN.matcher(fullPath);
         }
 
         if (sstableDirMatcher.find(0))
@@ -400,11 +433,12 @@ public class Descriptor
         }
         else if (validateDirs)
         {
-            logger.debug("Could not extract keyspace/table info from sstable directory {}", file.toString());
-            throw invalidSSTable(name, String.format("cannot extract keyspace and table name from %s; make sure the sstable is in the proper sub-directories", file));
+            logger.debug("Could not extract keyspace/table info from sstable directory {}", fullPath);
+            throw invalidSSTable(name, String.format("cannot extract keyspace and table name from %s; make sure the sstable is in the proper sub-directories", fullPath));
         }
 
-        return Pair.create(new Descriptor(info.version, parentOf(name, file), keyspaceName, tableName, info.id), info.component);
+        // Use tableDirectory directly, reusing the same File instance across multiple descriptors
+        return Pair.create(new Descriptor(info.version, tableDirectory, keyspaceName, tableName, info.id), info.component);
     }
 
     /**
@@ -427,7 +461,7 @@ public class Descriptor
             return fromFileWithComponent(file);
         }
 
-        SSTableInfo info = validateAndExtractInfo(file);
+        SSTableInfo info = validateAndExtractInfo(file.name());
         return Pair.create(new Descriptor(info.version, parentOf(file.name(), file), keyspace, table, info.id), info.component);
     }
 
@@ -450,9 +484,8 @@ public class Descriptor
         return tokens;
     }
 
-    private static SSTableInfo validateAndExtractInfo(File file)
+    private static SSTableInfo validateAndExtractInfo(String name)
     {
-        String name = file.name();
         List<String> tokens = filenameTokens(name);
 
         String versionString = tokens.get(0);
