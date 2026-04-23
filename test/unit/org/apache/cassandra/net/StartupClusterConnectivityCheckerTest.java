@@ -186,6 +186,17 @@ public class StartupClusterConnectivityCheckerTest
     }
 
     @Test
+    public void execute_LocalQuorum_dse() throws UnknownHostException
+    {
+        Set<InetAddressAndPort> available = new HashSet<>();
+        copyCount(peersAMinusLocal, available, NUM_PER_DC - 2);
+        InetAddressAndPort dsePeer = InetAddressAndPort.getByName("127.0.1.1:7012");
+        MessagingService.instance().versions.set(dsePeer, MessagingService.VERSION_DSE_68);
+        checkAvailable(localQuorumConnectivityChecker, available, false);
+        MessagingService.instance().versions.reset(dsePeer);
+    }
+
+    @Test
     public void execute_Noop()
     {
         checkAvailable(noopChecker, new HashSet<>(), true);

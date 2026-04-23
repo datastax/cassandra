@@ -20,6 +20,9 @@ package org.apache.cassandra.schema;
 
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -31,6 +34,8 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
  */
 public class SchemaTransformations
 {
+    private static final Logger logger = LoggerFactory.getLogger(SchemaTransformations.class);
+
     /**
      * Creates a schema transformation that adds the provided keyspace.
      *
@@ -227,6 +232,22 @@ public class SchemaTransformations
                             updatedKeyspace = updatedKeyspace.withSwapped(updatedKeyspace.tables.with(updatedBuilder.build()));
                         }
                     }
+
+                    if (curKeyspace.types != null)
+                    {
+                        for (UserType currType : curKeyspace.types)
+                        {
+                            UserType desiredType = updatedKeyspace.types.getNullable(currType.name);
+                            // if the type exist we keep the existing definition, otherwise we inherit the type
+                            // the motivation behind it is that there might be tables (inherited above) that depend on it
+                            if (desiredType == null)
+                            {
+                                logger.debug("Preserving type {} for keyspace {}", currType.getNameAsString(), curKeyspace.name);
+                                updatedKeyspace = updatedKeyspace.withSwapped(updatedKeyspace.types.with(currType));
+                            }
+                        }
+                    }
+
                 }
                 return schema.withAddedOrUpdated(updatedKeyspace);
             }
