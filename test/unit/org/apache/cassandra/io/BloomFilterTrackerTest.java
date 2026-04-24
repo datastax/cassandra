@@ -81,4 +81,26 @@ public class BloomFilterTrackerTest
         assertEquals(1L, bft.getFalsePositiveCount());
         assertEquals(0.2d, bft.getRecentFalsePositiveRate(), 0.0);
     }
+
+    @Test
+    public void testAddingLazyBloomFilterHits()
+    {
+        BloomFilterTracker bft = BloomFilterTracker.createMeterTracker();
+        assertEquals(0L, bft.getLazyBloomFilterHitCount());
+        bft.addLazyBloomFilterHit();
+        bft.addLazyBloomFilterHit();
+        assertEquals(2L, bft.getLazyBloomFilterHitCount());
+        assertEquals(0L, bft.getNoBloomFilterHitCount());
+    }
+
+    @Test
+    public void testAddingNoBloomFilterHits()
+    {
+        BloomFilterTracker bft = BloomFilterTracker.createMeterTracker();
+        assertEquals(0L, bft.getNoBloomFilterHitCount());
+        bft.addNoBloomFilterHit();
+        bft.addNoBloomFilterHit();
+        assertEquals(2L, bft.getNoBloomFilterHitCount());
+        assertEquals(0L, bft.getLazyBloomFilterHitCount());
+    }
 }

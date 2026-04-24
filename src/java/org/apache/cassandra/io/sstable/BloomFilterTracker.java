@@ -26,12 +26,23 @@ public abstract class BloomFilterTracker
     public abstract void addFalsePositive();
     public abstract void addTruePositive();
     public abstract void addTrueNegative();
+    /**
+     * Count a lookup that uses {@link org.apache.cassandra.utils.FilterFactory#AlwaysPresentForLazyLoading}.
+     */
+    public abstract void addLazyBloomFilterHit();
+    /**
+     * Count a lookup that uses {@link org.apache.cassandra.utils.FilterFactory#AlwaysPresent} due to lazy bloom filter
+     * loading failure or due to reaching bloom filter memory limit
+     */
+    public abstract void addNoBloomFilterHit();
     public abstract long getFalsePositiveCount();
     public abstract double getRecentFalsePositiveRate();
     public abstract long getTruePositiveCount();
     public abstract double getRecentTruePositiveRate();
     public abstract long getTrueNegativeCount();
     public abstract double getRecentTrueNegativeRate();
+    public abstract long getLazyBloomFilterHitCount();
+    public abstract long getNoBloomFilterHitCount();
 
     public static BloomFilterTracker createNoopTracker()
     {
@@ -48,6 +59,8 @@ public abstract class BloomFilterTracker
         private final Meter falsePositiveCount = new Meter();
         private final Meter truePositiveCount = new Meter();
         private final Meter trueNegativeCount = new Meter();
+        private final Meter lazyBloomFilterHitCount = new Meter();
+        private final Meter noBloomFilterHitCount = new Meter();
 
         @Override
         public void addFalsePositive()
@@ -65,6 +78,18 @@ public abstract class BloomFilterTracker
         public void addTrueNegative()
         {
             trueNegativeCount.mark();
+        }
+
+        @Override
+        public void addLazyBloomFilterHit()
+        {
+            lazyBloomFilterHitCount.mark();
+        }
+
+        @Override
+        public void addNoBloomFilterHit()
+        {
+            noBloomFilterHitCount.mark();
         }
 
         @Override
@@ -102,6 +127,18 @@ public abstract class BloomFilterTracker
         {
             return trueNegativeCount.getFifteenMinuteRate();
         }
+
+        @Override
+        public long getLazyBloomFilterHitCount()
+        {
+            return lazyBloomFilterHitCount.getCount();
+        }
+
+        @Override
+        public long getNoBloomFilterHitCount()
+        {
+            return noBloomFilterHitCount.getCount();
+        }
     }
 
     /**
@@ -123,6 +160,12 @@ public abstract class BloomFilterTracker
 
         @Override
         public void addTrueNegative() {}
+
+        @Override
+        public void addLazyBloomFilterHit() {}
+
+        @Override
+        public void addNoBloomFilterHit() {}
 
         @Override
         public long getFalsePositiveCount()
@@ -156,6 +199,18 @@ public abstract class BloomFilterTracker
 
         @Override
         public double getRecentTrueNegativeRate()
+        {
+            return 0;
+        }
+
+        @Override
+        public long getLazyBloomFilterHitCount()
+        {
+            return 0;
+        }
+
+        @Override
+        public long getNoBloomFilterHitCount()
         {
             return 0;
         }
