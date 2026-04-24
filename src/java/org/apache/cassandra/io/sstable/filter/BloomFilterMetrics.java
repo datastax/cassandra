@@ -70,6 +70,51 @@ public class BloomFilterMetrics<R extends SSTableReaderWithFilter> extends Abstr
                                                                                      SSTableReaderWithFilter::getFilterOffHeapSize,
                                                                                      Long::sum);
 
+    public final GaugeProvider<Long> approximateBloomFilterOffHeapMemoryUsed = newGaugeProvider("ApproximateBloomFilterOffHeapMemoryUsed",
+                                                                                                0L,
+                                                                                                SSTableReaderWithFilter::getApproximateBloomFilterMemorySize,
+                                                                                                Long::sum);
+
+    public final GaugeProvider<Long> loadedBloomFilter = newGaugeProvider("LoadedBloomFilter",
+                                                                          0L,
+                                                                          r -> r.isBloomFilterLoaded() ? 1L : 0L,
+                                                                          Long::sum);
+
+    public final GaugeProvider<Long> lazyBloomFilter = newGaugeProvider("LazyBloomFilter",
+                                                                        0L,
+                                                                        r -> r.isLazyBloomFilter() ? 1L : 0L,
+                                                                        Long::sum);
+
+    public final GaugeProvider<Long> passThroughBloomFilter = newGaugeProvider("PassThroughBloomFilter",
+                                                                               0L,
+                                                                               r -> r.isPassThroughBloomFilter() ? 1L : 0L,
+                                                                               Long::sum);
+
+    public final GaugeProvider<Long> lazyBloomFilterByRequestRate = newGaugeProvider("LazyBloomFilterByRequestRate",
+                                                                                     0L,
+                                                                                     r -> r.isLazyBloomFilterByRequestRateCriteria() ? 1L : 0L,
+                                                                                     Long::sum);
+
+    public final GaugeProvider<Long> lazyBloomFilterByRequestCount = newGaugeProvider("LazyBloomFilterByRequestCount",
+                                                                                      0L,
+                                                                                      r -> r.isLazyBloomFilterByRequestCountCriteria() ? 1L : 0L,
+                                                                                      Long::sum);
+
+    public final GaugeProvider<Long> lazyBloomFilterHits = newGaugeProvider("LazyBloomFilterHits",
+                                                                            0L,
+                                                                            r -> r.getFilterTracker().getLazyBloomFilterHitCount(),
+                                                                            Long::sum);
+
+    public final GaugeProvider<Long> loadedBloomFilterHits = newGaugeProvider("LoadedBloomFilterHits",
+                                                                              0L,
+                                                                              r -> r.getFilterTracker().getLoadedBloomFilterHitCount(),
+                                                                              Long::sum);
+
+    public final GaugeProvider<Long> passThroughBloomFilterHits = newGaugeProvider("PassThroughBloomFilterHits",
+                                                                                   0L,
+                                                                                   r -> r.getFilterTracker().getPassThroughBloomFilterHitCount(),
+                                                                                   Long::sum);
+
     /**
      * False positive ratio of bloom filter
      */
@@ -110,6 +155,15 @@ public class BloomFilterMetrics<R extends SSTableReaderWithFilter> extends Abstr
                                                                         recentBloomFilterFalsePositives,
                                                                         bloomFilterDiskSpaceUsed,
                                                                         bloomFilterOffHeapMemoryUsed,
+                                                                        approximateBloomFilterOffHeapMemoryUsed,
+                                                                        loadedBloomFilter,
+                                                                        lazyBloomFilter,
+                                                                        passThroughBloomFilter,
+                                                                        lazyBloomFilterByRequestRate,
+                                                                        lazyBloomFilterByRequestCount,
+                                                                        lazyBloomFilterHits,
+                                                                        loadedBloomFilterHits,
+                                                                        passThroughBloomFilterHits,
                                                                         bloomFilterFalseRatio,
                                                                         recentBloomFilterFalseRatio);
 
