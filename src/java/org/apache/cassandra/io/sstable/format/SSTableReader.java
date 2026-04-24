@@ -281,6 +281,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     private final boolean bloomFilterLazyLoading = BloomFilter.lazyLoading();
     private final int bloomFilterLazyLoadingWindow = BloomFilter.lazyLoadingWindow();
     private final long bloomFilterLazyLoadingThreshold = BloomFilter.lazyLoadingThreshold();
+    protected volatile long approximateBloomFilterMemorySize;
 
     public final IndexSummary indexSummary;
 
@@ -980,6 +981,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         replacement.first = newFirst;
         replacement.last = last;
         replacement.isSuspect.set(isSuspect.get());
+        replacement.approximateBloomFilterMemorySize = approximateBloomFilterMemorySize;
         return replacement;
     }
 
@@ -1009,6 +1011,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         replacement.first = first;
         replacement.last = last;
         replacement.isSuspect.set(isSuspect.get());
+        replacement.approximateBloomFilterMemorySize = approximateBloomFilterMemorySize;
         return replacement;
     }
 
@@ -1269,6 +1272,16 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public long getBloomFilterOffHeapSize()
     {
         return bf.offHeapSize();
+    }
+
+    /**
+     * Returns the approximate off-heap memory size in bytes that the bloom filter for this SSTable would occupy when
+     * fully loaded based on estimated keys and false-positive chance, regardless of the current bloom filter state
+     * (either lazy BF or no BF due ot memory limit or loading failure)
+     */
+    public long getApproximateBloomFilterMemorySize()
+    {
+        return approximateBloomFilterMemorySize;
     }
 
     /**
@@ -1641,8 +1654,63 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     protected boolean inBloomFilter(DecoratedKey dk)
     {
+        // There could be a race that async BF loading completed before calling "bf.isPresent(dk)". Should be acceptable.
+        if (isLazyBloomFilter())
+            bloomFilterTracker.addLazyBloomFilterHit();
+        else if (isPassThroughBloomFilter())
+            bloomFilterTracker.addPassThroughBloomFilterHit();
+        else
+            bloomFilterTracker.addLoadedBloomFilterHit();
         maybeDeserializeLazyBloomFilter();
         return bf.isPresent(dk);
+    }
+
+    /**
+     * If underlying bloom filter is {@link BloomFilter}
+     */
+    public boolean isBloomFilterLoaded()
+    {
+        return !isLazyBloomFilter() && !isPassThroughBloomFilter();
+    }
+
+    /**
+     * If underlying filter is {@link FilterFactory#AlwaysPresentForLazyLoading}
+     */
+    public boolean isLazyBloomFilter()
+    {
+        return bf == FilterFactory.AlwaysPresentForLazyLoading;
+    }
+
+    /**
+     * If underlying filter is {@link FilterFactory#AlwaysPresent}:
+     *   - BF file was not written when hitting BF memory limit during flush
+     *   - BF deserialization hits BF memory limit
+     *   - Lazy BF failed to load
+     */
+    public boolean isPassThroughBloomFilter()
+    {
+        return bf == FilterFactory.AlwaysPresent;
+    }
+
+    protected long computeExpectedBloomFilterMemorySize()
+    {
+        return FilterFactory.getFilterOffHeapSize(estimatedKeys(), metadata().params.bloomFilterFpChance);
+    }
+
+    @VisibleForTesting
+    public boolean isLazyBloomFilterByRequestRateCriteria()
+    {
+        return isLazyBloomFilter()
+               && bloomFilterLazyLoadingWindow > 0
+               && bloomFilterLazyLoadingThreshold > 0
+               && !partitionIndexHitRateExceedsThreshold();
+    }
+
+    public boolean isLazyBloomFilterByRequestCountCriteria()
+    {
+        return isLazyBloomFilter()
+               && (bloomFilterLazyLoadingThreshold == 0
+                   || bloomFilterLazyLoadingWindow <= 0 && !partitionIndexHitCountExceedsThreshold());
     }
 
     /**
@@ -1660,14 +1728,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         boolean loadBloomFilter = false;
 
-        // If the threshold was set to zero we always want to deserialize
+        // If the threshold was set to zero we always want to deserialize on first access
         if (bloomFilterLazyLoadingThreshold == 0)
             loadBloomFilter = true;
-            // otherwise, if window is <= 0 we use the threshold as an absolute count
-        else if (bloomFilterLazyLoadingWindow <= 0 && partitionIndexReadMeter.get().count() >= bloomFilterLazyLoadingThreshold)
+        // otherwise, if window is <= 0 we use the threshold as an absolute count
+        else if (bloomFilterLazyLoadingWindow <= 0 && partitionIndexHitCountExceedsThreshold())
             loadBloomFilter = true;
-            // otherwise we look at the count in the specified window
-        else if (bloomFilterLazyLoadingWindow > 0 && partitionIndexReadMeter.get().rate(bloomFilterLazyLoadingWindow) >= bloomFilterLazyLoadingThreshold)
+        // otherwise we look at the count in the specified window
+        else if (bloomFilterLazyLoadingWindow > 0 && partitionIndexHitRateExceedsThreshold())
             loadBloomFilter = true;
 
         if (!loadBloomFilter)
@@ -1702,7 +1770,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                      }
                                      else
                                      {
-                                         logger.debug("Successfuly loaded lazy bloom filter for {}", descriptor.baseFileURI());
+                                         logger.debug("Successfuly loaded lazy bloom filter for {} with offheap size {}", descriptor.baseFileURI(),
+                                                      FBUtilities.prettyPrintMemory(loaded.offHeapSize()));
 
                                          bf = loaded;
                                          tidy.addCloseable(loaded); // close newly created bloom filter on sstable close
@@ -1716,6 +1785,16 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                          });
 
         return true;
+    }
+
+    private boolean partitionIndexHitRateExceedsThreshold()
+    {
+        return partitionIndexReadMeter.map(meter -> meter.rate(bloomFilterLazyLoadingWindow) >= bloomFilterLazyLoadingThreshold).orElse(false);
+    }
+
+    private boolean partitionIndexHitCountExceedsThreshold()
+    {
+        return partitionIndexReadMeter.map(meter -> meter.count() >= bloomFilterLazyLoadingThreshold).orElse(false);
     }
 
     /**
