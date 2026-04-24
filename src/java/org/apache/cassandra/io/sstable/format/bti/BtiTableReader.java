@@ -81,6 +81,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
         super(builder, owner);
         this.rowIndexFile = builder.getRowIndexFile();
         this.partitionIndex = builder.getPartitionIndex();
+        this.approximateBloomFilterMemorySize = isBloomFilterLoaded() ? filter.offHeapSize() : computeExpectedBloomFilterMemorySize();
     }
 
     protected final Builder unbuildTo(Builder builder, boolean sharedCopy)
@@ -461,7 +462,9 @@ public class BtiTableReader extends SSTableReaderWithFilter
     @Override
     public BtiTableReader cloneAndReplace(IFilter filter)
     {
-        return unbuildTo(new Builder(descriptor).setFilter(filter), true).build(owner().orElse(null), true, true);
+        BtiTableReader replacement = unbuildTo(new Builder(descriptor).setFilter(filter), true).build(owner().orElse(null), true, true);
+        replacement.approximateBloomFilterMemorySize = approximateBloomFilterMemorySize;
+        return replacement;
     }
 
     @Override
@@ -495,10 +498,12 @@ public class BtiTableReader extends SSTableReaderWithFilter
      */
     private BtiTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason)
     {
-        return unbuildTo(new Builder(descriptor), true)
+        BtiTableReader replacement = unbuildTo(new Builder(descriptor), true)
                .setFirst(newFirst)
                .setOpenReason(reason)
                .build(owner().orElse(null), true, true);
+        replacement.approximateBloomFilterMemorySize = approximateBloomFilterMemorySize;
+        return replacement;
     }
 
     @Override

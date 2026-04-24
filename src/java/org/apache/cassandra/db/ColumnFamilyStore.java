@@ -3610,6 +3610,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return bloomFilterTracker.getRecentTrueNegativeRate();
     }
 
+    public long getLazyBloomFilterHitCount()
+    {
+        return bloomFilterTracker.getLazyBloomFilterHitCount();
+    }
+
+    public long getLoadedBloomFilterHitCount()
+    {
+        return bloomFilterTracker.getLoadedBloomFilterHitCount();
+    }
+
+    public long getPassThroughBloomFilterHitCount()
+    {
+        return bloomFilterTracker.getPassThroughBloomFilterHitCount();
+    }
+
     public long getReadRequests()
     {
         return metric == null ? 0 : metric.readRequests.getCount();
