@@ -755,7 +755,7 @@
       <dependency>
         <groupId>io.netty</groupId>
         <artifactId>netty-all</artifactId>
-        <version>4.1.130.Final</version>
+        <version>4.1.132.Final</version>
         <exclusions>
           <exclusion>
             <groupId>io.netty</groupId>
@@ -768,10 +768,6 @@
           <exclusion>
             <groupId>io.netty</groupId>
             <artifactId>netty-codec-http2</artifactId>
-          </exclusion>
-          <exclusion>
-            <groupId>io.netty</groupId>
-            <artifactId>netty-codec-http</artifactId>
           </exclusion>
           <exclusion>
             <groupId>io.netty</groupId>
