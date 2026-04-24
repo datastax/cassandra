@@ -142,7 +142,7 @@ public class SSTableReaderTest
     public static final String CF_INDEXED = "Indexed1";
     public static final String CF_STANDARD_LOW_INDEX_INTERVAL = "StandardLowIndexInterval";
     public static final String CF_STANDARD_SMALL_BLOOM_FILTER = "StandardSmallBloomFilter";
-    public static final String CF_STANDARD_NO_BLOOM_FILTER = "StandardNoBloomFilter";
+    public static final String CF_STANDARD_PASS_THROUGH_BLOOM_FILTER = "StandardPassThroughBloomFilter";
 
     private final List<Ref<?>> refsToRelease = new ArrayList<>();
     private IPartitioner partitioner;
@@ -174,7 +174,7 @@ public class SSTableReaderTest
                                                 .minIndexInterval(4)
                                                 .maxIndexInterval(4)
                                                 .bloomFilterFpChance(0.99),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_NO_BLOOM_FILTER)
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_PASS_THROUGH_BLOOM_FILTER)
                                                 .bloomFilterFpChance(1));
 
         // All tests in this class assume auto-compaction is disabled.
@@ -1491,7 +1491,7 @@ public class SSTableReaderTest
 
         final int numKeys = 100;
         final Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD_NO_BLOOM_FILTER);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD_PASS_THROUGH_BLOOM_FILTER);
 
         SSTableReader sstable = getNewSSTable(cfs, numKeys, 1);
         Assert.assertTrue(sstable.getBloomFilterSerializedSize() == 0);

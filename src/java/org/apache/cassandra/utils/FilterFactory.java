@@ -99,11 +99,9 @@ public class FilterFactory
 
     private static IFilter createFilter(long numElements, double maxFalsePosProbability, MemoryLimiter memoryLimiter, boolean failOnExceedingLimit)
     {
-        assert maxFalsePosProbability <= 1.0 : "Invalid probability";
-        if (maxFalsePosProbability == 1.0)
+        BloomCalculations.BloomSpecification spec = getBloomSpecification(numElements, maxFalsePosProbability);
+        if (spec == null)
             return AlwaysPresent;
-        int bucketsPerElement = BloomCalculations.maxBucketsPerElement(numElements);
-        BloomCalculations.BloomSpecification spec = BloomCalculations.computeBloomSpec(bucketsPerElement, maxFalsePosProbability);
         return createFilter(spec.K, numElements, spec.bucketsPerElement, memoryLimiter, failOnExceedingLimit);
     }
 
@@ -125,6 +123,27 @@ public class FilterFactory
             metrics.incrementOOMError();
             return AlwaysPresent;
         }
+    }
+
+    public static long getFilterOffHeapSize(long numElements, double maxFalsePosProbability)
+    {
+        BloomCalculations.BloomSpecification spec = getBloomSpecification(numElements, maxFalsePosProbability);
+        if (spec == null)
+            return 0;
+
+        long numBits = (numElements * spec.bucketsPerElement) + BITSET_EXCESS;
+        long wordCount = (((numBits - 1) >>> 6) + 1);
+        return wordCount * 8L;
+    }
+
+    private static BloomCalculations.BloomSpecification getBloomSpecification(long numElements, double maxFalsePosProbability)
+    {
+        assert maxFalsePosProbability <= 1.0 : "Invalid probability";
+        if (maxFalsePosProbability == 1.0)
+            return null;
+
+        int bucketsPerElement = BloomCalculations.maxBucketsPerElement(numElements);
+        return BloomCalculations.computeBloomSpec(bucketsPerElement, maxFalsePosProbability);
     }
 
     public interface FilterFactoryMetrics

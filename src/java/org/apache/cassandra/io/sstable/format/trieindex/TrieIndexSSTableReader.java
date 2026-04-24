@@ -124,6 +124,8 @@ public class TrieIndexSSTableReader extends SSTableReader
         super(desc, components, metadata, maxDataAge, sstableMetadata, compactionMetadata, openReason, header, null, dfile, null, bf);
         this.rowIndexFile = rowIndexFile;
         this.partitionIndex = partitionIndex;
+        // computeExpectedBloomFilterMemorySize() uses partition index to estimate num of keys
+        this.approximateBloomFilterMemorySize = isBloomFilterLoaded() ? bf.offHeapSize() : computeExpectedBloomFilterMemorySize();
     }
 
     /**
