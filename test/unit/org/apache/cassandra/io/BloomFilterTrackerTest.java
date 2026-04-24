@@ -81,4 +81,40 @@ public class BloomFilterTrackerTest
         assertEquals(1L, bft.getFalsePositiveCount());
         assertEquals(0.2d, bft.getRecentFalsePositiveRate(), 0.0);
     }
+
+    @Test
+    public void testAddingLazyBloomFilterHits()
+    {
+        BloomFilterTracker bft = BloomFilterTracker.createMeterTracker();
+        assertEquals(0L, bft.getLazyBloomFilterHitCount());
+        bft.addLazyBloomFilterHit();
+        bft.addLazyBloomFilterHit();
+        assertEquals(2L, bft.getLazyBloomFilterHitCount());
+        assertEquals(0L, bft.getLoadedBloomFilterHitCount());
+        assertEquals(0L, bft.getPassThroughBloomFilterHitCount());
+    }
+
+    @Test
+    public void testAddingLoadedBloomFilterHits()
+    {
+        BloomFilterTracker bft = BloomFilterTracker.createMeterTracker();
+        assertEquals(0L, bft.getLoadedBloomFilterHitCount());
+        bft.addLoadedBloomFilterHit();
+        bft.addLoadedBloomFilterHit();
+        assertEquals(2L, bft.getLoadedBloomFilterHitCount());
+        assertEquals(0L, bft.getLazyBloomFilterHitCount());
+        assertEquals(0L, bft.getPassThroughBloomFilterHitCount());
+    }
+
+    @Test
+    public void testAddingPassThroughBloomFilterHits()
+    {
+        BloomFilterTracker bft = BloomFilterTracker.createMeterTracker();
+        assertEquals(0L, bft.getPassThroughBloomFilterHitCount());
+        bft.addPassThroughBloomFilterHit();
+        bft.addPassThroughBloomFilterHit();
+        assertEquals(2L, bft.getPassThroughBloomFilterHitCount());
+        assertEquals(0L, bft.getLazyBloomFilterHitCount());
+        assertEquals(0L, bft.getLoadedBloomFilterHitCount());
+    }
 }

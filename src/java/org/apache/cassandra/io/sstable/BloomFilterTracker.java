@@ -20,18 +20,36 @@ package org.apache.cassandra.io.sstable;
 import com.codahale.metrics.Meter;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.BloomFilter;
+import org.apache.cassandra.utils.FilterFactory;
 
 public abstract class BloomFilterTracker
 {
     public abstract void addFalsePositive();
     public abstract void addTruePositive();
     public abstract void addTrueNegative();
+    /**
+     * Count a lookup that uses {@link FilterFactory#AlwaysPresentForLazyLoading}.
+     */
+    public abstract void addLazyBloomFilterHit();
+    /**
+     * Count a lookup that uses a loaded {@link BloomFilter}.
+     */
+    public abstract void addLoadedBloomFilterHit();
+    /**
+     * Count a lookup that uses {@link FilterFactory#AlwaysPresent} due to lazy bloom filter
+     * loading failure or due to reaching bloom filter memory limit
+     */
+    public abstract void addPassThroughBloomFilterHit();
     public abstract long getFalsePositiveCount();
     public abstract double getRecentFalsePositiveRate();
     public abstract long getTruePositiveCount();
     public abstract double getRecentTruePositiveRate();
     public abstract long getTrueNegativeCount();
     public abstract double getRecentTrueNegativeRate();
+    public abstract long getLazyBloomFilterHitCount();
+    public abstract long getLoadedBloomFilterHitCount();
+    public abstract long getPassThroughBloomFilterHitCount();
 
     public static BloomFilterTracker createNoopTracker()
     {
@@ -48,6 +66,9 @@ public abstract class BloomFilterTracker
         private final Meter falsePositiveCount = new Meter();
         private final Meter truePositiveCount = new Meter();
         private final Meter trueNegativeCount = new Meter();
+        private final Meter lazyBloomFilterHitCount = new Meter();
+        private final Meter loadedBloomFilterHitCount = new Meter();
+        private final Meter passThroughBloomFilterHitCount = new Meter();
 
         @Override
         public void addFalsePositive()
@@ -65,6 +86,24 @@ public abstract class BloomFilterTracker
         public void addTrueNegative()
         {
             trueNegativeCount.mark();
+        }
+
+        @Override
+        public void addLazyBloomFilterHit()
+        {
+            lazyBloomFilterHitCount.mark();
+        }
+
+        @Override
+        public void addLoadedBloomFilterHit()
+        {
+            loadedBloomFilterHitCount.mark();
+        }
+
+        @Override
+        public void addPassThroughBloomFilterHit()
+        {
+            passThroughBloomFilterHitCount.mark();
         }
 
         @Override
@@ -102,6 +141,24 @@ public abstract class BloomFilterTracker
         {
             return trueNegativeCount.getFifteenMinuteRate();
         }
+
+        @Override
+        public long getLazyBloomFilterHitCount()
+        {
+            return lazyBloomFilterHitCount.getCount();
+        }
+
+        @Override
+        public long getLoadedBloomFilterHitCount()
+        {
+            return loadedBloomFilterHitCount.getCount();
+        }
+
+        @Override
+        public long getPassThroughBloomFilterHitCount()
+        {
+            return passThroughBloomFilterHitCount.getCount();
+        }
     }
 
     /**
@@ -123,6 +180,15 @@ public abstract class BloomFilterTracker
 
         @Override
         public void addTrueNegative() {}
+
+        @Override
+        public void addLazyBloomFilterHit() {}
+
+        @Override
+        public void addLoadedBloomFilterHit() {}
+
+        @Override
+        public void addPassThroughBloomFilterHit() {}
 
         @Override
         public long getFalsePositiveCount()
@@ -156,6 +222,24 @@ public abstract class BloomFilterTracker
 
         @Override
         public double getRecentTrueNegativeRate()
+        {
+            return 0;
+        }
+
+        @Override
+        public long getLazyBloomFilterHitCount()
+        {
+            return 0;
+        }
+
+        @Override
+        public long getLoadedBloomFilterHitCount()
+        {
+            return 0;
+        }
+
+        @Override
+        public long getPassThroughBloomFilterHitCount()
         {
             return 0;
         }
