@@ -103,6 +103,7 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
         this.indexSummary = builder.getIndexSummary();
         this.rowIndexEntrySerializer = new RowIndexEntry.Serializer(descriptor.version, header, owner != null ? owner.getMetrics() : null);
         this.keyCache = Objects.requireNonNull(builder.getKeyCache());
+        this.approximateBloomFilterMemorySize = isBloomFilterLoaded() ? filter.offHeapSize() : computeExpectedBloomFilterMemorySize();
     }
 
     @Override
@@ -513,7 +514,9 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
     @Override
     public SSTableReaderWithFilter cloneAndReplace(IFilter filter)
     {
-        return unbuildTo(new Builder(descriptor).setFilter(filter), true).build(owner().orElse(null), true, true);
+        BigTableReader replacement = unbuildTo(new Builder(descriptor).setFilter(filter), true).build(owner().orElse(null), true, true);
+        replacement.approximateBloomFilterMemorySize = approximateBloomFilterMemorySize;
+        return replacement;
     }
 
     /**
@@ -526,10 +529,12 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
      */
     private SSTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason)
     {
-        return unbuildTo(new Builder(descriptor), true)
+        BigTableReader replacement = unbuildTo(new Builder(descriptor), true)
                .setFirst(newFirst)
                .setOpenReason(reason)
                .build(owner().orElse(null), true, true);
+        replacement.approximateBloomFilterMemorySize = approximateBloomFilterMemorySize;
+        return replacement;
     }
 
     /**
@@ -543,11 +548,13 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
      */
     private BigTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason, IndexSummary newSummary)
     {
-        return unbuildTo(new Builder(descriptor).setIndexSummary(newSummary), true)
+        BigTableReader replacement = unbuildTo(new Builder(descriptor).setIndexSummary(newSummary), true)
                     .setIndexSummary(newSummary)
                     .setFirst(newFirst)
                     .setOpenReason(reason)
                     .build(owner().orElse(null), true, true);
+        replacement.approximateBloomFilterMemorySize = approximateBloomFilterMemorySize;
+        return replacement;
     }
 
     public SSTableReader cloneWithRestoredStart(DecoratedKey restoredStart)

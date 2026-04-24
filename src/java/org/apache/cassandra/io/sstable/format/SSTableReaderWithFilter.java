@@ -36,6 +36,7 @@ import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.filter.BloomFilterTracker;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.FilterFactory;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.concurrent.Ref;
 
@@ -48,6 +49,7 @@ public abstract class SSTableReaderWithFilter extends SSTableReader
     private final boolean bloomFilterLazyLoading = BloomFilter.lazyLoading();
     private final int bloomFilterLazyLoadingWindow = BloomFilter.lazyLoadingWindow();
     private final long bloomFilterLazyLoadingThreshold = BloomFilter.lazyLoadingThreshold();
+    protected volatile long approximateBloomFilterMemorySize;
 
     private final BloomFilterTracker filterTracker;
 
@@ -84,15 +86,98 @@ public abstract class SSTableReaderWithFilter extends SSTableReader
     public boolean mayContainAssumingKeyIsInRange(DecoratedKey key)
     {
         maybeDeserializeLazyBloomFilter();
-        // if we don't have bloom filter(bf_fp_chance=1.0 or filter file is missing),
-        // we check index file instead.
-        return !filter.isInformative() && getPosition(key, Operator.EQ, false) >= 0 || filter.isPresent(key);
+
+        if (filter.isInformative())
+        {
+            recordBloomFilterHit();
+            return filter.isPresent(key);
+        }
+
+        if (isPassThroughBloomFilter())
+        {
+            recordBloomFilterHit();
+            return true;
+        }
+
+        // Lazy bloom filters must check the index both to answer accurately and to drive the lazy-loading threshold.
+        return getPosition(key, Operator.EQ, false) >= 0 || filter.isPresent(key);
     }
 
     protected boolean inBloomFilter(DecoratedKey dk)
     {
+        recordBloomFilterHit();
         maybeDeserializeLazyBloomFilter();
         return filter.isPresent(dk);
+    }
+
+    private void recordBloomFilterHit()
+    {
+        // There could be a race where async BF loading completes before calling filter.isPresent(key).
+        // That is acceptable because the counter records the state observed before this lookup.
+        if (isLazyBloomFilter())
+            filterTracker.addLazyBloomFilterHit();
+        else if (isPassThroughBloomFilter())
+            filterTracker.addPassThroughBloomFilterHit();
+        else
+            filterTracker.addLoadedBloomFilterHit();
+    }
+
+    /**
+     * If underlying bloom filter is {@link BloomFilter}.
+     */
+    public boolean isBloomFilterLoaded()
+    {
+        return !isLazyBloomFilter() && !isPassThroughBloomFilter();
+    }
+
+    /**
+     * If underlying filter is {@link FilterFactory#AlwaysPresentForLazyLoading}.
+     */
+    public boolean isLazyBloomFilter()
+    {
+        return filter == FilterFactory.AlwaysPresentForLazyLoading;
+    }
+
+    /**
+     * If underlying filter is {@link FilterFactory#AlwaysPresent}:
+     *   - BF file was not written when hitting BF memory limit during flush
+     *   - BF deserialization hits BF memory limit
+     *   - Lazy BF failed to load
+     */
+    public boolean isPassThroughBloomFilter()
+    {
+        return filter == FilterFactory.AlwaysPresent;
+    }
+
+    protected long computeExpectedBloomFilterMemorySize()
+    {
+        return FilterFactory.getFilterOffHeapSize(estimatedKeys(), metadata().params.bloomFilterFpChance);
+    }
+
+    /**
+     * Returns the approximate off-heap memory size in bytes that the bloom filter for this SSTable would occupy when
+     * fully loaded based on estimated keys and false-positive chance, regardless of the current bloom filter state
+     * (either lazy BF or no BF due to memory limit or loading failure).
+     */
+    public long getApproximateBloomFilterMemorySize()
+    {
+        return approximateBloomFilterMemorySize;
+    }
+
+    @VisibleForTesting
+    public boolean isLazyBloomFilterByRequestRateCriteria()
+    {
+        return isLazyBloomFilter()
+               && bloomFilterLazyLoadingWindow > 0
+               && bloomFilterLazyLoadingThreshold > 0
+               && !partitionIndexHitRateExceedsThreshold();
+    }
+
+    public boolean isLazyBloomFilterByRequestCountCriteria()
+    {
+        return isLazyBloomFilter()
+               && (bloomFilterLazyLoadingThreshold == 0
+                   || bloomFilterLazyLoadingWindow <= 0 && !partitionIndexHitCountExceedsThreshold());
     }
 
     /**
@@ -110,14 +195,14 @@ public abstract class SSTableReaderWithFilter extends SSTableReader
 
         boolean loadBloomFilter = false;
 
-        // If the threshold was set to zero we always want to deserialize
+        // If the threshold was set to zero we always want to deserialize on first access
         if (bloomFilterLazyLoadingThreshold == 0)
             loadBloomFilter = true;
-            // otherwise, if window is <= 0 we use the threshold as an absolute count
-        else if (bloomFilterLazyLoadingWindow <= 0 && partitionIndexReadMeter.get().count() >= bloomFilterLazyLoadingThreshold)
+        // otherwise, if window is <= 0 we use the threshold as an absolute count
+        else if (bloomFilterLazyLoadingWindow <= 0 && partitionIndexHitCountExceedsThreshold())
             loadBloomFilter = true;
-            // otherwise we look at the count in the specified window
-        else if (bloomFilterLazyLoadingWindow > 0 && partitionIndexReadMeter.get().rate(bloomFilterLazyLoadingWindow) >= bloomFilterLazyLoadingThreshold)
+        // otherwise we look at the count in the specified window
+        else if (bloomFilterLazyLoadingWindow > 0 && partitionIndexHitRateExceedsThreshold())
             loadBloomFilter = true;
 
         if (!loadBloomFilter)
@@ -152,7 +237,8 @@ public abstract class SSTableReaderWithFilter extends SSTableReader
                                      }
                                      else
                                      {
-                                         logger.debug("Successfuly loaded lazy bloom filter for {}", descriptor.baseFileURI());
+                                         logger.debug("Successfuly loaded lazy bloom filter for {} with offheap size {}", descriptor.baseFileURI(),
+                                                      FBUtilities.prettyPrintMemory(loaded.offHeapSize()));
 
                                          filter = loaded;
                                          tidy.addCloseable(loaded); // close newly created bloom filter on sstable close
@@ -170,6 +256,16 @@ public abstract class SSTableReaderWithFilter extends SSTableReader
                          });
 
         return true;
+    }
+
+    private boolean partitionIndexHitRateExceedsThreshold()
+    {
+        return partitionIndexReadMeter.map(meter -> meter.rate(bloomFilterLazyLoadingWindow) >= bloomFilterLazyLoadingThreshold).orElse(false);
+    }
+
+    private boolean partitionIndexHitCountExceedsThreshold()
+    {
+        return partitionIndexReadMeter.map(meter -> meter.count() >= bloomFilterLazyLoadingThreshold).orElse(false);
     }
 
     @Override

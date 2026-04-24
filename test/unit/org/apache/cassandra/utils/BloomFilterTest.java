@@ -409,6 +409,32 @@ public class BloomFilterTest
     }
 
     @Test
+    public void testGetFilterOffHeapSize()
+    {
+        long numElements = 100_000;
+        double fpChance = 0.01;
+
+        long actualOffHeapSize;
+        try (IFilter filter = FilterFactory.getFilter(numElements, fpChance, memoryLimiter))
+        {
+            assertTrue(filter instanceof BloomFilter);
+            actualOffHeapSize = filter.offHeapSize();
+        }
+        assertNotEquals(0, actualOffHeapSize);
+        assertEquals(actualOffHeapSize, FilterFactory.getFilterOffHeapSize(numElements, fpChance));
+    }
+
+    @Test
+    public void testGetFilterOffHeapSizeForBoundaries()
+    {
+        // fp_chance=1.0 maps to AlwaysPresent — no memory is needed
+        assertEquals(0, FilterFactory.getFilterOffHeapSize(100_000, 1.0));
+
+        // 0 elements: the Math.max(1, numElements) guard keeps the calculation valid
+        assertTrue(FilterFactory.getFilterOffHeapSize(0, 0.01) > 0);
+    }
+
+    @Test
     @Ignore // this is a test that can be used to print out the sizes of BFs
     public void testBloomFilterSize()
     {

@@ -33,6 +33,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -69,8 +70,6 @@ public class LazyBloomFilterTest
     @BeforeClass
     public static void defineSchema()
     {
-        CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING.setBoolean(true);
-
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
@@ -88,11 +87,24 @@ public class LazyBloomFilterTest
         CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING.reset();
     }
 
+    @Before
+    public void init()
+    {
+        CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING.setBoolean(true);
+    }
+
     @After
     public void cleanup()
     {
-        store.loadNewSSTables();
-        store.truncateBlocking();
+        try
+        {
+            store.loadNewSSTables();
+            store.truncateBlocking();
+        }
+        finally
+        {
+            CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING.reset();
+        }
     }
 
     @Test
@@ -101,6 +113,11 @@ public class LazyBloomFilterTest
         CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING_THRESHOLD.setInt(0);
 
         SSTableReaderWithFilter sstable = reopenFlushedSSTable();
+        assertThat(sstable.isBloomFilterLoaded()).isFalse();
+        assertThat(sstable.isLazyBloomFilter()).isTrue();
+        assertThat(sstable.isLazyBloomFilterByRequestRateCriteria()).isFalse();
+        assertThat(sstable.isLazyBloomFilterByRequestCountCriteria()).isTrue();
+        assertThat(sstable.isPassThroughBloomFilter()).isFalse();
 
         // first read will trigger bloom filter deserialization
         assertTrue(sstable.mayContainAssumingKeyIsInRange(Util.dk(String.valueOf(10))));
@@ -196,11 +213,26 @@ public class LazyBloomFilterTest
 
         SSTableReaderWithFilter sstable = reopenFlushedSSTable();
         DecoratedKey key = Util.dk(String.valueOf(keyInt));
+        long lazyBloomFilterHits = store.getLazyBloomFilterHitCount();
 
         // first read will NOT trigger bloom filter deserialization because of threshold not reached
         sstable.mayContainAssumingKeyIsInRange(key);
         assertSame(FilterFactory.AlwaysPresentForLazyLoading, sstable.getFilter());
         assertThat(sstable.getFilter().offHeapSize()).isEqualTo(0);
+        assertThat(store.getLazyBloomFilterHitCount()).isEqualTo(lazyBloomFilterHits + 1);
+        assertThat(sstable.isBloomFilterLoaded()).isFalse();
+        assertThat(sstable.isLazyBloomFilter()).isTrue();
+        assertThat(sstable.isPassThroughBloomFilter()).isFalse();
+        if (window > 0)
+        {
+            assertThat(sstable.isLazyBloomFilterByRequestRateCriteria()).isTrue();
+            assertThat(sstable.isLazyBloomFilterByRequestCountCriteria()).isFalse();
+        }
+        else
+        {
+            assertThat(sstable.isLazyBloomFilterByRequestRateCriteria()).isFalse();
+            assertThat(sstable.isLazyBloomFilterByRequestCountCriteria()).isTrue();
+        }
 
         // make the sstable access the index
         SinglePartitionReadCommand command = createCommand(key);
@@ -221,6 +253,12 @@ public class LazyBloomFilterTest
 
         assertThat(sstable.getFilter()).isNotSameAs(FilterFactory.AlwaysPresent);
         assertThat(sstable.getFilter().offHeapSize()).isGreaterThan(0);
+        assertThat(sstable.isBloomFilterLoaded()).isTrue();
+        assertThat(sstable.isLazyBloomFilter()).isFalse();
+        assertThat(sstable.isLazyBloomFilterByRequestRateCriteria()).isFalse();
+        assertThat(sstable.isLazyBloomFilterByRequestCountCriteria()).isFalse();
+        assertThat(sstable.isPassThroughBloomFilter()).isFalse();
+        assertThat(store.getLazyBloomFilterHitCount()).isGreaterThan(lazyBloomFilterHits);
 
         releaseSSTables(sstable);
     }
@@ -231,6 +269,7 @@ public class LazyBloomFilterTest
         CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING_THRESHOLD.setInt(0);
 
         SSTableReaderWithFilter sstable = reopenFlushedSSTable();
+        long passThroughBloomFilterHits = store.getPassThroughBloomFilterHitCount();
 
         // release sstable
         store.getLiveSSTables().forEach(s -> s.selfRef().release()); // ColumnFamilyStore#clearUnsafe won't release sstable reference
@@ -244,6 +283,67 @@ public class LazyBloomFilterTest
                   .until(() -> sstable.filter == FilterFactory.AlwaysPresent);
 
         assertThat(sstable.getFilter()).isSameAs(FilterFactory.AlwaysPresent);
+        assertThat(sstable.isBloomFilterLoaded()).isFalse();
+        assertThat(sstable.isLazyBloomFilter()).isFalse();
+        assertThat(sstable.isLazyBloomFilterByRequestRateCriteria()).isFalse();
+        assertThat(sstable.isLazyBloomFilterByRequestCountCriteria()).isFalse();
+        assertThat(sstable.isPassThroughBloomFilter()).isTrue();
+        assertThat(sstable.mayContainAssumingKeyIsInRange(Util.dk(String.valueOf(10)))).isTrue();
+        assertThat(store.getPassThroughBloomFilterHitCount()).isEqualTo(passThroughBloomFilterHits + 1);
+    }
+
+    @Test
+    public void testApproximateMemorySizeForLoadedBF()
+    {
+        CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING.setBoolean(false);
+
+        SSTableReaderWithFilter sstable = reopenFlushedSSTable();
+        assertThat(sstable.estimatedKeys()).isGreaterThan(0);
+
+        long approximateMemorySize = FilterFactory.getFilterOffHeapSize(sstable.estimatedKeys(), store.metadata().params.bloomFilterFpChance);
+        assertThat(sstable.getFilter().offHeapSize()).isGreaterThan(0);
+        assertThat(sstable.getApproximateBloomFilterMemorySize()).isEqualTo(sstable.getFilter().offHeapSize());
+        assertThat(sstable.getApproximateBloomFilterMemorySize()).isEqualTo(approximateMemorySize);
+    }
+
+    @Test
+    public void testApproximateMemorySizeForLazyBF()
+    {
+        SSTableReaderWithFilter sstable = reopenFlushedSSTable();
+        assertThat(sstable.estimatedKeys()).isGreaterThan(0);
+
+        long approximateMemorySize = FilterFactory.getFilterOffHeapSize(sstable.estimatedKeys(), store.metadata().params.bloomFilterFpChance);
+        assertThat(sstable.getFilter().offHeapSize()).isEqualTo(0);
+        assertThat(sstable.getFilter()).isSameAs(FilterFactory.AlwaysPresentForLazyLoading);
+        assertThat(sstable.getApproximateBloomFilterMemorySize()).isEqualTo(approximateMemorySize);
+    }
+
+    @Test
+    public void testApproximateMemorySizePreservedWhenLazyBFBecomesNoFilter()
+    {
+        CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING_THRESHOLD.setInt(0);
+
+        SSTableReaderWithFilter sstable = reopenFlushedSSTable();
+
+        // approximateBloomFilterMemorySize is computed at open time, before any deserialization attempt
+        long approximateMemorySize = sstable.getApproximateBloomFilterMemorySize();
+        assertThat(approximateMemorySize).isGreaterThan(0);
+        assertThat(sstable.isLazyBloomFilter()).isTrue();
+
+        // Release the sstable to fail lazy BF loading
+        store.getLiveSSTables().forEach(s -> s.selfRef().release());
+        store.clearUnsafe();
+        assertThat(sstable.selfRef().globalCount()).isEqualTo(0);
+
+        assertThat(sstable.maybeDeserializeLazyBloomFilter()).isTrue();
+        Awaitility.await("lazy BF deserialization falls back to AlwaysPresent")
+                  .atMost(10, TimeUnit.SECONDS)
+                  .until(() -> sstable.getFilter() == FilterFactory.AlwaysPresent);
+
+        // filter is now the pass-through filter
+        assertThat(sstable.isPassThroughBloomFilter()).isTrue();
+        assertThat(sstable.isBloomFilterLoaded()).isFalse();
+        assertThat(sstable.getApproximateBloomFilterMemorySize()).isEqualTo(approximateMemorySize);
     }
 
     private void releaseSSTables(SSTableReaderWithFilter sstable)
@@ -285,8 +385,11 @@ public class LazyBloomFilterTest
         SSTableReader newlyOpenedSSTable = Iterables.getOnlyElement(store.getLiveSSTables());
         assertThat(newlyOpenedSSTable).isInstanceOf(SSTableReaderWithFilter.class);
         sstable = (SSTableReaderWithFilter) newlyOpenedSSTable;
-        assertSame(FilterFactory.AlwaysPresentForLazyLoading, sstable.getFilter());
-        assertThat(sstable.getFilter().offHeapSize()).isEqualTo(0);
+        if (CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING.getBoolean())
+        {
+            assertSame(FilterFactory.AlwaysPresentForLazyLoading, sstable.getFilter());
+            assertThat(sstable.getFilter().offHeapSize()).isEqualTo(0);
+        }
 
         return sstable;
     }
