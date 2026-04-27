@@ -1565,18 +1565,35 @@ public abstract class CQLTester
         return QueryProcessor.parseStatement(formattedQuery, ClientState.forInternalCalls());
     }
 
-    protected ReadCommand parseReadCommand(String query)
+    protected ReadQuery parseReadQuery(String query)
     {
         SelectStatement select = (SelectStatement) parseStatement(query);
-        ReadQuery readQuery = select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
-        Assertions.assertThat(readQuery).isInstanceOf(ReadCommand.class);
-        return  (ReadCommand) readQuery;
+        return select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+    }
+
+    protected ReadCommand parseReadCommand(String query)
+    {
+        ReadQuery readQuery = parseReadQuery(query);
+
+        // if it's already a ReadCommand, return it directly
+        if (readQuery instanceof ReadCommand)
+            return (ReadCommand) readQuery;
+
+        // if it's a SinglePartitionReadCommand.Group, extract the single command, or fail if it's not single-command
+        if (readQuery instanceof SinglePartitionReadCommand.Group)
+        {
+            SinglePartitionReadCommand.Group commandGroup = (SinglePartitionReadCommand.Group) readQuery;
+            List<SinglePartitionReadCommand> commands = commandGroup.queries;
+            Assertions.assertThat(commands).as("Expected exactly 1 command in query: %s", query).hasSize(1);
+            return commands.get(0);
+        }
+
+        return Assertions.fail("Unexpected query type %s for query: %s", readQuery.getClass().getName(), query);
     }
 
     protected List<SinglePartitionReadCommand> parseReadCommandGroup(String query)
     {
-        SelectStatement select = (SelectStatement) parseStatement(query);
-        ReadQuery readQuery = select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+        ReadQuery readQuery = parseReadQuery(query);
         Assertions.assertThat(readQuery).isInstanceOf(SinglePartitionReadCommand.Group.class);
         SinglePartitionReadCommand.Group commands = (SinglePartitionReadCommand.Group) readQuery;
         return commands.queries;

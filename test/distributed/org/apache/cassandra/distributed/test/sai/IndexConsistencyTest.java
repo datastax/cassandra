@@ -149,6 +149,54 @@ public class IndexConsistencyTest extends TestBaseImpl
     }
 
     @Test
+    public void testUpdateOnWideTableWithSinglePartitionQueries() throws Exception
+    {
+        cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c int, v text, s int STATIC, PRIMARY KEY(k, c))"));
+        cluster.schemaChange(formatQuery(createIndexQuery("v")));
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
+        execute("INSERT INTO %s(k, s) VALUES (0, 9)",
+                "INSERT INTO %s(k, c, v) VALUES (0, -1, 'old')",
+                "INSERT INTO %s(k, c, v) VALUES (0, 0, 'old')",
+                "INSERT INTO %s(k, c, v) VALUES (0, 1, 'old')",
+                "INSERT INTO %s(k, s) VALUES (1, 9)",
+                "INSERT INTO %s(k, c, v) VALUES (1, -1, 'old')",
+                "INSERT INTO %s(k, c, v) VALUES (1, 0, 'old')",
+                "INSERT INTO %s(k, c, v) VALUES (1, 1, 'old')");
+
+        executeIsolated(1, "UPDATE %s SET v = 'new' WHERE k = 0 AND c = 0");
+
+        assertRows("SELECT * FROM %s WHERE k = 0 AND v = 'old'", row(0, -1, 9, "old"), row(0, 1, 9, "old"));
+        assertRows("SELECT * FROM %s WHERE k = 0 AND v = 'new'", row(0, 0, 9, "new"));
+    }
+
+    @Test
+    public void testUpdateOnWideTableWithSinglePartitionQueriesMultiClustering() throws Exception
+    {
+        cluster.schemaChange(formatQuery("CREATE TABLE %s (k int, c1 int, c2 int, v text, s int STATIC, PRIMARY KEY(k, c1, c2))"));
+        cluster.schemaChange(formatQuery(createIndexQuery("v")));
+        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, KEYSPACE);
+        execute("INSERT INTO %s(k, s) VALUES (0, 9)",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (0, -1, -1, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (0, -1, 0, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (0, -1, 1, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (0, 0, -1, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (0, 0, 0, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (0, 0, 1, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (0, 1, -1, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (0, 1, 0, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (0, 1, 1, 'old')",
+                "INSERT INTO %s(k, s) VALUES (1, 9)",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (1, 0, -1, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (1, 0, 0, 'old')",
+                "INSERT INTO %s(k, c1, c2, v) VALUES (1, 0, 1, 'old')");
+
+        executeIsolated(1, "UPDATE %s SET v = 'new' WHERE k = 0 AND c1 = 0 AND c2 = 0");
+
+        assertRows("SELECT * FROM %s WHERE k = 0 AND c1 = 0 AND v = 'old'", row(0, 0, -1, 9, "old"), row(0, 0, 1, 9, "old"));
+        assertRows("SELECT * FROM %s WHERE k = 0 AND c1 = 0 AND v = 'new'", row(0, 0, 0, 9, "new"));
+    }
+
+    @Test
     public void testUpdateOnWideTableCaseInsensitive() throws Exception
     {
         cluster.schemaChange(formatQuery("CREATE TABLE %s (k1 int, k2 int, v text, v1 text, primary key(k1, k2)) with read_repair='NONE'"));

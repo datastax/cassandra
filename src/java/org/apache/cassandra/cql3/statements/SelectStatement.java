@@ -397,14 +397,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                               int perPartitionLimit,
                               int userOffset)
     {
-        boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
-
         DataLimits dataLimits = getDataLimits(queryState, userLimit, perPartitionLimit, userOffset);
-
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-        ReadQuery query = isPartitionRangeQuery
-                        ? getRangeCommand(options, columnFilter, dataLimits, nowInSec, queryState, indexRegistry)
-                        : getSliceCommands(queryState, options, columnFilter, dataLimits, nowInSec, indexRegistry);
+        RowFilter rowFilter = getRowFilter(options, queryState, indexRegistry);
+
+        ReadQuery query = restrictions.isKeyRange()
+                        ? getRangeCommand(queryState, options, columnFilter, rowFilter, dataLimits, nowInSec)
+                        : getSliceCommands(queryState, options, columnFilter, rowFilter, dataLimits, nowInSec);
 
         // Handle additional validation for topK queries
         if (query.isTopK())
@@ -432,7 +431,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
         }
 
-        selectOptions.validate(queryState, table, userLimit, indexRegistry, query.indexQueryPlan());
+        query.validateSelectOptions(selectOptions, queryState);
 
         // If there's a secondary index that the command can use, have it validate the request parameters.
         query.maybeValidateIndexes();
@@ -705,9 +704,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private ReadQuery getSliceCommands(QueryState queryState,
                                        QueryOptions options,
                                        ColumnFilter columnFilter,
+                                       RowFilter rowFilter,
                                        DataLimits limit,
-                                       int nowInSec,
-                                       IndexRegistry indexRegistry)
+                                       int nowInSec)
     {
         Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options, queryState);
         if (keys.isEmpty())
@@ -718,8 +717,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter, queryState);
         if (filter == null || filter.isEmpty(table.comparator))
             return ReadQuery.empty(table);
-
-        RowFilter rowFilter = getRowFilter(options, queryState, indexRegistry);
 
         List<DecoratedKey> decoratedKeys = new ArrayList<>(keys.size());
         for (ByteBuffer key : keys)
@@ -778,18 +775,16 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                             IndexRegistry.EMPTY);
     }
 
-    private ReadQuery getRangeCommand(QueryOptions options,
+    private ReadQuery getRangeCommand(QueryState queryState,
+                                      QueryOptions options,
                                       ColumnFilter columnFilter,
+                                      RowFilter rowFilter,
                                       DataLimits limit,
-                                      int nowInSec,
-                                      QueryState queryState,
-                                      IndexRegistry indexRegistry)
+                                      int nowInSec)
     {
         ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, columnFilter, queryState);
         if (clusteringIndexFilter == null)
             return ReadQuery.empty(table);
-
-        RowFilter rowFilter = getRowFilter(options, queryState, indexRegistry);
 
         // The LIMIT provided by the user is the number of CQL row he wants returned.
         // We want to have getRangeSlice to count the number of columns, not the number of keys.
