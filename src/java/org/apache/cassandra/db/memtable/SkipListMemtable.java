@@ -285,7 +285,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             final Object val = new Object();
             for (int i = 0 ; i < count ; i++)
                 partitions.put(cloner.clone(new BufferDecoratedKey(new LongToken(i), HeapCloner.instance.allocate(1))), val);
-            double avgSize = ObjectSizes.measureDeep(partitions) / (double) count;
+            double avgSize = ObjectSizes.measureDeepOmitShared(partitions) / (double) count;
             rowOverhead = (int) ((avgSize - Math.floor(avgSize)) < 0.05 ? Math.floor(avgSize) : Math.ceil(avgSize));
             rowOverhead -= ObjectSizes.measureDeep(new LongToken(0));
             if (!(allocator instanceof NativeAllocator))

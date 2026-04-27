@@ -69,7 +69,9 @@ public class ComparisonReadBench
 {
     // Note: To see a printout of the usage for each object, add .printVisitedTree() here (most useful with smaller number of
     // partitions).
-    static MemoryMeter meter = new MemoryMeter().withGuessing(Guess.FALLBACK_UNSAFE);
+    static MemoryMeter meter = MemoryMeter.builder()
+                                          .withGuessing(Guess.INSTRUMENTATION_AND_SPECIFICATION, Guess.UNSAFE)
+                                          .build();
 
     public enum TrieAllocation {
         SHORT_LIVED,
