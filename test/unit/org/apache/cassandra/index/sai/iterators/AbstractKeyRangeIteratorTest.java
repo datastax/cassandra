@@ -273,10 +273,10 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
         Clustering<?> lastClustering = Clustering.EMPTY;
         for (PrimaryKey key : keys)
         {
-            if (key.hasEmptyClustering() && key.partitionKey().equals(lastPartitionKey))
+            if (!key.hasClustering() && key.partitionKey().equals(lastPartitionKey))
                 throw new AssertionError("A primary key with empty clustering follows a key in the same partition:\n" + key + "\nafter:\n" + lastPrimaryKey);
 
-            if (!key.hasEmptyClustering() && lastClustering.isEmpty() && key.partitionKey().equals(lastPartitionKey))
+            if (key.hasClustering() && lastClustering.isEmpty() && key.partitionKey().equals(lastPartitionKey))
                 throw new AssertionError("A primary key with non-empty clustering follows a key with empty clustering in the same partition:\n" + key + "\nafter:\n" + lastPrimaryKey);
 
             if (Objects.equals(key, lastPrimaryKey))
@@ -304,7 +304,7 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
         {
             for (PrimaryKey pk : keys)
             {
-                if (pk.hasEmptyClustering())
+                if (!pk.hasClustering())
                     partitions.add(pk.partitionKey());
                 else
                     rows.add(Pair.create(pk.partitionKey(), pk.clustering()));
