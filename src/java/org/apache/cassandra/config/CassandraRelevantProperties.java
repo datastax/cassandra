@@ -480,6 +480,11 @@ public enum CassandraRelevantProperties
      */
     DISABLED_AUTO_COMPACTION_PROPERTY("cassandra.disabled_auto_compaction"),
 
+    /**
+     * When set, all compaction logic is shut down and no compactions will execute.
+     */
+    DISABLED_ALL_COMPACTIONS("cassandra.disable_all_compactions", "false"),
+
     /** Which class to use for dynamic snitch severity values */
     DYNAMIC_SNITCH_SEVERITY_PROVIDER("cassandra.dynamic_snitch_severity_provider"),
 
