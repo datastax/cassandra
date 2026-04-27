@@ -356,7 +356,6 @@ public class StorageAttachedIndex implements Index
         }
         else if (type.isVector())
         {
-            // The current version must support vectors.
             if (!Version.current(metadata.keyspace).onOrAfter(Version.JVECTOR_EARLIEST))
             {
                 throw new InvalidRequestException(vectorUnsupportedByCurrentVersionError(Version.current(metadata.keyspace)));

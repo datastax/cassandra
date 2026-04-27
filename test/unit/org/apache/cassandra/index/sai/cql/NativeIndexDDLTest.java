@@ -1362,7 +1362,7 @@ public class NativeIndexDDLTest extends SAITester
      * More exhaustive testing is done in {@link CreateIndexWithNewVersionTest}.
      */
     @Test
-    public void verifyCanRebuildAndReloadInPlaceToNewerVersionOnlyAfterSSTsbleUpgrade()
+    public void verifyCanRebuildAndReloadInPlaceToNewerVersionOnlyAfterSSTableUpgrade()
     {
         Version current = Version.current(KEYSPACE);
         try

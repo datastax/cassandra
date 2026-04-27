@@ -137,6 +137,7 @@ public class CreateIndexWithNewVersionTest extends SAITester
         // Upgrade sstables should upgrade all sstable indexes to the new version.
         upgradeSSTables();
         verifySAIVersionInUse(upgradeVersion);
+        assertThat(group.getMinVersion()).isEqualTo(upgradeVersion);
         verifyQueries();
     }
 

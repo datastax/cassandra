@@ -105,20 +105,7 @@ public class FeaturesVersionSupportTest extends VectorTester
         // Vector index creation will be accepted on newer versions, unless there are other indexes using a version
         // that doesn't support jvector. In that case, the vector index will fail until the old sstables are
         // upgraded, so the old indexes are upgraded too.
-        SAIUtil.setCurrentVersion(Version.LATEST);
-        if (version.onOrAfter(Version.JVECTOR_EARLIEST))
-        {
-            createIndex(createIndexQuery);
-        }
-        else
-        {
-            Assertions.assertThatThrownBy(() -> createIndex(createIndexQuery))
-                      .hasMessageContaining(StorageAttachedIndex.vectorUnsupportedByExistingVersionError(version));
-
-            upgradeSSTables();
-            createIndex(createIndexQuery);
-            verifySAIVersionInUse(KEYSPACE, currentTable(), Version.LATEST);
-        }
+        assertIndexCreationChecksCurrentPerTableVersion(createIndexQuery);
 
         // once the index has been created, we can query it
         assertRows(execute("SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5, 4.5] LIMIT 3"), row(2), row(1), row(3));
@@ -168,6 +155,15 @@ public class FeaturesVersionSupportTest extends VectorTester
         // Geospatial index creation will be accepted on newer versions, unless there are other indexes using a version
         // that doesn't support jvector. In that case, the geospatial index will fail until the old sstables are
         // upgraded, so the old indexes are upgraded too.
+        assertIndexCreationChecksCurrentPerTableVersion(createIndexQuery);
+
+        // once the index has been created, we can query it
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE GEO_DISTANCE(v, [5,5]) < 157000"), row(2), row(3));
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE GEO_DISTANCE(v, [5,5]) < 157011"), row(1), row(2), row(3));
+    }
+
+    private void assertIndexCreationChecksCurrentPerTableVersion(String createIndexQuery)
+    {
         SAIUtil.setCurrentVersion(Version.LATEST);
         if (version.onOrAfter(Version.JVECTOR_EARLIEST))
         {
@@ -182,10 +178,6 @@ public class FeaturesVersionSupportTest extends VectorTester
             createIndex(createIndexQuery);
             verifySAIVersionInUse(KEYSPACE, currentTable(), Version.LATEST);
         }
-
-        // once the index has been created, we can query it
-        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE GEO_DISTANCE(v, [5,5]) < 157000"), row(2), row(3));
-        assertRowsIgnoringOrder(execute("SELECT k FROM %s WHERE GEO_DISTANCE(v, [5,5]) < 157011"), row(1), row(2), row(3));
     }
 
     /**

@@ -449,8 +449,8 @@ public class SAITester extends CQLTester
         Assertions.assertThat(perSSTableVersion).isIn(expectedVersions);
 
         // This is to make sure the context uses the actual files we think
-        SSTableContext ssTableContext = group.sstableContextManager().getContext(sstable);
-        perSSTableVersion = ssTableContext.usedPerSSTableComponents().version();
+        SSTableContext sstableContext = group.sstableContextManager().getContext(sstable);
+        perSSTableVersion = sstableContext.usedPerSSTableComponents().version();
         Assertions.assertThat(perSSTableVersion).isIn(expectedVersions);
 
         for (IndexContext indexContext : getIndexContexts(cfs.keyspace.getName(), cfs.name))
