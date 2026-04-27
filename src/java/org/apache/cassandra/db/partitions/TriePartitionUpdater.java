@@ -18,152 +18,219 @@
 
 package org.apache.cassandra.db.partitions;
 
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.DeletionInfo;
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.memtable.TrieMemtable;
-import org.apache.cassandra.db.rows.BTreeRow;
-import org.apache.cassandra.db.tries.InMemoryTrie;
-import org.apache.cassandra.index.transactions.UpdateTransaction;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.memory.Cloner;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
+import org.apache.cassandra.db.rows.Cells;
+import org.apache.cassandra.db.rows.TrieBackedRow;
+import org.apache.cassandra.db.memtable.TrieCellData;
+import org.apache.cassandra.db.rows.TrieTombstoneMarker;
+import org.apache.cassandra.db.tries.DeletionAwareTrie;
+import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 
-import static org.apache.cassandra.db.partitions.TrieBackedPartition.RowData;
+import static org.apache.cassandra.db.memtable.TrieMemtable.PartitionData;
 
-/**
- *  The function we provide to the trie utilities to perform any partition and row inserts and updates
- */
-public final class TriePartitionUpdater
-extends BasePartitionUpdater
-implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
+/// The function we provide to the trie utilities to perform any partition and row inserts and updates.
+/// This version is used when no secondary index is applied, which makes the process quite a bit simpler.
+public class TriePartitionUpdater
 {
-    private final UpdateTransaction indexer;
-    private final TableMetadata metadata;
-    private TrieMemtable.PartitionData currentPartition;
     private final TrieMemtable.MemtableShard owner;
-    public int partitionsAdded = 0;
+    protected final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>.Mutator<Object, TrieTombstoneMarker> mutator;
 
-    public TriePartitionUpdater(Cloner cloner,
-                                UpdateTransaction indexer,
-                                TableMetadata metadata,
-                                TrieMemtable.MemtableShard owner)
+    public long dataSize;
+    public long colUpdateTimeDelta;
+    public int partitionsAdded;
+
+    /// Holds a reference to the current partition's statistics, used to update them when merging data.
+    protected PartitionData currentPartition;
+
+    public TriePartitionUpdater(TrieMemtable.MemtableShard owner,
+                                InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
-        super(cloner);
-        this.indexer = indexer;
-        this.metadata = metadata;
         this.owner = owner;
+        this.mutator = data.mutator(this::mergeData,
+                                    this::mergeMarkers,
+                                    this::applyIncomingMarker,
+                                    this::applyExistingMarkerToIncomingRow,
+                                    true,
+                                    TrieMemtable.FORCE_COPY_PARTITION_BOUNDARY,
+                                    x -> { throw new AssertionError("Force copy should already be in effect for all range tries"); });
     }
 
-    @Override
-    public Object apply(Object existing, Object update, InMemoryTrie.KeyProducer<Object> keyState)
+    /// Merge the given update into the data trie.
+    public void mergeUpdate(DeletionAwareTrie<Object, TrieTombstoneMarker> update) throws TrieSpaceExhaustedException
     {
-        if (update instanceof RowData)
-            return applyRow((RowData) existing, (RowData) update, keyState);
-        else if (update instanceof DeletionInfo)
-            return applyDeletion((TrieMemtable.PartitionData) existing, (DeletionInfo) update);
+        this.currentPartition = null;
+        this.partitionsAdded = 0;
+        this.dataSize = 0;
+        this.colUpdateTimeDelta = Long.MAX_VALUE;
+
+        mutator.apply(update);
+    }
+
+    /// Merge incoming live data (cell, liveness info or various level markers) with existing content.
+    Object mergeData(@Nullable Object existing, Object update)
+    {
+        // Most common case first
+        if (update instanceof CellData)
+            return applyCell((TrieCellData) existing, (CellData<?, ?>) update);
+        else if (update == TrieBackedRow.COMPLEX_COLUMN_MARKER)
+            return update;
+        else if (update instanceof LivenessInfo)
+            return applyIncomingRowMarker((LivenessInfo) existing, (LivenessInfo) update);
+        else if (update == TrieBackedPartition.PARTITION_MARKER)
+            return mergePartitionMarkers((PartitionData) existing);
         else
             throw new AssertionError("Unexpected update type: " + update.getClass());
     }
 
-    /**
-     * Called when a row needs to be copied to the Memtable trie.
-     *
-     * @param existing Existing RowData for this clustering, or null if there isn't any.
-     * @param insert RowData to be inserted.
-     * @param keyState Used to obtain the path through which this node was reached.
-     * @return the insert row, or the merged row, copied using our allocator
-     */
-    private RowData applyRow(RowData existing, RowData insert, InMemoryTrie.KeyProducer<Object> keyState)
+    /// Merge an incoming tombstone with existing deletions.
+    /// This will be called for all boundary tombstones in the update, but also for all existing boundaries that are
+    /// covered by an incoming range.
+    TrieTombstoneMarker mergeMarkers(@Nullable TrieTombstoneMarker existing, TrieTombstoneMarker update)
     {
         if (existing == null)
         {
-            RowData data = insert.clone(cloner);
-
-            if (indexer != UpdateTransaction.NO_OP)
-                indexer.onInserted(data.toRow(clusteringFor(keyState)));
-
-            this.dataSize += data.dataSize();
-            this.heapSize += data.unsharedHeapSizeExcludingData();
-            currentPartition.markInsertedRows(1);  // null pointer here means a problem in applyDeletion
-            return data;
+            currentPartition.markAddedTombstones(1);
+            return update;
         }
         else
         {
-            // data and heap size are updated during merge through the PostReconciliationFunction interface
-            RowData reconciled = merge(existing, insert);
+            TrieTombstoneMarker merged = update.mergeWith(existing);
+            return merged;
+        }
+    }
 
-            if (indexer != UpdateTransaction.NO_OP)
-            {
-                Clustering<?> clustering = clusteringFor(keyState);
-                indexer.onUpdated(existing.toRow(clustering), reconciled.toRow(clustering));
-            }
+    /// Apply an incoming tombstone to existing data, possibly removing it from the trie.
+    Object applyIncomingMarker(Object existingContent, TrieTombstoneMarker updateMarker)
+    {
+        DeletionTime deletion = updateMarker.applicableToPointForward();
+        if (deletion == null)
+            return existingContent;
+
+        // Most common case first
+        if (existingContent instanceof CellData)
+            return applyCellDeletion((CellData<?, ?>) existingContent, deletion);
+        else if (existingContent == TrieBackedRow.COMPLEX_COLUMN_MARKER)
+            return existingContent;
+        else if (existingContent instanceof LivenessInfo)
+            return applyRowDeletion((LivenessInfo) existingContent, deletion);
+        else if (existingContent instanceof PartitionData)
+            return applyPartitionDeletion((PartitionData) existingContent, deletion);
+        else
+            throw new AssertionError("Unexpected content in trie " + existingContent + " for deletion " + updateMarker);
+    }
+
+    protected CellData<?, ?> applyCellDeletion(CellData<?, ?> existingContent, DeletionTime deletion)
+    {
+        if (!deletion.deletes(existingContent))
+            return existingContent;
+        dataSize -= existingContent.valueSize();
+        return null;
+    }
+
+    Object applyPartitionDeletion(PartitionData existing, DeletionTime unused)
+    {
+        existing.clearStats();
+        return existing;
+    }
+
+    LivenessInfo applyRowDeletion(LivenessInfo existing, DeletionTime deletion)
+    {
+        if (deletion.deletes(existing))
+        {
+            return LivenessInfo.EMPTY;
+            // TODO: and also do currentPartition.markInsertedRows(-1) in that case?
+            // TODO: Does strict row liveness apply here? How do we drop tail trie if it does?
+        }
+        return existing;
+    }
+
+    /// Apply an existing tombstone to incoming data before merging that data in the trie.
+    Object applyExistingMarkerToIncomingRow(TrieTombstoneMarker marker, Object content)
+    {
+        DeletionTime rowDeletion = marker.applicableToPointForward();
+        if (rowDeletion == null)
+            return content; // there is no row deletion here
+
+        // No size tracking is needed, because the result of this gets applied to the trie with applyRow.
+        if (content instanceof Cell)
+            return rowDeletion.deletes((Cell<?>) content) ? null : content;
+        else if (content == TrieBackedRow.COMPLEX_COLUMN_MARKER)
+            return content;
+        else if (content instanceof LivenessInfo)
+        {
+            if (!rowDeletion.deletes((LivenessInfo) content))
+                return content;
+            else
+                return LivenessInfo.EMPTY;
+        }
+        else if (content instanceof PartitionData)
+            return content;
+        else
+            throw new AssertionError("Unexpected content in trie " + content + " for deletion " + marker);
+    }
+
+    LivenessInfo applyIncomingRowMarker(@Nullable LivenessInfo existing, LivenessInfo insert)
+    {
+        if (existing == null)
+        {
+            this.dataSize += insert.dataSize();
+            currentPartition.markInsertedRows(1);  // null pointer here means a problem in applyDeletion
+            return insert;
+        }
+        else
+        {
+            LivenessInfo reconciled = LivenessInfo.merge(existing, insert);
+            if (reconciled != existing)
+                this.dataSize += reconciled.dataSize() - existing.dataSize();
 
             return reconciled;
         }
     }
 
-    private RowData merge(RowData existing, RowData update)
+    CellData<?, ?> applyCell(@Nullable TrieCellData existing, CellData<?, ?> update)
     {
-
-        LivenessInfo livenessInfo = LivenessInfo.merge(update.livenessInfo, existing.livenessInfo);
-        DeletionTime deletion = DeletionTime.merge(update.deletion, existing.deletion);
-        if (deletion.deletes(livenessInfo))
-            livenessInfo = LivenessInfo.EMPTY;
-
-        Object[] tree = BTreeRow.mergeRowBTrees(this,
-                                                existing.columnsBTree, update.columnsBTree,
-                                                deletion, existing.deletion);
-        return new RowData(tree, livenessInfo, deletion);
-    }
-
-    private Clustering<?> clusteringFor(InMemoryTrie.KeyProducer<Object> keyState)
-    {
-        return metadata.comparator.clusteringFromByteComparable(
-            ByteArrayAccessor.instance,
-            ByteComparable.preencoded(TrieBackedPartition.BYTE_COMPARABLE_VERSION,
-                                      keyState.getBytes(TrieMemtable.IS_PARTITION_BOUNDARY)));
-    }
-
-    /**
-     * Called at the partition boundary to merge the existing and new metadata associated with the partition. This needs
-     * to update the deletion time with any new deletion introduced by the update, but also make sure that the
-     * statistics we track for the partition (dataSize) are updated for the changes caused by merging the update's rows
-     * (note that this is called _after_ the rows of the partition have been merged, on the return path of the
-     * recursion).
-     *
-     * @param existing Any partition data already associated with the partition.
-     * @param update The update, always non-null.
-     * @return the combined partition data, copying any updated deletion information to heap.
-     */
-    private TrieMemtable.PartitionData applyDeletion(TrieMemtable.PartitionData existing, DeletionInfo update)
-    {
-        if (indexer != UpdateTransaction.NO_OP)
-        {
-            if (!update.getPartitionDeletion().isLive())
-                indexer.onPartitionDeletion(update.getPartitionDeletion());
-            if (update.hasRanges())
-                update.rangeIterator(false).forEachRemaining(indexer::onRangeTombstone);
-        }
-
         if (existing == null)
         {
-            // Note: Always on-heap, regardless of cloner
-            TrieMemtable.PartitionData newRef = new TrieMemtable.PartitionData(update, owner);
-            this.heapSize += newRef.unsharedHeapSize();
+            this.dataSize += update.valueSize();
+            return update;
+        }
+        else
+        {
+            CellData<?, ?> reconciled = Cells.<CellData>reconcile(existing, update);
+            if (reconciled != existing)
+            {
+                long timeDelta = Math.abs(reconciled.timestamp() - existing.timestamp());
+                if (timeDelta < colUpdateTimeDelta)
+                    colUpdateTimeDelta = timeDelta;
+                this.dataSize += reconciled.valueSize() - existing.valueSize();
+            }
+            return reconciled;
+        }
+    }
+
+    /// Called at the partition boundary to merge the existing and new metadata associated with the partition. This needs
+    /// to make sure that the statistics we track for the partition (dataSize) are updated for the changes caused by
+    /// merging the update's rows.
+    ///
+    /// @param existing Any partition data already associated with the partition.
+    /// @return the combined partition data, creating a new marker if one did not already exist.
+    protected PartitionData mergePartitionMarkers(@Nullable PartitionData existing)
+    {
+        if (existing == null)
+        {
+            PartitionData newRef = new PartitionData(owner);
             ++this.partitionsAdded;
             return currentPartition = newRef;
         }
 
         assert owner == existing.owner;
-        if (update.isLive() || !update.mayModify(existing))
-            return currentPartition = existing;
-
-        // Note: Always on-heap, regardless of cloner
-        TrieMemtable.PartitionData merged = new TrieMemtable.PartitionData(existing, update);
-        this.heapSize += merged.unsharedHeapSize() - existing.unsharedHeapSize();
-        return currentPartition = merged;
+        return currentPartition = existing;
     }
 }

@@ -63,7 +63,7 @@ public interface ByteSource
     /** Value returned if at the end of the stream. */
     int END_OF_STREAM = -1;
 
-    ByteSource EMPTY = () -> END_OF_STREAM;
+    Duplicatable EMPTY = preencoded(new byte[0]);
 
     /**
      * Escape value. Used, among other things, to mark the end of subcomponents (so that shorter compares before anything longer).
@@ -246,6 +246,24 @@ public interface ByteSource
     static ByteSource variableLengthInteger(long value)
     {
         return new VariableLengthInteger(value);
+    }
+
+    /**
+     * Produce a source for an unsigned integer, stored using variable length encoding.
+     * The representation uses between 1 and 9 bytes, is prefix-free and compares
+     * correctly.
+     */
+    static ByteSource variableLengthUnsignedInteger(long value)
+    {
+        return new VariableLengthUnsignedInteger(value);
+    }
+
+    /**
+     * Returns the direct concatenation of sources (no separators or terminators are added).
+     */
+    static ByteSource concat(ByteSource... sources)
+    {
+        return new Concat(sources);
     }
 
     /**
@@ -716,6 +734,34 @@ public interface ByteSource
             if (srcs[srcnum] == null)
                 return NEXT_COMPONENT_NULL;
             return NEXT_COMPONENT;
+        }
+    }
+
+    /**
+     * Direct concatenation of byte sources.
+     */
+    static class Concat implements ByteSource
+    {
+        private final ByteSource[] srcs;
+        private int srcnum = 0;
+
+        Concat(ByteSource[] srcs)
+        {
+            this.srcs = srcs;
+        }
+
+        @Override
+        public int next()
+        {
+            while (true)
+            {
+                if (srcnum == srcs.length)
+                    return END_OF_STREAM;
+                int b = srcs[srcnum].next();
+                if (b > END_OF_STREAM)
+                    return b;
+                ++srcnum;
+            }
         }
     }
 

@@ -124,7 +124,7 @@ public class TrieMemoryIndex extends MemoryIndex
         this.primaryKeysAccumulator = new PrimaryKeysAccumulator(primaryKeysHeapAllocations);
         this.primaryKeysRemover = new PrimaryKeysRemover(primaryKeysHeapAllocations);
         this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
-        this.data = InMemoryTrie.longLived(TypeUtil.byteComparableVersionForTermsData(indexContext.version()), TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
+        this.data = InMemoryTrie.longLivedOrdered(TypeUtil.byteComparableVersionForTermsData(indexContext.version()), TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.memtable = memtable;
     }
 
@@ -861,7 +861,7 @@ public class TrieMemoryIndex extends MemoryIndex
             upperInclusive = false;
         }
 
-        return data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
+        return data.slice(lowerBound, lowerInclusive, upperBound, upperInclusive);
     }
 
     private class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>

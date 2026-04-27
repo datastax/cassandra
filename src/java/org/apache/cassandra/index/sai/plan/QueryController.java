@@ -39,6 +39,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
+
+import org.apache.cassandra.db.CellSourceIdentifier;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -89,7 +91,7 @@ import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
+import org.apache.cassandra.index.sai.utils.RowWithSource;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -345,18 +347,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         SinglePartitionReadCommand partition = getPartitionReadCommand(key, executionController);
 
         // Class to transform the row to include its source table.
-        Function<Object, Transformation<BaseRowIterator<?>>> rowTransformer = (Object sourceTable) -> new Transformation<>()
+        Function<CellSourceIdentifier, Transformation<BaseRowIterator<?>>> rowTransformer = (CellSourceIdentifier sourceTable) -> new Transformation<>()
         {
             @Override
             protected Row applyToStatic(Row row)
             {
-                return new RowWithSourceTable(row, sourceTable);
+                return new RowWithSource(row, sourceTable);
             }
 
             @Override
             protected Row applyToRow(Row row)
             {
-                return new RowWithSourceTable(row, sourceTable);
+                return new RowWithSource(row, sourceTable);
             }
         };
 

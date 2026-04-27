@@ -137,6 +137,12 @@ public class RowWithSource implements Row
     }
 
     @Override
+    public boolean isEmptyAfterDeletion()
+    {
+        return row.isEmptyAfterDeletion();
+    }
+
+    @Override
     public String toString(TableMetadata metadata)
     {
         return row.toString(metadata);
@@ -182,40 +188,15 @@ public class RowWithSource implements Row
     }
 
     @Override
-    public Collection<ColumnData> columnData()
-    {
-        return Collections2.transform(row.columnData(), this::wrapColumnData);
-    }
-
-    @Override
-    public Iterable<Cell<?>> cellsInLegacyOrder(TableMetadata metadata, boolean reversed)
-    {
-        return Iterables.transform(row.cellsInLegacyOrder(metadata, reversed), this::wrapCell);
-    }
-
-    @Override
     public boolean hasComplexDeletion()
     {
         return row.hasComplexDeletion();
     }
 
     @Override
-    public boolean hasComplex()
-    {
-        return row.hasComplex();
-    }
-
-    @Override
     public boolean hasDeletion(long nowInSec)
     {
         return row.hasDeletion(nowInSec);
-    }
-
-    @Override
-    public SearchIterator<ColumnMetadata, ColumnData> searchIterator()
-    {
-        SearchIterator<ColumnMetadata, ColumnData> iterator = row.searchIterator();
-        return key -> wrapColumnData(iterator.next(key));
     }
 
     @Override
@@ -231,27 +212,15 @@ public class RowWithSource implements Row
     }
 
     @Override
-    public Row transformAndFilter(LivenessInfo info, Deletion deletion, Function<ColumnData, ColumnData> function)
+    public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> infoFunction, CellTransformer function)
     {
-        return maybeWrapRow(row.transformAndFilter(info, deletion, function));
-    }
-
-    @Override
-    public Row transformAndFilter(Function<ColumnData, ColumnData> function)
-    {
-        return maybeWrapRow(row.transformAndFilter(function));
+        return maybeWrapRow(row.transformAndFilter(infoFunction, function));
     }
 
     @Override
     public Row clone(Cloner cloner)
     {
         return maybeWrapRow(row.clone(cloner));
-    }
-
-    @Override
-    public Row purgeDataOlderThan(long timestamp, boolean enforceStrictLiveness)
-    {
-        return maybeWrapRow(row.purgeDataOlderThan(timestamp, enforceStrictLiveness));
     }
 
     @Override
@@ -264,6 +233,12 @@ public class RowWithSource implements Row
     public Row withOnlyQueriedData(ColumnFilter filter)
     {
         return maybeWrapRow(row.withOnlyQueriedData(filter));
+    }
+
+    @Override
+    public Row purgeDataOlderThan(long timestamp, boolean enforceStrictLiveness)
+    {
+        return maybeWrapRow(row.purgeDataOlderThan(timestamp, enforceStrictLiveness));
     }
 
     @Override
@@ -321,6 +296,18 @@ public class RowWithSource implements Row
     }
 
     @Override
+    public long minTimestamp()
+    {
+        return row.minTimestamp();
+    }
+
+    @Override
+    public long maxTimestamp()
+    {
+        return row.maxTimestamp();
+    }
+
+    @Override
     public void apply(Consumer<ColumnData> function)
     {
         row.apply(function);
@@ -339,21 +326,15 @@ public class RowWithSource implements Row
     }
 
     @Override
-    public long accumulate(LongAccumulator<ColumnData> accumulator, Comparator<ColumnData> comparator, ColumnData from, long initialValue)
-    {
-        return row.accumulate(accumulator, comparator, from, initialValue);
-    }
-
-    @Override
     public <A> long accumulate(BiLongAccumulator<A, ColumnData> accumulator, A arg, long initialValue)
     {
         return row.accumulate(accumulator, arg, initialValue);
     }
 
     @Override
-    public <A> long accumulate(BiLongAccumulator<A, ColumnData> accumulator, A arg, Comparator<ColumnData> comparator, ColumnData from, long initialValue)
+    public Row mergeWith(Row updateAsRow)
     {
-        return row.accumulate(accumulator, arg, comparator, from, initialValue);
+        return maybeWrapRow(row.mergeWith(updateAsRow));
     }
 
     @Override
@@ -369,7 +350,7 @@ public class RowWithSource implements Row
         if (c instanceof Cell<?>)
             return new CellWithSource<>((Cell<?>) c, source);
         if (c instanceof ComplexColumnData)
-            return ((ComplexColumnData) c).transform(c1 -> new CellWithSource<>(c1, source));
+            return new ComplexColumnWithSource((ComplexColumnData) c, source);
         throw new IllegalStateException("Unexpected ColumnData type: " + c.getClass().getName());
     }
 
@@ -394,17 +375,5 @@ public class RowWithSource implements Row
                row +
                ", source=" + source +
                '}';
-    }
-
-    @Override
-    public long minTimestamp()
-    {
-        return row.minTimestamp();
-    }
-
-    @Override
-    public long maxTimestamp()
-    {
-        return row.maxTimestamp();
     }
 }
