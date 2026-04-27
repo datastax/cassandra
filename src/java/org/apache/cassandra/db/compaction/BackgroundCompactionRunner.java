@@ -27,10 +27,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -391,6 +388,7 @@ public class BackgroundCompactionRunner implements Runnable
         ongoingCompactions.incrementAndGet();
         try
         {
+            Executor executor = task.getCustomExecutor() == null ? compactionExecutor : task.getCustomExecutor();
             return CompletableFuture.runAsync(
             () -> {
                 try
@@ -406,7 +404,7 @@ public class BackgroundCompactionRunner implements Runnable
                     //  - a thread has freed up, and a new compaction task (from any CFS) can be scheduled on it
                     markForCompactionCheck(cfs);
                 }
-            }, compactionExecutor);
+            }, executor);
         }
         catch (RejectedExecutionException ex)
         {

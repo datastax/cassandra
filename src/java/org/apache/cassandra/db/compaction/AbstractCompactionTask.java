@@ -24,6 +24,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
+import java.util.concurrent.Executor;
 
 import com.google.common.base.Preconditions;
 
@@ -36,6 +37,8 @@ import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.WrappedRunnable;
+
+import javax.annotation.Nullable;
 
 import static com.google.common.base.Throwables.propagate;
 
@@ -301,6 +304,15 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
      * by CNDB.
      */
     public abstract long getSpaceOverhead();
+
+    /**
+     * Allows subclasses to route the task to a dedicated executor instead of the shared compaction executor.
+     */
+    @Nullable
+    public Executor getCustomExecutor()
+    {
+        return null;
+    }
 
     /**
      * @return The compaction observers for this task. Used by CNDB.
