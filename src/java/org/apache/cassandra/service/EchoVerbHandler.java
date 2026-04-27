@@ -20,6 +20,8 @@ package org.apache.cassandra.service;
  *
  */
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -36,6 +38,14 @@ public class EchoVerbHandler implements IVerbHandler<NoPayload>
 
     public void doVerb(Message<NoPayload> message)
     {
+        // Cross-cluster safety checks
+        EndpointState fromEpState = Gossiper.instance.getEndpointStateForEndpoint(message.from());
+        if (!Gossiper.maybeBelongsInCluster(message.from(), fromEpState))
+        {
+            logger.error("Ignoring ECHO request from {} which doesn't belong in this cluster", message.from());
+            return;
+        }
+
         // only respond if we are not shutdown
         if (!StorageService.instance.isShutdown())
         {
