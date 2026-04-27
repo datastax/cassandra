@@ -3487,7 +3487,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         if (metadata == null)
             return null;
 
-        Keyspace keyspace = Keyspace.open(metadata.keyspace);
+        Keyspace keyspace = Keyspace.openIfExists(metadata.keyspace);
         if (keyspace == null)
             return null;
 
@@ -3505,7 +3505,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         if (ksName == null || cfName == null)
             return null;
 
-        Keyspace keyspace = Keyspace.open(ksName);
+        Keyspace keyspace = Keyspace.openIfExists(ksName);
         if (keyspace == null)
             return null;
 
