@@ -53,7 +53,7 @@ public class SaiDiskSizeTest extends SAITester
     public Version saiFormat;
 
     @Parameterized.Parameter(1)
-    public int expectedDiskSize;
+    public int expectedDiskSizeFor2SSTables;
 
     @Parameterized.Parameter(2)
     public String pkColumns;
@@ -68,7 +68,7 @@ public class SaiDiskSizeTest extends SAITester
      *
      * @return a collection of parameters to test
      */
-    @Parameterized.Parameters(name = "saiFormat={0}, expectedDiskSize={1}, pkColumns={2}, rowsPerPartition={3}")
+    @Parameterized.Parameters(name = "saiFormat={0}, expectedDiskSizeFor2SSTables={1}, pkColumns={2}, rowsPerPartition={3}")
     public static Collection<Object[]> generateParameters()
     {
         return Version.ALL.stream()
@@ -154,16 +154,16 @@ public class SaiDiskSizeTest extends SAITester
         logger.info("Disk size for SAI version {}: {}", saiFormat, diskSize);
         assertThat(diskSize)
         .as("Disk size for SAI version %s before compaction", saiFormat)
-        .isLessThanOrEqualTo(expectedDiskSize)
-        .isGreaterThan((long) (expectedDiskSize * 0.8));
+        .isLessThanOrEqualTo(expectedDiskSizeFor2SSTables)
+        .isGreaterThan((long) (expectedDiskSizeFor2SSTables * 0.8));
 
         compact();
 
         diskSize = indexDiskSpaceUse();
         assertThat(diskSize)
         .as("Disk size for SAI version %s after compaction", saiFormat)
-        .isLessThanOrEqualTo(expectedDiskSize)
-        .isGreaterThan((long) (expectedDiskSize * 0.8));
+        .isLessThanOrEqualTo(expectedDiskSizeFor2SSTables)
+        .isGreaterThan((long) (expectedDiskSizeFor2SSTables * 0.8));
     }
 
     private void insertRowsIntoOneSegment(int nrRows, int startRow) throws UnknownHostException
