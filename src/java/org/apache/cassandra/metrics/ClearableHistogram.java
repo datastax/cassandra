@@ -44,7 +44,6 @@ public class ClearableHistogram extends Histogram
         this.reservoirRef = reservoir;
     }
 
-    @VisibleForTesting
     public void clear()
     {
         clearCount();
