@@ -82,5 +82,6 @@ public class VectorCompression
     {
         NONE,
         PRODUCT_QUANTIZATION,
+        BINARY_QUANTIZATION
     }
 }
