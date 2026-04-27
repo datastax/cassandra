@@ -18,6 +18,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 
 import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
@@ -64,32 +65,38 @@ public class OnDiskVectorValuesWriter implements Closeable
      *
      * @param ordinal the ordinal position for this vector (must be greater than the last written ordinal)
      * @param vector the vector to write (must have the same dimension as specified in constructor)
-     * @throws IOException if an I/O error occurs
      * @throws AssertionError if ordinal is not greater than the last written ordinal, or if seeking backwards
      */
-    public void write(int ordinal, VectorFloat<?> vector) throws IOException
+    public void write(int ordinal, VectorFloat<?> vector)
     {
         assert ordinal > lastOrdinal : "Unexpected ordinal " + ordinal + " must be greater than " + lastOrdinal;
         assert vector != null : "Vector is null";
         assert vector.length() == dimension : "Incorrect vector dimension " + vector.length() + " != " + dimension;
 
-        // We are careful to only skip or call position() when necessary because the BufferedRandomAccessWriter always
-        // flushes the buffer for each of those operations. See https://github.com/datastax/jvector/issues/562.
-        if (ordinal != lastOrdinal + 1)
+        try
         {
-            // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
-            // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
-            // with the posting list logic.
-            long targetPosition = ordinal * Float.BYTES * (long) dimension;
-            assert bufferedWriter.position() <= targetPosition : "bufferedWriter.position()=" + bufferedWriter.position() + " > targetPosition=" + targetPosition;
-            bufferedWriter.seek(targetPosition);
+            // We are careful to only skip or call position() when necessary because the BufferedRandomAccessWriter always
+            // flushes the buffer for each of those operations. See https://github.com/datastax/jvector/issues/562.
+            if (ordinal != lastOrdinal + 1)
+            {
+                // Skip to the correct position (ensuring that we only skip forward). Note that if the ordinal
+                // is the segmentRowId and there are duplicates, we will skip some positions. This works in conjunction
+                // with the posting list logic.
+                long targetPosition = ordinal * Float.BYTES * (long) dimension;
+                assert bufferedWriter.position() <= targetPosition : "bufferedWriter.position()=" + bufferedWriter.position() + " > targetPosition=" + targetPosition;
+                bufferedWriter.seek(targetPosition);
+            }
+
+            // Update the last ordinal
+            lastOrdinal = ordinal;
+
+            // Write the vector data
+            vector.writeTo(bufferedWriter);
         }
-
-        // Update the last ordinal
-        lastOrdinal = ordinal;
-
-        // Write the vector data
-        vector.writeTo(bufferedWriter);
+        catch (IOException e)
+        {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /**
@@ -114,6 +121,21 @@ public class OnDiskVectorValuesWriter implements Closeable
     long position() throws IOException
     {
         return bufferedWriter.position();
+    }
+
+    /**
+     * Flushes the underlying bufferedWriter
+     */
+    void flush()
+    {
+        try
+        {
+            bufferedWriter.flush();
+        }
+        catch (IOException e)
+        {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Override

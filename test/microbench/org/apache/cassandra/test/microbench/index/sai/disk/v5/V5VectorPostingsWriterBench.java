@@ -105,15 +105,9 @@ public class V5VectorPostingsWriterBench
     }
 
     @Benchmark
-    public void createGenericIdentityMapping()
-    {
-        V5VectorPostingsWriter.createGenericIdentityMapping(postingsMap, maxRowId.get(), numVectors - 1);
-    }
-
-    @Benchmark
     public void describeForCompactionOneToMany()
     {
-        V5VectorPostingsWriter.describeForCompaction(V5VectorPostingsWriter.Structure.ONE_TO_MANY, numVectors, maxRowId.get(), numVectors - 1, postingsMap);
+        V5VectorPostingsWriter.describeForCompaction(V5VectorPostingsWriter.Structure.ONE_TO_MANY, numVectors, maxRowId.get(), numVectors - 1, postingsMap, null);
     }
 
     @TearDown

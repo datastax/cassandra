@@ -381,20 +381,20 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (indexContext.isVector())
         {
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
-            // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
+            // otherwise, we accumulate enough vectors to build one. (Or we go on heap if LTM is disabled.)
             var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
             // If no PQ instance available in indexes of completed sstables, check if we just wrote one in the previous segment
             if (pqi == null && !segments.isEmpty())
                 pqi = maybeReadPqFromLastSegment();
 
-            if (pqi != null && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            if (V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
             {
                 var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, allRowsHaveVectors, limiter);
+                var compressor = pqi != null ? pqi.pq : null;
+                builder = new SegmentBuilder.VectorSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, allRowsHaveVectors, limiter);
             }
             else
             {
-                // building on heap is the only way to get a PQ from nothing (CompactionGraph only knows how to fine-tune an existing one)
                 builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
             }
         }
