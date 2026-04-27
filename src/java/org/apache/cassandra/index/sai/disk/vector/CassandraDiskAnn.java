@@ -33,6 +33,7 @@ import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
+import io.github.jbellis.jvector.quantization.BQVectors;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
@@ -138,6 +139,14 @@ public class CassandraDiskAnn
                 {
                     compressedVectors = PQVectors.load(reader, reader.getFilePointer());
                     pq = ((PQVectors) compressedVectors).getCompressor();
+                    compression = new VectorCompression(compressionType,
+                                                        compressedVectors.getOriginalSize(),
+                                                        compressedVectors.getCompressedSize());
+                }
+                else if (compressionType == VectorCompression.CompressionType.BINARY_QUANTIZATION)
+                {
+                    compressedVectors = BQVectors.load(reader, reader.getFilePointer());
+                    pq = null;
                     compression = new VectorCompression(compressionType,
                                                         compressedVectors.getOriginalSize(),
                                                         compressedVectors.getCompressedSize());
