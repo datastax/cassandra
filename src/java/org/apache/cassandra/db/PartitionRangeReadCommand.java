@@ -20,8 +20,6 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.net.Verb;
@@ -286,7 +284,6 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         metric.rangeRequests.inc();
     }
 
-    @VisibleForTesting
     public UnfilteredPartitionIterator queryStorage(final ColumnFamilyStore cfs, ReadExecutionController controller)
     {
         ColumnFamilyStore.ViewFragment view = cfs.select(View.selectLive(dataRange().keyRange()));
