@@ -41,6 +41,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
 import org.apache.cassandra.net.MessagingService;
@@ -65,6 +66,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     private final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final boolean couldSpeculate;
     private final RequestSensors requestSensors;
+    private final MonotonicClock clock;
 
     public ReadCallback(ResponseResolver<E, P> resolver, ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
     {
@@ -86,6 +88,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockFor, this.replicaPlan);
         this.requestSensors = RequestTracker.instance.get();
+        this.clock = MonotonicClock.preciseTime;
     }
 
     protected P replicaPlan()
@@ -138,7 +141,29 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         if (Tracing.isTracing())
         {
             String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            Tracing.trace("{}; received {} of {} responses{}", failed ? "Failed" : "Timed out", received, blockFor, gotData);
+            Tracing.trace("{}; received {} of {} responses{}", failed ? "Failed" : "Timed out", received, blockFor,
+                          gotData);
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(clock.now() - queryStartNanoTime);
+            long timeoutMillis = TimeUnit.MILLISECONDS.convert(
+            command.getTimeout(TimeUnit.NANOSECONDS), TimeUnit.NANOSECONDS);
+            if (!failureReasonByEndpoint.isEmpty())
+            {
+                for (Map.Entry<InetAddressAndPort, RequestFailureReason> entry : failureReasonByEndpoint.entrySet())
+                {
+                    logger.trace(
+                    "Failure: replica={}, reason={}, received={}/{}, timeout={}ms, elapsed={}ms, available={}ms",
+                    entry.getKey().getHostAddress(true), entry.getValue(),
+                    received, blockFor, timeoutMillis, elapsedMillis,
+                    timeoutMillis - elapsedMillis);
+                }
+            }
+            else
+            {
+                logger.trace("Timeout: received={}/{}, timeout={}ms, elapsed={}ms, available={}ms, waiting for replicas={}",
+                             received, blockFor, timeoutMillis, elapsedMillis,
+                             timeoutMillis - elapsedMillis,
+                             replicaPlan().contacts());
+            }
         }
         else if (logger.isDebugEnabled())
         {
