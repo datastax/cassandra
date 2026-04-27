@@ -23,10 +23,13 @@ package org.apache.cassandra.db.commitlog;
 import java.io.DataInput;
 import java.nio.ByteBuffer;
 
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileSegmentInputStream;
+import org.apache.cassandra.io.util.Rebufferer;
 
 /**
  * Each segment of an encrypted file may contain many encrypted chunks, and each chunk needs to be individually decrypted
@@ -103,7 +106,10 @@ public class EncryptedFileSegmentInputStream extends FileSegmentInputStream impl
 
     public void reBuffer()
     {
+        Preconditions.checkState(!buffer.hasRemaining(), "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
         totalChunkOffset += buffer.position();
         buffer = chunkProvider.nextChunk();
+        if (buffer == null)
+            buffer = Rebufferer.EMPTY.buffer();
     }
 }
