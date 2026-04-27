@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import org.apache.cassandra.db.CellSourceIdentifier;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -43,12 +44,13 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class CellWithSourceTableTest {
+public class CellWithSourceTest
+{
 
     private ColumnMetadata column;
     private Cell<?> wrappedCell;
-    private Object sourceTable;
-    private CellWithSourceTable<?> cellWithSourceTable;
+    private CellSourceIdentifier sourceTable = RowWithSourceTest.source;
+    private CellWithSource<?> cellWithSource;
 
     private final long timestamp = System.currentTimeMillis();
     // We use a 4 byte array because the Int32Type is used in the test
@@ -59,83 +61,82 @@ public class CellWithSourceTableTest {
     {
         column = ColumnMetadata.regularColumn("keyspace1", "table1", "name1", Int32Type.instance);
         wrappedCell = new ArrayCell(column, timestamp, Cell.NO_TTL, Cell.NO_DELETION_TIME, value, null);
-        sourceTable = new Object();
-        cellWithSourceTable = new CellWithSourceTable<>(wrappedCell, sourceTable);
+        cellWithSource = new CellWithSource<>(wrappedCell, sourceTable);
     }
 
     @Test
     public void testSourceTable()
     {
-        assertEquals(sourceTable, cellWithSourceTable.sourceTable());
+        assertEquals(sourceTable, cellWithSource.sourceTable());
     }
 
     @Test
     public void testIsCounterCell()
     {
-        assertEquals(wrappedCell.isCounterCell(), cellWithSourceTable.isCounterCell());
+        assertEquals(wrappedCell.isCounterCell(), cellWithSource.isCounterCell());
     }
 
     @Test
     public void testValue()
     {
-        assertEquals(wrappedCell.value(), cellWithSourceTable.value());
+        assertEquals(wrappedCell.value(), cellWithSource.value());
     }
 
     @Test
     public void testAccessor()
     {
-        assertEquals(wrappedCell.accessor(), cellWithSourceTable.accessor());
+        assertEquals(wrappedCell.accessor(), cellWithSource.accessor());
     }
 
     @Test
     public void testTimestamp()
     {
-        assertEquals(wrappedCell.timestamp(), cellWithSourceTable.timestamp());
+        assertEquals(wrappedCell.timestamp(), cellWithSource.timestamp());
     }
 
     @Test
     public void testTtl()
     {
-        assertEquals(wrappedCell.ttl(), cellWithSourceTable.ttl());
+        assertEquals(wrappedCell.ttl(), cellWithSource.ttl());
     }
 
     @Test
     public void testLocalDeletionTime()
     {
-        assertEquals(wrappedCell.localDeletionTime(), cellWithSourceTable.localDeletionTime());
+        assertEquals(wrappedCell.localDeletionTime(), cellWithSource.localDeletionTime());
     }
 
     @Test
     public void testIsTombstone()
     {
-        assertEquals(wrappedCell.isTombstone(), cellWithSourceTable.isTombstone());
+        assertEquals(wrappedCell.isTombstone(), cellWithSource.isTombstone());
     }
 
     @Test
     public void testIsExpiring()
     {
-        assertEquals(wrappedCell.isExpiring(), cellWithSourceTable.isExpiring());
+        assertEquals(wrappedCell.isExpiring(), cellWithSource.isExpiring());
     }
 
     @Test
     public void testIsLive()
     {
         var nowInSec = 0;
-        assertEquals(wrappedCell.isLive(nowInSec), cellWithSourceTable.isLive(nowInSec));
+        assertEquals(wrappedCell.isLive(nowInSec), cellWithSource.isLive(nowInSec));
     }
 
     @Test
     public void testPath()
     {
-        assertEquals(wrappedCell.path(), cellWithSourceTable.path());
+        assertEquals(wrappedCell.path(), cellWithSource.path());
     }
 
     @Test
     public void testWithUpdatedColumn()
     {
-        var originalColumn = cellWithSourceTable.column();
+        var originalColumn = cellWithSource.column();
         var newColumn = ColumnMetadata.regularColumn("keyspace1", "table1", "name2", Int32Type.instance);
-        var resultColumn = cellWithSourceTable.withUpdatedColumn(newColumn).column();
+        var resultColumn = cellWithSource.withUpdatedColumn(newColumn).column();
         assertNotEquals(originalColumn, resultColumn);
         assertEquals(newColumn, resultColumn);
     }
@@ -144,8 +145,8 @@ public class CellWithSourceTableTest {
     public void testWithUpdatedValue()
     {
         ByteBuffer newValue = ByteBuffer.allocate(4);
-        var oldValue = cellWithSourceTable.value();
-        var resultValue = cellWithSourceTable.withUpdatedValue(newValue).value();
+        var oldValue = cellWithSource.value();
+        var resultValue = cellWithSource.withUpdatedValue(newValue).value();
         assertNotEquals(oldValue, resultValue);
         assertTrue(resultValue instanceof byte[]);
         assertArrayEquals(newValue.array(), (byte[]) resultValue);
@@ -156,10 +157,10 @@ public class CellWithSourceTableTest {
     {
         long newTimestamp = 1234567890L;
         int newLocalDeletionTime = 987654321;
-        var originalTimestamp = cellWithSourceTable.timestamp();
-        var originalDeletionTime = cellWithSourceTable.localDeletionTime();
-        var resultTimestamp = cellWithSourceTable.withUpdatedTimestampAndLocalDeletionTime(newTimestamp, newLocalDeletionTime).timestamp();
-        var resultDeletionTime = cellWithSourceTable.withUpdatedTimestampAndLocalDeletionTime(newTimestamp, newLocalDeletionTime).localDeletionTime();
+        var originalTimestamp = cellWithSource.timestamp();
+        var originalDeletionTime = cellWithSource.localDeletionTime();
+        var resultTimestamp = cellWithSource.withUpdatedTimestampAndLocalDeletionTime(newTimestamp, newLocalDeletionTime).timestamp();
+        var resultDeletionTime = cellWithSource.withUpdatedTimestampAndLocalDeletionTime(newTimestamp, newLocalDeletionTime).localDeletionTime();
         assertNotEquals(originalTimestamp, resultTimestamp);
         assertEquals(newTimestamp, resultTimestamp);
         assertNotEquals(originalDeletionTime, resultDeletionTime);
@@ -169,19 +170,19 @@ public class CellWithSourceTableTest {
     @Test
     public void testWithSkippedValue()
     {
-        var originalValue = cellWithSourceTable.value();
-        var resultValue = cellWithSourceTable.withSkippedValue().value();
+        var originalValue = cellWithSource.value();
+        var resultValue = cellWithSource.withSkippedValue().value();
         assertNotEquals(originalValue, resultValue);
     }
 
     @Test
     public void testClone()
     {
-        var resultClone = cellWithSourceTable.clone(HeapCloner.instance);
+        var resultClone = cellWithSource.clone(HeapCloner.instance);
         // The reference is not equal here because we have a non-zero length value
-        assertNotSame(cellWithSourceTable, resultClone);
+        assertNotSame(cellWithSource, resultClone);
         // Now make the value 0 length and we should get the same reference
-        var skippedCell = cellWithSourceTable.withSkippedValue();
+        var skippedCell = cellWithSource.withSkippedValue();
         var clonedSkippedCell = skippedCell.clone(HeapCloner.instance);
         assertSame(skippedCell, clonedSkippedCell);
     }
@@ -189,33 +190,33 @@ public class CellWithSourceTableTest {
     @Test
     public void testDataSize()
     {
-        assertEquals(wrappedCell.dataSize(), cellWithSourceTable.dataSize());
+        assertEquals(wrappedCell.dataSize(), cellWithSource.dataSize());
     }
 
     @Test
     public void testUnsharedHeapSizeExcludingData()
     {
-        assertEquals(wrappedCell.unsharedHeapSizeExcludingData(), cellWithSourceTable.unsharedHeapSizeExcludingData());
+        assertEquals(wrappedCell.unsharedHeapSizeExcludingData(), cellWithSource.unsharedHeapSizeExcludingData());
     }
 
     @Test
     public void testValidate()
     {
         wrappedCell.validate();
-        cellWithSourceTable.validate();
+        cellWithSource.validate();
     }
 
     @Test
     public void testHasInvalidDeletions()
     {
-        assertEquals(wrappedCell.hasInvalidDeletions(), cellWithSourceTable.hasInvalidDeletions());
+        assertEquals(wrappedCell.hasInvalidDeletions(), cellWithSource.hasInvalidDeletions());
     }
 
     @Test
     public void testDigest()
     {
         var digest1 = Digest.forValidator();
-        cellWithSourceTable.digest(digest1);
+        cellWithSource.digest(digest1);
         var digest2 = Digest.forValidator();
         wrappedCell.digest(digest2);
         assertArrayEquals(digest1.digest(), digest2.digest());
@@ -225,7 +226,7 @@ public class CellWithSourceTableTest {
     public void testUpdateAllTimestamp()
     {
         long newTimestamp = 1234567890L;
-        var resultData = cellWithSourceTable.updateAllTimestamp(newTimestamp);
+        var resultData = cellWithSource.updateAllTimestamp(newTimestamp);
         assertEquals(newTimestamp, resultData.minTimestamp());
         assertEquals(newTimestamp, resultData.minTimestamp());
     }
@@ -233,8 +234,8 @@ public class CellWithSourceTableTest {
     @Test
     public void testMarkCounterLocalToBeCleared()
     {
-        var resultCell = cellWithSourceTable.markCounterLocalToBeCleared();
-        assertSame(cellWithSourceTable, resultCell);
+        var resultCell = cellWithSource.markCounterLocalToBeCleared();
+        assertSame(cellWithSource, resultCell);
     }
 
     @Test
@@ -246,7 +247,7 @@ public class CellWithSourceTableTest {
         long purgeSame = 98765;
         when(mockCell.purge(any(), eq(purgeNull))).thenReturn(null);
         when(mockCell.purge(any(), eq(purgeSame))).thenReturn(mockCell);
-        var cell = new CellWithSourceTable<>(mockCell, sourceTable);
+        var cell = new CellWithSource<>(mockCell, sourceTable);
         assertNull(cell.purge(purger, purgeNull));
         assertSame(cell, cell.purge(purger, purgeSame));
     }
@@ -254,12 +255,12 @@ public class CellWithSourceTableTest {
     @Test
     public void testMaxTimestamp()
     {
-        assertEquals(timestamp, cellWithSourceTable.maxTimestamp());
+        assertEquals(timestamp, cellWithSource.maxTimestamp());
     }
 
     @Test
     public void testMinTimestamp()
     {
-        assertEquals(timestamp, cellWithSourceTable.minTimestamp());
+        assertEquals(timestamp, cellWithSource.minTimestamp());
     }
 }
