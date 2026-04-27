@@ -741,6 +741,16 @@ public enum CassandraRelevantProperties
     SAI_ENABLE_JVECTOR_DELETES("cassandra.sai.enable_jvector_deletes", "true"),
     SAI_ENABLE_LTM_CONSTRUCTION("cassandra.sai.ltm_construction", "true"),
     SAI_ENABLE_RERANK_FLOOR("cassandra.sai.rerank_floor", "true"),
+    // When building a compaction graph, encode layer 0 nodes in parallel and subsequently use async io for writes.
+    // This feature is experimental, so defaults to false.
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED("cassandra.sai.vector.encode_and_write_graph_in_parallel.enabled", "false"),
+    // When parallel graph encoding is enabled, the number of threads to use for encoding. Defaults to 0, meaning
+    // use all available processors as reported by the JVM.
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_NUM_THREADS("cassandra.sai.vector.encode_and_write_graph_in_parallel.num_threads", "0"),
+    // When parallel graph encoding is enabled, whether to use director buffers. Defaults to false, meaning heap
+    // buffers are used. A buffer will be allocated per encoding thread. The size of each buffer is the size
+    // of the encoded graph node at layer 0, which varies based on graph feature settings.
+    SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS("cassandra.sai.vector.encode_and_write_graph_in_parallel.use_direct_buffers", "false"),
 
     /** Controls the hnsw vector cache size, in bytes, per index segment. 0 to disable */
     SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(4 * 1024 * 1024)),
@@ -827,6 +837,10 @@ public enum CassandraRelevantProperties
 
     /** Whether to validate terms that will be SAI indexed at the coordinator */
     SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
+
+    // Whether compaction should build vector indexes using a fused graph, aka a graph where the quantized vectors
+    // are stored inline with a graph node. Feature is still experimental, so defaults to false.
+    SAI_VECTOR_ENABLE_FUSED("cassandra.sai.vector.enable_fused", "false"),
 
     // Use nvq when building graphs in compaction. Disabled by default for now. Enabling will reduce recall slightly
     // while also reducing the storage footprint.
