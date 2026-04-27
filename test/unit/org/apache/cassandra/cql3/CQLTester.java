@@ -1033,7 +1033,7 @@ public abstract class CQLTester
     {
         String formattedQuery = formatQuery(keyspace, query);
         Pair<String, String> qualifiedIndexName = createFormattedIndex(keyspace, formattedQuery);
-        waitForIndexQueryableOnFirstNode(qualifiedIndexName.left, qualifiedIndexName.right);
+        waitForIndexQueryable(qualifiedIndexName.left, qualifiedIndexName.right);
         return qualifiedIndexName.right;
     }
 
@@ -1140,7 +1140,7 @@ public abstract class CQLTester
 
     public void waitForIndexQueryable(String index)
     {
-        waitForIndexQueryableOnFirstNode(KEYSPACE, index);
+        waitForIndexQueryable(KEYSPACE, index);
     }
 
     /**
@@ -1149,7 +1149,7 @@ public abstract class CQLTester
      * @param keyspace the index keyspace name
      * @param index the index name
      */
-    public void waitForIndexQueryableOnFirstNode(String keyspace, String index)
+    public void waitForIndexQueryable(String keyspace, String index)
     {
         waitForIndexQueryable(keyspace, index, 1, TimeUnit.MINUTES);
     }

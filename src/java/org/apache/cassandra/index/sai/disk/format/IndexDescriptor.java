@@ -78,10 +78,13 @@ public class IndexDescriptor
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    // TODO Because indexes can be added at any time to existing data, the Version of a column index
-    // may not match the Version of the base sstable.  OnDiskFormat + IndexFeatureSet + IndexDescriptor
-    // was not designed with this in mind, leading to some awkwardness, notably in IFS where some features
-    // are per-sstable (`isRowAware`) and some are per-column (`hasTermsHistogram`).
+    /*
+    TODO: New indexes can be added at any time to existing data. Since CNDB-8756 we keep all new column indexes in the
+     same version as the existing per-sstable index components, making sstable upgrade the only way to move to a newer
+     version. However, prior to that fix the Version of a column index may not match the Version of the base sstable.
+     OnDiskFormat + IndexFeatureSet + IndexDescriptor was not designed with this in mind, leading to some awkwardness,
+     notably in IFS where some features are per-sstable (`isRowAware`) and some are per-column (`hasTermsHistogram`).
+    */
 
     public final Descriptor descriptor;
     private final ComponentsBuildId emptyGroupMarker;
@@ -260,6 +263,16 @@ public class IndexDescriptor
         return this;
     }
 
+    /**
+     * Returns the version that should be used for new components for the sstable of this descriptor.
+     * It is the version of the per-sstable components, which is either the version of the existing per-sstable
+     * components if any, or the current version if there is no existing components.
+     */
+    public Version versionForNewComponents()
+    {
+        return perSSTableComponents().version();
+    }
+
     public IndexComponents.ForRead perSSTableComponents()
     {
         return perSSTable;
@@ -288,7 +301,7 @@ public class IndexDescriptor
 
     private IndexComponents.ForWrite newComponentsForWrite(@Nullable IndexContext context, IndexComponentsImpl currentComponents)
     {
-        Version version = context != null ? context.version() : Version.current(descriptor.ksname);
+        Version version = versionForNewComponents();
         var currentBuildId = currentComponents == null ? null : currentComponents.buildId;
         return new IndexComponentsImpl(context, ComponentsBuildId.forNewBuild(version, currentBuildId, candidateId -> {
             // This checks that there is no existing files on disk we would overwrite by using `candidateId` for our
