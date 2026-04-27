@@ -410,7 +410,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
-    protected UnfilteredPartitionIterator queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public UnfilteredPartitionIterator queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         // skip the row cache and go directly to sstables/memtable if repaired status of
         // data is being tracked. This is only requested after an initial digest mismatch
@@ -1220,6 +1220,11 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException
         {
             return StorageProxy.read(this, consistency, queryState, queryStartNanoTime);
+        }
+
+        public PartitionIterator postReconciliationProcessing(PartitionIterator result)
+        {
+            return queries.isEmpty() ? result : queries.get(0).postReconciliationProcessing(result);
         }
     }
 
