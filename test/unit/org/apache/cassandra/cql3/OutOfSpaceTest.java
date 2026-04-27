@@ -179,7 +179,7 @@ public class OutOfSpaceTest
 
         // Make sure commit log wasn't discarded.
         TableId tableId = currentTableMetadata().id;
-        for (CommitLogSegment segment : CommitLog.instance.getSegmentManager().getActiveSegments())
+        for (CommitLogSegment segment : ((CommitLog) CommitLog.instance).getSegmentManager().getActiveSegments())
             if (segment.getDirtyTableIds().contains(tableId))
                 return;
         fail("Expected commit log to remain dirty for the affected table.");

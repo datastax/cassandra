@@ -196,6 +196,11 @@ public enum CassandraRelevantProperties
     LOG_TRANSACTIONS_FACTORY("cassandra.log_transactions_factory"),
 
     /**
+     * Factory to create instances of CommitLog
+     */
+    COMMITLOG_FACTORY("cassandra.commit_log_factory"),
+
+    /**
      * When doing a host replacement its possible that the gossip state is "empty" meaning that the endpoint is known
      * but the current state isn't known.  If the host replacement is needed to repair this state, this property must
      * be true.
