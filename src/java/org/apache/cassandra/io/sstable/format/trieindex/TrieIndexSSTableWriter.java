@@ -204,12 +204,13 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             StatsMetadata stats = (StatsMetadata) finalMetadata.get(MetadataType.STATS);
             CompactionMetadata compactionMetadata = (CompactionMetadata) finalMetadata.get(MetadataType.COMPACTION);
 
-            FileHandle ifile = iwriter.rowIndexFHBuilder.withLength(iwriter.rowIndexFile.getLastFlushOffset()).complete();
-            // With trie indices it is no longer necessary to limit the file size; just make sure indices and data
-            // get updated length / compression metadata.
-            dataFile.updateFileHandle(dbuilder, dataLength);
+            FileHandle ifile = iwriter.rowIndexFile.updateFileHandle(iwriter.rowIndexFHBuilder)
+                                                   .complete();
             int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).withLength(dataLength).complete();
+            FileHandle dfile = dataFile.updateFileHandle(dbuilder, dataLength)
+                                       .bufferSize(dataBufferSize)
+                                       .withLength(dataLength)
+                                       .complete();
             invalidateCacheAtPreviousBoundary(dfile, dataLength);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                         components(), metadata,
@@ -232,6 +233,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
                             // ensure outstanding openEarly actions are not triggered.
         dataFile.sync();
         iwriter.rowIndexFile.sync();
+        iwriter.rowIndexFile.updateFileHandle(iwriter.rowIndexFHBuilder);
         // Note: Nothing must be written to any of the files after this point, as the chunk cache could pick up and
         // retain a partially-written page (see DB-2446).
 
@@ -397,7 +399,6 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
 
         public boolean buildPartial(long dataPosition, Consumer<PartitionIndex> callWhenReady)
         {
-            rowIndexFile.updateFileHandle(rowIndexFHBuilder);
             return partitionIndex.buildPartial(callWhenReady, rowIndexFile.position(), dataPosition);
         }
 
@@ -450,8 +451,6 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
 
             // truncate index file
             rowIndexFile.prepareToCommit();
-            rowIndexFHBuilder.withLength(rowIndexFile.getLastFlushOffset());
-            //TODO figure out whether the update should be done before or after the prepare to commit
             rowIndexFile.updateFileHandle(rowIndexFHBuilder);
 
             complete();
