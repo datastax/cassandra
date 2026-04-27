@@ -116,7 +116,38 @@ public enum IndexComponentType
     /**
      * Stores document length information for BM25 scoring
      */
-    DOC_LENGTHS("DocLengths");
+    DOC_LENGTHS("DocLengths"),
+
+    /**
+     * An on-disk block-packed index containing the starting and ending rowIds for each partition.
+     * <p>
+     * V9
+     */
+    PARTITION_SIZES("PartitionSizes"),
+    /**
+     * Prefix-compressed blocks of partition keys used for rowId to partition key lookups
+     * <p>
+     * V9
+     */
+    PARTITION_KEY_BLOCKS("PKBlocks"),
+    /**
+     * Encoded sequence of offsets to partition key blocks
+     * <p>
+     * V9
+     */
+    PARTITION_KEY_BLOCK_OFFSETS("PKBlockOffsets"),
+    /**
+     * Prefix-compressed blocks of clustering keys used for rowId to clustering key lookups
+     * <p>
+     * V9
+     */
+    CLUSTERING_KEY_BLOCKS("CKBlocks"),
+    /**
+     * Encoded sequence of offsets to clustering key blocks
+     * <p>
+     * V9
+     */
+    CLUSTERING_KEY_BLOCK_OFFSETS("CKBlockOffsets");
 
     public final String representation;
 

@@ -95,6 +95,7 @@ public abstract class SSTable
 
     protected final DiskOptimizationStrategy optimizationStrategy;
     protected final TableMetadataRef metadata;
+    public final boolean hasClustering;
     // This field is null if the compaction metadata is not loaded yet, it can be a empty optional if the compaction metadata is not available
     protected Optional<CompactionMetadata> compactionMetadata;
     private static final int SAMPLES_CAP = 10000;
@@ -111,6 +112,7 @@ public abstract class SSTable
         this.compression = components.contains(Component.COMPRESSION_INFO);
         this.components = ImmutableSet.copyOf(components);
         this.metadata = metadata;
+        this.hasClustering = metadata.get().comparator.size() > 0;
         this.optimizationStrategy = Objects.requireNonNull(optimizationStrategy);
     }
 
@@ -420,7 +422,6 @@ public abstract class SSTable
     /**
      * Appends new component names to the TOC component.
      */
-    @SuppressWarnings("resource")
     protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
     {
         File tocFile = descriptor.fileFor(Component.TOC);

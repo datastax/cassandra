@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
 import javax.annotation.Nullable;
 import javax.management.AttributeNotFoundException;
 import javax.management.InstanceNotFoundException;
@@ -46,6 +47,7 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
+
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -697,7 +699,7 @@ public class SAITester extends CQLTester
     {
         Set<File> indexFiles = indexFiles();
 
-        for (IndexComponentType indexComponentType : Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType indexComponentType : Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes(false))
         {
             String name = Version.current(KEYSPACE).fileNameFormatter().format(indexComponentType, (String)null, 0);
             Component component = new Component(Component.Type.CUSTOM, name);

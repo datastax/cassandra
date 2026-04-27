@@ -40,14 +40,14 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  */
 public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
-    private final ClusteringComparator clusteringComparator;
-    private final boolean hasEmptyClustering;
+    protected final ClusteringComparator clusteringComparator;
+    public final boolean hasClustering;
 
 
     public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
     {
         this.clusteringComparator = clusteringComparator;
-        this.hasEmptyClustering = clusteringComparator.size() == 0;
+        this.hasClustering = clusteringComparator.size() > 0;
     }
 
     @Override
@@ -62,19 +62,19 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
     }
 
-    PrimaryKey createWithSource(PrimaryKeyMap primaryKeyMap, long sstableRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
+    public PrimaryKey createWithSource(PrimaryKeyMap primaryKeyMap, long sstableRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
     {
         return new PrimaryKeyWithSource(primaryKeyMap, sstableRowId, sourceSstableMinKey, sourceSstableMaxKey);
     }
 
-    private class RowAwarePrimaryKey implements PrimaryKey
+    protected class RowAwarePrimaryKey implements PrimaryKey
     {
         private final Token token;
-        private DecoratedKey partitionKey;
-        private Clustering clustering;
+        protected DecoratedKey partitionKey;
+        protected Clustering clustering;
         private Supplier<PrimaryKey> primaryKeySupplier;
 
-        private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
+        protected RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
         {
             this.token = token;
             this.partitionKey = partitionKey;
@@ -141,7 +141,12 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, true);
         }
 
-        private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
+        protected ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
+        {
+            return ByteSource.withTerminator(terminator, buildComparableSources(version, isPrefix));
+        }
+
+        protected ByteSource[] buildComparableSources(ByteComparable.Version version, boolean isPrefix)
         {
             // We need to make sure that the key is loaded before returning a
             // byte comparable representation. If we don't we won't get a correct
@@ -162,9 +167,9 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 
             // prefix doesn't include null components
             if (isPrefix && clusteringComparable == null)
-                return ByteSource.withTerminator(terminator, tokenComparable, keyComparable);
+                return new ByteSource[]{ tokenComparable, keyComparable };
             else
-                return ByteSource.withTerminator(terminator, tokenComparable, keyComparable, clusteringComparable);
+                return new ByteSource[]{ tokenComparable, keyComparable, clusteringComparable };
         }
 
         @Override
@@ -191,9 +196,10 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int hashCode()
         {
-            if (hasEmptyClustering)
+            if (hasClustering)
+                return Objects.hash(token, clustering());
+            else
                 return Objects.hash(token);
-            return Objects.hash(token, clustering());
         }
 
         @Override
