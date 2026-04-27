@@ -1641,8 +1641,43 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     protected boolean inBloomFilter(DecoratedKey dk)
     {
+        // There could be a race that async BF loading completed before calling "bf.isPresent(dk)". Should be acceptable.
+        if (isLazyBloomFilter())
+            bloomFilterTracker.addLazyBloomFilterHit();
+        else if (isNoBloomFilter())
+            bloomFilterTracker.addNoBloomFilterHit();
         maybeDeserializeLazyBloomFilter();
         return bf.isPresent(dk);
+    }
+
+    public boolean isBloomFilterLoaded()
+    {
+        return !isLazyBloomFilter() && !isNoBloomFilter();
+    }
+
+    public boolean isLazyBloomFilter()
+    {
+        return bf == FilterFactory.AlwaysPresentForLazyLoading;
+    }
+
+    public boolean isNoBloomFilter()
+    {
+        return bf == FilterFactory.AlwaysPresent;
+    }
+
+    public boolean isLazyBloomFilterByRequestRateCriteria()
+    {
+        return isLazyBloomFilter()
+               && bloomFilterLazyLoadingWindow > 0
+               && bloomFilterLazyLoadingThreshold > 0
+               && !partitionIndexHitRateExceedsThreshold();
+    }
+
+    public boolean isLazyBloomFilterByRequestCountCriteria()
+    {
+        return isLazyBloomFilter()
+               && (bloomFilterLazyLoadingThreshold == 0
+                   || bloomFilterLazyLoadingWindow <= 0 && !partitionIndexHitCountExceedsThreshold());
     }
 
     /**
@@ -1660,14 +1695,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         boolean loadBloomFilter = false;
 
-        // If the threshold was set to zero we always want to deserialize
+        // If the threshold was set to zero we always want to deserialize on first access
         if (bloomFilterLazyLoadingThreshold == 0)
             loadBloomFilter = true;
-            // otherwise, if window is <= 0 we use the threshold as an absolute count
-        else if (bloomFilterLazyLoadingWindow <= 0 && partitionIndexReadMeter.get().count() >= bloomFilterLazyLoadingThreshold)
+        // otherwise, if window is <= 0 we use the threshold as an absolute count
+        else if (bloomFilterLazyLoadingWindow <= 0 && partitionIndexHitCountExceedsThreshold())
             loadBloomFilter = true;
-            // otherwise we look at the count in the specified window
-        else if (bloomFilterLazyLoadingWindow > 0 && partitionIndexReadMeter.get().rate(bloomFilterLazyLoadingWindow) >= bloomFilterLazyLoadingThreshold)
+        // otherwise we look at the count in the specified window
+        else if (bloomFilterLazyLoadingWindow > 0 && partitionIndexHitRateExceedsThreshold())
             loadBloomFilter = true;
 
         if (!loadBloomFilter)
@@ -1716,6 +1751,16 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                          });
 
         return true;
+    }
+
+    private boolean partitionIndexHitRateExceedsThreshold()
+    {
+        return partitionIndexReadMeter.map(meter -> meter.rate(bloomFilterLazyLoadingWindow) >= bloomFilterLazyLoadingThreshold).orElse(false);
+    }
+
+    private boolean partitionIndexHitCountExceedsThreshold()
+    {
+        return partitionIndexReadMeter.map(meter -> meter.count() >= bloomFilterLazyLoadingThreshold).orElse(false);
     }
 
     /**
