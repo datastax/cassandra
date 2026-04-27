@@ -799,7 +799,24 @@ public enum CassandraRelevantProperties
     /**
      * A directory to the default system key location - used by transparent data encryption
      */
-    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf");
+    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf"),
+
+    /**
+     * Cache size for compression chunk offsets. By default, it uses 10% of max direct memory.
+     * 
+     * When positive: Uses block-cached implementation (BlockCacheChunkOffsets) that spills to disk
+     * with LRU eviction, preventing OOM. This is the recommended default.
+     * 
+     * When zero or negative: Falls back to legacy in-memory implementation (InMemoryCompressionChunkOffsets)
+     * that loads all offsets into a single Memory.LongArray. Use only for rollback if issues occur.
+     *
+     * Alternatively, an absolute cache size can be configured, e.g. "10GiB".
+     */
+    COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE("cassandra.compression_chunk_offsets_block_cache_size", "auto@0.1"),
+    /**
+     * Factory for initializing {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} instances
+     */
+    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

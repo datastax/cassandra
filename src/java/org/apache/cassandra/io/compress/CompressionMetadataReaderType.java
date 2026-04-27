@@ -16,7 +16,7 @@
 
 package org.apache.cassandra.io.compress;
 
-enum CompressionMetadataReaderType
+public enum CompressionMetadataReaderType
 {
     WRITE_TIME,
     READ_TIME
