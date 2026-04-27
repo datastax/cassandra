@@ -682,7 +682,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
     public UnfilteredRowIterator queryMemtableAndDisk(ColumnFamilyStore cfs,
                                                       ColumnFamilyStore.ViewFragment view,
-                                                      Function<Object, Transformation<BaseRowIterator<?>>> rowTransformer,
+                                                      Function<CellSourceIdentifier, Transformation<BaseRowIterator<?>>> rowTransformer,
                                                       ReadExecutionController executionController)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
@@ -700,7 +700,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
     private UnfilteredRowIterator queryMemtableAndDiskInternal(ColumnFamilyStore cfs,
                                                                ColumnFamilyStore.ViewFragment view,
-                                                               Function<Object, Transformation<BaseRowIterator<?>>> rowTransformer,
+                                                               Function<CellSourceIdentifier, Transformation<BaseRowIterator<?>>> rowTransformer,
                                                                ReadExecutionController controller,
                                                                long startTimeNanos)
     {
@@ -985,7 +985,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
      * no collection or counters are included).
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
-    private UnfilteredRowIterator queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, ColumnFamilyStore.ViewFragment view, Function<Object, Transformation<BaseRowIterator<?>>> rowTransformer, ClusteringIndexNamesFilter filter, ReadExecutionController controller, long startTimeNanos)
+    private UnfilteredRowIterator queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, ColumnFamilyStore.ViewFragment view, Function<CellSourceIdentifier, Transformation<BaseRowIterator<?>>> rowTransformer, ClusteringIndexNamesFilter filter, ReadExecutionController controller, long startTimeNanos)
     {
         if (Tracing.traceSinglePartitions())
             Tracing.trace("Acquiring sstable references");
