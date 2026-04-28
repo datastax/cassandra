@@ -444,8 +444,6 @@ public class CompactionTask extends AbstractCompactionTask
                 this.sstableRefs = Refs.ref(actuallyCompact);
                 this.op = initializeSource(tokenRange());
                 this.writer = getCompactionAwareWriter(realm, dirs, actuallyCompact);
-                if (null != opObserver)
-                    this.obsCloseable = opObserver.onOperationStart(op);
                 CompactionProgress progress = this;
                 var sharedProgress = sharedProgress();
                 if (sharedProgress != null)
@@ -454,6 +452,8 @@ public class CompactionTask extends AbstractCompactionTask
                     progress = sharedProgress;
                 }
 
+                if (null != opObserver)
+                    this.obsCloseable = opObserver.onOperationStart(op);
                 for (var obs : getCompObservers())
                     obs.onInProgress(progress);
             }
