@@ -653,7 +653,7 @@
         <copy todir="${basedir}/conf" file="${build.classes.main}/META-INF/hotspot_compiler"/>
     </target>
 
-    <target name="check" depends="_main-jar,build-test,gen-doc" description="Verifies the source code and dependencies. This task is intended to run on pre-commit and locally. It should verify mostly modified files compared to the upstream base branch." unless="check.skip">
+    <target name="check" depends="_main-jar,build-test" description="Verifies the source code and dependencies. This task is intended to run on pre-commit and locally. It should verify mostly modified files compared to the upstream base branch." unless="check.skip">
         <antcall target="rat-check" inheritrefs="true"/>
         <antcall target="checkstyle" inheritrefs="true"/>
         <antcall target="checkstyle-test" inheritrefs="true"/>
