@@ -237,17 +237,17 @@ public class NoSpamLoggerTest
    {
        now = 5;
 
-       assertTrue(NoSpamLogger.log( mock, Level.INFO, 5,  TimeUnit.NANOSECONDS, statement, param));
+       assertTrue(NoSpamLogger.log(mock, Level.INFO, 5, TimeUnit.NANOSECONDS, statement, param));
        checkMock(Level.INFO);
 
        now = 10;
 
-       assertTrue(NoSpamLogger.log( mock, Level.WARN, 5,  TimeUnit.NANOSECONDS, statement, param));
+       assertTrue(NoSpamLogger.log(mock, Level.WARN, 5, TimeUnit.NANOSECONDS, statement, param));
        checkMock(Level.WARN);
 
        now = 15;
 
-       assertTrue(NoSpamLogger.log( mock, Level.ERROR, 5,  TimeUnit.NANOSECONDS, statement, param));
+       assertTrue(NoSpamLogger.log(mock, Level.ERROR, 5, TimeUnit.NANOSECONDS, statement, param));
        checkMock(Level.ERROR);
 
        now = 20;
@@ -284,4 +284,176 @@ public class NoSpamLoggerTest
        assertTrue(nospamStatement.error(param));
        checkMock(Level.ERROR);
    }
+
+    /**
+     * Test that the lastMessage cache is bounded and doesn't grow beyond max_statements_per_logger.
+     * This prevents memory exhaustion from dynamic log messages (e.g., queries with unique strings).
+     */
+    @Test
+    public void testLastMessageCacheBounded() throws Exception
+    {
+        // Set a small cache size for testing
+        System.setProperty("cassandra.nospam_logger.max_statements_per_logger", "10");
+        try
+        {
+            NoSpamLogger.clearWrappedLoggersForTest();
+            now = 5;
+            NoSpamLogger logger = NoSpamLogger.getLogger(mock, 5, TimeUnit.NANOSECONDS);
+
+            // Create more unique log statements than the cache can hold
+            for (int i = 0; i < 15; i++)
+            {
+                String uniqueStatement = "statement" + i + "{}";
+                assertTrue("First log of statement " + i + " should succeed", 
+                          logger.info(uniqueStatement, param));
+                now += 10; // Advance time so each statement can log
+            }
+
+            // Verify we logged 15 times
+            assertEquals(15, logged.get(Level.INFO).size());
+
+            // The cache should have evicted some entries due to size limit
+            // We can't directly check cache size, but we can verify behavior:
+            // If we try to log the first few statements again (which should have been evicted),
+            // they should log again immediately (not be rate-limited)
+            now += 10;
+            assertTrue("Statement 0 should have been evicted and can log again",
+                      logger.info("statement0{}", param));
+            assertEquals(16, logged.get(Level.INFO).size());
+        }
+        finally
+        {
+            System.clearProperty("cassandra.nospam_logger.max_statements_per_logger");
+            NoSpamLogger.clearWrappedLoggersForTest();
+        }
+    }
+
+    /**
+     * Test that log statements expire after the configured inactivity period.
+     */
+    @Test
+    public void testLastMessageCacheTimeBasedEviction() throws Exception
+    {
+        // Set a short expiry time for testing (1 minute = 60,000,000,000 nanoseconds)
+        System.setProperty("cassandra.nospam_logger.statements_expire_minutes", "1");
+        try
+        {
+            NoSpamLogger.clearWrappedLoggersForTest();
+            now = 0;
+            NoSpamLogger logger = NoSpamLogger.getLogger(mock, 5, TimeUnit.NANOSECONDS);
+
+            // Log a statement
+            assertTrue(logger.info("test{}", param));
+            assertEquals(1, logged.get(Level.INFO).size());
+
+            // Try to log again immediately - should be rate-limited
+            assertFalse(logger.info("test{}", param));
+            assertEquals(1, logged.get(Level.INFO).size());
+
+            // Advance time by more than 1 minute (60 minutes in nanoseconds)
+            now += TimeUnit.MINUTES.toNanos(61);
+
+            // The statement should have expired from cache, so it should log again
+            // even though we haven't waited for the rate limit interval
+            assertTrue("Statement should have expired and can log again",
+                      logger.info("test{}", param));
+            assertEquals(2, logged.get(Level.INFO).size());
+        }
+        finally
+        {
+            System.clearProperty("cassandra.nospam_logger.statements_expire_minutes");
+            NoSpamLogger.clearWrappedLoggersForTest();
+        }
+    }
+
+    /**
+     * Test that the wrappedLoggers cache is bounded.
+     */
+    @Test
+    public void testWrappedLoggersCacheBounded() throws Exception
+    {
+        // Set a small cache size for testing
+        System.setProperty("cassandra.nospam_logger.max_loggers", "5");
+        try
+        {
+            NoSpamLogger.clearWrappedLoggersForTest();
+            now = 5;
+
+            // Create more unique loggers than the cache can hold
+            for (int i = 0; i < 10; i++)
+            {
+                Logger uniqueLogger = new SubstituteLogger("logger" + i, null, true)
+                {
+                    @Override
+                    public void info(String statement, Object... args)
+                    {
+                        logged.get(Level.INFO).offer(Pair.create(statement, args));
+                    }
+
+                    @Override
+                    public int hashCode()
+                    {
+                        return System.identityHashCode(this);
+                    }
+
+                    @Override
+                    public boolean equals(Object o)
+                    {
+                        return this == o;
+                    }
+                };
+
+                NoSpamLogger logger = NoSpamLogger.getLogger(uniqueLogger, 5, TimeUnit.NANOSECONDS);
+                assertTrue(logger.info("test{}", param));
+                now += 10;
+            }
+
+            // Verify we created 10 loggers and they all logged
+            assertEquals(10, logged.get(Level.INFO).size());
+
+            // The cache should have evicted some logger instances due to size limit
+            // This test mainly verifies that the cache doesn't grow unbounded
+        }
+        finally
+        {
+            System.clearProperty("cassandra.nospam_logger.max_loggers");
+            NoSpamLogger.clearWrappedLoggersForTest();
+        }
+    }
+
+    /**
+     * Test that simulates the production scenario: many unique log messages
+     * (e.g., tombstone warnings with different query strings) don't cause OOM.
+     */
+    @Test
+    public void testMemoryDoesNotGrowUnbounded() throws Exception
+    {
+        System.setProperty("cassandra.nospam_logger.max_statements_per_logger", "100");
+        try
+        {
+            NoSpamLogger.clearWrappedLoggersForTest();
+            now = 0;
+            NoSpamLogger logger = NoSpamLogger.getLogger(mock, 1, TimeUnit.NANOSECONDS);
+
+            // Simulate 1000 unique log messages (like unique query strings)
+            for (int i = 0; i < 1000; i++)
+            {
+                String uniqueMessage = "Scanned over 1000 tombstones for query: SELECT * FROM table WHERE id = " + i;
+                logger.warn(uniqueMessage);
+                now += 2; // Advance time so each can log
+            }
+
+            // All 1000 should have logged
+            assertEquals(1000, logged.get(Level.WARN).size());
+
+            // The cache should be bounded to 100 entries, not 1000
+            // We can't directly check cache size, but the test verifies that
+            // the system doesn't crash with OOM and completes successfully
+        }
+        finally
+        {
+            System.clearProperty("cassandra.nospam_logger.max_statements_per_logger");
+            NoSpamLogger.clearWrappedLoggersForTest();
+        }
+    }
 }

@@ -20,10 +20,14 @@ package org.apache.cassandra.utils;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.MoreExecutors;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 
 /**
  * Logging that limits each log statement to firing based on time since the statement last fired.
@@ -147,25 +151,28 @@ public class NoSpamLogger
         }
     }
 
-    private static final NonBlockingHashMap<Logger, NoSpamLogger> wrappedLoggers = new NonBlockingHashMap<>();
+    /**
+     * Cache of NoSpamLogger instances per Logger object.
+     * Bounded by size and time to prevent memory exhaustion.
+     * Uses Caffeine with W-TinyLFU eviction policy and directExecutor for non-blocking operations.
+     */
+    private static final Cache<Logger, NoSpamLogger> wrappedLoggers = Caffeine.newBuilder()
+            .maximumSize(NOSPAM_LOGGER_MAX_LOGGERS.getLong())
+            .expireAfterAccess(NOSPAM_LOGGER_LOGGERS_EXPIRE_MINUTES.getLong(), TimeUnit.MINUTES)
+            .executor(MoreExecutors.directExecutor())
+            .recordStats()
+            .build();
 
     @VisibleForTesting
     static void clearWrappedLoggersForTest()
     {
-        wrappedLoggers.clear();
+        wrappedLoggers.invalidateAll();
     }
 
     public static NoSpamLogger getLogger(Logger logger, long minInterval, TimeUnit unit)
     {
-        NoSpamLogger wrapped = wrappedLoggers.get(logger);
-        if (wrapped == null)
-        {
-            wrapped = new NoSpamLogger(logger, minInterval, unit);
-            NoSpamLogger temp = wrappedLoggers.putIfAbsent(logger, wrapped);
-            if (temp != null)
-                wrapped = temp;
-        }
-        return wrapped;
+        // Caffeine's get(key, loader) is non-blocking and functionally equivalent to putIfAbsent pattern
+        return wrappedLoggers.get(logger, key -> new NoSpamLogger(logger, minInterval, unit));
     }
 
     public static boolean log(Logger logger, Level level, long minInterval, TimeUnit unit, String message, Object... objects)
@@ -193,7 +200,18 @@ public class NoSpamLogger
 
     private final Logger wrapped;
     private final long minIntervalNanos;
-    private final NonBlockingHashMap<String, NoSpamLogStatement> lastMessage = new NonBlockingHashMap<>();
+    
+    /**
+     * Cache of log statements per logger instance.
+     * Bounded by size and time to prevent memory exhaustion from dynamic log messages.
+     * Uses Caffeine with W-TinyLFU eviction policy and directExecutor for non-blocking operations.
+     */
+    private final Cache<String, NoSpamLogStatement> lastMessage = Caffeine.newBuilder()
+            .maximumSize(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong())
+            .expireAfterAccess(NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES.getLong(), TimeUnit.MINUTES)
+            .executor(MoreExecutors.directExecutor())
+            .recordStats()
+            .build();
 
     private NoSpamLogger(Logger wrapped, long minInterval, TimeUnit timeUnit)
     {
@@ -268,14 +286,7 @@ public class NoSpamLogger
 
     public NoSpamLogStatement getStatement(String key, String s, long minIntervalNanos)
     {
-        NoSpamLogStatement statement = lastMessage.get(key);
-        if (statement == null)
-        {
-            statement = new NoSpamLogStatement(s, minIntervalNanos);
-            NoSpamLogStatement temp = lastMessage.putIfAbsent(key, statement);
-            if (temp != null)
-                statement = temp;
-        }
-        return statement;
+        // Caffeine's get(key, loader) is non-blocking and functionally equivalent to putIfAbsent pattern
+        return lastMessage.get(key, k -> new NoSpamLogStatement(s, minIntervalNanos));
     }
 }
