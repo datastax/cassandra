@@ -20,7 +20,6 @@ package org.apache.cassandra.db.tries;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.io.compress.BufferType;
 
 /// Buffer-managing component of in-memory tries. Deals with the allocation, access and
