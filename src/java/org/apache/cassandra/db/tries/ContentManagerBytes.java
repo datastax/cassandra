@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.db.tries;
 
-import org.agrona.concurrent.UnsafeBuffer;
-
 import static org.apache.cassandra.db.tries.ContentSerializer.OFFSET_SPECIAL;
 import static org.apache.cassandra.db.tries.InMemoryReadTrie.offset;
 

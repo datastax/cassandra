@@ -19,13 +19,11 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import com.google.common.collect.Collections2;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 
@@ -48,7 +46,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.BiLongAccumulator;
 import org.apache.cassandra.utils.LongAccumulator;
 import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.memory.Cloner;
 
 /**
