@@ -20,8 +20,6 @@ package org.apache.cassandra.db.tries;
 
 import org.junit.Test;
 
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-
 public class TrieToDotTest
 {
     @Test
