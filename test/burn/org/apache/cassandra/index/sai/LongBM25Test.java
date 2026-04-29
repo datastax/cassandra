@@ -37,8 +37,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;

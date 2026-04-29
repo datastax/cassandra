@@ -18,33 +18,25 @@
 
 package org.apache.cassandra.db.tries;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.google.common.base.Predicates;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Streams;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.apache.cassandra.db.tries.TrieUtil.directComparable;
-import static org.apache.cassandra.utils.bytecomparable.ByteComparable.EMPTY;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**

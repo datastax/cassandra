@@ -31,8 +31,6 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
-import static org.github.jamm.MemoryMeterStrategy.MEMORY_LAYOUT;
-
 /// Base class for mutable in-memory tries, providing the common infrastructure for plain, range and deletion-aware
 /// in-memory tries.
 public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
