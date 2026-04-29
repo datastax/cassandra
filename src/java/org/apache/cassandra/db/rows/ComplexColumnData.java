@@ -18,7 +18,6 @@
 package org.apache.cassandra.db.rows;
 
 import java.util.Iterator;
-import java.util.function.Function;
 
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
