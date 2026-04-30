@@ -169,6 +169,50 @@ public class NoSpamLogger
         wrappedLoggers.invalidateAll();
     }
 
+    /**
+     * Forces eviction of entries from the wrappedLoggers cache.
+     * This is useful for testing to ensure cache size limits are enforced immediately.
+     */
+    @VisibleForTesting
+    static void cleanUpWrappedLoggersForTest()
+    {
+        wrappedLoggers.cleanUp();
+    }
+
+    /**
+     * Returns the current size of the wrappedLoggers cache.
+     * This is useful for testing cache eviction behavior.
+     *
+     * @return the number of NoSpamLogger instances currently cached
+     */
+    @VisibleForTesting
+    static long getWrappedLoggersCount()
+    {
+        return wrappedLoggers.estimatedSize();
+    }
+
+    /**
+     * Forces eviction of entries from the lastMessage cache for this logger instance.
+     * This is useful for testing to ensure cache size limits are enforced immediately.
+     */
+    @VisibleForTesting
+    void cleanUpStatementsForTest()
+    {
+        lastMessage.cleanUp();
+    }
+
+    /**
+     * Returns the current size of the lastMessage cache for this logger instance.
+     * This is useful for testing cache eviction behavior.
+     *
+     * @return the number of log statements currently cached for this logger
+     */
+    @VisibleForTesting
+    long getStatementsCount()
+    {
+        return lastMessage.estimatedSize();
+    }
+
     public static NoSpamLogger getLogger(Logger logger, long minInterval, TimeUnit unit)
     {
         return wrappedLoggers.get(logger, key -> new NoSpamLogger(logger, minInterval, unit));

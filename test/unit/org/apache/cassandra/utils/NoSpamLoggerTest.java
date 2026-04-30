@@ -18,6 +18,7 @@
 */
 package org.apache.cassandra.utils;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_MAX_LOGGERS;
 import static org.junit.Assert.*;
 
 import java.util.ArrayDeque;
@@ -303,15 +304,20 @@ public class NoSpamLoggerTest
             for (int i = 0; i < 15; i++)
             {
                 String uniqueStatement = "statement" + i + "{}";
-                assertTrue("First log of statement " + i + " should succeed", 
+                assertTrue("First log of statement " + i + " should succeed",
                           logger.info(uniqueStatement, param));
                 now += 10; // Advance time so each statement can log
             }
 
             assertEquals(15, logged.get(Level.INFO).size());
 
+            // Force cache cleanup to ensure eviction has completed
+            logger.cleanUpStatementsForTest();
+
+            // Verify the cache size is bounded to the configured maximum
+            assertTrue("Cache size should be at most 10", logger.getStatementsCount() <= 10);
+
             // The cache should have evicted some entries due to size limit
-            // We can't directly check cache size, but we can verify behavior:
             // If we try to log the first few statements again (which should have been evicted),
             // they should log again immediately (not be rate-limited)
             now += 10;
@@ -368,55 +374,52 @@ public class NoSpamLoggerTest
     @Test
     public void testWrappedLoggersCacheBounded() throws Exception
     {
-        // Set a small cache size for testing
-        System.setProperty("cassandra.nospam_logger.max_loggers", "5");
-        try
-        {
-            NoSpamLogger.clearWrappedLoggersForTest();
-            now = 5;
+        NoSpamLogger.clearWrappedLoggersForTest();
+        now = 5;
 
-            // Create more unique loggers than the cache can hold
-            for (int i = 0; i < 10; i++)
+        long maxLoggers = NOSPAM_LOGGER_MAX_LOGGERS.getLong();
+        int loggersToCreate = (int) (maxLoggers * 1.5); // Create 50% more than the limit
+
+        // Create more unique loggers than the cache can hold
+        for (int i = 0; i < loggersToCreate; i++)
+        {
+            Logger uniqueLogger = new SubstituteLogger("logger" + i, null, true)
             {
-                Logger uniqueLogger = new SubstituteLogger("logger" + i, null, true)
+                @Override
+                public void info(String statement, Object... args)
                 {
-                    @Override
-                    public void info(String statement, Object... args)
-                    {
-                        logged.get(Level.INFO).offer(Pair.create(statement, args));
-                    }
+                    logged.get(Level.INFO).offer(Pair.create(statement, args));
+                }
 
-                    @Override
-                    public int hashCode()
-                    {
-                        return System.identityHashCode(this);
-                    }
+                @Override
+                public int hashCode()
+                {
+                    return System.identityHashCode(this);
+                }
 
-                    @Override
-                    public boolean equals(Object o)
-                    {
-                        return this == o;
-                    }
-                };
+                @Override
+                public boolean equals(Object o)
+                {
+                    return this == o;
+                }
+            };
 
-                NoSpamLogger logger = NoSpamLogger.getLogger(uniqueLogger, 5, TimeUnit.NANOSECONDS);
-                assertTrue(logger.info("test{}", param));
-                now += 10;
-            }
-            // The cache should have evicted some logger instances due to size limit
-            assertEquals(10, logged.get(Level.INFO).size());
+            NoSpamLogger logger = NoSpamLogger.getLogger(uniqueLogger, 5, TimeUnit.NANOSECONDS);
+            assertTrue(logger.info("test{}", param));
+            now += 10;
         }
-        finally
-        {
-            System.clearProperty("cassandra.nospam_logger.max_loggers");
-            NoSpamLogger.clearWrappedLoggersForTest();
-        }
+        // All messages should have been logged
+        assertEquals(loggersToCreate, logged.get(Level.INFO).size());
+        
+        // Force cache cleanup to ensure eviction has completed
+        NoSpamLogger.cleanUpWrappedLoggersForTest();
+        
+        // Verify the wrappedLoggers cache size is bounded to the configured maximum
+        long cacheSize = NoSpamLogger.getWrappedLoggersCount();
+        assertTrue("Wrapped loggers cache size should be at most " + maxLoggers + " (was " + cacheSize + ")",
+                  cacheSize <= maxLoggers);
     }
 
-    /**
-     * Test that simulates the production scenario: many unique log messages
-     * (e.g., tombstone warnings with different query strings) don't cause OOM.
-     */
     @Test
     public void testMemoryDoesNotGrowUnbounded() throws Exception
     {
@@ -434,8 +437,16 @@ public class NoSpamLoggerTest
                 now += 2; // Advance time so each can log
             }
 
-            // All the messages should have been logged (We can't directly check cache size)
+            // All the messages should have been logged
             assertEquals(1000, logged.get(Level.WARN).size());
+            
+            // Force cache cleanup to ensure eviction has completed
+            logger.cleanUpStatementsForTest();
+            
+            // Verify the cache size is bounded and doesn't grow unbounded
+            long cacheSize = logger.getStatementsCount();
+            assertTrue("Statements cache should be bounded to 100 (was " + cacheSize + ")",
+                      cacheSize <= 100);
         }
         finally
         {
