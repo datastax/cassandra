@@ -569,15 +569,15 @@ public class TrieBackedRow extends AbstractRow
             return content;
         if (content == COMPLEX_COLUMN_MARKER)
             return content;
-        if (content instanceof LivenessInfo)
-            return null; // skip row marker
-        // skip any deletion that may be covering the row
+        // We may also have a complex column in the deletion trie, introducing a COLUMN-level deletion.
+        if (marker == null)
+            return null; // any other content in the live part of the trie is not a column root
         TrieTombstoneMarker.Covering introducedDeletion = marker.succedingState(direction);
-        if (introducedDeletion == null || introducedDeletion.deletionKind() != TrieTombstoneMarker.Kind.COLUMN)
-            return null;
-        // This is a complex column deletion marker. Return it, which will also result in skipping the return path
-        // marker.
-        return marker;
+        if (introducedDeletion != null && introducedDeletion.deletionKind() == TrieTombstoneMarker.Kind.COLUMN)
+            return COMPLEX_COLUMN_MARKER;
+        // This is a complex column deletion marker. Return it as a complex column, which will also result in skipping
+        // the return path marker.
+        return null;
     }
 
     private static Object combineDataAndDeletionForColumnIteratorForward(Object content, TrieTombstoneMarker marker)
@@ -608,7 +608,7 @@ public class TrieBackedRow extends AbstractRow
         protected ColumnData mapContent(Object value, DeletionAwareTrie<Object, TrieTombstoneMarker> tailTrie, byte[] bytes, int byteLength)
         {
             // value is given by combineDataAndDeletionForColumnIterator above
-            if (value instanceof CellData)
+            if (value != COMPLEX_COLUMN_MARKER)
                 return cellFromCellData((CellData<?, ?>) value, bytes, byteLength, columns);
 
             return new TrieBackedComplexColumn(columnMetadataFromPath(bytes, byteLength, columns), tailTrie);
@@ -633,10 +633,31 @@ public class TrieBackedRow extends AbstractRow
         return value.toCell(column, column.isComplex() ? cellPath(column, pathBytes) : null);
     }
 
+    /// Count the columns in the provided data trie (a row or a partition trie). This includes simple and complex
+    /// columns, including fully deleted ones.
+    public static int countColumns(DeletionAwareTrie<Object, TrieTombstoneMarker> data)
+    {
+        class Counter implements Trie.ValueConsumer<Object>
+        {
+            int count = 0;
+
+            @Override
+            public void content(Object content)
+            {
+                ++count;
+            }
+        }
+
+        Counter counter = new Counter();
+        data.mergedTrie(TrieBackedRow::combineDataAndDeletionForColumnIteratorForward)
+            .processSkippingBranches(Direction.FORWARD, counter);
+        return counter.count;
+    }
+
     @Override
     public int columnCount()
     {
-        return Iterators.size(new ColumnDataIterator(columns, data, Direction.FORWARD));
+        return countColumns(data);
     }
 
     @Override

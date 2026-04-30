@@ -24,6 +24,8 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import com.google.common.base.Predicates;
+
 import org.agrona.DirectBuffer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -113,18 +115,32 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
 
     /// Call the given consumer on all `(path, content)` pairs with non-null content in the trie in order, skipping all
     /// branches below the top content-bearing node.
-    default void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, ? super T> consumer)
+    default void forEachEntrySkippingBranches(Direction direction, Predicate<? super T> acceptancePredicate, BiConsumer<ByteComparable.Preencoded, ? super T> consumer)
     {
+        // TODO: test
         Cursor<T> cursor = cursor(direction);
-        cursor.processSkippingBranches(new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
+        cursor.processSkippingBranches(acceptancePredicate, new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
         // implemented with default methods alone.
+    }
+
+    /// Call the given consumer on all `(path, content)` pairs with non-null content in the trie in order, skipping all
+    /// branches below the top content-bearing node.
+    default void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, ? super T> consumer)
+    {
+        forEachEntrySkippingBranches(direction, Predicates.alwaysTrue(), consumer);
     }
 
     /// Process the trie using the given [Cursor.Walker], skipping all branches below the top content-bearing node.
     default <R> R processSkippingBranches(Direction direction, Cursor.Walker<? super T, R> walker)
     {
-        return cursor(direction).processSkippingBranches(walker);
+        return processSkippingBranches(direction, Predicates.alwaysTrue(), walker);
+    }
+
+    /// Process the trie using the given [Cursor.Walker], skipping all branches below the top content-bearing node.
+    default <R> R processSkippingBranches(Direction direction, Predicate<? super T> acceptancePredicate, Cursor.Walker<? super T, R> walker)
+    {
+        return cursor(direction).processSkippingBranches(acceptancePredicate, walker);
     }
 
     /// Map-like get by key.
