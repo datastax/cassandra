@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
 
@@ -484,11 +485,11 @@ interface Cursor<T>
     /// This is similar to [Trie#tailTries], but able to access only the content instead of the full branch.
     ///
     /// This method should only be called on a freshly constructed cursor.
-    default <R> R processSkippingBranches(Cursor.Walker<? super T, R> walker)
+    default <R> R processSkippingBranches(Predicate<? super T> acceptancePredicate, Cursor.Walker<? super T, R> walker)
     {
         assertFresh();
         T content = content();   // handle content on the root node
-        if (content != null)
+        if (content != null && acceptancePredicate.test(content))
         {
             walker.content(content);
             return walker.complete();
@@ -497,15 +498,20 @@ interface Cursor<T>
 
         while (content != null)
         {
-            walker.content(content);
-            // skip over the branch by requesting a position that is beyond
-            long current = skipTo(positionForSkippingBranch(encodedPosition()));
-            if (isExhausted(current))
-                break;
-            walker.resetPathLength(depth(current) - 1);
-            walker.addPathByte(incomingTransition(current));
-            content = content();
-            if (content == null)
+            if (acceptancePredicate.test(content))
+            {
+                walker.content(content);
+                // skip over the branch by requesting a position that is beyond
+                long current = skipTo(positionForSkippingBranch(encodedPosition()));
+                if (isExhausted(current))
+                    break;
+                walker.resetPathLength(depth(current) - 1);
+                walker.addPathByte(incomingTransition(current));
+                content = content();
+                if (content == null)
+                    content = advanceToContent(walker);
+            }
+            else
                 content = advanceToContent(walker);
         }
         return walker.complete();

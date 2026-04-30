@@ -106,7 +106,9 @@ public class TrieBackedPartition implements Partition
     protected final TableMetadata metadata;
     protected final RegularAndStaticColumns columns;
     protected final EncodingStats stats;
+    /// Number of rows in the partition. This will count only the rows that have live data.
     protected final int rowCountIncludingStatic;
+    /// Number of tombstone boundary pairs on the row-level or above: partition, range and row tombstones.
     protected final int tombstoneCount;
 
     public TrieBackedPartition(DecoratedKey partitionKey,
@@ -315,6 +317,10 @@ public class TrieBackedPartition implements Partition
         return stats;
     }
 
+    /// @inheritDoc
+    /// Trie-backed partitions only count rows with live data. If a row only contains a row deletion, or a column-level
+    /// deletion with no overriding live cells, it will not be counted in this number. Though this is somewhat wrong,
+    /// the uses of the row count do not require the number to be precise, and getting the right count can be expensive.
     @Override
     public int rowCount()
     {
@@ -720,7 +726,7 @@ public class TrieBackedPartition implements Partition
                 putRangeDeletionInTrie(comparator, trie,
                                 isReverseOrder ? unfiltered : openMarker,
                                 isReverseOrder ? openMarker : unfiltered);
-                ++tombstoneCount;
+                ++tombstoneCount; // we only count one side of a range, to match DeletionInfo.rangeCount
                 if (unfiltered.isOpen(isReverseOrder))
                     openMarker = unfiltered;
                 else

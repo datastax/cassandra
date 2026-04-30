@@ -19,6 +19,7 @@ package org.apache.cassandra.db.partitions;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -77,6 +78,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
     public static final Factory FACTORY = new TrieFactory();
 
+    private static EnumSet<TrieTombstoneMarker.Kind> ROW_DELETION_KINDS =
+        EnumSet.of(TrieTombstoneMarker.Kind.ROW, TrieTombstoneMarker.Kind.RANGE, TrieTombstoneMarker.Kind.PARTITION);
+
     final int dataSize;
 
     private TriePartitionUpdate(TableMetadata metadata,
@@ -98,6 +102,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         if (!(obj instanceof TriePartitionUpdate))
             return false;
 
+        // FIXME
         TriePartitionUpdate that = (TriePartitionUpdate) obj;
         return partitionKey.equals(that.partitionKey)
                && metadata().id.equals(that.metadata().id)
@@ -269,10 +274,41 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         return builder.build();
     }
 
+    /// @inheritDoc
+    /// Note: This will not count rows that contain only column-level deletions, as these are not represented in either
+    /// the live row count or the tombstone count. As this method is meant to get an approximation, we would rather
+    /// spare the cost of correcting this.
     @Override
     public int operationCount()
     {
         return rowCountIncludingStatic + tombstoneCount;
+    }
+
+
+    /// @inheritDoc
+    /// Note: This will not count rows that contain only column-level deletions, as these are not represented in either
+    /// the live row count or the tombstone count. As this method is meant to get an approximation, we would rather
+    /// spare the cost of correcting this.
+    @Override
+    public int affectedRowCount()
+    {
+        // If there is a partition-level deletion, we intend to delete at least the columns of one row.
+        if (!partitionLevelDeletion().isLive())
+            return 1;
+
+        return rowCountIncludingStatic + tombstoneCount;
+    }
+
+    @Override
+    public int affectedColumnCount()
+    {
+        // If there is a partition-level deletion, we intend to delete at least the columns of one row.
+        if (!partitionLevelDeletion().isLive())
+            return metadata().regularAndStaticColumns().size();
+
+        return TrieBackedRow.countColumns(trie) +
+               // Each range delete should correspond to at least one intended row deletion, and with it, its regular columns.
+               tombstoneCount * metadata().regularColumns().size();
     }
 
     @Override
@@ -677,17 +713,29 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             if (existing == null)
             {
-                // We are adding a new tombstone.
-                ++tombstoneCount;
+                // We are adding a new tombstone. We are counting tombstones on the row level, so ones that introduce
+                // or close column deletions should not count.
+                // We will only count one of the sides as we want to increase the count by one for each pair.
+                if (hasKind(update.rightDeletion(), ROW_DELETION_KINDS))
+                    ++tombstoneCount;
                 return update;
             }
             else
             {
                 TrieTombstoneMarker merged = update.mergeWith(existing);
-                if (merged == null || !merged.isBoundary())
-                    --tombstoneCount;   // dropped the existing tombstone (covered by a newer one)
+                int hadTombstone = existing.isBoundary() && hasKind(existing.rightDeletion(), ROW_DELETION_KINDS) ? 1 : 0;
+                int hasTombstone = merged != null && merged.isBoundary() && hasKind(merged.rightDeletion(), ROW_DELETION_KINDS) ? 1 : 0;
+                tombstoneCount += hasTombstone - hadTombstone;
                 return merged;
             }
+        }
+
+        private static boolean hasKind(TrieTombstoneMarker.Covering side, EnumSet<TrieTombstoneMarker.Kind> kinds)
+        {
+            if (side == null)
+                return false;
+
+            return kinds.contains(side.deletionKind());
         }
 
         @Override
