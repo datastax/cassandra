@@ -171,7 +171,6 @@ public class NoSpamLogger
 
     public static NoSpamLogger getLogger(Logger logger, long minInterval, TimeUnit unit)
     {
-        // Caffeine's get(key, loader) is non-blocking and functionally equivalent to putIfAbsent pattern
         return wrappedLoggers.get(logger, key -> new NoSpamLogger(logger, minInterval, unit));
     }
 
@@ -286,7 +285,6 @@ public class NoSpamLogger
 
     public NoSpamLogStatement getStatement(String key, String s, long minIntervalNanos)
     {
-        // Caffeine's get(key, loader) is non-blocking and functionally equivalent to putIfAbsent pattern
         return lastMessage.get(key, k -> new NoSpamLogStatement(s, minIntervalNanos));
     }
 }
