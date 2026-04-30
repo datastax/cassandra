@@ -292,7 +292,6 @@ public class NoSpamLoggerTest
     @Test
     public void testLastMessageCacheBounded() throws Exception
     {
-        // Set a small cache size for testing
         System.setProperty("cassandra.nospam_logger.max_statements_per_logger", "10");
         try
         {
@@ -309,7 +308,6 @@ public class NoSpamLoggerTest
                 now += 10; // Advance time so each statement can log
             }
 
-            // Verify we logged 15 times
             assertEquals(15, logged.get(Level.INFO).size());
 
             // The cache should have evicted some entries due to size limit
@@ -334,7 +332,6 @@ public class NoSpamLoggerTest
     @Test
     public void testLastMessageCacheTimeBasedEviction() throws Exception
     {
-        // Set a short expiry time for testing (1 minute = 60,000,000,000 nanoseconds)
         System.setProperty("cassandra.nospam_logger.statements_expire_minutes", "1");
         try
         {
@@ -342,7 +339,6 @@ public class NoSpamLoggerTest
             now = 0;
             NoSpamLogger logger = NoSpamLogger.getLogger(mock, 5, TimeUnit.NANOSECONDS);
 
-            // Log a statement
             assertTrue(logger.info("test{}", param));
             assertEquals(1, logged.get(Level.INFO).size());
 
@@ -407,12 +403,8 @@ public class NoSpamLoggerTest
                 assertTrue(logger.info("test{}", param));
                 now += 10;
             }
-
-            // Verify we created 10 loggers and they all logged
-            assertEquals(10, logged.get(Level.INFO).size());
-
             // The cache should have evicted some logger instances due to size limit
-            // This test mainly verifies that the cache doesn't grow unbounded
+            assertEquals(10, logged.get(Level.INFO).size());
         }
         finally
         {
@@ -435,7 +427,6 @@ public class NoSpamLoggerTest
             now = 0;
             NoSpamLogger logger = NoSpamLogger.getLogger(mock, 1, TimeUnit.NANOSECONDS);
 
-            // Simulate 1000 unique log messages (like unique query strings)
             for (int i = 0; i < 1000; i++)
             {
                 String uniqueMessage = "Scanned over 1000 tombstones for query: SELECT * FROM table WHERE id = " + i;
@@ -443,12 +434,8 @@ public class NoSpamLoggerTest
                 now += 2; // Advance time so each can log
             }
 
-            // All 1000 should have logged
+            // All the messages should have been logged (We can't directly check cache size)
             assertEquals(1000, logged.get(Level.WARN).size());
-
-            // The cache should be bounded to 100 entries, not 1000
-            // We can't directly check cache size, but the test verifies that
-            // the system doesn't crash with OOM and completes successfully
         }
         finally
         {
