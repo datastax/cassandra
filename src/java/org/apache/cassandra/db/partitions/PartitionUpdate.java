@@ -81,6 +81,7 @@ public interface PartitionUpdate extends Partition
     @SuppressWarnings("Convert2MethodRef")
     public static final PartitionUpdateSerializer serializer = new PartitionUpdateSerializer(tableId -> Schema.instance.getExistingTableMetadata(tableId));
 
+    // FIXME This must be removed
     DeletionInfo deletionInfo();
 
     /**
