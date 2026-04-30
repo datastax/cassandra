@@ -80,8 +80,8 @@ public abstract class SimpleTableWriter extends CQLTester
         rand = new Random(1);
         executorService = Executors.newFixedThreadPool(threadCount);
         partitions = Math.max(1, count / rowsPerPartition);
-        DatabaseDescriptor.setAutoSnapshot(false);
         CQLTester.setUpClass();
+        DatabaseDescriptor.setAutoSnapshot(false);
         logger.info("setupClass done.");
         String memtableSetup = "";
         if (!memtableClass.isEmpty())
