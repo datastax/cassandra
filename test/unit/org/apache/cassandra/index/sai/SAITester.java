@@ -1019,6 +1019,11 @@ public class SAITester extends CQLTester
         return indexFiles.stream().filter(c -> c.name().endsWith(componentName)).collect(Collectors.toSet());
     }
 
+    public void disableQueryOptimization()
+    {
+        QueryController.QUERY_OPT_LEVEL = 0;
+    }
+
     /**
      * Run repeated verification task concurrently with target test
      */

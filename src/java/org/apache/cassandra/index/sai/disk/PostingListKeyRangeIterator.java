@@ -90,6 +90,16 @@ public class PostingListKeyRangeIterator extends KeyRangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
+        // If this index indexes a static column, we must skip to the correct static row having the partition key
+        // equal to or greater than the partition key of the given nextKey. Beware that the primaryKeyMap
+        // for this index can be row-aware and looking up a regular row will end up in a rowId larger than the
+        // rowId of the static row of the nextKey's partition. Therefore, we need to explicitly round down
+        // the primary key to the start of the partition.
+        // Skipping to a regular row primaryKey can happen if an index on a static column is intersected with
+        // an index on a regular column.
+        if (indexContext.getDefinition().isStatic())
+            nextKey = nextKey.forStaticRow();
+
         // If skipToToken is equal to nextKey, we take the nextKey because in practice, it is greater than or equal
         // to the skipToToken. This is because token only PKs are considered equal to all PKs with the same token,
         // and for a range query, we first skip on the token-only PK.

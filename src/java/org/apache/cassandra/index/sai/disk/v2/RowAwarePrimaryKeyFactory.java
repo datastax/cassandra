@@ -116,9 +116,16 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
                 assert partitionKey == null : "While applying existing primaryKeySupplier to load deferred primaryKey the partition key was unexpectedly already set";
                 PrimaryKey deferredPrimaryKey = primaryKeySupplier.get();
                 this.partitionKey = deferredPrimaryKey.partitionKey();
-                this.clustering = deferredPrimaryKey.clustering();
-                primaryKeySupplier = null;
                 assert this.token.equals(this.partitionKey.getToken()) : "Deferred primary key must contain the same token";
+
+                // It is possible we have already set clustering to `STATIC_CLUSTERING` because this object
+                // is the result of a call to `forStaticRow` on some other primary key that was not yet loaded.
+                // In that case we must not overwrite it. Overwriting it would turn the key for the static row back into
+                // the key to a regular row.
+                if (this.clustering == null)
+                    this.clustering = deferredPrimaryKey.clustering();
+
+                primaryKeySupplier = null;
             }
             return this;
         }
