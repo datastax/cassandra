@@ -424,21 +424,20 @@ public class BTreeTest
     @Test
     public void testFastBuilderResetClearsSavedState()
     {
-        // Add >31 items to trigger overflow (savedBuffer/savedNextKey population)
+        // Add enough values to trigger overflow and populate savedBuffer/savedNextKey.
         try (BTree.FastBuilder<Integer> builder = BTree.fastBuilder())
         {
             for (int i = 0; i < 40; i++)
                 builder.add(i);
-            // Simulate an abandoned builder (e.g. exception during deserialization)
-            // by closing without calling build(). close() calls reset() then returns
-            // the builder to the pool.
+            // Simulate an abandoned builder, for example an exception during deserialization.
+            // close() calls reset() before returning the builder to the thread-local pool.
         }
 
-        // Reuse the pooled builder — it should be clean
+        // Reuse the pooled builder. A clean builder should still build an empty tree.
         try (BTree.FastBuilder<Integer> builder = BTree.fastBuilder())
         {
-            assertTrue("FastBuilder should be empty after reset, but savedBuffer/savedNextKey leaked",
-                       builder.validateEmpty());
+            assertTrue("FastBuilder leaked saved overflow state after reset",
+                       BTree.isEmpty(builder.build()));
         }
     }
 
