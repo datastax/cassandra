@@ -34,11 +34,11 @@ import static org.junit.Assert.fail;
 public class BTreeFastBuilderContaminationTest extends TestBaseImpl
 {
     // 4200 columns * ~18 bytes/name > 64KB large-message threshold
-    // → READ_REQ deserialized on SEPWorker threads, not Netty event loop
+    // READ_REQ is deserialized on SEPWorker threads, not Netty event loop.
     private static final int NUM_WIDE_COLUMNS = 4200;
 
     // Small-message scenario: both READ_REQ and MUTATION_REQ stay under 64KB
-    // → deserialized on Netty event loop threads
+    // Messages are deserialized on Netty event loop threads.
     private static final int NUM_SMALL_SOURCE_COLUMNS = 150; // >31 to trigger FastBuilder overflow
     private static final int NUM_SMALL_VICTIM_COLUMNS = 2000;
 
@@ -47,10 +47,10 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
 
     // Verify CASSANDRA-21216/CASSANDRA-21260 fix: stale ColumnMetadata from a failed
     // READ_REQ deserialization must not leak into a Row BTree during mutation, which can
-    // cause ClassCastException. Source table is wide (~4200 columns) so READ_REQ exceeds 
-    // 64KB, meaning it is deserialized on SEPWorker. Victim table is narrow — without the 
-    // fix, corruption can happen via BTree.updateLeaves() during mutation execution on 
-    // the same SEPWorker thread (SharedExecutorPool threads hop between stages).
+    // cause ClassCastException. Source table is wide (~4200 columns), so READ_REQ exceeds
+    // 64KB and is deserialized on SEPWorker. Victim table is narrow; without the fix,
+    // corruption can happen via BTree.updateLeaves() during mutation execution on the
+    // same SEPWorker thread (SharedExecutorPool threads hop between stages).
     @Test
     public void testSchemaDisagreementCorruptsPartitionViaFastBuilder() throws Throwable
     {
@@ -67,14 +67,14 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
             createWideSourceTable(cluster);
 
             cluster.schemaChange(withKeyspace(
-                "CREATE TABLE %s.victim (pk int, ck int, v text, PRIMARY KEY (pk, ck))"));
+            "CREATE TABLE %s.victim (pk int, ck int, v text, PRIMARY KEY (pk, ck))"));
 
             cluster.coordinator(1).execute(
-                withKeyspace("INSERT INTO %s.source (pk, src_wide_col_0000) VALUES (1, 42)"), ALL);
+            withKeyspace("INSERT INTO %s.source (pk, src_wide_col_0000) VALUES (1, 42)"), ALL);
 
             for (int pk = 0; pk < NUM_PARTITIONS; pk++)
                 cluster.get(2).executeInternal(withKeyspace(
-                    "INSERT INTO %s.victim (pk, ck, v) VALUES (" + pk + ", 1, 'seed')"));
+                "INSERT INTO %s.victim (pk, ck, v) VALUES (" + pk + ", 1, 'seed')"));
 
             createSchemaDisagreement(cluster);
             poisonFastBuilder(cluster);
@@ -84,7 +84,7 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
                 try
                 {
                     cluster.coordinator(1).execute(withKeyspace(
-                        "INSERT INTO %s.victim (pk, ck, v) VALUES (" + pk + ", 2, 'probe')"), ALL);
+                    "INSERT INTO %s.victim (pk, ck, v) VALUES (" + pk + ", 2, 'probe')"), ALL);
                 }
                 catch (Exception e)
                 {
@@ -98,7 +98,7 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
                 try
                 {
                     cluster.coordinator(1).execute(withKeyspace(
-                        "SELECT * FROM %s.victim WHERE pk = " + pk), ALL);
+                    "SELECT * FROM %s.victim WHERE pk = " + pk), ALL);
                 }
                 catch (Exception e)
                 {
@@ -125,10 +125,10 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
         }
     }
 
-    // Verify CASSANDRA-21260 fix: SSTable header must not be contaminated via small messages
-    // on the Netty event loop.
-    // Source: 150 columns (>31 → FastBuilder overflow) but only ~3KB → small message.
-    // Victim: 2000 columns, but partition DELETE has empty updatedColumns → tiny message.
+    // Verify CASSANDRA-21260 fix: SSTable header must not be contaminated via small
+    // messages on Netty event loop.
+    // Source: 150 columns (>31 -> FastBuilder overflow) but only ~3KB -> small message.
+    // Victim: 2000 columns, but partition DELETE has empty updatedColumns, so the message is tiny.
     // Both deserialized on the same Netty event loop thread (channel-to-EventLoop binding).
     // Without the fix, the poisoned FastBuilder is reused for the victim's SerializationHeader
     // deserialization.
@@ -153,7 +153,7 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
             // a partition-level DELETE has empty updatedColumns (no column operations), so
             // the MUTATION_REQ is tiny. It is deserialized on the same Netty event loop thread
             // that handled the failed READ_REQ. The poisoned FastBuilder's stale savedBuffer
-            // is drained even though 0 new columns are added — build() calls propagateOverflow()
+            // is drained even though 0 new columns are added; build() calls propagateOverflow()
             // when hasOverflow() is true from the previous use.
             int batchSize = NUM_DELETE_PARTITIONS / 5;
             for (int round = 0; round < 5; round++)
@@ -166,7 +166,7 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
                     try
                     {
                         cluster.coordinator(1).execute(withKeyspace(
-                            "DELETE FROM %s.victim WHERE pk = " + pk), ALL);
+                        "DELETE FROM %s.victim WHERE pk = " + pk), ALL);
                     }
                     catch (Exception ignored)
                     {
@@ -179,7 +179,7 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
             List<String> foreignColumns = cluster.get(2).callOnInstance(() -> {
                 java.util.List<String> result = new java.util.ArrayList<>();
                 org.apache.cassandra.db.ColumnFamilyStore cfs =
-                    org.apache.cassandra.db.ColumnFamilyStore.getIfExists(KEYSPACE, "victim");
+                org.apache.cassandra.db.ColumnFamilyStore.getIfExists(KEYSPACE, "victim");
                 if (cfs == null)
                     return result;
                 org.apache.cassandra.schema.TableMetadata metadata = cfs.metadata.get();
@@ -188,10 +188,10 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
                     try
                     {
                         org.apache.cassandra.db.SerializationHeader.Component header =
-                            (org.apache.cassandra.db.SerializationHeader.Component)
-                                sstable.descriptor.getMetadataSerializer()
-                                       .deserialize(sstable.descriptor,
-                                                    org.apache.cassandra.io.sstable.metadata.MetadataType.HEADER);
+                        (org.apache.cassandra.db.SerializationHeader.Component)
+                        sstable.descriptor.getMetadataSerializer()
+                                          .deserialize(sstable.descriptor,
+                                                       org.apache.cassandra.io.sstable.metadata.MetadataType.HEADER);
                         result.addAll(getUnknownColumns(header, metadata));
                     }
                     catch (Exception e)
@@ -211,7 +211,7 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
     private void createTable(Cluster cluster, String tableName, int numColumns, String columnPrefix)
     {
         StringBuilder ddl = new StringBuilder(
-            withKeyspace("CREATE TABLE %s." + tableName + " (pk int PRIMARY KEY"));
+        withKeyspace("CREATE TABLE %s." + tableName + " (pk int PRIMARY KEY"));
         for (int i = 0; i < numColumns; i++)
             ddl.append(String.format(", %s_%04d int", columnPrefix, i));
         ddl.append(')');
@@ -231,7 +231,7 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
         cluster.filters().verbs(Verb.SCHEMA_VERSION_RSP.id).from(1).to(2).drop();
 
         cluster.get(1).schemaChangeInternal(
-            withKeyspace("ALTER TABLE %s.source ADD zzz_new_col text"));
+        withKeyspace("ALTER TABLE %s.source ADD zzz_new_col text"));
     }
 
     // Trigger a failed READ_REQ on node2 (schema disagreement), poisoning the
@@ -241,7 +241,7 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
         try
         {
             cluster.coordinator(1).execute(
-                withKeyspace("SELECT * FROM %s.source WHERE pk = 1"), ALL);
+            withKeyspace("SELECT * FROM %s.source WHERE pk = 1"), ALL);
         }
         catch (Exception e)
         {
@@ -251,12 +251,12 @@ public class BTreeFastBuilderContaminationTest extends TestBaseImpl
 
     // Check for columns in an SSTable header that don't belong to the table's schema.
     private static java.util.List<String> getUnknownColumns(
-        org.apache.cassandra.db.SerializationHeader.Component header,
-        org.apache.cassandra.schema.TableMetadata metadata)
+    org.apache.cassandra.db.SerializationHeader.Component header,
+    org.apache.cassandra.schema.TableMetadata metadata)
     {
         java.util.List<String> unknownColumns = new java.util.ArrayList<>();
         java.util.Map<java.nio.ByteBuffer, org.apache.cassandra.db.marshal.AbstractType<?>>[] maps =
-            new java.util.Map[] { header.getStaticColumns(), header.getRegularColumns() };
+        new java.util.Map[] { header.getStaticColumns(), header.getRegularColumns() };
         boolean[] isStatic = { true, false };
         for (int i = 0; i < maps.length; i++)
         {

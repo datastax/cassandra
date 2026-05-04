@@ -3371,6 +3371,25 @@ public class BTree
             }
         }
 
+        @Override
+        void reset()
+        {
+            Arrays.fill(leaf().buffer, null);
+            leaf().count = 0;
+            leaf().savedBuffer = null;
+            leaf().savedNextKey = null;
+            BranchBuilder branch = leaf().parent;
+            while (branch != null && branch.inUse)
+            {
+                Arrays.fill(branch.buffer, null);
+                branch.count = 0;
+                branch.savedBuffer = null;
+                branch.savedNextKey = null;
+                branch.inUse = false;
+                branch = branch.parent;
+            }
+        }
+
         public boolean validateEmpty()
         {
             LeafOrBranchBuilder cur = leaf();
@@ -3394,6 +3413,62 @@ public class BTree
                     return false;
             }
             return true;
+        }
+    }
+
+    private static abstract class AbstractUpdater extends AbstractFastBuilder implements AutoCloseable
+    {
+        void reset()
+        {
+            assert leaf().count == 0;
+            clearLeafBuffer(leaf().buffer);
+            if (leaf().savedBuffer != null)
+                Arrays.fill(leaf().savedBuffer, null);
+            leaf().savedNextKey = null;
+
+            BranchBuilder branch = leaf().parent;
+            while (branch != null && branch.inUse)
+            {
+                assert branch.count == 0;
+                clearBranchBuffer(branch.buffer);
+                if (branch.savedBuffer != null && branch.savedBuffer[0] != null)
+                    Arrays.fill(branch.savedBuffer, null); // by definition full, if non-empty
+                branch.savedNextKey = null;
+                branch.inUse = false;
+                branch = branch.parent;
+            }
+        }
+
+        /**
+         * Clear the contents of a branch buffer, aborting once we encounter a null entry
+         * to save time on small trees
+         */
+        private void clearLeafBuffer(Object[] array)
+        {
+            if (array[0] == null)
+                return;
+            // find first null entry; loop from beginning, to amortise cost over size of working set
+            int i = 1;
+            while (i < array.length && array[i] != null)
+                ++i;
+            Arrays.fill(array, 0, i, null);
+        }
+
+        /**
+         * Clear the contents of a branch buffer, aborting once we encounter a null entry
+         * to save time on small trees
+         */
+        private void clearBranchBuffer(Object[] array)
+        {
+            if (array[0] == null)
+                return;
+
+            // find first null entry; loop from beginning, to amortise cost over size of working set
+            int i = 1;
+            while (i < MAX_KEYS && array[i] != null)
+                ++i;
+            Arrays.fill(array, 0, i, null);
+            Arrays.fill(array, MAX_KEYS, MAX_KEYS + i + 1, null);
         }
     }
 
