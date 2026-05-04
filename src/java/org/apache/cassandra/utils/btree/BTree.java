@@ -3330,11 +3330,15 @@ public class BTree
         {
             Arrays.fill(leaf().buffer, null);
             leaf().count = 0;
+            leaf().savedBuffer = null;
+            leaf().savedNextKey = null;
             BranchBuilder branch = leaf().parent;
             while (branch != null && branch.inUse)
             {
                 Arrays.fill(branch.buffer, null);
                 branch.count = 0;
+                branch.savedBuffer = null;
+                branch.savedNextKey = null;
                 branch.inUse = false;
                 branch = branch.parent;
             }
@@ -3374,6 +3378,7 @@ public class BTree
             clearLeafBuffer(leaf().buffer);
             if (leaf().savedBuffer != null)
                 Arrays.fill(leaf().savedBuffer, null);
+            leaf().savedNextKey = null;
 
             BranchBuilder branch = leaf().parent;
             while (branch != null && branch.inUse)
@@ -3382,6 +3387,7 @@ public class BTree
                 clearBranchBuffer(branch.buffer);
                 if (branch.savedBuffer != null && branch.savedBuffer[0] != null)
                     Arrays.fill(branch.savedBuffer, null); // by definition full, if non-empty
+                branch.savedNextKey = null;
                 branch.inUse = false;
                 branch = branch.parent;
             }
