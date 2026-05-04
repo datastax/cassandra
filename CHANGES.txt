@@ -1,4 +1,5 @@
 Future version (tbd)
+ * Clear BTree.FastBuilder saved overflow state on reset to prevent cross-table column contamination after schema disagreement (CASSANDRA-21216, CASSANDRA-21260)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 Merged from 5.1:
  * Expose current compaction throughput in nodetool (CASSANDRA-13890)
@@ -7456,5 +7457,4 @@ Full list of issues resolved in 0.4 is at https://issues.apache.org/jira/secure/
  * Combined blocking and non-blocking versions of insert APIs
  * Added FlushPeriodInMinutes configuration parameter to force
    flushing of infrequently-updated ColumnFamilies
-
 
