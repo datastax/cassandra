@@ -23,17 +23,20 @@ import java.io.IOException;
 import com.google.common.collect.Lists;
 import org.junit.Test;
 
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
+import org.apache.cassandra.schema.ColumnMetadata;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class PostingListKeyRangeIteratorTest
 {
@@ -45,6 +48,8 @@ public class PostingListKeyRangeIteratorTest
         @SuppressWarnings("resource")
         var postingList = new IntArrayPostingList(new int[]{ 1, 1, 2, 2, 3});
         var mockIndexContext = mock(IndexContext.class);
+        var columnMetadata = ColumnMetadata.regularColumn("ks", "tbl", "col", Int32Type.instance);
+        when(mockIndexContext.getDefinition()).thenReturn(columnMetadata);
         var indexContext = new IndexSearcherContext(pkm.primaryKeyFromRowId(1),
                                                     pkm.primaryKeyFromRowId(3),
                                                     0,
@@ -69,6 +74,8 @@ public class PostingListKeyRangeIteratorTest
         var postingList2 = new IntArrayPostingList(new int[]{ 1});
         var postingList3 = new IntArrayPostingList(new int[]{ 3});
         var mockIndexContext = mock(IndexContext.class);
+        var columnMetadata = ColumnMetadata.regularColumn("ks", "tbl", "col", Int32Type.instance);
+        when(mockIndexContext.getDefinition()).thenReturn(columnMetadata);
         var mpl = MergePostingList.merge(Lists.newArrayList(postingList1, postingList2));
         var indexContext1 = buildIndexContext(1, 3, mpl);
         var indexContext2 = buildIndexContext(3, 3, postingList3);
