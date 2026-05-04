@@ -1,4 +1,5 @@
 5.0.7
+ * Clear BTree.FastBuilder saved overflow state on reset to prevent cross-table column contamination after schema disagreement (CASSANDRA-21216, CASSANDRA-21260)
  * Refactor SAI ANN query execution to use score ordered iterators for correctness and speed (CASSANDRA-20086)
  * Disallow binding an identity to a superuser when the user is a regular user (CASSANDRA-21219)
  * Fix ConcurrentModificationException in compaction garbagecollect (CASSANDRA-21065)
