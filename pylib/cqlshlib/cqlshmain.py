@@ -1400,7 +1400,7 @@ class Shell(cmd.Cmd):
                     self.describe_element(result)
 
             except CQL_ERRORS as err:
-                err_msg = err.message if hasattr(err, 'message') else str(err)
+                err_msg = maybe_ensure_text(err.message if hasattr(err, 'message') else str(err))
                 self.printerr(err_msg.partition("message=")[2].strip('"'))
             except Exception:
                 import traceback
