@@ -150,9 +150,8 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
     Clustering clustering();
 
     /**
-     * Return whether the primary key has a clustering or not.
-     * By default the clustering exists if the internal clustering
-     * is not null and is not empty.
+     * Return whether the primary key has a clustering, i.e., has non-static clustering column(s).
+     * This operation might require loading the primary key.
      *
      * @return {@code true} if the clustering exists, otherwise {@code false}
      */
