@@ -56,9 +56,12 @@ public class SaiDiskSizeTest extends SAITester
     public int expectedDiskSizeFor2SSTables;
 
     @Parameterized.Parameter(2)
-    public String pkColumns;
+    public int expectedDiskSizeForCompactedSSTable;
 
     @Parameterized.Parameter(3)
+    public String pkColumns;
+
+    @Parameterized.Parameter(4)
     public int rowsPerPartition;
 
     /**
@@ -68,7 +71,8 @@ public class SaiDiskSizeTest extends SAITester
      *
      * @return a collection of parameters to test
      */
-    @Parameterized.Parameters(name = "saiFormat={0}, expectedDiskSizeFor2SSTables={1}, pkColumns={2}, rowsPerPartition={3}")
+    @Parameterized.Parameters(name = "saiFormat={0}, expectedDiskSizeFor2SSTables={1}, " +
+                                     "expectedDiskSizeForCompactedSSTable={2}, pkColumns={3}, rowsPerPartition={4}")
     public static Collection<Object[]> generateParameters()
     {
         return Version.ALL.stream()
@@ -77,30 +81,30 @@ public class SaiDiskSizeTest extends SAITester
                               {
                                   case "aa":
                                       return Stream.of(
-                                      new Object[]{ v, 24991, "pk", 1 },
-                                      new Object[]{ v, 26183, "pk, v_int", 2 },
-                                      new Object[]{ v, 28530, "pk, v_int", 100 });
+                                      new Object[]{ v, 24766, 24989, "pk", 1 },
+                                      new Object[]{ v, 26026, 26181, "pk, v_int", 2 },
+                                      new Object[]{ v, 28526, 26603, "pk, v_int", 100 });
                                   case "ba":
                                   case "ca":
                                   case "db":
                                   case "dc":
                                       return Stream.of(
-                                      new Object[]{ v, 131493, "pk", 1 },
-                                      new Object[]{ v, 115252, "pk, v_int", 2 },
-                                      new Object[]{ v, 55996, "pk, v_int", 100 });
+                                      new Object[]{ v, 131489, 131312, "pk", 1 },
+                                      new Object[]{ v, 115177, 115009, "pk, v_int", 2 },
+                                      new Object[]{ v, 55861, 55720, "pk, v_int", 100 });
                                   case "eb":
                                   case "ec":
                                       return Stream.of(
-                                      new Object[]{ v, 134765, "pk", 1 },
-                                      new Object[]{ v, 118524, "pk, v_int", 2 },
-                                      new Object[]{ v, 59268, "pk, v_int", 100 });
+                                      new Object[]{ v, 134761, 132841, "pk", 1 },
+                                      new Object[]{ v, 118449, 116538, "pk, v_int", 2 },
+                                      new Object[]{ v, 59133, 57249, "pk, v_int", 100 });
                                   case "ed":
                                   case "fa":
                                   default:
                                       return Stream.of(
-                                      new Object[]{ v, 134781, "pk", 1 },
-                                      new Object[]{ v, 118540, "pk, v_int", 2 },
-                                      new Object[]{ v, 59284, "pk, v_int", 100 });
+                                      new Object[]{ v, 134777, 132849, "pk", 1 },
+                                      new Object[]{ v, 118465, 116546, "pk, v_int", 2 },
+                                      new Object[]{ v, 59149, 57257, "pk, v_int", 100 });
                               }
                           })
                           .collect(Collectors.toList());
@@ -155,15 +159,15 @@ public class SaiDiskSizeTest extends SAITester
         assertThat(diskSize)
         .as("Disk size for SAI version %s before compaction", saiFormat)
         .isLessThanOrEqualTo(expectedDiskSizeFor2SSTables)
-        .isGreaterThan((long) (expectedDiskSizeFor2SSTables * 0.8));
+        .isGreaterThan((long) (expectedDiskSizeFor2SSTables * 0.95));
 
         compact();
 
         diskSize = indexDiskSpaceUse();
         assertThat(diskSize)
         .as("Disk size for SAI version %s after compaction", saiFormat)
-        .isLessThanOrEqualTo(expectedDiskSizeFor2SSTables)
-        .isGreaterThan((long) (expectedDiskSizeFor2SSTables * 0.8));
+        .isLessThanOrEqualTo(expectedDiskSizeForCompactedSSTable)
+        .isGreaterThan((long) (expectedDiskSizeForCompactedSSTable * 0.95));
     }
 
     private void insertRowsIntoOneSegment(int nrRows, int startRow) throws UnknownHostException
