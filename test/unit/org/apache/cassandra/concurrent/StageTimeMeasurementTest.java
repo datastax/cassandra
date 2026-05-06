@@ -130,10 +130,12 @@ public class StageTimeMeasurementTest
         }
         for (int i = 0; i < NUM_TASKS; i += MAX_CONCURRENCY)
         {
-            // expect in each iteration tasks are enqueued for TASK_DURATION_NANOS more
+            // expect in each iteration tasks are enqueued for TASK_DURATION_NANOS more; the error can accumulate
+            // with each preceding execution interval.
+            int batch = i / MAX_CONCURRENCY;
             for (int concurrentTask = 0; concurrentTask < MAX_CONCURRENCY; concurrentTask++)
             {
-                assertEquals((double) i / MAX_CONCURRENCY * TASK_DURATION_NANOS, callback.enqueuedTimes.get(i + concurrentTask), MAX_ACCEPTABLE_MEASUREMENT_ERROR);
+                assertEquals((double) batch * TASK_DURATION_NANOS, callback.enqueuedTimes.get(i + concurrentTask), (batch + 1) * MAX_ACCEPTABLE_MEASUREMENT_ERROR);
             }
         }
     }
