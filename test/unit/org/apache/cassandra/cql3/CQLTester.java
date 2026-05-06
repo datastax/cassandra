@@ -181,6 +181,7 @@ import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -1912,46 +1913,59 @@ public abstract class CQLTester
     private UntypedResultSet executeFormattedQuery(String query, boolean useCoordinator, Object... values)
     {
         if (useCoordinator)
+        {
             requireNetworkWithoutDriver();
+            CoordinatorWarnings.init();
+        }
 
         UntypedResultSet rs;
-        if (usePrepared)
+        try
         {
-            if (logger.isTraceEnabled())
-                logger.trace("Executing: {} with values {}", query, formatAllValues(values));
-
-            Object[] transformedValues = transformValues(values);
-
-            if (reusePrepared)
+            if (usePrepared)
             {
-                rs = useCoordinator
-                     ? QueryProcessor.execute(query, ConsistencyLevel.ONE, transformedValues)
-                     : QueryProcessor.executeInternal(query, transformedValues);
+                if (logger.isTraceEnabled())
+                    logger.trace("Executing: {} with values {}", query, formatAllValues(values));
 
-                // If a test uses a "USE ...", then presumably its statements use relative table. In that case, a USE
-                // change the meaning of the current keyspace, so we don't want a following statement to reuse a previously
-                // prepared statement at this wouldn't use the right keyspace. To avoid that, we drop the previously
-                // prepared statement.
-                if (query.startsWith("USE"))
-                    QueryProcessor.clearInternalStatementsCache();
+                Object[] transformedValues = transformValues(values);
+
+                if (reusePrepared)
+                {
+                    rs = useCoordinator
+                         ? QueryProcessor.execute(query, ConsistencyLevel.ONE, transformedValues)
+                         : QueryProcessor.executeInternal(query, transformedValues);
+
+                    // If a test uses a "USE ...", then presumably its statements use relative table. In that case, a USE
+                    // change the meaning of the current keyspace, so we don't want a following statement to reuse a previously
+                    // prepared statement at this wouldn't use the right keyspace. To avoid that, we drop the previously
+                    // prepared statement.
+                    if (query.startsWith("USE"))
+                        QueryProcessor.clearInternalStatementsCache();
+                }
+                else
+                {
+                    rs = useCoordinator
+                         ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE, transformedValues)
+                         : QueryProcessor.executeOnceInternal(query, transformedValues);
+                }
             }
             else
             {
+                query = replaceValues(query, values);
+
+                if (logger.isTraceEnabled())
+                    logger.trace("Executing: {}", query);
+
                 rs = useCoordinator
-                     ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE, transformedValues)
-                     : QueryProcessor.executeOnceInternal(query, transformedValues);
+                     ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE)
+                     : QueryProcessor.executeOnceInternal(query);
             }
+            if (useCoordinator)
+                CoordinatorWarnings.done();
         }
-        else
+        finally
         {
-            query = replaceValues(query, values);
-
-            if (logger.isTraceEnabled())
-                logger.trace("Executing: {}", query);
-
-            rs = useCoordinator
-                 ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE)
-                 : QueryProcessor.executeOnceInternal(query);
+            if (useCoordinator)
+                CoordinatorWarnings.reset();
         }
         if (rs != null)
         {
