@@ -24,6 +24,8 @@ import org.junit.runners.Parameterized.Parameters;
 import java.util.Arrays;
 import java.util.Collection;
 
+import org.apache.cassandra.config.DataStorageSpec.LongBytesBound;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.index.sai.SAITester;
@@ -64,34 +66,47 @@ public class EstimatedRowCountTest extends SAITester
     @Test
     public void testReturnedRowsEstimates() throws Throwable
     {
-        TrieMemtable.SHARD_COUNT = numShards;
-        createTable("CREATE TABLE %s (k int, c int, n int, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX n_idx ON %s (n) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX c_idx ON %s (c) USING 'StorageAttachedIndex'");
+        LongBytesBound oldLocalReadSizeWarnThreshold = DatabaseDescriptor.getLocalReadSizeWarnThreshold();
+        LongBytesBound oldLocalReadSizeFailThreshold = DatabaseDescriptor.getLocalReadSizeFailThreshold();
+        try
+        {
+            DatabaseDescriptor.setLocalReadSizeWarnThreshold(null);
+            DatabaseDescriptor.setLocalReadSizeFailThreshold(null);
 
-        int numRowsPerPartition = 13;
-        int numRows = numPartitions * numRowsPerPartition;
+            TrieMemtable.SHARD_COUNT = numShards;
+            createTable("CREATE TABLE %s (k int, c int, n int, PRIMARY KEY(k, c))");
+            createIndex("CREATE CUSTOM INDEX n_idx ON %s (n) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX c_idx ON %s (c) USING 'StorageAttachedIndex'");
 
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        cfs.unsafeRunWithoutFlushing(() -> {
-             for (int k = 0; k < numPartitions; k++)
-                 for (int c = 0; c < numRowsPerPartition; c++)
-                     execute("INSERT INTO %s (k, c, n) VALUES (?, ?, 1)", k, c);
-         });
+            int numRowsPerPartition = 13;
+            int numRows = numPartitions * numRowsPerPartition;
 
-        beforeAndAfterFlush(() -> {
-            assertThatPlanFor("SELECT k, c FROM %s WHERE n = 0", 0)
-                .hasEstimatedRowsCountBetween(0.0, 0.0);
-            assertThatPlanFor("SELECT k, c FROM %s WHERE n = 1", numRows)
-                .hasEstimatedRowsCountBetween((double) numRows / 2, numRows * 2);
-            assertThatPlanFor("SELECT k, c FROM %s WHERE n < 5", numRows)
-                .hasEstimatedRowsCountBetween((double) numRows / 2, numRows * 2);
-            assertThatPlanFor("SELECT k, c FROM %s WHERE c = 1", numPartitions)
-                .hasEstimatedRowsCountBetween((double) numPartitions / 2, numPartitions * 2);
-            assertThatPlanFor("SELECT k, c FROM %s WHERE c >= 1 AND c <= 10", numPartitions * 10)
-                .hasEstimatedRowsCountBetween((double) numPartitions * 5, numPartitions * 20);
-            assertThatPlanFor("SELECT k, c FROM %s WHERE n = 1 AND c = 1", numPartitions)
-                .hasEstimatedRowsCountBetween((double) numPartitions / 2, numPartitions * 2);;
-        });
+            ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+            cfs.unsafeRunWithoutFlushing(() -> {
+                 for (int k = 0; k < numPartitions; k++)
+                     for (int c = 0; c < numRowsPerPartition; c++)
+                         execute("INSERT INTO %s (k, c, n) VALUES (?, ?, 1)", k, c);
+             });
+
+            beforeAndAfterFlush(() -> {
+                assertThatPlanFor("SELECT k, c FROM %s WHERE n = 0", 0)
+                    .hasEstimatedRowsCountBetween(0.0, 0.0);
+                assertThatPlanFor("SELECT k, c FROM %s WHERE n = 1", numRows)
+                    .hasEstimatedRowsCountBetween((double) numRows / 2, numRows * 2);
+                assertThatPlanFor("SELECT k, c FROM %s WHERE n < 5", numRows)
+                    .hasEstimatedRowsCountBetween((double) numRows / 2, numRows * 2);
+                assertThatPlanFor("SELECT k, c FROM %s WHERE c = 1", numPartitions)
+                    .hasEstimatedRowsCountBetween((double) numPartitions / 2, numPartitions * 2);
+                assertThatPlanFor("SELECT k, c FROM %s WHERE c >= 1 AND c <= 10", numPartitions * 10)
+                    .hasEstimatedRowsCountBetween((double) numPartitions * 5, numPartitions * 20);
+                assertThatPlanFor("SELECT k, c FROM %s WHERE n = 1 AND c = 1", numPartitions)
+                    .hasEstimatedRowsCountBetween((double) numPartitions / 2, numPartitions * 2);;
+            });
+        }
+        finally
+        {
+            DatabaseDescriptor.setLocalReadSizeWarnThreshold(oldLocalReadSizeWarnThreshold);
+            DatabaseDescriptor.setLocalReadSizeFailThreshold(oldLocalReadSizeFailThreshold);
+        }
     }
 }
