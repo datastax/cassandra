@@ -66,6 +66,10 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                                            .withInstanceInitializer(BB::install)
                                            .start()))
         {
+            ICoordinator coordinator = cluster.coordinator(1);
+            IInvokableInstance node = cluster.get(1);
+            node.runOnInstance(() -> QueryController.QUERY_OPT_USE_TERM_STATS = true);
+
             // create a table with numeric, text and vector indexes
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (k int, c int, n int, s text, v vector<float, 2>, l int, PRIMARY KEY(k, c))"));
             cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t (n) USING 'StorageAttachedIndex'"));
@@ -73,8 +77,6 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t (v) USING 'StorageAttachedIndex'"));
 
             // insert some data
-            ICoordinator coordinator = cluster.coordinator(1);
-            IInvokableInstance node = cluster.get(1);
             coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v, l) VALUES (1, 1, 1, 's_1', [1, 1], 1)"), ConsistencyLevel.ONE);
             coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v, l) VALUES (1, 2, 2, 's_2', [1, 2], 2)"), ConsistencyLevel.ONE);
             coordinator.execute(withKeyspace("INSERT INTO %s.t (k, c, n, s, v, l) VALUES (2, 1, 3, 's_3', [1, 3], 3)"), ConsistencyLevel.ONE);
