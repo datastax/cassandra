@@ -16,14 +16,14 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.SAITester;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * A test with a complex wide partition schema and SAI indexes.
@@ -40,40 +40,29 @@ public class ComplexSchemaTest extends SAITester
     private static final long BASE_TIMESTAMP = 1700000000000L;
     private static final int DAYS_TO_SPREAD = 30;
 
+    private static final String TABLE_SCHEMA = "CREATE TABLE %s (" +
+                                               "pk_int int, " +
+                                               "ck1_bigint bigint, " +
+                                               "ck2_bigint bigint, " +
+                                               "ck3_text text, " +
+                                               "ck4_bigint bigint, " +
+                                               "ck5_bigint bigint, " +
+                                               "col1_text text, " +
+                                               "col2_timestamp timestamp, " +
+                                               "col3_bigint bigint, " +
+                                               "col4_int int, " +
+                                               "col5_int int, " +
+                                               "col6_int int, " +
+                                               "col7_text text, " +
+                                               "col8_int int, " +
+                                               "col9_timestamp timestamp, " +
+                                               "PRIMARY KEY (pk_int, ck1_bigint, ck2_bigint, ck3_text, ck4_bigint, ck5_bigint)" +
+                                               ") WITH CLUSTERING ORDER BY (ck1_bigint DESC, ck2_bigint DESC, ck3_text ASC, ck4_bigint ASC, ck5_bigint ASC)";
+
     @Test
     public void testWideTimeseriesWithMultipleIndexes()
     {
-        createTable("CREATE TABLE %s (" +
-                    "pk_int int, " +
-                    "ck1_bigint bigint, " +
-                    "ck2_bigint bigint, " +
-                    "ck3_text text, " +
-                    "ck4_bigint bigint, " +
-                    "ck5_bigint bigint, " +
-                    "col1_text text, " +
-                    "col2_timestamp timestamp, " +
-                    "col3_bigint bigint, " +
-                    "col4_int int, " +
-                    "col5_int int, " +
-                    "col6_int int, " +
-                    "col7_text text, " +
-                    "col8_int int, " +
-                    "col9_timestamp timestamp, " +
-                    "PRIMARY KEY (pk_int, ck1_bigint, ck2_bigint, ck3_text, ck4_bigint, ck5_bigint)" +
-                    ") WITH CLUSTERING ORDER BY (ck1_bigint DESC, ck2_bigint DESC, ck3_text ASC, ck4_bigint ASC, ck5_bigint ASC)");
-
-        createIndex("CREATE CUSTOM INDEX ON %s(col1_text) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(ck3_text) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(ck2_bigint) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(ck1_bigint) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(ck4_bigint) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(col4_int) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(col8_int) USING 'StorageAttachedIndex'");
-
-        insertData();
-
-        flush();
-
+        // Compute query parameters
         int testIndex = ROW_COUNT / 2;
         int pkInt = hashRange(testIndex, PAR_COUNT);
         long ck2Bigint = BASE_TIMESTAMP + (testIndex * DAYS_TO_SPREAD * 86400000L / ROW_COUNT);
@@ -83,17 +72,87 @@ public class ComplexSchemaTest extends SAITester
         long ck1BigintUpper = (ck2BigintUpper / 3600000L) * 3600000L;
         long ck4Bigint = hash2(testIndex, 1) % HC;
 
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE pk_int=? AND ck1_bigint>=? AND ck1_bigint<=? " +
-                                          "AND ck2_bigint<=? AND ck2_bigint>=? AND ck4_bigint=? LIMIT 10 ALLOW FILTERING",
-                                          pkInt, ck1BigintLower, ck1BigintUpper, ck2BigintUpper, ck2BigintLower, ck4Bigint);
-        assertThat(result).as("Query should return at least one result").isNotEmpty();
+        ReferenceResults referenceResults = obtainReferenceResults(pkInt, ck1BigintLower, ck1BigintUpper,
+                                                                   ck2Bigint, ck2BigintUpper, ck2BigintLower, ck4Bigint);
 
-        result = execute("SELECT * FROM %s WHERE pk_int=? AND col5_int=? LIMIT 10 ALLOW FILTERING", pkInt, 1);
-        assertThat(result).as("Query with pk_int and col5_int should return at least one result").isNotEmpty();
+        createTable(TABLE_SCHEMA);
+        createIndex("CREATE CUSTOM INDEX ON %s(col1_text) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(ck3_text) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(ck2_bigint) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(ck1_bigint) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(ck4_bigint) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(col4_int) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(col8_int) USING 'StorageAttachedIndex'");
 
-        result = execute("SELECT * FROM %s WHERE pk_int=? AND ck2_bigint<? AND ck3_text>? AND ck4_bigint>? LIMIT 10 ALLOW FILTERING",
-                         pkInt, ck2Bigint, "value_10", ck4Bigint / 2);
-        assertThat(result).as("Complex multi-column query should execute successfully").isNotEmpty();
+        insertData();
+        flush();
+
+        UntypedResultSet indexedResult1 = execute("SELECT * FROM %s WHERE pk_int=? AND ck1_bigint>=? AND ck1_bigint<=? " +
+                                                  "AND ck2_bigint<=? AND ck2_bigint>=? AND ck4_bigint=? LIMIT 10 ALLOW FILTERING",
+                                                  pkInt, ck1BigintLower, ck1BigintUpper, ck2BigintUpper, ck2BigintLower, ck4Bigint);
+        assertRowsIgnoringOrder(indexedResult1, referenceResults.expectedRows1);
+
+        UntypedResultSet indexedResult2 = execute("SELECT * FROM %s WHERE pk_int=? AND col5_int=? LIMIT 10 ALLOW FILTERING",
+                                                  pkInt, 1);
+        assertRowsIgnoringOrder(indexedResult2, referenceResults.expectedRows2);
+
+        UntypedResultSet indexedResult3 = execute("SELECT * FROM %s WHERE pk_int=? AND ck2_bigint<? AND ck3_text>? AND ck4_bigint>? LIMIT 10 ALLOW FILTERING",
+                                                  pkInt, ck2Bigint, "value_10", ck4Bigint / 2);
+        assertRowsIgnoringOrder(indexedResult3, referenceResults.expectedRows3);
+    }
+
+    /**
+     * Creates a reference table without indexes, populates it with data, and executes test queries.
+     * Returns the query results converted to Object[][] format for use with assertRowsIgnoringOrder.
+     */
+    private ReferenceResults obtainReferenceResults(int pkInt, long ck1BigintLower, long ck1BigintUpper,
+                                                    long ck2Bigint, long ck2BigintUpper, long ck2BigintLower, long ck4Bigint)
+    {
+        createTable(TABLE_SCHEMA);
+        insertData();
+        flush();
+
+        UntypedResultSet result1 = execute("SELECT * FROM %s WHERE pk_int=? AND ck1_bigint>=? AND ck1_bigint<=? " +
+                                           "AND ck2_bigint<=? AND ck2_bigint>=? AND ck4_bigint=? LIMIT 10 ALLOW FILTERING",
+                                           pkInt, ck1BigintLower, ck1BigintUpper, ck2BigintUpper, ck2BigintLower, ck4Bigint);
+
+        UntypedResultSet result2 = execute("SELECT * FROM %s WHERE pk_int=? AND col5_int=? LIMIT 10 ALLOW FILTERING",
+                                           pkInt, 1);
+
+        UntypedResultSet result3 = execute("SELECT * FROM %s WHERE pk_int=? AND ck2_bigint<? AND ck3_text>? AND ck4_bigint>? LIMIT 10 ALLOW FILTERING",
+                                           pkInt, ck2Bigint, "value_10", ck4Bigint / 2);
+
+        return new ReferenceResults(
+        convertResultSetToRows(result1),
+        convertResultSetToRows(result2),
+        convertResultSetToRows(result3)
+        );
+    }
+
+    private Object[][] convertResultSetToRows(UntypedResultSet resultSet)
+    {
+        List<Object[]> rows = new ArrayList<>();
+        for (UntypedResultSet.Row row : resultSet)
+        {
+            rows.add(new Object[]{
+            row.getInt("pk_int"),
+            row.getLong("ck1_bigint"),
+            row.getLong("ck2_bigint"),
+            row.getString("ck3_text"),
+            row.getLong("ck4_bigint"),
+            row.getLong("ck5_bigint"),
+            row.getString("col1_text"),
+            row.getTimestamp("col2_timestamp"),
+            row.getLong("col3_bigint"),
+            row.getInt("col4_int"),
+            row.getInt("col5_int"),
+            row.getInt("col6_int"),
+            row.getString("col7_text"),
+            row.getInt("col8_int"),
+            row.getTimestamp("col9_timestamp")
+            });
+        }
+        return rows.toArray(new Object[rows.size()][]);
     }
 
     private void insertData()
@@ -141,5 +200,19 @@ public class ComplexSchemaTest extends SAITester
     {
         // Use Random with combined seed for deterministic distribution
         return Math.abs(new Random(i * 31L + seed).nextInt());
+    }
+
+    private static class ReferenceResults
+    {
+        final Object[][] expectedRows1;
+        final Object[][] expectedRows2;
+        final Object[][] expectedRows3;
+
+        ReferenceResults(Object[][] expectedRows1, Object[][] expectedRows2, Object[][] expectedRows3)
+        {
+            this.expectedRows1 = expectedRows1;
+            this.expectedRows2 = expectedRows2;
+            this.expectedRows3 = expectedRows3;
+        }
     }
 }
