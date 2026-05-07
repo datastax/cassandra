@@ -18,7 +18,10 @@
 
 package org.apache.cassandra.schema;
 
+import java.nio.ByteBuffer;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -235,17 +238,31 @@ public class SchemaTransformations
 
                     if (curKeyspace.types != null)
                     {
-                        for (UserType currType : curKeyspace.types)
+                        Set<ByteBuffer> referencedTypes = new HashSet<>();
+                        for (TableMetadata table : updatedKeyspace.tables)
+                            referencedTypes.addAll(table.getReferencedUserTypes());
+
+                        boolean addedType;
+                        do
                         {
-                            UserType desiredType = updatedKeyspace.types.getNullable(currType.name);
-                            // if the type exist we keep the existing definition, otherwise we inherit the type
-                            // the motivation behind it is that there might be tables (inherited above) that depend on it
-                            if (desiredType == null)
+                            addedType = false;
+                            for (UserType currType : curKeyspace.types)
                             {
-                                logger.debug("Preserving type {} for keyspace {}", currType.getNameAsString(), curKeyspace.name);
-                                updatedKeyspace = updatedKeyspace.withSwapped(updatedKeyspace.types.with(currType));
+                                UserType desiredType = updatedKeyspace.types.getNullable(currType.name);
+                                // Preserve only missing types that are still referenced by preserved tables/columns.
+                                // This avoids changing schema digests by inheriting unrelated legacy system UDTs.
+                                if (desiredType == null && referencedTypes.contains(currType.name))
+                                {
+                                    logger.debug("Preserving type {} for keyspace {}", currType.getNameAsString(), curKeyspace.name);
+                                    updatedKeyspace = updatedKeyspace.withSwapped(updatedKeyspace.types.with(currType));
+                                    for (UserType type : curKeyspace.types)
+                                        if (currType.referencesUserType(type.name))
+                                            referencedTypes.add(type.name);
+                                    addedType = true;
+                                }
                             }
                         }
+                        while (addedType);
                     }
 
                 }
