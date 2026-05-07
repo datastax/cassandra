@@ -26,8 +26,9 @@ import org.apache.cassandra.index.sai.SAITester;
 
 /**
  * A test with a complex wide partition schema and SAI indexes.
- * Tests with such a complex schema and indexes do not exist.
- * This test allowed catching a crashing bug while implementing CNDB-15608.
+ * This test comes from a benchmark where it allowed catching a bug
+ * with a failure during SELECT query execution while implementing CNDB-15608.
+ * Existing tests didn't cover this case as CI runs were successful.
  */
 public class ComplexSchemaTest extends SAITester
 {
