@@ -645,13 +645,20 @@ public class MigrationManagerTest
     public void testInheritTypesFromPreviousKeyspace()
     {
         // given
-        TableMetadata table0 = addTestTable("ks2", "t", "");
         UserType udt = new UserType("ks2",
                                     bytes("PreviousType"),
                                     List.of(forUnquoted("a"), forUnquoted("b")),
                                     List.of(Int32Type.instance, Int32Type.instance),
                                     true);
-        KeyspaceMetadata previousKeyspace = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table0), Views.none(), Types.of(udt), UserFunctions.none());
+        UserType unreferencedUdt = new UserType("ks2",
+                                                bytes("UnreferencedType"),
+                                                List.of(forUnquoted("a")),
+                                                List.of(Int32Type.instance),
+                                                true);
+        TableMetadata table0 = addTestTable("ks2", "t", "").unbuild()
+                                                        .addRegularColumn("udt", udt)
+                                                        .build();
+        KeyspaceMetadata previousKeyspace = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table0), Views.none(), Types.of(udt, unreferencedUdt), UserFunctions.none());
         KeyspaceMetadata currentKeyspace = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table0));
 
         // when
@@ -665,6 +672,7 @@ public class MigrationManagerTest
         UserType inheritedUdt = keyspaceAfterTransformation.types.getNullable(udt.name);
         assertNotNull(inheritedUdt);
         assertEquals(udt, inheritedUdt);
+        assertNull(keyspaceAfterTransformation.types.getNullable(unreferencedUdt.name));
     }
 
     private TableMetadata addTestTable(String ks, String cf, String comment)
