@@ -18,7 +18,6 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 
 import org.junit.Test;
 
@@ -192,14 +191,20 @@ public class ComplexSchemaTest extends SAITester
 
     private int hash(int i)
     {
-        // Use Random with seed based on input for deterministic distribution
-        return new Random(i).nextInt();
+        // Simple hash function
+        int h = i;
+        h ^= (h >>> 16);
+        h *= 0x85ebca6b;
+        h ^= (h >>> 13);
+        h *= 0xc2b2ae35;
+        h ^= (h >>> 16);
+        return h;
     }
 
     private int hash2(int i, int seed)
     {
-        // Use Random with combined seed for deterministic distribution
-        return Math.abs(new Random(i * 31L + seed).nextInt());
+        // Hash with seed
+        return Math.abs(hash(i + seed * 31));
     }
 
     private static class ReferenceResults
