@@ -275,9 +275,6 @@ public class CassandraRoleManagerTest
             RoleOptions newOptions1 = getLoginRoleOptions("new_password1");
             roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, role1, newOptions1);
 
-            RoleOptions newOptions2 = getLoginRoleOptions("new_password2");
-            roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, role2, newOptions2);
-
             try
             {
                 RoleOptions newOptions1Again = getLoginRoleOptions("another_password1");
@@ -288,6 +285,9 @@ public class CassandraRoleManagerTest
             {
                 assertEquals("Password for role test_role_1 can only be changed every 100ms.", e.getMessage());
             }
+
+            RoleOptions newOptions2 = getLoginRoleOptions("new_password2");
+            roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, role2, newOptions2);
 
             roleManager.dropRole(AuthenticatedUser.ANONYMOUS_USER, role1);
             roleManager.dropRole(AuthenticatedUser.ANONYMOUS_USER, role2);
