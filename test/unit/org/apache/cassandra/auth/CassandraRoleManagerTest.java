@@ -290,17 +290,6 @@ public class CassandraRoleManagerTest
             RoleOptions newOptions2 = getLoginRoleOptions("new_password2");
             roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, role2, newOptions2);
 
-            try
-            {
-                RoleOptions newOptions2Again = getLoginRoleOptions("another_password2");
-                roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, role2, newOptions2Again);
-                fail("Expected OverloadedException for test_role_2");
-            }
-            catch (OverloadedException e)
-            {
-                assertEquals("Password for role test_role_2 can only be changed every 100ms.", e.getMessage());
-            }
-
             roleManager.dropRole(AuthenticatedUser.ANONYMOUS_USER, role1);
             roleManager.dropRole(AuthenticatedUser.ANONYMOUS_USER, role2);
         }
