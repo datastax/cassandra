@@ -84,7 +84,7 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
                     // If we chose one of the specific keys with non-empty clustering (e.g. pick the first one we see),
                     // we may miss rows matched by the non-row-aware index, as well as the rows matched by
                     // the other row-aware indexes.
-                    if (range.peek().hasEmptyClustering() && !candidate.peek().hasEmptyClustering())
+                    if (!range.peek().hasClustering() && candidate.peek().hasClustering())
                         candidate = range;
                     else
                         range.next();   // truly equal by partition and clustering, so we can just get rid of one
@@ -105,7 +105,7 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
         // advance all other ranges to the end of this partition to avoid duplicates.
         // We delay that to the next call to computeNext() though, because if we have a wide partition, it's better
         // to first let the caller consume all the rows from this partition - maybe they won't call again.
-        if (result.hasEmptyClustering())
+        if (!result.hasClustering())
             partitionToSkip = result.partitionKey();
 
         return result;

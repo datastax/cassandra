@@ -150,15 +150,12 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
     Clustering clustering();
 
     /**
-     * Return whether the primary key has an empty clustering or not.
-     * By default the clustering is empty if the internal clustering
-     * is null or is empty.
-     *
-     * @return {@code true} if the clustering is empty, otherwise {@code false}
+     * Return whether the primary key has a clustering, i.e., has non-static clustering column(s).
+     * This operation might require loading the primary key.
      */
-    default boolean hasEmptyClustering()
+    default boolean hasClustering()
     {
-        return clustering() == null || clustering().isEmpty();
+        return clustering() != null && !clustering().isEmpty();
     }
 
     /**

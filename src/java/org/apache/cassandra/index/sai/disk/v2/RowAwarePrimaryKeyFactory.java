@@ -41,13 +41,13 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     private final ClusteringComparator clusteringComparator;
-    private final boolean hasEmptyClustering;
+    private final boolean hasClustering;
 
 
     public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
     {
         this.clusteringComparator = clusteringComparator;
-        this.hasEmptyClustering = clusteringComparator.size() == 0;
+        this.hasClustering = clusteringComparator.size() > 0;
     }
 
     @Override
@@ -183,7 +183,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             // clusterings then we can return the result of this without
             // needing to compare the clusterings
             cmp = partitionKey().compareTo(o.partitionKey());
-            if (cmp != 0 || hasEmptyClustering() || o.hasEmptyClustering())
+            if (cmp != 0 || !hasClustering() || !o.hasClustering())
                 return cmp;
             return clusteringComparator.compare(clustering(), o.clustering());
         }
@@ -191,9 +191,10 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int hashCode()
         {
-            if (hasEmptyClustering)
+            if (hasClustering)
+                return Objects.hash(token, clustering());
+            else
                 return Objects.hash(token);
-            return Objects.hash(token, clustering());
         }
 
         @Override
