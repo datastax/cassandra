@@ -371,7 +371,7 @@ abstract public class VectorCompactionTest extends VectorTester
                 for (long i = segment.metadata.minSSTableRowId; i <= segment.metadata.maxSSTableRowId; i++)
                 {
                     var primaryKey = pkm.primaryKeyFromRowId(i);
-                    assertTrue("The subsequent logic assumes that we have no clustering columns", primaryKey.hasEmptyClustering());
+                    assertTrue("The subsequent logic assumes that we have no clustering columns", !primaryKey.hasClustering());
                     try (var sstableIter = segment.sstableContext
                                            .sstable()
                                            .rowIterator(primaryKey.partitionKey(), Slices.ALL, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
