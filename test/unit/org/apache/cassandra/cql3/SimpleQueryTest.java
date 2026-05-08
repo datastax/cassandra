@@ -328,7 +328,7 @@ public class SimpleQueryTest extends CQLTester
     {
         createTable("CREATE TABLE %s (k text, t int, v text, PRIMARY KEY (k, t));");
 
-        execute("CREATE INDEX ON %s(v)");
+        createIndex("CREATE INDEX ON %s(v)");
 
         execute("INSERT INTO %s (k, t, v) values (?, ?, ?)", "key1", 1, "foo");
         execute("INSERT INTO %s (k, t, v) values (?, ?, ?)", "key1", 2, "bar");
@@ -481,7 +481,7 @@ public class SimpleQueryTest extends CQLTester
     {
         createTable("CREATE TABLE %s (k int, c1 int, c2 int, v int, PRIMARY KEY(k, c1, c2))");
 
-        execute("CREATE INDEX v_idx ON %s(v)");
+        createIndex("CREATE INDEX v_idx ON %s(v)");
 
         execute("INSERT INTO %s (k, c1, c2, v) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
         execute("INSERT INTO %s (k, c1, c2, v) VALUES (?, ?, ?, ?)", 0, 1, 0, 0);
