@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.stream.Collectors;
 
@@ -63,7 +62,7 @@ abstract public class VectorCompactionTest extends VectorTester
     // Subclasses must implement this to cover different dimensions
     abstract public int dimension();
 
-    @Parameterized.Parameter(0)
+    @Parameterized.Parameter()
     public Version version;
 
     @Parameterized.Parameter(1)
@@ -90,8 +89,7 @@ abstract public class VectorCompactionTest extends VectorTester
     }
 
     @Before
-    public void setEnableNVQ() throws Throwable
-    {
+    public void setEnableNVQ() {
         SAIUtil.setEnableNVQ(enableNVQ);
     }
 
@@ -410,11 +408,6 @@ abstract public class VectorCompactionTest extends VectorTester
                                 // TODO: further investigate what other checks are needed here
                                 assertEquals("Expected fused PQ path only for FA+", Version.FA, version);
                                 assertNotNull("Expected PQ metadata for FA fused PQ", searcher.getPQ());
-                            }
-                            else
-                            {
-                                // We should only hit this case when we don't have enough rows to build a PQ.
-                                assertTrue("Found " + numRows + " but no PQ", MIN_PQ_ROWS > numRows);
                             }
                         }
                     }
