@@ -42,6 +42,7 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -258,6 +259,13 @@ public class CassandraRoleManager implements IRoleManager
 
     protected void loadIdentityStatement()
     {
+        // Only prepare statement if identity_to_role table exists (5.0+)
+        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+        {
+            loadIdentityStatement = null;
+            return;
+        }
+
         loadIdentityStatement = (SelectStatement) prepare("SELECT role from %s.%s where identity=?",
                                                           SchemaConstants.AUTH_KEYSPACE_NAME,
                                                           AuthKeyspace.IDENTITY_TO_ROLES);
