@@ -18,6 +18,8 @@ package org.apache.cassandra.io.compress;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
 
 import com.google.common.collect.ImmutableMap;
@@ -26,11 +28,54 @@ import org.junit.Test;
 import org.apache.cassandra.io.util.RandomAccessReader;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 
 public class AdaptiveCompressorTest
 {
+
+    @Test
+    public void testCreateWithDifferentParamsMakeSeparateInstances()
+    {
+        Random rnd = new Random(1);
+        for (int i = 0; i < 1000; i++)
+        {
+            Map<String, String> options = new HashMap<>();
+            int maxCompressionLevel = rnd.nextInt(AdaptiveCompressor.MAX_COMPRESSION_LEVEL) + 1;
+            int minCompressionLevel = rnd.nextInt(maxCompressionLevel);
+            int maxQueueLen = rnd.nextInt(20) + 1;
+            options.put(AdaptiveCompressor.MIN_COMPRESSION_LEVEL_OPTION_NAME, Integer.toString(minCompressionLevel));
+            options.put(AdaptiveCompressor.MAX_COMPRESSION_LEVEL_OPTION_NAME, Integer.toString(maxCompressionLevel));
+            options.put(AdaptiveCompressor.MAX_COMPACTION_QUEUE_LENGTH_OPTION_NAME, Integer.toString(maxQueueLen));
+
+            AdaptiveCompressor compressor = AdaptiveCompressor.create(options);
+            assertEquals(maxCompressionLevel, compressor.params.maxCompressionLevel);
+            assertEquals(minCompressionLevel, compressor.params.minCompressionLevel);
+            assertEquals(maxQueueLen, compressor.params.maxCompactionQueueLength);
+
+            AdaptiveCompressor compressorForFlush = AdaptiveCompressor.createForFlush(options);
+            assertEquals(maxCompressionLevel, compressorForFlush.params.maxCompressionLevel);
+            assertEquals(minCompressionLevel, compressorForFlush.params.minCompressionLevel);
+        }
+    }
+
+    @Test
+    public void testCreateWithSameParamsReturnsTheSameInstance()
+    {
+        Map<String, String> options = new HashMap<>();
+        int maxCompressionLevel = 10;
+        int minCompressionLevel = 0;
+        int maxQueueLen = 20;
+        options.put(AdaptiveCompressor.MIN_COMPRESSION_LEVEL_OPTION_NAME, Integer.toString(minCompressionLevel));
+        options.put(AdaptiveCompressor.MAX_COMPRESSION_LEVEL_OPTION_NAME, Integer.toString(maxCompressionLevel));
+        options.put(AdaptiveCompressor.MAX_COMPACTION_QUEUE_LENGTH_OPTION_NAME, Integer.toString(maxQueueLen));
+        AdaptiveCompressor compressor1 = AdaptiveCompressor.create(options);
+        AdaptiveCompressor compressor2 = AdaptiveCompressor.create(options);
+        assertSame(compressor1, compressor2);
+    }
 
     @Test(expected = IllegalArgumentException.class)
     public void badCompressionLevelParamThrowsExceptionMin()
@@ -116,6 +161,38 @@ public class AdaptiveCompressorTest
         }
 
         assertEquals(8, c.getThreadLocalState().currentCompressionLevel);
+    }
+
+    @Test
+    public void testParamsEqualsAndHashCode()
+    {
+        AdaptiveCompressor.Params[] params = new AdaptiveCompressor.Params[16];
+        int index = 0;
+        for (ICompressor.Uses use : new ICompressor.Uses[]{ICompressor.Uses.GENERAL, ICompressor.Uses.FAST_COMPRESSION})
+            for (int min : new int[]{5, 6})
+                for (int max : new int[]{10, 11})
+                    for (int queue : new int[]{15, 16})
+                        params[index++] = new AdaptiveCompressor.Params(use, min, max, queue);
+
+        for (int i = 0; i < params.length; i++)
+        {
+            for (int j = 0; j < params.length; j++)
+            {
+                if (i == j)
+                {
+                    assertEquals(params[i], params[j]);
+                    assertEquals(params[i].hashCode(), params[j].hashCode());
+                }
+                else
+                {
+                    assertNotEquals(params[i], params[j]);
+                }
+            }
+        }
+
+        // cannot change to assertNotEquals, because we want to expicitly call Params.equals here
+        assertFalse(params[0].equals(null));
+        assertFalse(params[0].equals(new Object()));
     }
 
     private static ByteBuffer getDstByteBuffer(ICompressor compressor)

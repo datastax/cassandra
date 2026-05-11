@@ -154,7 +154,9 @@ public class AdaptiveCompressor implements ICompressor
         return instances.computeIfAbsent(params, p -> new AdaptiveCompressor(p, AdaptiveCompressor::getFlushPressure));
     }
 
-    private final Params params;
+
+    final Params params;
+
     private final ThreadLocal<State> state;
     private final Supplier<Double> writePressureSupplier;
 
@@ -185,15 +187,19 @@ public class AdaptiveCompressor implements ICompressor
         @Override
         public boolean equals(Object o)
         {
-            if (o == null || getClass() != o.getClass()) return false;
+            if (o == null || getClass() != o.getClass())
+                return false;
             Params params = (Params) o;
-            return minCompressionLevel == params.minCompressionLevel && maxCompressionLevel == params.maxCompressionLevel && use == params.use;
+            return minCompressionLevel == params.minCompressionLevel
+                   && maxCompressionLevel == params.maxCompressionLevel
+                   && maxCompactionQueueLength == params.maxCompactionQueueLength
+                   && use == params.use;
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hash(use, minCompressionLevel, maxCompressionLevel);
+            return Objects.hash(use, minCompressionLevel, maxCompressionLevel, maxCompactionQueueLength);
         }
     }
 
