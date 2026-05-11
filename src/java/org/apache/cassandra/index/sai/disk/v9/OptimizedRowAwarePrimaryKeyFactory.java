@@ -75,7 +75,7 @@ public class OptimizedRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactor
             // clusterings, then return the result of this without
             // needing to compare the clusterings.
             int cmp = partitionKey().compareTo(o.partitionKey());
-            if (cmp != 0 || hasEmptyClustering() || o.hasEmptyClustering())
+            if (cmp != 0 || !hasClustering() || !o.hasClustering())
                 return cmp;
             return clusteringComparator.compare(clustering(), o.clustering());
         }
