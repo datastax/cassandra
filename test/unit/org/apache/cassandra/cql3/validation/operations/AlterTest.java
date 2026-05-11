@@ -28,6 +28,8 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.SkipListMemtable;
@@ -638,22 +640,41 @@ public class AlterTest extends CQLTester
     @Test
     public void testAlterTableWithMemtable() throws Throwable
     {
+        StorageCompatibilityMode mode = DatabaseDescriptor.getStorageCompatibilityMode();
+
         createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))");
         assertSame(MemtableParams.DEFAULT.factory(), getCurrentColumnFamilyStore().metadata().params.memtable.factory());
-        assertSchemaOption("memtable", null);
-        Class<? extends Memtable> defaultClass = getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable().getClass();
+        Class<? extends Memtable> defaultMemtableClass = getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable().getClass();
 
-        testMemtableConfig("skiplist", SkipListMemtable.FACTORY, SkipListMemtable.class);
-        testMemtableConfig("test_fullname", TestMemtable.FACTORY, SkipListMemtable.class);
-        testMemtableConfig("test_shortname", SkipListMemtable.FACTORY, SkipListMemtable.class);
+        if (mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
+        {
+            assertMemtableOptionVersion4(null, null);
+            testMemtableConfigVersion4("skiplist", map("class", "SkipListMemtable"), SkipListMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfigVersion4("test_fullname", map("class", "TestMemtable"), TestMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfigVersion4("test_shortname", map("class", "TestMemtable", "skiplist", "true"), SkipListMemtable.FACTORY, SkipListMemtable.class);
+        }
+        else
+        {
+            assertMemtableOption(null);
+            testMemtableConfig("skiplist", SkipListMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfig("test_fullname", TestMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfig("test_shortname", SkipListMemtable.FACTORY, SkipListMemtable.class);
+        }
 
         // verify memtable does not change on other ALTER
         alterTable("ALTER TABLE %s"
                    + " WITH compression = {'class': 'LZ4Compressor'};");
-        assertSchemaOption("memtable", "test_shortname");
 
-        testMemtableConfig("default", MemtableParams.DEFAULT.factory(), defaultClass);
-
+        if (mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
+        {
+            assertMemtableOptionVersion4("test_shortname", map("class", "TestMemtable", "skiplist", "true"));
+            testMemtableConfigVersion4("default", null, MemtableParams.DEFAULT.factory(), defaultMemtableClass);
+        }
+        else
+        {
+            assertMemtableOption("test_shortname");
+            testMemtableConfig("default", MemtableParams.DEFAULT.factory(), defaultMemtableClass);
+        }
 
         assertAlterTableThrowsException(ConfigurationException.class,
                                         "The 'class_name' option must be specified.",
@@ -701,13 +722,52 @@ public class AlterTest extends CQLTester
                    row(expected));
     }
 
+    /**
+     * Assert memtable option where schema stores config key as text.
+     */
+    void assertMemtableOption(String expectedConfigKey) throws Throwable
+    {
+        assertSchemaOption("memtable", expectedConfigKey);
+    }
+
     private void testMemtableConfig(String memtableConfig, Memtable.Factory factoryInstance, Class<? extends Memtable> memtableClass) throws Throwable
     {
         alterTable("ALTER TABLE %s"
                    + " WITH memtable = '" + memtableConfig + "';");
         assertSame(factoryInstance, getCurrentColumnFamilyStore().metadata().params.memtable.factory());
         Assert.assertTrue(memtableClass.isInstance(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable()));
-        assertSchemaOption("memtable", MemtableParams.DEFAULT.configurationKey().equals(memtableConfig) ? null : memtableConfig);
+        assertMemtableOption(MemtableParams.DEFAULT.configurationKey().equals(memtableConfig) ? null : memtableConfig);
+    }
+
+    /**
+     * Assert memtable option in HCD_1 mode where schema stores class name in frozen<map<text,text>>.
+     * @param expectedConfigKey The config key used in ALTER TABLE (e.g., "skiplist", "test_fullname")
+     * @param expectedSchemaMap The expected map value in schema (e.g., map("class", "SkipListMemtable"))
+     */
+    void assertMemtableOptionVersion4(String expectedConfigKey, Object expectedSchemaMap) throws Throwable
+    {
+        // Assert the schema contains the correct map value
+        Object expectedSchemaValue;
+        if (expectedConfigKey == null || "default".equals(expectedConfigKey))
+        {
+            // Default memtable is not written to schema at all
+            expectedSchemaValue = null;
+        }
+        else
+        {
+            expectedSchemaValue = expectedSchemaMap;
+        }
+        assertSchemaOption("memtable", expectedSchemaValue);
+    }
+
+    private void testMemtableConfigVersion4(String memtableConfig, Object expectedSchemaMap, Memtable.Factory factoryInstance, Class<? extends Memtable> memtableClass) throws Throwable
+    {
+        alterTable("ALTER TABLE %s"
+                   + " WITH memtable = '" + memtableConfig + "';");
+        assertSame(factoryInstance, getCurrentColumnFamilyStore().metadata().params.memtable.factory());
+        Assert.assertTrue(memtableClass.isInstance(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable()));
+        assertMemtableOptionVersion4(MemtableParams.DEFAULT.configurationKey().equals(memtableConfig) ? null : memtableConfig,
+                                     expectedSchemaMap);
     }
 
     @Test
