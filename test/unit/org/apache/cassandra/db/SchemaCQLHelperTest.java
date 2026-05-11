@@ -41,6 +41,7 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -840,11 +841,14 @@ public class SchemaCQLHelperTest extends CQLTester
         ColumnFamilyStore cfs7 = Keyspace.open(keyspace).getColumnFamilyStore(tableName7);
         Assertions.assertThat(cfs7.metadata().params.memtable.configurationKey()).isEqualTo("trie");
 
-        // Test parsing CC 4.0 format with ShardedSkipListMemtable (short name)
-        String tableName8 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'ShardedSkipListMemtable'}");
-        ColumnFamilyStore cfs8 = Keyspace.open(keyspace).getColumnFamilyStore(tableName8);
-        Assertions.assertThat(cfs8.metadata().params.memtable.configurationKey()).isEqualTo("skiplist_sharded");
-
+        // Sharded memtables require Cassandra 5.0+, skip this test in compatibility mode
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+        {
+            // Test parsing CC 4.0 format with ShardedSkipListMemtable (short name)
+            String tableName8 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'ShardedSkipListMemtable'}");
+            ColumnFamilyStore cfs8 = Keyspace.open(keyspace).getColumnFamilyStore(tableName8);
+            Assertions.assertThat(cfs8.metadata().params.memtable.configurationKey()).isEqualTo("skiplist_sharded");
+        }
         // Test parsing CC 4.0 format with empty map (default)
         String tableName9 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {}");
         ColumnFamilyStore cfs9 = Keyspace.open(keyspace).getColumnFamilyStore(tableName9);
@@ -910,12 +914,16 @@ public class SchemaCQLHelperTest extends CQLTester
             Assertions.assertThat(cql2).contains("memtable = {'class': 'SkipListMemtable'");
             Assertions.assertThat(cql2).doesNotContain("org.apache.cassandra.db.memtable.SkipListMemtable");
 
-            String tableName3 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'skiplist_sharded'");
-            ColumnFamilyStore cfs3 = Keyspace.open(keyspace).getColumnFamilyStore(tableName3);
-            String cql3 = SchemaCQLHelper.getTableMetadataAsCQL(cfs3.metadata(), cfs3.keyspace.getMetadata());
-            // Should output short class name for standard Cassandra memtable
-            Assertions.assertThat(cql3).contains("memtable = {'class': 'ShardedSkipListMemtable'");
-            Assertions.assertThat(cql3).doesNotContain("org.apache.cassandra.db.memtable.ShardedSkipListMemtable");
+            // Sharded memtables require Cassandra 5.0+, skip this test in compatibility mode
+            if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+            {
+                String tableName3 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'skiplist_sharded'");
+                ColumnFamilyStore cfs3 = Keyspace.open(keyspace).getColumnFamilyStore(tableName3);
+                String cql3 = SchemaCQLHelper.getTableMetadataAsCQL(cfs3.metadata(), cfs3.keyspace.getMetadata());
+                // Should output short class name for standard Cassandra memtable
+                Assertions.assertThat(cql3).contains("memtable = {'class': 'ShardedSkipListMemtable'");
+                Assertions.assertThat(cql3).doesNotContain("org.apache.cassandra.db.memtable.ShardedSkipListMemtable");
+            }
 
             // Test that tables created with fully qualified class names also output short class names
             String tableName4 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.TrieMemtable'}");
