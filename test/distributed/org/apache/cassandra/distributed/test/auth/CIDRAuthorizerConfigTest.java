@@ -25,19 +25,22 @@ import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 public class CIDRAuthorizerConfigTest extends TestBaseImpl
 {
     @BeforeClass
     public static void setup() throws Exception
     {
+        // Skip this test if running in compatibility mode < 5.0, as CIDR authorization is a CC5.0+ feature
+        StorageCompatibilityMode mode = CassandraRelevantProperties.TEST_STORAGE_COMPATIBILITY_MODE.getEnum(true, StorageCompatibilityMode.class);
         Assume.assumeFalse("CIDR features require Cassandra 5.0+",
-                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+                           mode != null && mode.isBefore(CassandraVersion.CASSANDRA_5_0.major));
     }
 
     @Test
