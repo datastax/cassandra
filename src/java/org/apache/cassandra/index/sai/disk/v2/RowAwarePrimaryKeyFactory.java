@@ -156,13 +156,13 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         protected ByteSource[] buildComparableSources(ByteComparable.Version version, boolean isPrefix)
         {
             // We need to make sure that the key is loaded before returning a
-            // byte comparable representation. If we don't we won't get a correct
+            // byte comparable representation. If we don't, we won't get a correct
             // comparison because we potentially won't be using the partition key
             // and clustering for the lookup
             loadDeferred();
 
             ByteSource tokenComparable = token.asComparableBytes(version);
-            ByteSource keyComparable = ByteSource.of(partitionKey.getKey(), version);
+            ByteSource partitionKeyComparable = ByteSource.of(partitionKey.getKey(), version);
 
             // It is important that the ClusteringComparator.asBytesComparable method is used
             // to maintain the correct clustering sort order
@@ -174,9 +174,9 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 
             // prefix doesn't include null components
             if (isPrefix && clusteringComparable == null)
-                return new ByteSource[]{ tokenComparable, keyComparable };
+                return new ByteSource[]{ tokenComparable, partitionKeyComparable };
             else
-                return new ByteSource[]{ tokenComparable, keyComparable, clusteringComparable };
+                return new ByteSource[]{ tokenComparable, partitionKeyComparable, clusteringComparable };
         }
 
         @Override
@@ -184,15 +184,15 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         {
             int cmp = token().compareTo(o.token());
 
-            // If the tokens don't match then we don't need to compare any more of the key.
-            // Otherwise if either this key or given key are token only,
+            // If the tokens don't match, then we don't need to compare any more of the key.
+            // Otherwise, if the given key is token only,
             // then we can only compare tokens
-            if ((cmp != 0) || isTokenOnly() || o.isTokenOnly())
+            if ((cmp != 0) || o.isTokenOnly())
                 return cmp;
 
-            // Next compare the partition keys. If they are not equal or
+            // Next, compare the partition keys. If they are not equal or
             // this is a single row partition key or there are no
-            // clusterings then we can return the result of this without
+            // clusterings, then we can return the result of this without
             // needing to compare the clusterings
             cmp = partitionKey().compareTo(o.partitionKey());
             if (cmp != 0 || !hasClustering() || !o.hasClustering())
