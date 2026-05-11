@@ -387,23 +387,33 @@ public class SchemaCQLHelperTest extends CQLTester
 
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
 
+        boolean isCompatibilityMode = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5);
+        String memtableFormat = isCompatibilityMode
+                                ? "    AND memtable = {}\n"
+                                : "    AND memtable = 'default'\n";
+
+        // allow_auto_snapshot and incremental_backups are not present in pre-5.0 compatibility mode
+        String autoSnapshotAndIncrementalBackups = isCompatibilityMode
+                                                   ? ""
+                                                   : "    AND allow_auto_snapshot = true\n" +
+                                                     "    AND incremental_backups = true\n";
+
         assertThat(SchemaCQLHelper.getTableMetadataAsCQL(cfs.metadata(), cfs.keyspace.getMetadata()),
                    containsString("AND CLUSTERING ORDER BY (cl1 ASC)\n" +
                             "    AND DROPPED COLUMN RECORD reg1 ascii USING TIMESTAMP " + droppedTimestamp +"\n" +
                             "    AND additional_write_policy = 'ALWAYS'\n" +
-                            "    AND allow_auto_snapshot = true\n" +
+                            autoSnapshotAndIncrementalBackups +
                             "    AND bloom_filter_fp_chance = 1.0\n" +
                             "    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}\n" +
                             "    AND cdc = false\n" +
                             "    AND comment = 'comment'\n" +
                             "    AND compaction = {'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4', 'sstable_size_in_mb': '1'}\n" +
                             "    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor', 'min_compress_ratio': '2.0'}\n" +
-                            "    AND memtable = 'default'\n" +
+                            memtableFormat +
                             "    AND crc_check_chance = 0.3\n" +
                             "    AND default_time_to_live = 4\n" +
                             "    AND extensions = {'ext1': 0x76616c31}\n" +
                             "    AND gc_grace_seconds = 5\n" +
-                            "    AND incremental_backups = true\n" +
                             "    AND max_index_interval = 7\n" +
                             "    AND memtable_flush_period_in_ms = 8\n" +
                             "    AND min_index_interval = 6\n" +
