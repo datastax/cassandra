@@ -21,14 +21,25 @@ package org.apache.cassandra.distributed.test.auth;
 import java.io.IOException;
 
 import com.google.common.collect.ImmutableMap;
+import org.junit.Assume;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.utils.CassandraVersion;
 
 public class CIDRAuthorizerConfigTest extends TestBaseImpl
 {
+    @BeforeClass
+    public static void setup() throws Exception
+    {
+        Assume.assumeFalse("CIDR features require Cassandra 5.0+",
+                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+    }
+
     @Test
     public void testParameterizedClass() throws IOException
     {
