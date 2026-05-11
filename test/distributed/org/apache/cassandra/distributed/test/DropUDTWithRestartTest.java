@@ -47,14 +47,18 @@ import org.json.simple.JSONValue;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 import org.junit.Ignore;
+import org.junit.Assume;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInstance;
@@ -301,6 +305,11 @@ public class DropUDTWithRestartTest extends TestBaseImpl
     @Test
     public void loadCommitLogAndSSTablesWithDroppedColumnTestCassandra5() throws Exception
     {
+        // Skip this test if running in compatibility mode < 5.0, as it loads CC5.0 format commit logs and SSTables
+        StorageCompatibilityMode mode = CassandraRelevantProperties.TEST_STORAGE_COMPATIBILITY_MODE.getEnum(true, StorageCompatibilityMode.class);
+        Assume.assumeFalse("Test requires Cassandra 5.0+ format data",
+                           mode != null && mode.isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         // Cassandra limitations
         // - user types cannot include other non-frozen udt
         // - cannot drop non-frozen columns
@@ -311,6 +320,11 @@ public class DropUDTWithRestartTest extends TestBaseImpl
     @Test
     public void loadCommitLogAndSSTablesWithDroppedColumnTestCC50() throws Exception
     {
+        // Skip this test if running in compatibility mode < 5.0, as it loads CC5.0 format commit logs and SSTables
+        StorageCompatibilityMode mode = CassandraRelevantProperties.TEST_STORAGE_COMPATIBILITY_MODE.getEnum(true, StorageCompatibilityMode.class);
+        Assume.assumeFalse("Test requires Cassandra 5.0+ format data",
+                           mode != null && mode.isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         loadCommitLogAndSSTablesWithDroppedColumnTest(CC50_PRODUCT_PATH);
     }
 
