@@ -42,7 +42,7 @@ public class TableHistogramsTest extends CQLTester
     private final int ALL_TABLE_SIZE = SystemKeyspace.TABLE_NAMES.size() +
                                        SchemaKeyspace.metadata().tables.size() +
                                        TraceKeyspace.TABLE_NAMES.size() +
-                                       AuthKeyspace.TABLE_NAMES.size() +
+                                       AuthKeyspace.tableNames().size() +
                                        SystemDistributedKeyspace.TABLE_NAMES.size();
 
     @BeforeClass

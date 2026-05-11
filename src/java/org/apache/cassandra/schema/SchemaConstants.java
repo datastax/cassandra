@@ -195,7 +195,7 @@ public final class SchemaConstants
                            .addAll(SystemKeyspace.TABLE_NAMES)
                            .addAll(SchemaKeyspaceTables.ALL)
                            .addAll(TraceKeyspace.TABLE_NAMES)
-                           .addAll(AuthKeyspace.TABLE_NAMES)
+                           .addAll(AuthKeyspace.tableNames())
                            .addAll(SystemDistributedKeyspace.TABLE_NAMES)
                            .build();
     }
