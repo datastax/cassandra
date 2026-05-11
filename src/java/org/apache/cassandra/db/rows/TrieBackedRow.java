@@ -95,7 +95,7 @@ public class TrieBackedRow extends AbstractRow
                                                                                                         LivenessInfo.EMPTY);
     static final Object2IntHashMap<ColumnIdentifier> EMPTY_COLUMN_IDS = makeColumnIdsMap(Columns.NONE);
 
-    private static final long EMPTY_SIZE = ObjectSizes.measure(new TrieBackedRow(Columns.NONE, EMPTY_COLUMN_IDS, Clustering.EMPTY, EMPTY_ROW));
+    private static final long EMPTY_SIZE = ObjectSizes.measure(new TrieBackedRow(Columns.NONE, EMPTY_COLUMN_IDS, Clustering.EMPTY, LivenessInfo.EMPTY, Row.Deletion.LIVE, EMPTY_ROW));
 
     private static final int COLUMN_NOT_PRESENT = -1;
 
@@ -131,6 +131,11 @@ public class TrieBackedRow extends AbstractRow
     ///    - Cells may be expiring or even expired (not really expected for memtables but possible)
     ///  - Deletion branch with tombstones
     private final DeletionAwareTrie<Object, TrieTombstoneMarker> data;
+
+    /// Copy of the row's liveness info (also stored at the root of the trie).
+    private final LivenessInfo livenessInfo;
+    /// Copy of the row-level deletion time as [Row.Deletion] (also stored at the root of the deletion branch).
+    private final Deletion deletion;
 
     /// Create a trie-backed version of a row, using the column definitions of the given table metadata.
     public static TrieBackedRow from(TableMetadata metadata, Row row)
@@ -179,14 +184,23 @@ public class TrieBackedRow extends AbstractRow
 
     TrieBackedRow(Columns columns, Clustering<?> clustering, DeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
-        this(columns, columnsMapCache.computeIfAbsent(columns, TrieBackedRow::makeColumnIdsMap), clustering, data);
+        this(columns,
+             columnsMapCache.computeIfAbsent(columns, TrieBackedRow::makeColumnIdsMap),
+             clustering,
+             getLivenessInfo(data),
+             getDeletion(data),
+             data);
     }
 
     private TrieBackedRow(Columns columns,
                           Object2IntHashMap<ColumnIdentifier> columnIds,
                           Clustering<?> clustering,
+                          LivenessInfo livenessInfo,
+                          Deletion deletion,
                           DeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
+        this.deletion = deletion;
+        this.livenessInfo = livenessInfo;
         assert data != null;
         this.columns = columns;
         this.columnIds = columnIds;
@@ -218,7 +232,7 @@ public class TrieBackedRow extends AbstractRow
     {
         assert !deletion.isLive();
         RangeTrie<TrieTombstoneMarker> deletionTrie = rowDeletionTrie(deletion);
-        return new TrieBackedRow(Columns.NONE, EMPTY_COLUMN_IDS, clustering,
+        return new TrieBackedRow(Columns.NONE, EMPTY_COLUMN_IDS, clustering, LivenessInfo.EMPTY, Deletion.regular(deletion),
                                  DeletionAwareTrie.deletionBranch(ByteComparable.EMPTY, BYTE_COMPARABLE_VERSION, deletionTrie));
     }
 
@@ -342,7 +356,12 @@ public class TrieBackedRow extends AbstractRow
     @Override
     public LivenessInfo primaryKeyLivenessInfo()
     {
-        LivenessInfo info = (LivenessInfo) data.get(ByteComparable.EMPTY);
+        return livenessInfo;
+    }
+
+    public static LivenessInfo getLivenessInfo(DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    {
+        LivenessInfo info = (LivenessInfo) trie.get(ByteComparable.EMPTY);
         return info != null ? info : LivenessInfo.EMPTY;
     }
 
@@ -404,7 +423,12 @@ public class TrieBackedRow extends AbstractRow
     @Override
     public Deletion deletion()
     {
-        DeletionTime delTime = TrieTombstoneMarker.applicableDeletion(data, ByteComparable.EMPTY);
+        return deletion;
+    }
+
+    static Deletion getDeletion(DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    {
+        DeletionTime delTime = TrieTombstoneMarker.applicableDeletion(trie, ByteComparable.EMPTY);
         if (delTime == null)
             return Deletion.LIVE;
         else
@@ -746,6 +770,8 @@ public class TrieBackedRow extends AbstractRow
                                                       true);
             }
         }
+        LivenessInfo filteredLivenessInfo = this.livenessInfo;
+        Deletion filteredDeletion = this.deletion;
 
         if (mayHaveDeleted)
         {
@@ -765,6 +791,8 @@ public class TrieBackedRow extends AbstractRow
                                                                      TrieBackedRow::deleteData,
                                                                      TrieTombstoneMarker::dropShadowedUpdate,
                                                                      true);
+            filteredLivenessInfo = getLivenessInfo(filteredData);
+            filteredDeletion = getDeletion(filteredData);
         }
 
         // TODO: Should we use `fetched` for `columns`? Note the ids cannot change.
@@ -772,7 +800,7 @@ public class TrieBackedRow extends AbstractRow
         if (isEmpty(filteredData))
             return null;
 
-        return new TrieBackedRow(columns, columnIds, clustering, filteredData);
+        return new TrieBackedRow(columns, columnIds, clustering, filteredLivenessInfo, filteredDeletion, filteredData);
     }
 
     private static DeletionAwareTrie<Object, TrieTombstoneMarker> restrictToColumnSet(DeletionAwareTrie<Object, TrieTombstoneMarker> data, BitSet fetchedIds)
@@ -875,7 +903,7 @@ public class TrieBackedRow extends AbstractRow
         Columns queried = filter.queriedColumns().columns(isStatic());
         BitSet queriedIds = getColumnIds(queried);
         if (queriedIds.cardinality() != columns.size())
-            return new TrieBackedRow(columns, columnIds, clustering, restrictToColumnSet(data, queriedIds));
+            return new TrieBackedRow(columns, columnIds, clustering, livenessInfo, deletion, restrictToColumnSet(data, queriedIds));
         else
             return this;
     }
@@ -935,11 +963,11 @@ public class TrieBackedRow extends AbstractRow
         if (newDeletion.isLive())
             return this;
 
-        return new TrieBackedRow(columns, columnIds, clustering,
-                                 data.mergeWithDeletion(rowDeletionTrie(newDeletion),
-                                                        TrieBackedRow::deleteData,
-                                                        TrieTombstoneMarker::mergeUpdate,
-                                                        true));
+        DeletionAwareTrie<Object, TrieTombstoneMarker> newData = data.mergeWithDeletion(rowDeletionTrie(newDeletion),
+                                                                                        TrieBackedRow::deleteData,
+                                                                                        TrieTombstoneMarker::mergeUpdate,
+                                                                                        true);
+        return new TrieBackedRow(columns, columnIds, clustering, getLivenessInfo(newData), getDeletion(newData), newData);
     }
 
     @Override
@@ -985,7 +1013,7 @@ public class TrieBackedRow extends AbstractRow
     public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> livenessInfoFunction,
                                   CellTransformer cellFunction)
     {
-        return new TrieBackedRow(columns, columnIds, clustering, data.mapValues(
+        return new TrieBackedRow(columns, columnIds, clustering, livenessInfoFunction.apply(livenessInfo), deletion, data.mapValues(
             (Object x) ->
             {
                 if (x instanceof LivenessInfo)
@@ -1024,7 +1052,19 @@ public class TrieBackedRow extends AbstractRow
         if (isEmpty(mappedData))
             return null;
 
-        return new TrieBackedRow(columns, columnIds, clustering, mappedData);
+        Deletion newDeletion = deletion;
+        if (!deletion.isLive())
+        {
+            DeletionTime newDeletionTime = markerFunction.apply(deletion.time());
+            if (newDeletionTime != deletion.time())
+                newDeletion = newDeletionTime != null ? Deletion.regular(newDeletionTime) : Deletion.LIVE;
+        }
+        return new TrieBackedRow(columns,
+                                 columnIds,
+                                 clustering,
+                                 livenessInfoFunction.apply(livenessInfo),
+                                 newDeletion,
+                                 mappedData);
     }
 
     @Override
@@ -1045,7 +1085,7 @@ public class TrieBackedRow extends AbstractRow
         {
             throw new AssertionError(e);
         }
-        return new TrieBackedRow(columns, columnIds, cloner.clone(clustering), newTrie);
+        return new TrieBackedRow(columns, columnIds, cloner.clone(clustering), livenessInfo, deletion, newTrie);
     }
 
     // TODO: Redo size collection to be more direct.
@@ -1166,6 +1206,8 @@ public class TrieBackedRow extends AbstractRow
             return new TrieBackedRow(this.columns,
                                      this.columnIds,
                                      this.clustering,
+                                     getLivenessInfo(mergedData),
+                                     getDeletion(mergedData),
                                      mergedData);
         }
         catch (TrieSpaceExhaustedException e)
@@ -1389,6 +1431,8 @@ public class TrieBackedRow extends AbstractRow
             TrieBackedRow row = new TrieBackedRow(regularAndStaticColumns.columns(clustering == Clustering.STATIC_CLUSTERING),
                                                   columnIds,
                                                   clustering,
+                                                  getLivenessInfo(data),
+                                                  getDeletion(data),
                                                   data);
             reset();
             return row;
