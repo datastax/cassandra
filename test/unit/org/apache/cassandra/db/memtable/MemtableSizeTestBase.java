@@ -40,7 +40,9 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.github.jamm.MemoryMeter;
 import org.github.jamm.MemoryMeter.Guess;
 
@@ -77,10 +79,18 @@ public abstract class MemtableSizeTestBase extends CQLTester
     @Parameterized.Parameters(name = "{0}")
     public static List<Object> parameters()
     {
-        return ImmutableList.of("skiplist",
-                                "skiplist_sharded",
-                                "trie_stage1",
-                                "trie");
+        // Sharded memtables require Cassandra 5.0+, skip them in compatibility mode
+        StorageCompatibilityMode mode = DatabaseDescriptor.getStorageCompatibilityMode();
+        boolean skipSharded = mode != null && mode.isBefore(CassandraVersion.CASSANDRA_5_0.major);
+
+        ImmutableList.Builder<Object> params = ImmutableList.builder();
+        params.add("skiplist");
+        if (!skipSharded)
+            params.add("skiplist_sharded");
+        params.add("trie_stage1");
+        params.add("trie");
+
+        return params.build();
     }
 
     // Must be within 3% of the real usage. We are actually more precise than this, but the threshold is set higher to
