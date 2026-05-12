@@ -59,15 +59,15 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
  * This uses the following on-disk structures:
  * <ul>
  *     <li>A block-packed structure for rowId to token lookups using {@link BlockPackedReader}.
- *     Uses the {@link IndexComponentType#TOKEN_VALUES} component</li>
+ *     Uses the {@link IndexComponentType#TOKEN_VALUES} component.</li>
  *     <li>A monotonic block packed structure for rowId to partitionId lookups using {@link MonotonicBlockPackedReader}.
- *     Uses the {@link IndexComponentType#PARTITION_SIZES} component</li>
+ *     Uses the {@link IndexComponentType#PARTITION_SIZES} component.</li>
  *     <li>A key store for rowId to {@link PrimaryKey} and {@link PrimaryKey} to rowId lookups using
  *     {@link KeyLookup}. Uses the {@link IndexComponentType#PARTITION_KEY_BLOCKS} and
- *     {@link IndexComponentType#PARTITION_KEY_BLOCK_OFFSETS} components</li>
+ *     {@link IndexComponentType#PARTITION_KEY_BLOCK_OFFSETS} components.</li>
  * </ul>
  * <p>
- * While the {@link Factory} is threadsafe, individual instances of the {@link SkinnyPrimaryKeyMap}
+ * While the {@link Factory} is thread-safe, individual instances of the {@link SkinnyPrimaryKeyMap}
  * are not.
  */
 @NotThreadSafe
@@ -215,7 +215,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     {
         if (key instanceof PrimaryKeyWithSource)
         {
-            var pkws = (PrimaryKeyWithSource) key;
+            PrimaryKeyWithSource pkws = (PrimaryKeyWithSource) key;
             if (pkws.getSourceSstableId().equals(sstableId))
                 return pkws.getSourceRowId();
         }
