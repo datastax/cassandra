@@ -122,19 +122,6 @@ public abstract class AbstractBlockPackedReader implements LongArray
         return findBlockRowIdForFloor(targetValue);
     }
 
-    /**
-     * Find the block and row ID for floor operation.
-     * Similar to findBlockRowId but searches for the largest value <= target.
-     */
-    private long findBlockRowIdForFloor(long targetValue)
-    {
-        int blockIndex = binarySearchBlockMaxValues(targetValue);
-
-        // blockIndex is now the block that might contain our floor value
-        // Search for the floor value within the identified block
-        return findBlockRowIdForFloor(targetValue, blockIndex);
-    }
-
     private long findBlockIndex(long targetValue)
     {
         // We keep track previous returned value in lastIndex, so searching backward will not return correct result.
@@ -166,6 +153,19 @@ public abstract class AbstractBlockPackedReader implements LongArray
 
         // Find the global (not block-specific) index of the target token, which is equivalent to its row ID:
         return findBlockIndex(targetValue, blockIndex, exactMatch);
+    }
+
+    /**
+     * Find the block and row ID for floor operation.
+     * Similar to findBlockRowId but searches for the largest value <= target.
+     */
+    private long findBlockRowIdForFloor(long targetValue)
+    {
+        int blockIndex = binarySearchBlockMaxValues(targetValue);
+
+        // blockIndex is now the block that might contain our floor value
+        // Search for the floor value within the identified block
+        return findBlockRowIdForFloor(targetValue, blockIndex);
     }
 
     /**
@@ -245,14 +245,15 @@ public abstract class AbstractBlockPackedReader implements LongArray
     private int binarySearchBlockMaxValues(long targetValue)
     {
         int min = binarySearchBlockMinValues(targetValue);
-        int max = min;
         int highest = Math.toIntExact(blockBitsPerValue.length) - 1;
         if (min < 0)
             min = -min;
         if (min > highest)
             min--;
+        // Check if the target value is smaller than the first value in min block
         if (targetValue < delta(min, 0))
             return Math.max(min - 1, 0);
+        int max = min;
         // Check for duplicates in the next blocks
         while (min <= highest && delta(min, 0) <= targetValue)
         {
@@ -277,12 +278,11 @@ public abstract class AbstractBlockPackedReader implements LongArray
     }
 
     /**
-     * Find the floor row ID within a specific block.
+     * Find the floor row ID within the specific block.
      */
     private long findBlockRowIdForFloor(long targetValue, int blockIdx)
     {
-        if (blockIdx < 0)
-            return -1; // Target is smaller than all values
+        assert blockIdx >= 0 : "Block index cannot be negative";
 
         // Calculate the global offset for the selected block
         long offset = (long) blockIdx << blockShift;
