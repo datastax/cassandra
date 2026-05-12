@@ -217,15 +217,15 @@ public class KeyLookup
         {
             assert clustering : "Cannot do a clustered seek to a key on non-clustered keys";
 
-            BytesRef skipKey = asBytesRef(key);
+            BytesRef searchKey = asBytesRef(key);
 
             updateCurrentBlockIndex(startingPointId);
             resetToCurrentBlock();
 
-            if (compareKeys(currentKey, skipKey) == 0)
+            if (compareKeys(currentKey, searchKey) == 0)
                 return startingPointId;
 
-            if (notInCurrentBlock(startingPointId, skipKey))
+            if (notInCurrentBlock(startingPointId, searchKey))
             {
                 long split = (endingPointId - startingPointId) >>> blockShift;
                 long splitPointId = startingPointId;
@@ -240,7 +240,7 @@ public class KeyLookup
                         resetToCurrentBlock();
                     }
 
-                    int cmp = compareKeys(currentKey, skipKey);
+                    int cmp = compareKeys(currentKey, searchKey);
 
                     if (cmp == 0)
                         return currentPointId;
@@ -252,7 +252,7 @@ public class KeyLookup
                 }
                 // After we finish the binary search, we need to move the block back till we hit a block that has
                 // a starting key that is less than or equal to the skip key
-                while (currentBlockIndex > 0 && compareKeys(currentKey, skipKey) > 0)
+                while (currentBlockIndex > 0 && compareKeys(currentKey, searchKey) > 0)
                 {
                     currentBlockIndex--;
                     resetToCurrentBlock();
@@ -270,7 +270,7 @@ public class KeyLookup
             // Move forward to the ending point ID, returning the point ID if we find our key
             while (currentPointId < endingPointId)
             {
-                if (compareKeys(currentKey, skipKey) >= 0)
+                if (compareKeys(currentKey, searchKey) >= 0)
                     return currentPointId;
                 currentPointId++;
                 if (currentPointId == keyLookupMeta.keyCount)
