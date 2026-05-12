@@ -22,7 +22,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.function.Predicate;
 import javax.management.JMRuntimeException;
 import javax.management.MBeanAttributeInfo;
 import javax.management.MBeanInfo;

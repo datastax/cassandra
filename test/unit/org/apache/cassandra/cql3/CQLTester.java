@@ -211,7 +211,6 @@ import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.FUNCTION
 import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.MATERIALIZED_VIEW;
 import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.TABLE;
 import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.TYPE;
-import static org.apache.cassandra.index.sai.SAITester.vector;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -1495,7 +1494,7 @@ public abstract class CQLTester
     /**
      * Index creation is asynchronous. This method waits until the specified index hasn't any building task running.
      * <p>
-     * This method differs from {@link #waitForIndexQueryable(String, String)} in that it doesn't require the
+     * This method differs from {@link #waitForIndexQueryable(String, String, long, TimeUnit)} in that it doesn't require the
      * index to be fully nor successfully built, so it can be used to wait for failing index builds.
      *
      * @param keyspace the index keyspace name
@@ -1660,7 +1659,7 @@ public abstract class CQLTester
     }
 
     /**
-     * Assert memtable option in HCD_1 mode where schema stores class name in frozen<map<text,text>>.
+     * Assert memtable option in HCD_1 mode where schema stores class name in {@code frozen<map<text,text>>}.
      * @param expectedConfigKey The config key used in CREATE/ALTER TABLE (e.g., "skiplist", "test_fullname")
      * @param expectedSchemaMap The expected map value in schema (e.g., map("class", "SkipListMemtable"))
      */
