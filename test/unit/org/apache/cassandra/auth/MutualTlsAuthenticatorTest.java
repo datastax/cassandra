@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
@@ -41,6 +42,7 @@ import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.MBeanWrapper;
 
 import static org.apache.cassandra.auth.AuthTestUtils.getMockInetAddress;
@@ -71,6 +73,9 @@ public class MutualTlsAuthenticatorTest
     @BeforeClass
     public static void setup()
     {
+        Assume.assumeFalse("Mutual TLS authentication with identity mapping requires Cassandra 5.0+",
+                          DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         SchemaLoader.loadSchema();
         DatabaseDescriptor.daemonInitialization();
         StorageService.instance.initServer(0);

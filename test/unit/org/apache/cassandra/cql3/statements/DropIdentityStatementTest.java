@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.Map;
 
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
@@ -40,6 +41,7 @@ import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Dispatcher;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static org.apache.cassandra.auth.AuthKeyspace.IDENTITY_TO_ROLES;
 import static org.apache.cassandra.cql3.statements.AddIdentityStatementTest.defineSchema;
@@ -60,6 +62,9 @@ public class DropIdentityStatementTest
     @BeforeClass
     public static void beforeClasss() throws ConfigurationException
     {
+        Assume.assumeFalse("Mutual TLS authentication with identity mapping requires Cassandra 5.0+",
+                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         defineSchema();
     }
 

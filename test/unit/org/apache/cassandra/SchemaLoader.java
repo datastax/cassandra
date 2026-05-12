@@ -308,14 +308,26 @@ public class SchemaLoader
         DatabaseDescriptor.setAuthenticator(authenticator);
         DatabaseDescriptor.setAuthorizer(authorizer);
         DatabaseDescriptor.setNetworkAuthorizer(networkAuthorizer);
-        DatabaseDescriptor.setCIDRAuthorizer(cidrAuthorizer);
+
+        // Only set and setup CIDR authorizer if storage compatibility mode supports it (5.0+)
+        // This matches the pattern in CQLTester and production behavior
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+        {
+            DatabaseDescriptor.setCIDRAuthorizer(cidrAuthorizer);
+        }
+
         SchemaTestUtil.announceNewKeyspace(AuthKeyspace.metadata());
         DatabaseDescriptor.getRoleManager().setup();
         DatabaseDescriptor.getAuthenticator().setup();
         DatabaseDescriptor.getInternodeAuthenticator().setupInternode();
         DatabaseDescriptor.getAuthorizer().setup();
         DatabaseDescriptor.getNetworkAuthorizer().setup();
-        DatabaseDescriptor.getCIDRAuthorizer().setup();
+
+        // Only setup CIDR authorizer if storage compatibility mode supports it (5.0+)
+        // This matches production behavior in StorageService.doAuthSetup()
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+            DatabaseDescriptor.getCIDRAuthorizer().setup();
+
         Schema.instance.registerListener(new AuthSchemaChangeListener());
     }
 

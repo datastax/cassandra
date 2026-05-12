@@ -32,6 +32,8 @@ import org.junit.Test;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -52,13 +54,11 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.schema.MemtableParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.SchemaKeyspaceTables;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.triggers.ITrigger;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-import static java.lang.String.format;
 import static org.apache.cassandra.cql3.Duration.NANOS_PER_HOUR;
 import static org.apache.cassandra.cql3.Duration.NANOS_PER_MICRO;
 import static org.apache.cassandra.cql3.Duration.NANOS_PER_MILLI;
@@ -636,25 +636,53 @@ public class CreateTest extends CQLTester
     @Test
     public void testCreateTableWithMemtable() throws Throwable
     {
+        StorageCompatibilityMode mode = DatabaseDescriptor.getStorageCompatibilityMode();
+
         createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))");
         assertSame(MemtableParams.DEFAULT.factory(), getCurrentColumnFamilyStore().metadata().params.memtable.factory());
         Class<? extends Memtable> defaultClass = getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable().getClass();
 
-        assertSchemaOption("memtable", null);
+        if (mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
+        {
+            // In CC4/HCD_1 mode, memtable is stored as frozen<map<text,text>> in schema
+            assertMemtableOptionVersion4(null, null);
 
-        testMemtableConfig("skiplist", SkipListMemtable.FACTORY, SkipListMemtable.class);
-        testMemtableConfig("trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
-        testMemtableConfig("skiplist_remapped", SkipListMemtable.FACTORY, SkipListMemtable.class);
-        testMemtableConfig("test_fullname", TestMemtable.FACTORY, SkipListMemtable.class);
-        testMemtableConfig("test_shortname", SkipListMemtable.FACTORY, SkipListMemtable.class);
-        testMemtableConfig("default", MemtableParams.DEFAULT.factory(), defaultClass);
+            testMemtableConfigVersion4("skiplist", map("class", "SkipListMemtable"), SkipListMemtable.FACTORY, SkipListMemtable.class);
+            // Note: trie config in test/conf/cassandra.yaml has shards: 4 parameter
+            testMemtableConfigVersion4("trie", map("class", "TrieMemtable", "shards", "4"), MemtableParams.get("trie").factory(), TrieMemtable.class);
+            testMemtableConfigVersion4("skiplist_remapped", map("class", "SkipListMemtable"), SkipListMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfigVersion4("test_fullname", map("class", "TestMemtable"), TestMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfigVersion4("test_shortname", map("class", "TestMemtable", "skiplist", "true"), SkipListMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfigVersion4("default", null, MemtableParams.DEFAULT.factory(), defaultClass);
 
-        // Handle CC 4.0 memtable configuration given as a map
-        testMapMemtableConfig("", null, MemtableParams.DEFAULT.factory(), defaultClass);
-        testMapMemtableConfig("SkipListMemtable", "skiplist", MemtableParams.get("skiplist").factory(), SkipListMemtable.class);
-        testMapMemtableConfig("TrieMemtable","trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
-        testMapMemtableConfig("TrieMemtableStage1", "trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
-        testMapMemtableConfig("PersistentMemoryMemtable", "persistent_memory", MemtableParams.get("persistent_memory").factory(), PersistentMemoryMemtable.class);
+            // Handle CC 4.0 memtable configuration given as a map
+            // Note: empty map defaults to default memtable, which is stored as null in schema
+            testMapMemtableConfigVersion4("", null, MemtableParams.DEFAULT.factory(), defaultClass);
+            testMapMemtableConfigVersion4("SkipListMemtable", map("class", "SkipListMemtable"), MemtableParams.get("skiplist").factory(), SkipListMemtable.class);
+            // Note: trie config in test/conf/cassandra.yaml has shards: 4 parameter
+            testMapMemtableConfigVersion4("TrieMemtable", map("class", "TrieMemtable", "shards", "4"), MemtableParams.get("trie").factory(), TrieMemtable.class);
+            testMapMemtableConfigVersion4("TrieMemtableStage1", map("class", "TrieMemtable", "shards", "4"), MemtableParams.get("trie").factory(), TrieMemtable.class);
+            testMapMemtableConfigVersion4("PersistentMemoryMemtable", map("class", "PersistentMemoryMemtable"), MemtableParams.get("persistent_memory").factory(), PersistentMemoryMemtable.class);
+        }
+        else
+        {
+            // In CC5 mode, memtable is stored as text in schema
+            assertSchemaOption("memtable", null);
+
+            testMemtableConfig("skiplist", SkipListMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfig("trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
+            testMemtableConfig("skiplist_remapped", SkipListMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfig("test_fullname", TestMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfig("test_shortname", SkipListMemtable.FACTORY, SkipListMemtable.class);
+            testMemtableConfig("default", MemtableParams.DEFAULT.factory(), defaultClass);
+
+            // Handle CC 4.0 memtable configuration given as a map
+            testMapMemtableConfig("", null, MemtableParams.DEFAULT.factory(), defaultClass);
+            testMapMemtableConfig("SkipListMemtable", "skiplist", MemtableParams.get("skiplist").factory(), SkipListMemtable.class);
+            testMapMemtableConfig("TrieMemtable","trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
+            testMapMemtableConfig("TrieMemtableStage1", "trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
+            testMapMemtableConfig("PersistentMemoryMemtable", "persistent_memory", MemtableParams.get("persistent_memory").factory(), PersistentMemoryMemtable.class);
+        }
 
         assertThrowsConfigurationException("The 'class_name' option must be specified.",
                                            "CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
@@ -710,14 +738,27 @@ public class CreateTest extends CQLTester
         assertSchemaOption("memtable", expectedMemtableConfig);
     }
 
-    void assertSchemaOption(String option, Object expected) throws Throwable
+    private void testMemtableConfigVersion4(String memtableConfig, Object expectedSchemaMap, Memtable.Factory factoryInstance, Class<? extends Memtable> memtableClass) throws Throwable
     {
-        assertRows(execute(format("SELECT " + option + " FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
-                                  SchemaConstants.SCHEMA_KEYSPACE_NAME,
-                                  SchemaKeyspaceTables.TABLES),
-                           KEYSPACE,
-                           currentTable()),
-                   row(expected));
+        createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
+                    + " WITH memtable = '" + memtableConfig + "';");
+        assertSame(factoryInstance, getCurrentColumnFamilyStore().metadata().params.memtable.factory());
+        Assert.assertTrue(memtableClass.isInstance(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable()));
+
+        assertMemtableOptionVersion4(MemtableParams.DEFAULT.configurationKey().equals(memtableConfig) ? null : memtableConfig,
+                                     expectedSchemaMap);
+    }
+
+    private void testMapMemtableConfigVersion4(String memtableConfig, Object expectedSchemaMap, Memtable.Factory factoryInstance, Class<? extends Memtable> memtableClass) throws Throwable
+    {
+        String memtableMap = "".equals(memtableConfig) ? memtableConfig : String.format("'class' : '%s'", memtableConfig);
+        createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
+                    + " WITH memtable = {" + memtableMap + "};");
+        assertSame(factoryInstance, getCurrentColumnFamilyStore().metadata().params.memtable.factory());
+        Assert.assertTrue(memtableClass.isInstance(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable()));
+
+        // For map-based CREATE, always write the expected schema map (not null)
+        assertSchemaOption("memtable", expectedSchemaMap);
     }
 
     @Test

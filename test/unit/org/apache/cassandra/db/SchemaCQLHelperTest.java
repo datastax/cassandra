@@ -41,6 +41,7 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -386,23 +387,33 @@ public class SchemaCQLHelperTest extends CQLTester
 
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
 
+        boolean isCompatibilityMode = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5);
+        String memtableFormat = isCompatibilityMode
+                                ? "    AND memtable = {}\n"
+                                : "    AND memtable = 'default'\n";
+
+        // allow_auto_snapshot and incremental_backups are not present in pre-5.0 compatibility mode
+        String autoSnapshotAndIncrementalBackups = isCompatibilityMode
+                                                   ? ""
+                                                   : "    AND allow_auto_snapshot = true\n" +
+                                                     "    AND incremental_backups = true\n";
+
         assertThat(SchemaCQLHelper.getTableMetadataAsCQL(cfs.metadata(), cfs.keyspace.getMetadata()),
                    containsString("AND CLUSTERING ORDER BY (cl1 ASC)\n" +
                             "    AND DROPPED COLUMN RECORD reg1 ascii USING TIMESTAMP " + droppedTimestamp +"\n" +
                             "    AND additional_write_policy = 'ALWAYS'\n" +
-                            "    AND allow_auto_snapshot = true\n" +
+                            autoSnapshotAndIncrementalBackups +
                             "    AND bloom_filter_fp_chance = 1.0\n" +
                             "    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}\n" +
                             "    AND cdc = false\n" +
                             "    AND comment = 'comment'\n" +
                             "    AND compaction = {'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4', 'sstable_size_in_mb': '1'}\n" +
                             "    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor', 'min_compress_ratio': '2.0'}\n" +
-                            "    AND memtable = 'default'\n" +
+                            memtableFormat +
                             "    AND crc_check_chance = 0.3\n" +
                             "    AND default_time_to_live = 4\n" +
                             "    AND extensions = {'ext1': 0x76616c31}\n" +
                             "    AND gc_grace_seconds = 5\n" +
-                            "    AND incremental_backups = true\n" +
                             "    AND max_index_interval = 7\n" +
                             "    AND memtable_flush_period_in_ms = 8\n" +
                             "    AND min_index_interval = 6\n" +
@@ -840,11 +851,14 @@ public class SchemaCQLHelperTest extends CQLTester
         ColumnFamilyStore cfs7 = Keyspace.open(keyspace).getColumnFamilyStore(tableName7);
         Assertions.assertThat(cfs7.metadata().params.memtable.configurationKey()).isEqualTo("trie");
 
-        // Test parsing CC 4.0 format with ShardedSkipListMemtable (short name)
-        String tableName8 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'ShardedSkipListMemtable'}");
-        ColumnFamilyStore cfs8 = Keyspace.open(keyspace).getColumnFamilyStore(tableName8);
-        Assertions.assertThat(cfs8.metadata().params.memtable.configurationKey()).isEqualTo("skiplist_sharded");
-
+        // Sharded memtables require Cassandra 5.0+, skip this test in compatibility mode
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+        {
+            // Test parsing CC 4.0 format with ShardedSkipListMemtable (short name)
+            String tableName8 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'ShardedSkipListMemtable'}");
+            ColumnFamilyStore cfs8 = Keyspace.open(keyspace).getColumnFamilyStore(tableName8);
+            Assertions.assertThat(cfs8.metadata().params.memtable.configurationKey()).isEqualTo("skiplist_sharded");
+        }
         // Test parsing CC 4.0 format with empty map (default)
         String tableName9 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {}");
         ColumnFamilyStore cfs9 = Keyspace.open(keyspace).getColumnFamilyStore(tableName9);
@@ -910,12 +924,16 @@ public class SchemaCQLHelperTest extends CQLTester
             Assertions.assertThat(cql2).contains("memtable = {'class': 'SkipListMemtable'");
             Assertions.assertThat(cql2).doesNotContain("org.apache.cassandra.db.memtable.SkipListMemtable");
 
-            String tableName3 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'skiplist_sharded'");
-            ColumnFamilyStore cfs3 = Keyspace.open(keyspace).getColumnFamilyStore(tableName3);
-            String cql3 = SchemaCQLHelper.getTableMetadataAsCQL(cfs3.metadata(), cfs3.keyspace.getMetadata());
-            // Should output short class name for standard Cassandra memtable
-            Assertions.assertThat(cql3).contains("memtable = {'class': 'ShardedSkipListMemtable'");
-            Assertions.assertThat(cql3).doesNotContain("org.apache.cassandra.db.memtable.ShardedSkipListMemtable");
+            // Sharded memtables require Cassandra 5.0+, skip this test in compatibility mode
+            if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+            {
+                String tableName3 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = 'skiplist_sharded'");
+                ColumnFamilyStore cfs3 = Keyspace.open(keyspace).getColumnFamilyStore(tableName3);
+                String cql3 = SchemaCQLHelper.getTableMetadataAsCQL(cfs3.metadata(), cfs3.keyspace.getMetadata());
+                // Should output short class name for standard Cassandra memtable
+                Assertions.assertThat(cql3).contains("memtable = {'class': 'ShardedSkipListMemtable'");
+                Assertions.assertThat(cql3).doesNotContain("org.apache.cassandra.db.memtable.ShardedSkipListMemtable");
+            }
 
             // Test that tables created with fully qualified class names also output short class names
             String tableName4 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'org.apache.cassandra.db.memtable.TrieMemtable'}");

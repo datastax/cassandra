@@ -33,16 +33,19 @@ import javax.management.remote.JMXConnector;
 import com.google.common.collect.ImmutableSet;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.shared.JMXUtil;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 public class JMXGetterCheckTest extends TestBaseImpl
 {
-    private static final Set<String> IGNORE_ATTRIBUTES = ImmutableSet.of(
+    private static final Set<String> BASE_IGNORE_ATTRIBUTES = ImmutableSet.of(
     "org.apache.cassandra.net:type=MessagingService:BackPressurePerHost", // throws unsupported saying the feature was removed... dropped in CASSANDRA-15375
     "org.apache.cassandra.db:type=DynamicEndpointSnitch:Scores" // when running in multiple-port-one-IP mode, this fails
 
@@ -59,6 +62,21 @@ public class JMXGetterCheckTest extends TestBaseImpl
     "org.apache.cassandra.db:type=StorageService:startGossiping", // causes multiple loops to fail
     "org.apache.cassandra.db:type=StorageService:startNativeTransport" // causes multiple loops to fail
     );
+
+    private static Set<String> getIgnoreAttributes()
+    {
+        // CIDR features require Cassandra 5.0+, skip CIDR-related attributes in compatibility mode
+        StorageCompatibilityMode mode = CassandraRelevantProperties.TEST_STORAGE_COMPATIBILITY_MODE.getEnum(true, StorageCompatibilityMode.class);
+        if (mode != null && mode.isBefore(CassandraVersion.CASSANDRA_5_0.major))
+        {
+            return ImmutableSet.<String>builder()
+                    .addAll(BASE_IGNORE_ATTRIBUTES)
+                    .add("org.apache.cassandra.db:type=CIDRFilteringMetricsTable:CountsMetricsFromVtable")
+                    .add("org.apache.cassandra.db:type=CIDRFilteringMetricsTable:LatenciesMetricsFromVtable")
+                    .build();
+        }
+        return BASE_IGNORE_ATTRIBUTES;
+    }
 
     @Test
     public void testGetters() throws Exception
@@ -81,6 +99,8 @@ public class JMXGetterCheckTest extends TestBaseImpl
      */
     public static void testAllValidGetters(Cluster cluster) throws Exception
     {
+        Set<String> ignoreAttributes = getIgnoreAttributes();
+
         for (IInvokableInstance instance: cluster)
         {
             if (instance.isShutdown())
@@ -101,7 +121,7 @@ public class JMXGetterCheckTest extends TestBaseImpl
                     for (MBeanAttributeInfo a : info.getAttributes())
                     {
                         String fqn = String.format("%s:%s", name, a.getName());
-                        if (!a.isReadable() || IGNORE_ATTRIBUTES.contains(fqn))
+                        if (!a.isReadable() || ignoreAttributes.contains(fqn))
                             continue;
                         try
                         {

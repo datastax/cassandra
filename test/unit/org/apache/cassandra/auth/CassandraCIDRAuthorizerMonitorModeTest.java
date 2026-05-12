@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.HashMap;
 
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -37,6 +38,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static org.apache.cassandra.auth.AuthKeyspace.CIDR_GROUPS;
 import static org.apache.cassandra.auth.AuthKeyspace.CIDR_PERMISSIONS;
@@ -59,6 +61,9 @@ public class CassandraCIDRAuthorizerMonitorModeTest extends CQLTester
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        Assume.assumeFalse("CIDR features require Cassandra 5.0+",
+                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         SchemaLoader.prepareServer();
 
         SchemaLoader.setupAuth(new AuthTestUtils.LocalCassandraRoleManager(),

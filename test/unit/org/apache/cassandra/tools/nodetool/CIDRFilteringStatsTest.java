@@ -21,6 +21,7 @@ package org.apache.cassandra.tools.nodetool;
 import java.net.InetSocketAddress;
 import java.util.Collections;
 
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -28,6 +29,7 @@ import org.junit.Test;
 import org.apache.cassandra.auth.AuthCacheService;
 import org.apache.cassandra.auth.AuthTestUtils;
 import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CIDR;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.virtual.CIDRFilteringMetricsTable;
@@ -35,6 +37,7 @@ import org.apache.cassandra.db.virtual.VirtualKeyspace;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.tools.ToolRunner;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertFalse;
@@ -45,6 +48,9 @@ public class CIDRFilteringStatsTest extends CQLTester
     @BeforeClass
     public static void setup() throws Exception
     {
+        Assume.assumeFalse("CIDR features require Cassandra 5.0+",
+                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         CQLTester.setUpClass();
         CQLTester.requireAuthentication();
         AuthCacheService.initializeAndRegisterCaches();

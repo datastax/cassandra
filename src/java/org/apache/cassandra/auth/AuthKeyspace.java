@@ -62,10 +62,25 @@ public final class AuthKeyspace
     public static final String CIDR_PERMISSIONS = "cidr_permissions";
     public static final String CIDR_GROUPS = "cidr_groups";
     public static final String IDENTITY_TO_ROLES = "identity_to_role";
-    public static final Set<String> TABLE_NAMES = ImmutableSet.of(ROLES, ROLE_MEMBERS, ROLE_PERMISSIONS,
-                                                                  RESOURCE_ROLE_INDEX, NETWORK_PERMISSIONS,
-                                                                  CIDR_PERMISSIONS, CIDR_GROUPS,
-                                                                  IDENTITY_TO_ROLES);
+
+    /**
+     * Returns the set of table names that should exist in the system_auth keyspace.
+     * In compatibility mode (pre-5.0), CIDR and identity tables are excluded as they
+     * are Cassandra 5.0+ features.
+     *
+     * @return the set of table names appropriate for the current storage compatibility mode
+     */
+    public static Set<String> tableNames()
+    {
+        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+            return ImmutableSet.of(ROLES, ROLE_MEMBERS, ROLE_PERMISSIONS,
+                                   RESOURCE_ROLE_INDEX, NETWORK_PERMISSIONS);
+        else
+            return ImmutableSet.of(ROLES, ROLE_MEMBERS, ROLE_PERMISSIONS,
+                                   RESOURCE_ROLE_INDEX, NETWORK_PERMISSIONS,
+                                   CIDR_PERMISSIONS, CIDR_GROUPS,
+                                   IDENTITY_TO_ROLES);
+    }
 
     public static final long SUPERUSER_SETUP_DELAY = SUPERUSER_SETUP_DELAY_MS.getLong();
 
