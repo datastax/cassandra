@@ -55,7 +55,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  *     {@link KeyLookup}. Uses the {@link org.apache.cassandra.index.sai.disk.format.IndexComponentType#CLUSTERING_KEY_BLOCKS} and
  *     {@link org.apache.cassandra.index.sai.disk.format.IndexComponentType#CLUSTERING_KEY_BLOCK_OFFSETS} components</li>
  * </ul>
- * While the {@link Factory} is threadsafe, individual instances of the {@link WidePrimaryKeyMap}
+ * While the {@link Factory} is thread-safe, individual instances of the {@link WidePrimaryKeyMap}
  * are not.
  */
 @NotThreadSafe
@@ -77,7 +77,9 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
     }
 
     /**
-     * Returns a row Id for a {@link PrimaryKey}. If there is no such term, returns the `-(next row id) - 1` where `next row id` is the row id of the next greatest {@link PrimaryKey} in the map.
+     * Returns a row Id for a {@link PrimaryKey}. If there is no such term,
+     * returns the `-(next row id) - 1` where `next row id` is the row id
+     * of the next greatest {@link PrimaryKey} in the map.
      *
      * @param key the {@link PrimaryKey} to lookup
      * @return a row id
@@ -94,7 +96,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
 
         // Find the partition using the token array for initial lookup
         long rowId = tokenArray.indexOf(key.token().getLongValue());
-        if (key.isTokenOnly() || rowId < 0 || key.clustering().isEmpty())
+        if (key.isTokenOnly() || rowId < 0)
             return rowId;
         // If we have skipped a token (shouldn't happen with indexOf, but check for safety)
         if (tokenArray.get(rowId) != key.token().getLongValue())
@@ -102,6 +104,8 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
 
         // Handle token collisions by comparing partition keys using partitionKeyCursor
         rowId = tokenCeilingCollisionDetection(key, rowId);
+        if (key.clustering().isEmpty())
+            return rowId;
 
         // Now search within the partition for the clustering key
         long clusteringRowId = clusteringKeyCursor.clusteredSeekToKey(
@@ -131,8 +135,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
      * Returns -1 if no such key exists (i.e., the given key is greater than all keys in the map).
      * <p>
      * For wide tables, this method leverages {@link #exactRowIdOrInvertedCeiling(PrimaryKey)}
-     * and converts the inverted ceiling format to a regular ceiling, except for token-only keys
-     * where we need special handling to avoid token ring wraparound issues.
+     * and converts the inverted ceiling format to a regular ceiling.
      *
      * @param key the primary key to find the ceiling for
      * @return the row ID of the ceiling key, or -1 if no ceiling exists
@@ -171,6 +174,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
 
         long rowId = exactRowIdOrInvertedCeiling(key);
 
+        // Exact match
         if (rowId >= 0)
         {
             // If the key is a prefix (token-only or partition-only), 
@@ -241,7 +245,8 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         private FileHandle clusteringKeyBlockOffsetsFile = null;
         private FileHandle clustingingKeyBlocksFile = null;
 
-        public Factory(IndexComponents.ForRead perSSTableComponents, OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
+        public Factory(IndexComponents.ForRead perSSTableComponents,
+                       OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
                        SSTableReader sstable)
         {
             super(perSSTableComponents, primaryKeyFactory, sstable);
