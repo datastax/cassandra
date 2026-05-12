@@ -41,8 +41,6 @@ import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.MemtableParams;
-import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.SchemaKeyspaceTables;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -712,16 +710,6 @@ public class AlterTest extends CQLTester
                                            + " WITH memtable = 'unknown';");
     }
 
-    void assertSchemaOption(String option, Object expected) throws Throwable
-    {
-        assertRows(execute(format("SELECT " + option + " FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
-                                  SchemaConstants.SCHEMA_KEYSPACE_NAME,
-                                  SchemaKeyspaceTables.TABLES),
-                           KEYSPACE,
-                           currentTable()),
-                   row(expected));
-    }
-
     /**
      * Assert memtable option where schema stores config key as text.
      */
@@ -737,27 +725,6 @@ public class AlterTest extends CQLTester
         assertSame(factoryInstance, getCurrentColumnFamilyStore().metadata().params.memtable.factory());
         Assert.assertTrue(memtableClass.isInstance(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable()));
         assertMemtableOption(MemtableParams.DEFAULT.configurationKey().equals(memtableConfig) ? null : memtableConfig);
-    }
-
-    /**
-     * Assert memtable option in HCD_1 mode where schema stores class name in frozen<map<text,text>>.
-     * @param expectedConfigKey The config key used in ALTER TABLE (e.g., "skiplist", "test_fullname")
-     * @param expectedSchemaMap The expected map value in schema (e.g., map("class", "SkipListMemtable"))
-     */
-    void assertMemtableOptionVersion4(String expectedConfigKey, Object expectedSchemaMap) throws Throwable
-    {
-        // Assert the schema contains the correct map value
-        Object expectedSchemaValue;
-        if (expectedConfigKey == null || "default".equals(expectedConfigKey))
-        {
-            // Default memtable is not written to schema at all
-            expectedSchemaValue = null;
-        }
-        else
-        {
-            expectedSchemaValue = expectedSchemaMap;
-        }
-        assertSchemaOption("memtable", expectedSchemaValue);
     }
 
     private void testMemtableConfigVersion4(String memtableConfig, Object expectedSchemaMap, Memtable.Factory factoryInstance, Class<? extends Memtable> memtableClass) throws Throwable
