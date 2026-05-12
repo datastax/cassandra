@@ -32,12 +32,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 @RunWith(Parameterized.class)
@@ -60,12 +63,22 @@ public class MemtableQuickTest extends CQLTester
     @Parameterized.Parameters(name = "{0}")
     public static List<Object> parameters()
     {
-        return ImmutableList.of("skiplist",
-                                "skiplist_sharded",
-                                "skiplist_sharded_locking",
-                                "trie",
-                                "trie_stage1",
-                                "persistent_memory");
+        // Sharded memtables require Cassandra 5.0+, skip them in compatibility mode
+        StorageCompatibilityMode mode = DatabaseDescriptor.getStorageCompatibilityMode();
+        boolean skipSharded = mode != null && mode.isBefore(CassandraVersion.CASSANDRA_5_0.major);
+
+        ImmutableList.Builder<Object> params = ImmutableList.builder();
+        params.add("skiplist");
+        if (!skipSharded)
+        {
+            params.add("skiplist_sharded");
+            params.add("skiplist_sharded_locking");
+        }
+        params.add("trie");
+        params.add("trie_stage1");
+        params.add("persistent_memory");
+
+        return params.build();
     }
 
     @BeforeClass

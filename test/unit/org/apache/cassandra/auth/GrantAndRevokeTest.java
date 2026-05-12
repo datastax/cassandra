@@ -23,6 +23,7 @@ import java.util.Set;
 
 import com.google.common.collect.Iterables;
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -38,6 +39,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.schema.SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES;
@@ -68,7 +70,7 @@ public class GrantAndRevokeTest extends CQLTester
     public void tearDown() throws Throwable
     {
         useSuperUser();
-        executeNet("DROP ROLE " + user);
+        executeNet("DROP ROLE IF EXISTS " + user);
     }
 
     @Test
@@ -490,6 +492,9 @@ public class GrantAndRevokeTest extends CQLTester
     @Test
     public void testAddIdentityPermissions() throws Throwable
     {
+        Assume.assumeFalse("ADD IDENTITY requires Cassandra 5.0+",
+                          DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         useSuperUser();
 
         executeNet(String.format("CREATE ROLE %s WITH LOGIN = TRUE AND password='%s'", user, pass));
@@ -506,6 +511,9 @@ public class GrantAndRevokeTest extends CQLTester
     @Test
     public void testRemoveIdentityPermissionsWithSpecificRolePermission() throws Throwable
     {
+        Assume.assumeFalse("DROP IDENTITY requires Cassandra 5.0+",
+                          DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         useSuperUser();
 
         String simpleUser = "user_1";
@@ -528,6 +536,9 @@ public class GrantAndRevokeTest extends CQLTester
     @Test
     public void testRemoveIdentityPermissions()
     {
+        Assume.assumeFalse("DROP IDENTITY requires Cassandra 5.0+",
+                          DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         useSuperUser();
 
         executeNet(String.format("CREATE ROLE %s WITH LOGIN = TRUE AND password='%s'", user, pass));

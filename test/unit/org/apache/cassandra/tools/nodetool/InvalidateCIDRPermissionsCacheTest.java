@@ -20,6 +20,7 @@ package org.apache.cassandra.tools.nodetool;
 
 import java.net.InetSocketAddress;
 
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -31,6 +32,7 @@ import org.apache.cassandra.auth.IRoleManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.tools.ToolRunner;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static org.apache.cassandra.auth.AuthTestUtils.ROLE_A;
 import static org.apache.cassandra.auth.AuthTestUtils.ROLE_B;
@@ -44,6 +46,9 @@ public class InvalidateCIDRPermissionsCacheTest extends CQLTester
     @BeforeClass
     public static void setup() throws Exception
     {
+        Assume.assumeFalse("CIDR features require Cassandra 5.0+",
+                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         DatabaseDescriptor.setRolesValidity(Integer.MAX_VALUE-1);
         CQLTester.setUpClass();
         CQLTester.requireAuthentication();

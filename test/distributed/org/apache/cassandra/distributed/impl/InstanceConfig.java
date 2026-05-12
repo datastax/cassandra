@@ -174,7 +174,8 @@ public class InstanceConfig implements IInstanceConfig
                 .set("default_secondary_index", "sai")
                 .set("default_secondary_index_enabled", "true")
 
-                .set("storage_compatibility_mode", "NONE");
+                // Respect TEST_STORAGE_COMPATIBILITY_MODE system property (defaults to HCD_1 in tests)
+                .set("storage_compatibility_mode", CassandraRelevantProperties.TEST_STORAGE_COMPATIBILITY_MODE.getString());
         }
         this.featureFlags = EnumSet.noneOf(Feature.class);
         this.jmxPort = jmx_port;

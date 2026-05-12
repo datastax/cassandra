@@ -76,8 +76,8 @@ public class SystemKeyspaceTablesNamesTest extends CQLTester
     public void testSystemAuthKeyspaceTableNames()
     {
         assertExpectedTablesInKeyspace(SchemaConstants.AUTH_KEYSPACE_NAME,
-                                       "AuthKeyspace.TABLE_NAMES",
-                                       AuthKeyspace.TABLE_NAMES);
+                                       "AuthKeyspace.tableNames()",
+                                       AuthKeyspace.tableNames());
     }
 
     @Test

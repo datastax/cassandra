@@ -20,6 +20,7 @@ package org.apache.cassandra.tools.nodetool;
 
 import java.net.InetSocketAddress;
 
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -31,6 +32,7 @@ import org.apache.cassandra.auth.IRoleManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.tools.ToolRunner;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.auth.AuthKeyspace.CIDR_GROUPS;
@@ -46,6 +48,9 @@ public class ReloadCIDRGroupsCacheTest extends CQLTester
     @BeforeClass
     public static void setup() throws Exception
     {
+        Assume.assumeFalse("CIDR features require Cassandra 5.0+",
+                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         CQLTester.setUpClass();
         CQLTester.requireAuthentication();
 

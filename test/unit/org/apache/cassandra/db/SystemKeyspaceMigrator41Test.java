@@ -308,7 +308,9 @@ public class SystemKeyspaceMigrator41Test extends CQLTester
             assertEquals(compactAt, row.getTimestamp("compacted_at"));
             assertEquals("keyspace", row.getString("keyspace_name"));
             assertEquals(rowsMerged, row.getMap("rows_merged", Int32Type.instance, LongType.instance));
-            assertEquals(ImmutableMap.of(), row.getMap("compaction_properties", UTF8Type.instance, UTF8Type.instance));
+            // compaction_properties column only exists in Cassandra 5.0+
+            if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+                assertEquals(ImmutableMap.of(), row.getMap("compaction_properties", UTF8Type.instance, UTF8Type.instance));
         }
         assertEquals(1, rowCount);
 

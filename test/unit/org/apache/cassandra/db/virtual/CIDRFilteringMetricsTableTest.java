@@ -28,6 +28,7 @@ import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -47,6 +48,7 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.CIDRAuthorizerMetrics;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static org.apache.cassandra.auth.AuthKeyspace.CIDR_GROUPS;
 import static org.apache.cassandra.auth.AuthKeyspace.CIDR_PERMISSIONS;
@@ -71,6 +73,9 @@ public class CIDRFilteringMetricsTableTest extends CQLTester
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        Assume.assumeFalse("CIDR features require Cassandra 5.0+",
+                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         SchemaLoader.prepareServer();
 
         SchemaLoader.setupAuth(new AuthTestUtils.LocalCassandraRoleManager(),

@@ -26,14 +26,17 @@ import java.util.Map;
 import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CIDR;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static org.apache.cassandra.schema.SchemaConstants.AUTH_KEYSPACE_NAME;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -56,6 +59,9 @@ public class CIDRGroupsMappingManagerTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        Assume.assumeFalse("CIDR features require Cassandra 5.0+",
+                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major));
+
         SchemaLoader.prepareServer();
 
         SchemaLoader.setupAuth(new AuthTestUtils.LocalCassandraRoleManager(),
