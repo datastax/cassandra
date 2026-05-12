@@ -175,6 +175,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspace;
+import org.apache.cassandra.schema.SchemaKeyspaceTables;
 import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.TypeSerializer;
@@ -189,6 +190,7 @@ import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.transport.SimpleClient;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JMXServerUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -209,7 +211,6 @@ import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.FUNCTION
 import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.MATERIALIZED_VIEW;
 import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.TABLE;
 import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.TYPE;
-import static org.apache.cassandra.index.sai.SAITester.vector;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -605,7 +606,11 @@ public abstract class CQLTester
         DatabaseDescriptor.setAuthenticator(new AuthTestUtils.LocalPasswordAuthenticator());
         DatabaseDescriptor.setAuthorizer(new AuthTestUtils.LocalCassandraAuthorizer());
         DatabaseDescriptor.setNetworkAuthorizer(new AuthTestUtils.LocalCassandraNetworkAuthorizer());
-        DatabaseDescriptor.setCIDRAuthorizer(new AuthTestUtils.LocalCassandraCIDRAuthorizer());
+
+        // Only set CIDR authorizer if storage compatibility mode supports it (5.0+)
+        // This matches production behavior in StorageService.doAuthSetup()
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+            DatabaseDescriptor.setCIDRAuthorizer(new AuthTestUtils.LocalCassandraCIDRAuthorizer());
 
         // The CassandraRoleManager constructor set the supported and alterable options based on
         // DatabaseDescriptor authenticator type so it needs to be created only after the authenticator is set.
@@ -614,7 +619,10 @@ public abstract class CQLTester
             public void setup()
             {
                 loadRoleStatement();
-                loadIdentityStatement();
+                // Only load identity statement if storage compatibility mode supports it (5.0+)
+                // This matches CassandraRoleManager.setup() production behavior
+                if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
+                    loadIdentityStatement();
                 QueryProcessor.executeInternal(createDefaultRoleQuery());
             }
         };
@@ -625,7 +633,12 @@ public abstract class CQLTester
         DatabaseDescriptor.getAuthenticator().setup();
         DatabaseDescriptor.getAuthorizer().setup();
         DatabaseDescriptor.getNetworkAuthorizer().setup();
-        DatabaseDescriptor.getCIDRAuthorizer().setup();
+
+        // Only setup CIDR authorizer if storage compatibility mode supports it (5.0+)
+        // This matches production behavior in StorageService.doAuthSetup()
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+            DatabaseDescriptor.getCIDRAuthorizer().setup();
+
         Schema.instance.registerListener(new AuthSchemaChangeListener());
 
         AuthCacheService.initializeAndRegisterCaches();
@@ -1481,7 +1494,7 @@ public abstract class CQLTester
     /**
      * Index creation is asynchronous. This method waits until the specified index hasn't any building task running.
      * <p>
-     * This method differs from {@link #waitForIndexQueryable(String, String)} in that it doesn't require the
+     * This method differs from {@link #waitForIndexQueryable(String, String, long, TimeUnit)} in that it doesn't require the
      * index to be fully nor successfully built, so it can be used to wait for failing index builds.
      *
      * @param keyspace the index keyspace name
@@ -1628,6 +1641,42 @@ public abstract class CQLTester
         Assert.assertEquals(expectedKeyspace, schemaChange.keyspace);
         Assert.assertEquals(expectedName, schemaChange.name);
         Assert.assertEquals(expectedArgTypes != null ? Arrays.asList(expectedArgTypes) : null, schemaChange.argTypes);
+    }
+
+    /**
+     * Assert a table schema option has the expected value.
+     * @param option The schema option name (e.g., "memtable", "compression")
+     * @param expected The expected value for the option
+     */
+    protected void assertSchemaOption(String option, Object expected) throws Throwable
+    {
+        assertRows(execute(String.format("SELECT " + option + " FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
+                                         SchemaConstants.SCHEMA_KEYSPACE_NAME,
+                                         SchemaKeyspaceTables.TABLES),
+                           KEYSPACE,
+                           currentTable()),
+                   row(expected));
+    }
+
+    /**
+     * Assert memtable option in HCD_1 mode where schema stores class name in {@code frozen<map<text,text>>}.
+     * @param expectedConfigKey The config key used in CREATE/ALTER TABLE (e.g., "skiplist", "test_fullname")
+     * @param expectedSchemaMap The expected map value in schema (e.g., map("class", "SkipListMemtable"))
+     */
+    protected void assertMemtableOptionVersion4(String expectedConfigKey, Object expectedSchemaMap) throws Throwable
+    {
+        // Assert the schema contains the correct map value
+        Object expectedSchemaValue;
+        if (expectedConfigKey == null || "default".equals(expectedConfigKey))
+        {
+            // Default memtable is not written to schema at all
+            expectedSchemaValue = null;
+        }
+        else
+        {
+            expectedSchemaValue = expectedSchemaMap;
+        }
+        assertSchemaOption("memtable", expectedSchemaValue);
     }
 
     protected static void assertWarningsContain(Message.Response response, String message)

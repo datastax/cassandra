@@ -206,7 +206,16 @@ public final class CassandraGenerators
         {
             Set<String> known = MemtableParams.knownDefinitions();
             // for testing reason, some invalid types are added; filter out
-            List<String> valid = known.stream().filter(name -> !name.startsWith("test_")).collect(Collectors.toList());
+            // Also filter out CC5-only types (sharded memtables) when in HCD_1/CC4 mode
+            List<String> valid = known.stream()
+                                      .filter(name -> !name.startsWith("test_"))
+                                      .filter(name -> {
+                                          // Filter out sharded memtables when in CC4 compatibility mode
+                                          if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(org.apache.cassandra.utils.CassandraVersion.CASSANDRA_5_0.major))
+                                              return !name.toLowerCase().contains("sharded");
+                                          return true;
+                                      })
+                                      .collect(Collectors.toList());
             memtableKeyGen = SourceDSL.arbitrary().pick(valid);
             return this;
         }

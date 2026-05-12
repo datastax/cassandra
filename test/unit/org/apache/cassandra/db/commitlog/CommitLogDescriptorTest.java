@@ -85,7 +85,13 @@ public class CommitLogDescriptorTest
 
         Assert.assertEquals(1340512736956320000L, CommitLogDescriptor.fromFileName("CommitLog-2-1340512736956320000.log").id);
 
-        Assert.assertEquals(MessagingService.current_version, new CommitLogDescriptor(1340512736956320000L, null, neverEnabledEncryption).getMessagingVersion());
+        // The CommitLogDescriptor constructor uses currentStorageVersion() which
+        // respects storage compatibility mode, so expect the storage messaging version.
+        int expectedVersion = StorageCompatibilityMode.current().storageMessagingVersion();
+        Assert.assertEquals(expectedVersion, new CommitLogDescriptor(1340512736956320000L, null, neverEnabledEncryption).getMessagingVersion());
+
+        // CURRENT_VERSION is computed from MessagingService.current_version (doesn't respect SCM)
+        // but when we read from a filename, it should return the messaging version that corresponds to the version in the filename
         String newCLName = "CommitLog-" + CommitLogDescriptor.CURRENT_VERSION + "-1340512736956320000.log";
         Assert.assertEquals(MessagingService.current_version, CommitLogDescriptor.fromFileName(newCLName).getMessagingVersion());
     }
