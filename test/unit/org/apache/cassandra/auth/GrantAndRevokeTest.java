@@ -70,14 +70,7 @@ public class GrantAndRevokeTest extends CQLTester
     public void tearDown() throws Throwable
     {
         useSuperUser();
-        try
-        {
-            executeNet("DROP ROLE " + user);
-        }
-        catch (Exception e)
-        {
-            // Role may not exist if test was skipped - ignore
-        }
+        executeNet("DROP ROLE IF EXISTS " + user);
     }
 
     @Test

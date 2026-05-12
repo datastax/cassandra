@@ -32,13 +32,10 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CIDR;
 import org.apache.cassandra.cql3.PageSize;
-import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -61,7 +58,6 @@ import static org.apache.cassandra.service.QueryState.forInternalCalls;
 
 public class CIDRGroupsMappingManager implements CIDRGroupsMappingManagerMBean
 {
-    private static final Logger logger = LoggerFactory.getLogger(CIDRGroupsMappingManager.class);
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=CIDRGroupsMappingManager";
 
     private SelectStatement getCidrGroupsStatement;
@@ -71,14 +67,6 @@ public class CIDRGroupsMappingManager implements CIDRGroupsMappingManagerMBean
 
     public void setup()
     {
-        // In compatibility mode, cidr_groups table doesn't exist
-        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
-        {
-            logger.debug("Skipping CIDR groups statement preparation in compatibility mode {}",
-                        DatabaseDescriptor.getStorageCompatibilityMode());
-            return;
-        }
-
         if (!MBeanWrapper.instance.isRegistered(MBEAN_NAME))
             MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
 
@@ -118,10 +106,6 @@ public class CIDRGroupsMappingManager implements CIDRGroupsMappingManagerMBean
 
     public UntypedResultSet getCidrGroupsTableEntries()
     {
-        // In compatibility mode, cidr_groups table doesn't exist
-        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
-            return UntypedResultSet.create(Collections.emptyList());
-
         String getAllRowsQuery = String.format("SELECT * FROM %s.%s",
                                                SchemaConstants.AUTH_KEYSPACE_NAME,
                                                AuthKeyspace.CIDR_GROUPS);
@@ -131,10 +115,6 @@ public class CIDRGroupsMappingManager implements CIDRGroupsMappingManagerMBean
 
     public Set<String> getAvailableCidrGroups()
     {
-        // In compatibility mode, statement is not prepared
-        if (getCidrGroupsStatement == null)
-            return Collections.emptySet();
-
         Set<String> availableCidrGroups = new HashSet<>();
 
         QueryOptions options = QueryOptions.forInternalCalls(CassandraAuthorizer.authReadConsistencyLevel(),
@@ -178,10 +158,6 @@ public class CIDRGroupsMappingManager implements CIDRGroupsMappingManagerMBean
 
     public Set<String> getCidrsOfCidrGroupAsStrings(String cidrGroupName)
     {
-        // In compatibility mode, statement is not prepared
-        if (getCidrsForCidrGroupStatement == null)
-            return Collections.emptySet();
-
         QueryOptions options = QueryOptions.forInternalCalls(CassandraAuthorizer.authReadConsistencyLevel(),
                                                              Lists.newArrayList(ByteBufferUtil.bytes(cidrGroupName)));
         ResultMessage.Rows rows = select(getCidrsForCidrGroupStatement, options);

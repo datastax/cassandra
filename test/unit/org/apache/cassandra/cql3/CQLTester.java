@@ -189,6 +189,7 @@ import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.transport.SimpleClient;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JMXServerUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -605,7 +606,11 @@ public abstract class CQLTester
         DatabaseDescriptor.setAuthenticator(new AuthTestUtils.LocalPasswordAuthenticator());
         DatabaseDescriptor.setAuthorizer(new AuthTestUtils.LocalCassandraAuthorizer());
         DatabaseDescriptor.setNetworkAuthorizer(new AuthTestUtils.LocalCassandraNetworkAuthorizer());
-        DatabaseDescriptor.setCIDRAuthorizer(new AuthTestUtils.LocalCassandraCIDRAuthorizer());
+
+        // Only set CIDR authorizer if storage compatibility mode supports it (5.0+)
+        // This matches production behavior in StorageService.doAuthSetup()
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+            DatabaseDescriptor.setCIDRAuthorizer(new AuthTestUtils.LocalCassandraCIDRAuthorizer());
 
         // The CassandraRoleManager constructor set the supported and alterable options based on
         // DatabaseDescriptor authenticator type so it needs to be created only after the authenticator is set.
@@ -614,7 +619,10 @@ public abstract class CQLTester
             public void setup()
             {
                 loadRoleStatement();
-                loadIdentityStatement();
+                // Only load identity statement if storage compatibility mode supports it (5.0+)
+                // This matches CassandraRoleManager.setup() production behavior
+                if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
+                    loadIdentityStatement();
                 QueryProcessor.executeInternal(createDefaultRoleQuery());
             }
         };
@@ -625,7 +633,12 @@ public abstract class CQLTester
         DatabaseDescriptor.getAuthenticator().setup();
         DatabaseDescriptor.getAuthorizer().setup();
         DatabaseDescriptor.getNetworkAuthorizer().setup();
-        DatabaseDescriptor.getCIDRAuthorizer().setup();
+
+        // Only setup CIDR authorizer if storage compatibility mode supports it (5.0+)
+        // This matches production behavior in StorageService.doAuthSetup()
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+            DatabaseDescriptor.getCIDRAuthorizer().setup();
+
         Schema.instance.registerListener(new AuthSchemaChangeListener());
 
         AuthCacheService.initializeAndRegisterCaches();

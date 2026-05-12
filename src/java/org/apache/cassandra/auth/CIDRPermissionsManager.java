@@ -35,7 +35,6 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.SelectStatement;
-import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -62,14 +61,6 @@ public class CIDRPermissionsManager implements CIDRPermissionsManagerMBean, Auth
 
     public void setup()
     {
-        // In compatibility mode, cidr_permissions table doesn't exist
-        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
-        {
-            logger.debug("Skipping CIDR permissions statement preparation in compatibility mode {}",
-                        DatabaseDescriptor.getStorageCompatibilityMode());
-            return;
-        }
-
         if (!MBeanWrapper.instance.isRegistered(MBEAN_NAME))
             MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
 
@@ -96,10 +87,6 @@ public class CIDRPermissionsManager implements CIDRPermissionsManagerMBean, Auth
 
     private Set<String> getAuthorizedCIDRGroups(String name)
     {
-        // In compatibility mode, statement is not prepared
-        if (getCidrPermissionsOfUserStatement == null)
-            return Collections.emptySet();
-
         QueryOptions options = QueryOptions.forInternalCalls(CassandraAuthorizer.authReadConsistencyLevel(),
                                                              Lists.newArrayList(ByteBufferUtil.bytes(name)));
 
