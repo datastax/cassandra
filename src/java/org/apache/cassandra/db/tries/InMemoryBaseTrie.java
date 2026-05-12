@@ -82,7 +82,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
     private void putShortVolatile(int pos, short value)
     {
-        getBuffer(pos).putShort(inBufferOffset(pos), value);
+        getBuffer(pos).putShortVolatile(inBufferOffset(pos), value);
     }
 
     private void putByte(int pos, byte value)
@@ -461,7 +461,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
         // Sparse nodes have two access modes: via the order word, when listing transitions, or directly to characters
         // and addresses.
-        // To support the former, we volatile write to the order word last, and everything is correctly set up.
+        // To support the former, we volatile write to the order word last, after everything is correctly set up.
         // The latter does not touch the order word. To support that too, we volatile write the address, as the reader
         // can't determine if the position is in use based on the character byte alone (00 is also a valid transition).
         // Note that this means that reader must check the transition byte AFTER the address, to ensure they get the
