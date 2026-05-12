@@ -180,7 +180,7 @@ public class NoSpamLogger
     }
 
     /**
-     * Returns the current size of the wrappedLoggers cache.
+     * Returns the current size of the {@link NoSpamLogger} cache.
      * This is useful for testing cache eviction behavior.
      *
      * @return the number of NoSpamLogger instances currently cached
@@ -192,7 +192,7 @@ public class NoSpamLogger
     }
 
     /**
-     * Forces eviction of entries from the lastMessage cache for this logger instance.
+     * Forces eviction of entries from the {@link NoSpamLogStatement} cache for this logger instance.
      * This is useful for testing to ensure cache size limits are enforced immediately.
      */
     @VisibleForTesting
@@ -245,7 +245,7 @@ public class NoSpamLogger
     private final long minIntervalNanos;
     
     /**
-     * Cache of log statements per logger instance.
+     * Cache of NoSpamLog statements per NoSpamLogger instance.
      * Bounded by size and time to prevent memory exhaustion from dynamic log messages.
      * Uses Caffeine with W-TinyLFU eviction policy and directExecutor for non-blocking operations.
      */

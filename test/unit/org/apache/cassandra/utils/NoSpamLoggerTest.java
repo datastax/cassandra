@@ -19,6 +19,7 @@
 package org.apache.cassandra.utils;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_MAX_LOGGERS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES;
 import static org.junit.Assert.*;
 
 import java.util.ArrayDeque;
@@ -287,13 +288,14 @@ public class NoSpamLoggerTest
    }
 
     /**
-     * Test that the lastMessage cache is bounded and doesn't grow beyond max_statements_per_logger.
+     * Test that the {@link NoSpamLogStatement} cache is bounded and doesn't grow beyond max_statements_per_logger.
      * This prevents memory exhaustion from dynamic log messages (e.g., queries with unique strings).
      */
     @Test
-    public void testLastMessageCacheBounded() throws Exception
+    public void testNoSpamLogStatementCacheBounded() throws Exception
     {
-        System.setProperty("cassandra.nospam_logger.max_statements_per_logger", "10");
+        int maxStatementsPerLogger = 10;
+        System.setProperty("cassandra.nospam_logger.max_statements_per_logger", String.valueOf(maxStatementsPerLogger));
         try
         {
             NoSpamLogger.clearWrappedLoggersForTest();
@@ -301,21 +303,22 @@ public class NoSpamLoggerTest
             NoSpamLogger logger = NoSpamLogger.getLogger(mock, 5, TimeUnit.NANOSECONDS);
 
             // Create more unique log statements than the cache can hold
-            for (int i = 0; i < 15; i++)
+            int numberOfLogStatements = (int) (maxStatementsPerLogger * 1.5);
+            for (int i = 0; i < numberOfLogStatements; i++)
             {
                 String uniqueStatement = "statement" + i + "{}";
-                assertTrue("First log of statement " + i + " should succeed",
+                assertTrue("First occurrence of statement " + i + " should succeed",
                           logger.info(uniqueStatement, param));
                 now += 10; // Advance time so each statement can log
             }
 
-            assertEquals(15, logged.get(Level.INFO).size());
+            assertEquals(numberOfLogStatements, logged.get(Level.INFO).size());
 
             // Force cache cleanup to ensure eviction has completed
             logger.cleanUpStatementsForTest();
 
             // Verify the cache size is bounded to the configured maximum
-            assertTrue("Cache size should be at most 10", logger.getStatementsCount() <= 10);
+            assertTrue("Cache size should be at most " + maxStatementsPerLogger, logger.getStatementsCount() <= maxStatementsPerLogger);
 
             // The cache should have evicted some entries due to size limit
             // If we try to log the first few statements again (which should have been evicted),
@@ -323,7 +326,7 @@ public class NoSpamLoggerTest
             now += 10;
             assertTrue("Statement 0 should have been evicted and can log again",
                       logger.info("statement0{}", param));
-            assertEquals(16, logged.get(Level.INFO).size());
+            assertEquals(numberOfLogStatements + 1, logged.get(Level.INFO).size());
         }
         finally
         {
@@ -353,7 +356,7 @@ public class NoSpamLoggerTest
             assertEquals(1, logged.get(Level.INFO).size());
 
             // Advance time by more than 1 minute (60 minutes in nanoseconds)
-            now += TimeUnit.MINUTES.toNanos(61);
+            now += TimeUnit.MINUTES.toNanos(NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES.getLong()+1);
 
             // The statement should have expired from cache, so it should log again
             // even though we haven't waited for the rate limit interval
@@ -369,10 +372,10 @@ public class NoSpamLoggerTest
     }
 
     /**
-     * Test that the wrappedLoggers cache is bounded.
+     * Test that the {@link NoSpamLogger} cache is bounded.
      */
     @Test
-    public void testWrappedLoggersCacheBounded() throws Exception
+    public void testNoSpamLoggerCacheBounded() throws Exception
     {
         NoSpamLogger.clearWrappedLoggersForTest();
         now = 5;
@@ -416,8 +419,7 @@ public class NoSpamLoggerTest
         
         // Verify the wrappedLoggers cache size is bounded to the configured maximum
         long cacheSize = NoSpamLogger.getWrappedLoggersCount();
-        assertTrue("Wrapped loggers cache size should be at most " + maxLoggers + " (was " + cacheSize + ")",
-                  cacheSize <= maxLoggers);
+        assertEquals("Wrapped loggers cache size should be at most " + maxLoggers + " (was " + cacheSize + ")", cacheSize, maxLoggers);
     }
 
     @Test
@@ -429,8 +431,8 @@ public class NoSpamLoggerTest
             NoSpamLogger.clearWrappedLoggersForTest();
             now = 0;
             NoSpamLogger logger = NoSpamLogger.getLogger(mock, 1, TimeUnit.NANOSECONDS);
-
-            for (int i = 0; i < 1000; i++)
+            int numberOfLogMessages = 1000;
+            for (int i = 0; i < numberOfLogMessages; i++)
             {
                 String uniqueMessage = "Scanned over 1000 tombstones for query: SELECT * FROM table WHERE id = " + i;
                 logger.warn(uniqueMessage);
@@ -438,15 +440,14 @@ public class NoSpamLoggerTest
             }
 
             // All the messages should have been logged
-            assertEquals(1000, logged.get(Level.WARN).size());
+            assertEquals(numberOfLogMessages, logged.get(Level.WARN).size());
             
             // Force cache cleanup to ensure eviction has completed
             logger.cleanUpStatementsForTest();
             
             // Verify the cache size is bounded and doesn't grow unbounded
             long cacheSize = logger.getStatementsCount();
-            assertTrue("Statements cache should be bounded to 100 (was " + cacheSize + ")",
-                      cacheSize <= 100);
+            assertEquals("Statements cache should be bounded to " + NOSPAM_LOGGER_MAX_LOGGERS.getLong() + " (was " + cacheSize + ")", cacheSize, NOSPAM_LOGGER_MAX_LOGGERS.getLong());
         }
         finally
         {
