@@ -569,10 +569,29 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     }
 
     /// Returns a view of all deletion ranges in this trie as a single [RangeTrie].
+    ///
+    /// Because a deletion branch can be introduced at any depth, the returned trie will present all paths in the data
+    /// trie that do not introduce a deletion branch. In particular, walks over tries that do not have any deletions
+    /// will have to follow the entire data trie.
+    ///
+    /// If it is known that the deletion branch can only be introduced at the root, one can use [#deletionBranchAtRoot]
+    /// as a more efficient version of this.
     default RangeTrie<D> deletionOnlyTrie()
     {
         // Note: We must walk the main trie to find deletion branch roots. This can be inefficient.
         return dir -> new DeletionAwareCursor.DeletionsTrieCursor<>(cursor(dir));
+    }
+
+    /// Return a trie representing the deletion branch at the root of the trie, if there is one, or an empty trie.
+    /// This method does not consider any deletion branches introduced below the root and is an efficient alternative to
+    /// [#deletionOnlyTrie], to be used when it is known that the deletion branch must be at the root of the trie.
+    default RangeTrie<D> deletionBranchAtRoot()
+    {
+        return dir -> {
+            DeletionAwareCursor<T, D> cursor = cursor(dir);
+            RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(dir);
+            return deletionBranch != null ? deletionBranch : RangeCursor.empty(dir, cursor.byteComparableVersion());
+        };
     }
 
     /// Returns a view of the combination of the live data and deletions in this trie as a regular [Trie], using
