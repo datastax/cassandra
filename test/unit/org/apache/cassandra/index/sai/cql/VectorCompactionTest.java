@@ -408,6 +408,13 @@ abstract public class VectorCompactionTest extends VectorTester
                                 // reasonable for now.
                                 assertEquals(1.0f, quantizedSim, 0.01f);
                             }
+                            else if (numRows >= MIN_PQ_ROWS)
+                            {
+                                // With FA + fused PQ, PQ metadata is present and used by the graph, but there is no
+                                // standalone CompressedVectors instance to validate against.
+                                assertEquals("Expected fused PQ path only for FA+", Version.FA, version);
+                                assertNotNull("Expected PQ metadata for FA fused PQ", searcher.getPQ());
+                            }
                             else
                             {
                                 // We should only hit this case when we don't have enough rows to build a PQ.
