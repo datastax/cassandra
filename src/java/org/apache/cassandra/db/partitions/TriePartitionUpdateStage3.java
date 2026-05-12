@@ -306,7 +306,7 @@ public class TriePartitionUpdateStage3 extends TrieBackedPartitionStage3 impleme
         // Collect deletion info from the trie.
         DeletionTime partitionLevelDeletion = partitionLevelDeletion();
         MutableDeletionInfo.Builder builder = MutableDeletionInfo.builder(partitionLevelDeletion, metadata.comparator, false);
-        for (Map.Entry<ByteComparable.Preencoded, TrieTombstoneMarker> entry : trie.deletionOnlyTrie().entrySet())
+        for (Map.Entry<ByteComparable.Preencoded, TrieTombstoneMarker> entry : trie.deletionBranchAtRoot().entrySet())
         {
             RangeTombstoneMarker marker = entry.getValue().toRangeTombstoneMarker(entry.getKey(), BYTE_COMPARABLE_VERSION, metadata.comparator);
             if (marker != null)
@@ -387,7 +387,7 @@ public class TriePartitionUpdateStage3 extends TrieBackedPartitionStage3 impleme
     public long maxTimestamp()
     {
         long maxTimestamp = LivenessInfo.NO_TIMESTAMP;
-        for (Iterator<TrieTombstoneMarker> it = trie.deletionOnlyTrie().valueIterator(); it.hasNext();)
+        for (Iterator<TrieTombstoneMarker> it = trie.deletionBranchAtRoot().valueIterator(); it.hasNext();)
         {
             TrieTombstoneMarker next = it.next();
             DeletionTime pointDeletion = next.pointDeletion();
