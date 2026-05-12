@@ -389,7 +389,7 @@ public class TrieBackedRow extends AbstractRow
         {
             // The row deletion marker may remain even if the data is deleted/filtered out.
             // Check for the existence of a deletion boundary
-            return !data.deletionOnlyTrie().filteredValuesIterator(Direction.FORWARD, TrieTombstoneMarker.Boundary.class).hasNext();
+            return !data.deletionBranchAtRoot().filteredValuesIterator(Direction.FORWARD, TrieTombstoneMarker.Boundary.class).hasNext();
         }
     }
 
@@ -911,10 +911,12 @@ public class TrieBackedRow extends AbstractRow
     @Override
     public boolean hasComplexDeletion()
     {
-        for (Map.Entry<ByteComparable.Preencoded, TrieTombstoneMarker> entry : data.deletionOnlyTrie().entrySet())
+        for (Iterator<TrieTombstoneMarker> it = data.deletionBranchAtRoot().valueIterator(); it.hasNext();)
         {
-            if (entry.getKey().getPreencodedBytes().peek() != ByteSource.END_OF_STREAM)
-                return true; // entry below the root level exists, this must be a complex column deletion
+            TrieTombstoneMarker marker = it.next();
+            TrieTombstoneMarker.Covering introducedDeletion = marker.rightDeletion();
+            if (introducedDeletion != null && introducedDeletion.deletionKind() == TrieTombstoneMarker.Kind.COLUMN)
+                return true;
         }
         return false;
     }
