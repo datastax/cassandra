@@ -97,7 +97,7 @@ public class V9OnDiskFormat extends V8OnDiskFormat
     @Override
     public int openFilesPerSSTable(boolean hasClustering)
     {
-        // For the V2 format the number of open files depends on whether the table has clustering. For wide tables
+        // For the V9 format the number of open files depends on whether the table has clustering. For wide tables
         // the number of open files will be 8 per SSTable - token values, partition sizes index, partition key blocks,
         // partition key block offsets, clustering key blocks, clustering key block offsets, group meta & group completion marker
         // and for skinny tables the number of files will be 6 per SSTable - token values, partition key sizes,
