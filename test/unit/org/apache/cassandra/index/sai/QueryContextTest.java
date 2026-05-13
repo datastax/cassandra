@@ -37,6 +37,9 @@ import static org.junit.Assert.assertEquals;
 
 public class QueryContextTest extends SAITester.Versioned
 {
+    private static final int EXPIRING_ROW_TTL_SECONDS = 5;
+    private static final int EXPIRING_ROW_WAIT_SECONDS = EXPIRING_ROW_TTL_SECONDS + 1;
+
     @Test
     public void testSkinnyTable()
     {
@@ -209,11 +212,11 @@ public class QueryContextTest extends SAITester.Versioned
 
         // insert some data using TTLs
         execute("INSERT INTO %s (k, a, b) VALUES (0, 0, 0)");
-        execute("INSERT INTO %s (k, a, b) VALUES (1, 1, 1) USING TTL 1");
+        execute("INSERT INTO %s (k, a, b) VALUES (1, 1, 1) USING TTL " + EXPIRING_ROW_TTL_SECONDS);
         execute("INSERT INTO %s (k, a, b) VALUES (2, 0, 0)");
-        execute("INSERT INTO %s (k, a, b) VALUES (3, 1, 1) USING TTL 1");
+        execute("INSERT INTO %s (k, a, b) VALUES (3, 1, 1) USING TTL " + EXPIRING_ROW_TTL_SECONDS);
         flush();
-        Uninterruptibles.sleepUninterruptibly(2, TimeUnit.SECONDS);
+        Uninterruptibles.sleepUninterruptibly(EXPIRING_ROW_WAIT_SECONDS, TimeUnit.SECONDS);
         snapshot = queryContext("SELECT * FROM %s WHERE a >= 0 ALLOW FILTERING",
                                 row(0, 0, 0),
                                 row(2, 0, 0));
@@ -471,13 +474,13 @@ public class QueryContextTest extends SAITester.Versioned
 
         // insert some data using TTLs
         execute("INSERT INTO %s (k, c, a, b) VALUES (0, 0, 0, 0)");
-        execute("INSERT INTO %s (k, c, a, b) VALUES (0, 1, 1, 1) USING TTL 1");
+        execute("INSERT INTO %s (k, c, a, b) VALUES (0, 1, 1, 1) USING TTL " + EXPIRING_ROW_TTL_SECONDS);
         execute("INSERT INTO %s (k, c, a, b) VALUES (0, 2, 0, 0)");
         execute("INSERT INTO %s (k, c, a, b) VALUES (1, 0, 0, 0)");
         execute("INSERT INTO %s (k, c, a, b) VALUES (1, 1, 1, 1)");
-        execute("INSERT INTO %s (k, c, a, b) VALUES (1, 2, 0, 0) USING TTL 1");
+        execute("INSERT INTO %s (k, c, a, b) VALUES (1, 2, 0, 0) USING TTL " + EXPIRING_ROW_TTL_SECONDS);
         flush();
-        Uninterruptibles.sleepUninterruptibly(2, TimeUnit.SECONDS);
+        Uninterruptibles.sleepUninterruptibly(EXPIRING_ROW_WAIT_SECONDS, TimeUnit.SECONDS);
         snapshot = queryContext("SELECT * FROM %s WHERE a >= 0 ALLOW FILTERING",
                                 row(0, 0, 0, 0),
                                 row(0, 2, 0, 0),
@@ -656,16 +659,16 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(0, snapshot.rowTombstonesFetched);
 
         // insert some data using TTLs
-        execute("INSERT INTO %s (k, c, n, v) VALUES (0, 0, 0, [0, 0]) USING TTL 1");
+        execute("INSERT INTO %s (k, c, n, v) VALUES (0, 0, 0, [0, 0]) USING TTL " + EXPIRING_ROW_TTL_SECONDS);
         execute("INSERT INTO %s (k, c, n, v) VALUES (0, 1, 1, [1, 1])");
         execute("INSERT INTO %s (k, c, n, v) VALUES (0, 2, 0, [0, 0])");
         execute("INSERT INTO %s (k, c, n, v) VALUES (0, 3, 1, [1, 1])");
         execute("INSERT INTO %s (k, c, n, v) VALUES (1, 0, 0, [0, 0])");
-        execute("INSERT INTO %s (k, c, n, v) VALUES (1, 1, 1, [1, 1]) USING TTL 1");
+        execute("INSERT INTO %s (k, c, n, v) VALUES (1, 1, 1, [1, 1]) USING TTL " + EXPIRING_ROW_TTL_SECONDS);
         execute("INSERT INTO %s (k, c, n, v) VALUES (1, 2, 0, [0, 0])");
         execute("INSERT INTO %s (k, c, n, v) VALUES (1, 3, 1, [1, 1])");
         flush();
-        Uninterruptibles.sleepUninterruptibly(2, TimeUnit.SECONDS);
+        Uninterruptibles.sleepUninterruptibly(EXPIRING_ROW_WAIT_SECONDS, TimeUnit.SECONDS);
         snapshot = queryContext("SELECT * FROM %s ORDER BY v ANN OF [0, 0] LIMIT 10",
                                 row(1, 0, 0, vector(0, 0)),
                                 row(1, 2, 0, vector(0, 0)),
@@ -959,16 +962,16 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(0, snapshot.rowTombstonesFetched);
 
         // insert some data using TTLs
-        execute("INSERT INTO %s (k, c, a, b, s) VALUES (0, 0, 0, 0, 0) USING TTL 1");
+        execute("INSERT INTO %s (k, c, a, b, s) VALUES (0, 0, 0, 0, 0) USING TTL " + EXPIRING_ROW_TTL_SECONDS);
         execute("INSERT INTO %s (k, c, a, b) VALUES (0, 1, 1, 1)");
         execute("INSERT INTO %s (k, c, a, b) VALUES (0, 2, 0, 0)");
         execute("INSERT INTO %s (k, c, a, b) VALUES (0, 3, 1, 1)");
         execute("INSERT INTO %s (k, c, a, b, s) VALUES (1, 0, 0, 0, 1)");
         execute("INSERT INTO %s (k, c, a, b) VALUES (1, 1, 1, 1)");
-        execute("INSERT INTO %s (k, c, a, b) VALUES (1, 2, 0, 0) USING TTL 1");
+        execute("INSERT INTO %s (k, c, a, b) VALUES (1, 2, 0, 0) USING TTL " + EXPIRING_ROW_TTL_SECONDS);
         execute("INSERT INTO %s (k, c, a, b) VALUES (1, 3, 1, 1)");
         flush();
-        Uninterruptibles.sleepUninterruptibly(2, TimeUnit.SECONDS);
+        Uninterruptibles.sleepUninterruptibly(EXPIRING_ROW_WAIT_SECONDS, TimeUnit.SECONDS);
         snapshot = queryContext("SELECT k,c,a,b,s FROM %s WHERE a >= 0",
                                 row(0, 1, 1, 1, null),
                                 row(0, 2, 0, 0, null),
