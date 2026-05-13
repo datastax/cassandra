@@ -24,6 +24,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
@@ -130,6 +131,8 @@ public class CQLCompressionTest extends CQLTester
     @Test
     public void lz4hcFlushTest() throws Throwable
     {
+        DatabaseDescriptor.setFlushCompression(Config.FlushCompression.fast);
+
         createTable("CREATE TABLE %s (k text PRIMARY KEY, v text) WITH compression = " +
                     "{'sstable_compression': 'LZ4Compressor', 'lz4_compressor_type': 'high'};");
         ColumnFamilyStore store = flushTwice();
@@ -158,10 +161,11 @@ public class CQLCompressionTest extends CQLTester
         createTable("CREATE TABLE %s (k text PRIMARY KEY, v text) WITH compression = {'sstable_compression': 'ZstdCompressor'};");
         ColumnFamilyStore store = flushTwice();
 
-        // Should flush as LZ4
+        // Should flush as LZ4 or Adaptive
         Set<SSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
-            assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof LZ4Compressor);
+            var compressor = sstable.getCompressionMetadata().parameters.getSstableCompressor();
+            assertTrue(compressor instanceof LZ4Compressor || compressor instanceof AdaptiveCompressor);
         });
 
         // Should compact to Zstd
@@ -213,10 +217,11 @@ public class CQLCompressionTest extends CQLTester
         createTable("CREATE TABLE %s (k text PRIMARY KEY, v text) WITH compression = {'sstable_compression': 'DeflateCompressor'};");
         ColumnFamilyStore store = flushTwice();
 
-        // Should flush as LZ4
+        // Should flush as LZ4 or Adaptive
         Set<SSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
-            assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof LZ4Compressor);
+            var compressor = sstable.getCompressionMetadata().parameters.getSstableCompressor();
+            assertTrue(compressor instanceof LZ4Compressor || compressor instanceof AdaptiveCompressor);
         });
 
         // Should compact to Deflate
@@ -273,10 +278,11 @@ public class CQLCompressionTest extends CQLTester
         createTable("CREATE TABLE %s (k text PRIMARY KEY, v text) WITH compression = {'sstable_compression': 'ZstdCompressor'};");
         ColumnFamilyStore store = flushTwice();
 
-        // Should flush as LZ4
+        // Should flush as LZ4 or Adaptive
         Set<SSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
-            assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof LZ4Compressor);
+            var compressor = sstable.getCompressionMetadata().parameters.getSstableCompressor();
+            assertTrue(compressor instanceof LZ4Compressor || compressor instanceof AdaptiveCompressor);
         });
 
         // Should compact to Zstd

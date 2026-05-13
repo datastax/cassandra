@@ -136,7 +136,8 @@ public class SSTableEncryptionTest extends TestBaseImpl
         {
             // given tables with and without encryption
             String keyspace = createKeyspace(cluster);
-            TestTable nonEncryptedTable = createTableWithSampleData(cluster, keyspace, "");
+            // force no compression because some compression algorithms likely won't preserve the sensitive key
+            TestTable nonEncryptedTable = createTableWithSampleData(cluster, keyspace, " WITH compression = {'class': 'NoopCompressor'}");
             Path secretKey = createLocalSecretKey(cluster);
             TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString()));
 
