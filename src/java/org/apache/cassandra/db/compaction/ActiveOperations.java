@@ -227,7 +227,7 @@ public class ActiveOperations implements TableOperationObserver
         return matching;
     }
 
-    public void cancelScheduledTasksAffecting(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> predicate)
+    public void cancelScheduledTasksAffecting(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> predicate, TableOperation.StopTrigger trigger)
     {
         Iterable<AbstractCompactionTask> tasksCopy;
         synchronized (scheduledTasks)
@@ -237,7 +237,7 @@ public class ActiveOperations implements TableOperationObserver
 
         for (AbstractCompactionTask task : tasksCopy)
             for (ColumnFamilyStore cfs : cfss)
-                task.cancelIfAffects(cfs, predicate);
+                task.cancelIfAffects(cfs, predicate, trigger);
     }
 
     @VisibleForTesting

@@ -3196,7 +3196,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
                 // Cancel scheduled compactions matching predicate. This must be done first because tasks progress from
                 // scheduled to active.
-                CompactionManager.instance.active.cancelScheduledTasksAffecting(toInterruptFor, sstablesPredicate);
+                CompactionManager.instance.active.cancelScheduledTasksAffecting(toInterruptFor, sstablesPredicate, trigger);
 
                 // interrupt in-progress compactions
                 CompactionManager.instance.interruptCompactionForCFs(toInterruptFor, sstablesPredicate, interruptValidation, trigger);
