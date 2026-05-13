@@ -21,11 +21,9 @@
 package org.apache.cassandra.index.internal;
 
 import java.nio.ByteBuffer;
-import java.util.NavigableSet;
+import java.util.SortedSet;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import org.apache.cassandra.index.internal.composites.CollectionValueIndex;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.*;
@@ -39,8 +37,6 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 
 public abstract class CassandraIndexSearcher implements Index.Searcher
 {
-    private static final Logger logger = LoggerFactory.getLogger(CassandraIndexSearcher.class);
-
     private final RowFilter.Expression expression;
     protected final CassandraIndex index;
     protected final ReadCommand command;
@@ -100,8 +96,28 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
 
             if (filter instanceof ClusteringIndexNamesFilter)
             {
-                NavigableSet<Clustering<?>> requested = ((ClusteringIndexNamesFilter)filter).requestedRows();
-                BTreeSet<Clustering<?>> clusterings = BTreeSet.copy(requested, index.getIndexComparator());
+                if (index instanceof CollectionValueIndex)
+                {
+                    // Collection value indexes have an extra clustering key for the path, but we cannot construct an
+                    // index names filter from the filter on the backing table, because it has no path information.
+                    // Instead, we construct a slice from the clustering keys that are provided.
+                    Slices slices = filter.getSlices(index.baseCfs.metadata());
+                    ClusteringBound<?> start = BufferClusteringBound.BOTTOM;
+                    ClusteringBound<?> end = BufferClusteringBound.TOP;
+
+                    if (!slices.isEmpty())
+                    {
+                        start = slices.get(0).start();
+                        end = slices.get(slices.size() - 1).end();
+                    }
+
+                    Slice slice = Slice.make(makeIndexBound(pk, start), makeIndexBound(pk, end));
+                    return new ClusteringIndexSliceFilter(Slices.with(index.getIndexComparator(), slice), filter.isReversed());
+                }
+
+                SortedSet<Clustering<?>> requested = ((ClusteringIndexNamesFilter) filter).requestedRows();
+                // The partition key from the base table must be the first element of all clusterings of the index table.
+                BTreeSet<Clustering<?>> clusterings = BTreeSet.copy(requested, index.getIndexComparator(), clustering -> makeIndexClustering(pk, clustering));
                 return new ClusteringIndexNamesFilter(clusterings, filter.isReversed());
             }
             else
@@ -146,10 +162,8 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
                      */
                     if (!dataRange.isNamesQuery() && !index.indexedColumn.isStatic())
                     {
-                        ClusteringIndexSliceFilter startSliceFilter = ((ClusteringIndexSliceFilter) dataRange.clusteringIndexFilter(
-                                                                                                                                   startKey));
-                        ClusteringIndexSliceFilter endSliceFilter = ((ClusteringIndexSliceFilter) dataRange.clusteringIndexFilter(
-                                                                                                                                 endKey));
+                        ClusteringIndexSliceFilter startSliceFilter = ((ClusteringIndexSliceFilter) dataRange.clusteringIndexFilter(startKey));
+                        ClusteringIndexSliceFilter endSliceFilter = ((ClusteringIndexSliceFilter) dataRange.clusteringIndexFilter(endKey));
 
                         // We can't effectively support reversed queries when we have a range, so we don't support it
                         // (or through post-query reordering) and shouldn't get there.

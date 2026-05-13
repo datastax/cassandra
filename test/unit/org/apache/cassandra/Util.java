@@ -79,7 +79,6 @@ import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
@@ -840,7 +839,7 @@ public class Util
         }
     }
 
-    public static UnfilteredPartitionIterator executeLocally(PartitionRangeReadCommand command,
+    public static UnfilteredPartitionIterator executeLocally(ReadCommand command,
                                                              ColumnFamilyStore cfs,
                                                              ReadExecutionController controller)
     {

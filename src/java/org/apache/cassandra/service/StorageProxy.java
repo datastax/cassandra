@@ -2129,6 +2129,10 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
             PartitionIterator result = fetchRows(group.queries, consistencyLevel, queryStartNanoTime, readTracker);
+
+            // Let the indexes do any processing here, including reordering results, before applying the limits.
+            result = group.postReconciliationProcessing(result);
+
             // Note that the only difference between the command in a group must be the partition key on which
             // they applied.
             boolean enforceStrictLiveness = group.queries.get(0).metadata().enforceStrictLiveness();
