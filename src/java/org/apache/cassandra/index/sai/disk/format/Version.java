@@ -82,7 +82,7 @@ public class Version implements Comparable<Version>
     public static final Version FA = new Version("fa", V8OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "fa"));
     // Replaces primary key components with partition key and clustering key components and
     // uses key lookup store instead of sorted terms.
-    public static final Version GA = new Version("ha", V9OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ha"));
+    public static final Version GA = new Version("ga", V9OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ga"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version, so we want to test that one first.

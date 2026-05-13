@@ -103,7 +103,7 @@ public class SaiDiskSizeTest extends SAITester
                                       new Object[]{ v, 134777, 132849, "pk", 1 },
                                       new Object[]{ v, 118465, 116546, "pk, v_int", 2 },
                                       new Object[]{ v, 59149, 57257, "pk, v_int", 100 });
-                                  case "ha":
+                                  case "ga":
                                   default:
                                       return // A new version assumes the latest size by default
                                       Stream.of(
