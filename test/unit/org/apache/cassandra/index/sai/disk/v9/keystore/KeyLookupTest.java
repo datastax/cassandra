@@ -119,7 +119,8 @@ public class KeyLookupTest extends SaiRandomizedTest
 
         try (MetadataWriter metadataWriter = new MetadataWriter(components))
         {
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS), metadataWriter, true);
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS),
+                                                                        metadataWriter, true);
             try (KeyStoreWriter writer = new KeyStoreWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
                                                             metadataWriter,
                                                             blockFPWriter,
@@ -413,7 +414,8 @@ public class KeyLookupTest extends SaiRandomizedTest
             }
         }, false);
 
-        withKeyLookupCursor(cursor -> assertThatThrownBy(() -> cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(0L)), 0L, 10L))
+        withKeyLookupCursor(cursor -> assertThatThrownBy(() -> cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(0L)),
+                                                                                         0L, 10L))
                                       .isInstanceOf(AssertionError.class));
     }
 
@@ -497,7 +499,8 @@ public class KeyLookupTest extends SaiRandomizedTest
         IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
         try (MetadataWriter metadataWriter = new MetadataWriter(components))
         {
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS), metadataWriter, true);
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS),
+                                                                        metadataWriter, true);
             try (KeyStoreWriter writer = new KeyStoreWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
                                                             metadataWriter,
                                                             blockFPWriter,
@@ -517,7 +520,7 @@ public class KeyLookupTest extends SaiRandomizedTest
         NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(components.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS)));
         KeyLookupMeta keyLookupMeta = new KeyLookupMeta(metadataSource.get(components.get(IndexComponentType.PARTITION_KEY_BLOCKS)));
         try (FileHandle keysData = components.get(IndexComponentType.PARTITION_KEY_BLOCKS).createFileHandle();
-        FileHandle blockOffsets = components.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS).createFileHandle())
+             FileHandle blockOffsets = components.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS).createFileHandle())
         {
             KeyLookup reader = new KeyLookup(keysData, blockOffsets, keyLookupMeta, blockPointersMeta);
             testCode.accept(reader);
