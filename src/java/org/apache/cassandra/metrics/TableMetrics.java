@@ -1087,8 +1087,8 @@ public class TableMetrics
 
         bytesValidated = createTableHistogram("BytesValidated", cfs.getKeyspaceMetrics().bytesValidated, false);
         partitionsValidated = createTableHistogram("PartitionsValidated", cfs.getKeyspaceMetrics().partitionsValidated, false);
-        bytesAnticompacted = createTableMeter("BytesAnticompacted", cfs.getKeyspaceMetrics().bytesAnticompacted, true);
-        bytesMutatedAnticompaction = createTableMeter("BytesMutatedAnticompaction", cfs.getKeyspaceMetrics().bytesMutatedAnticompaction, true);
+        bytesAnticompacted = createTableMeter("BytesAnticompacted", cfs.getKeyspaceMetrics().bytesAnticompacted);
+        bytesMutatedAnticompaction = createTableMeter("BytesMutatedAnticompaction", cfs.getKeyspaceMetrics().bytesMutatedAnticompaction);
         bytesPreviewed = createTableMeter("BytesPreviewed", cfs.getKeyspaceMetrics().bytesPreviewed);
         tokenRangesPreviewedDesynchronized = createTableMeter("TokenRangesPreviewedDesynchronized", cfs.getKeyspaceMetrics().tokenRangesPreviewedDesynchronized);
         bytesPreviewedDesynchronized = createTableMeter("BytesPreviewedDesynchronized", cfs.getKeyspaceMetrics().bytesPreviewedDesynchronized);
@@ -1660,6 +1660,14 @@ public class TableMetrics
             for (Meter meter : all)
             {
                 meter.mark();
+            }
+        }
+
+        public void mark(long n)
+        {
+            for (Meter meter : all)
+            {
+                meter.mark(n);
             }
         }
 

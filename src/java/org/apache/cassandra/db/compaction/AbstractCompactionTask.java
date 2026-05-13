@@ -229,7 +229,24 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     /**
      * Reject/cancel the task if it affects any sstable that satisfies the given predicate.
      */
-    public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
+    public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate, TableOperation.StopTrigger trigger)
+    {
+        boolean affects = affectsAny(realm, sstablePredicate);
+        if (affects)
+        {
+            // Reject with an exception to notify observers task wasn't successful.
+            TimeUUID id = getTransaction().opId();
+            Throwable err = rejected(new CompactionInterruptedException(id, trigger));
+            if (err != null && !(err instanceof CompactionInterruptedException))
+                logger.warn("Failed to reject task with id={}", id, err);
+        }
+        return affects;
+    }
+
+    /**
+     * Returns true iff the task affects any sstable that satisfies the given predicate.
+     */
+    public boolean affectsAny(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
     {
         if (realm != this.realm)
             return false;
@@ -237,10 +254,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         for (SSTableReader r : transaction.originals())
         {
             if (sstablePredicate.test(r))
-            {
-                Throwables.maybeFail(rejected(null));
                 return true;
-            }
         }
         return false;
     }

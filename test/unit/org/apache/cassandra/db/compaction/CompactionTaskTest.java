@@ -182,7 +182,7 @@ public class CompactionTaskTest
             }
         };
         Assert.assertNotNull(task);
-        task.cancelIfAffects(cfs, Predicates.alwaysTrue());
+        task.cancelIfAffects(cfs, Predicates.alwaysTrue(), TableOperation.StopTrigger.UNIT_TESTS);
         try
         {
             task.execute(CompactionManager.instance.active);

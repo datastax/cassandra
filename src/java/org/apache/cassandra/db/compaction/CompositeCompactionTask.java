@@ -79,7 +79,7 @@ public class CompositeCompactionTask extends AbstractCompactionTask
     }
 
     @Override
-    public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
+    public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate, TableOperation.StopTrigger trigger)
     {
         // Leave cancellation to the individual tasks.
         return false;
