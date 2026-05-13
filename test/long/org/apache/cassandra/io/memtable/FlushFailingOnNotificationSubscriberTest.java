@@ -62,7 +62,7 @@ public class FlushFailingOnNotificationSubscriberTest extends CQLTester
     private final AtomicInteger numFailedFlushes = new AtomicInteger();
 
     volatile long maxTimeSinceCleanup = 0;
-    volatile long lastTimePoolNeededCleaning = System.nanoTime();
+    volatile long lastTimePoolNeededCleaning = 0;
 
     static AtomicDouble failFlushProbability = new AtomicDouble(FLUSH_FAILURE_PROBABILITY);
 
@@ -116,14 +116,7 @@ public class FlushFailingOnNotificationSubscriberTest extends CQLTester
                 }
 
                 idx++;
-                if (MEMORY_POOL.needsCleaning())
-                {
-                    lastTimePoolNeededCleaning = System.nanoTime();
-                }
-                else
-                {
-                    updateMaxTimeSinceCleanup();
-                }
+                updateMaxTimeSinceCleanup();
 
                 if (MEMORY_POOL.getNumPendingtasks() > 2)
                 {
@@ -164,7 +157,19 @@ public class FlushFailingOnNotificationSubscriberTest extends CQLTester
 
     private void updateMaxTimeSinceCleanup()
     {
-        maxTimeSinceCleanup = Math.max(maxTimeSinceCleanup, (System.nanoTime() - lastTimePoolNeededCleaning) / TimeUnit.MILLISECONDS.toNanos(1));
+        long now = System.nanoTime();
+        if (MEMORY_POOL.needsCleaning())
+        {
+            if (lastTimePoolNeededCleaning == 0)
+                lastTimePoolNeededCleaning = now;
+
+            maxTimeSinceCleanup = Math.max(maxTimeSinceCleanup, (now - lastTimePoolNeededCleaning) / TimeUnit.MILLISECONDS.toNanos(1));
+        }
+        else if (lastTimePoolNeededCleaning != 0)
+        {
+            maxTimeSinceCleanup = Math.max(maxTimeSinceCleanup, (now - lastTimePoolNeededCleaning) / TimeUnit.MILLISECONDS.toNanos(1));
+            lastTimePoolNeededCleaning = 0;
+        }
     }
 
     private void logState()
@@ -209,7 +214,7 @@ public class FlushFailingOnNotificationSubscriberTest extends CQLTester
         {
             failFlushProbability.set(0.0);
             getCurrentColumnFamilyStore().forceFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS).get();
-            lastTimePoolNeededCleaning = System.nanoTime();
+            lastTimePoolNeededCleaning = 0;
             failFlushProbability.set(FLUSH_FAILURE_PROBABILITY);
         }
         catch (InterruptedException | ExecutionException e)
