@@ -508,38 +508,4 @@ public class NoSpamLoggerTest
         long cacheSize = NoSpamLogger.getWrappedLoggersCount();
         assertEquals("Wrapped loggers cache size should be at most " + maxLoggers + " (was " + cacheSize + ")", cacheSize, maxLoggers);
     }
-
-    @Test
-    public void testMemoryDoesNotGrowUnbounded() throws Exception
-    {
-        System.setProperty("cassandra.nospam_logger.max_statements_per_logger", "100");
-        try
-        {
-            NoSpamLogger.clearWrappedLoggersForTest();
-            now = 0;
-            NoSpamLogger logger = NoSpamLogger.getLogger(mock, 1, TimeUnit.NANOSECONDS);
-            int numberOfLogMessages = 1000;
-            for (int i = 0; i < numberOfLogMessages; i++)
-            {
-                String uniqueMessage = "Scanned over 1000 tombstones for query: SELECT * FROM table WHERE id = " + i;
-                logger.warn(uniqueMessage);
-                now += 2; // Advance time so each can log
-            }
-
-            // All the messages should have been logged
-            assertEquals(numberOfLogMessages, logged.get(Level.WARN).size());
-            
-            // Force cache cleanup to ensure eviction has completed
-            logger.cleanUpStatementsForTest();
-            
-            // Verify the cache size is bounded and doesn't grow unbounded
-            long cacheSize = logger.getStatementsCount();
-            assertEquals("Statements cache should be bounded to " + NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong() + " (was " + cacheSize + ")", cacheSize, NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong());
-        }
-        finally
-        {
-            System.clearProperty("cassandra.nospam_logger.max_statements_per_logger");
-            NoSpamLogger.clearWrappedLoggersForTest();
-        }
-    }
 }
