@@ -32,8 +32,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 
-import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
-
 import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -86,7 +84,6 @@ public class LongVectorTest extends SAITester
 
     private static void wrappedOp(Op op, Integer i)
     {
-        CoordinatorWarnings.init();  // Initialize for this thread
         try
         {
             op.run(i);
@@ -94,10 +91,6 @@ public class LongVectorTest extends SAITester
         catch (Throwable e)
         {
             throw new RuntimeException(e);
-        }
-        finally
-        {
-            CoordinatorWarnings.reset();  // Clean up thread-local state
         }
     }
 
