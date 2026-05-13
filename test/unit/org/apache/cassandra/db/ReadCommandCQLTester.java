@@ -15,6 +15,8 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 
@@ -25,7 +27,7 @@ public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTes
 {
     private static final Pattern PATTERN = Pattern.compile("%");
 
-    protected abstract T parseCommand(String query);
+    protected abstract List<T> parseCommands(String query);
 
     protected void assertToCQLString(String query, String expectedUnredactedCQL, String expectedRedactedCQL)
     {
@@ -37,19 +39,45 @@ public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTes
                                      String expectedRedactedCQL,
                                      @Nullable String expectedErrorMessage)
     {
-        T command = parseCommand(query);
+        assertToCQLString(query,
+                          Collections.singletonList(expectedUnredactedCQL),
+                          Collections.singletonList(expectedRedactedCQL),
+                          expectedErrorMessage);
+    }
 
-        String actualUnredactedCQL = command.toUnredactedCQLString();
-        Assertions.assertThat(actualUnredactedCQL)
-                  .isEqualTo(formatQuery(expectedUnredactedCQL));
+    protected void assertToCQLString(String query,
+                                     List<String> expectedUnredactedCQL,
+                                     List<String> expectedRedactedCQL)
+    {
+        assertToCQLString(query, expectedUnredactedCQL, expectedRedactedCQL, null);
+    }
 
-        String actualRedactedCQL = command.toRedactedCQLString();
-        Assertions.assertThat(actualRedactedCQL)
-                  .isEqualTo(formatQuery(expectedRedactedCQL));
+    protected void assertToCQLString(String query,
+                                     List<String> expectedUnredactedCQL,
+                                     List<String> expectedRedactedCQL,
+                                     @Nullable String expectedErrorMessage)
+    {
+        List<T> commands = parseCommands(query);
+        Assertions.assertThat(commands)
+                  .hasSameSizeAs(expectedUnredactedCQL)
+                  .hasSameSizeAs(expectedRedactedCQL);
 
-        if (expectedErrorMessage == null)
-            execute(PATTERN.matcher(actualUnredactedCQL).replaceAll("%%"));
-        else
-            Assertions.assertThatThrownBy(() -> execute(actualUnredactedCQL)).hasMessageContaining(expectedErrorMessage);
+        for (int i = 0; i < commands.size(); i++)
+        {
+            T command = commands.get(i);
+
+            String actualUnredactedCQL = command.toUnredactedCQLString();
+            Assertions.assertThat(actualUnredactedCQL)
+                      .isEqualTo(formatQuery(expectedUnredactedCQL.get(i)));
+
+            String actualRedactedCQL = command.toRedactedCQLString();
+            Assertions.assertThat(actualRedactedCQL)
+                      .isEqualTo(formatQuery(expectedRedactedCQL.get(i)));
+
+            if (expectedErrorMessage == null)
+                execute(PATTERN.matcher(actualUnredactedCQL).replaceAll("%%"));
+            else
+                Assertions.assertThatThrownBy(() -> execute(actualUnredactedCQL)).hasMessageContaining(expectedErrorMessage);
+        }
     }
 }

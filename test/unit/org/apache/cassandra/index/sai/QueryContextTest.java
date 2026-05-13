@@ -25,7 +25,7 @@ import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.Test;
 
-import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -1073,7 +1073,7 @@ public class QueryContextTest extends SAITester.Versioned
         assertRowsIgnoringOrder(execute(query), rows);
 
         // Get an index searcher for the query
-        PartitionRangeReadCommand command = (PartitionRangeReadCommand) parseReadCommand(query);
+        ReadCommand command = parseReadCommand(query);
         StorageAttachedIndexQueryPlan plan = (StorageAttachedIndexQueryPlan) command.indexQueryPlan();
         Assert.assertNotNull(plan);
         StorageAttachedIndexSearcher searcher = plan.searcherFor(command);

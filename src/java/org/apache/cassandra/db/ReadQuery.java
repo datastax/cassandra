@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 
 import javax.annotation.Nullable;
 
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -255,6 +256,13 @@ public interface ReadQuery
      * violates the implementation specific validation rules.
      */
     default void maybeValidateIndexes()
+    {
+    }
+
+    /**
+     * Validates the specified {@link SelectOptions} against this query.
+     */
+    default void validateSelectOptions(SelectOptions selectOptions, QueryState queryState)
     {
     }
 
