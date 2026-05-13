@@ -410,7 +410,8 @@ public class CompactionTest extends AbstractMetricsTest
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
         disableCompaction(keyspace(), currentTable());
 
-        int rowsPerSSTable = 2000;
+        // Might need to increase this if stronger sstable compression is used, so large enough sstables are produced
+        int rowsPerSSTable = 4000;
         int numSSTables = 4;
         int key = 0;
         for (int s = 0; s < numSSTables; s++)
