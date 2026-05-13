@@ -88,6 +88,7 @@ import org.apache.cassandra.config.DurationSpec;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
+import org.apache.cassandra.db.compaction.AbstractCompactionTask;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionRealm;
@@ -3146,7 +3147,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      */
     public <V> V runWithCompactionsDisabled(Callable<V> callable,
                                             Predicate<SSTableReader> sstablesPredicate,
-                                            OperationType operationType, 
+                                            OperationType operationType,
                                             boolean interruptValidation,
                                             boolean interruptViews,
                                             boolean interruptIndexes,
@@ -3165,12 +3166,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             try (CompactionManager.CompactionPauser pause = CompactionManager.instance.pauseGlobalCompaction();
                  CompactionManager.CompactionPauser pausedStrategies = pauseCompactionStrategies(toInterruptFor))
             {
-                List<TableOperation> uninterruptibleTasks = CompactionManager.instance.getCompactionsMatching(toInterruptForMetadata,
+                List<TableOperation> uninterruptibleOps = CompactionManager.instance.getCompactionsMatching(toInterruptForMetadata,
+                                                                                                              sstablesPredicate,
                                                                                                               (progress) -> progress.operationType().priority <= operationType.priority);
-                if (!uninterruptibleTasks.isEmpty())
+                if (!uninterruptibleOps.isEmpty())
                 {
                     logger.info("Unable to cancel in-progress compactions, since they're running with higher or same priority: {}. You can abort these operations using `nodetool stop`.",
-                                uninterruptibleTasks.stream().map((compaction) -> String.format("%s@%s (%s)",
+                                uninterruptibleOps.stream().map((compaction) -> String.format("%s@%s (%s)",
                                                                                                 compaction.getProgress().operationType(),
                                                                                                 compaction.getProgress().metadata().name,
                                                                                                 compaction.getProgress().operationId()))
@@ -3178,9 +3180,24 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                     return null;
                 }
 
+                Collection<AbstractCompactionTask> uninterruptibleTasks = CompactionManager.instance.active.getScheduledTasksMatching(toInterruptFor,
+                                                                                                                                      sstablesPredicate,
+                                                                                                                                      task -> task.getCompactionType().priority <= operationType.priority);
+                if (!uninterruptibleTasks.isEmpty())
+                {
+                    logger.info("Unable to cancel {} scheduled compactions with higher or same priority. You can abort these operations using `nodetool stop`.", uninterruptibleTasks.size());
+                    return null;
+                }
+
+                // We have checked that there are no operations with overriding priority and can now stop all the tasks
+                // we find satisfying the sstables predicate. If new higher-priority tasks happen to appear in-between,
+                // we will still stop them; any task that appears at this point is in violation of the compaction pause
+                // we are operating under and is okay to cancel.
+
                 // Cancel scheduled compactions matching predicate. This must be done first because tasks progress from
                 // scheduled to active.
-                CompactionManager.instance.active.cancelScheduledTasksAffecting(toInterruptFor, sstablesPredicate);
+                CompactionManager.instance.active.cancelScheduledTasksAffecting(toInterruptFor, sstablesPredicate, trigger);
+
                 // interrupt in-progress compactions
                 CompactionManager.instance.interruptCompactionForCFs(toInterruptFor, sstablesPredicate, interruptValidation, trigger);
 
