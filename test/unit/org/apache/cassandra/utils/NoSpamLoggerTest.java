@@ -19,6 +19,7 @@
 package org.apache.cassandra.utils;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_MAX_LOGGERS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER;
 import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES;
 import static org.junit.Assert.*;
 
@@ -447,7 +448,7 @@ public class NoSpamLoggerTest
             
             // Verify the cache size is bounded and doesn't grow unbounded
             long cacheSize = logger.getStatementsCount();
-            assertEquals("Statements cache should be bounded to " + NOSPAM_LOGGER_MAX_LOGGERS.getLong() + " (was " + cacheSize + ")", cacheSize, NOSPAM_LOGGER_MAX_LOGGERS.getLong());
+            assertEquals("Statements cache should be bounded to " + NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong() + " (was " + cacheSize + ")", cacheSize, NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong());
         }
         finally
         {
