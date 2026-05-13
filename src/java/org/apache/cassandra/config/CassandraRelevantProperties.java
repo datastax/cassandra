@@ -291,7 +291,7 @@ public enum CassandraRelevantProperties
      * Maximum number of log statements cached per NoSpamLogger instance.
      * This prevents unbounded memory growth when log messages contain dynamic content.
      */
-    NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER("cassandra.nospam_logger.max_statements_per_logger", "10000"),
+    NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER("cassandra.nospam_logger.max_statements_per_logger", "1000"),
 
     /**
      * Time in minutes after which inactive log statements are evicted from NoSpamLogger cache.
