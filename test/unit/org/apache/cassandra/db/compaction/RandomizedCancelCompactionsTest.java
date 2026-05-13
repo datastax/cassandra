@@ -74,7 +74,6 @@ public class RandomizedCancelCompactionsTest extends CQLTester
 
     private static final Logger logger = LoggerFactory.getLogger(RandomizedCancelCompactionsTest.class);
     
-    private static final int TEST_DURATION_SECONDS = 40;
     private static final int MAX_CONCURRENT_COMPACTIONS = 40;
     private static final int EXECUTOR_THREADS = 4; // Limited threads to keep tasks in queue
     private static final int SSTABLE_COUNT = 500;
@@ -83,7 +82,19 @@ public class RandomizedCancelCompactionsTest extends CQLTester
     private static final double QUICK_EXIT_CHANCE = 0.05;
     
     @Test
-    public void testRandomizedCancellation() throws Exception
+    public void testRandomizedCancellationAccepted() throws Exception
+    {
+        testRandomizedCancellation(OperationType.ANTICOMPACTION, 40);
+    }
+
+    @Test
+    public void testRandomizedCancellationReject() throws Exception
+    {
+        testRandomizedCancellation(OperationType.STREAM, 10);
+    }
+
+
+    public void testRandomizedCancellation(OperationType cancellationType, int durationInSeconds) throws Exception
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         List<SSTableReader> sstables = createSSTables(cfs, SSTABLE_COUNT, 0);
@@ -107,7 +118,7 @@ public class RandomizedCancelCompactionsTest extends CQLTester
         AtomicInteger cancellationSuccess = new AtomicInteger(0);
 
         long startTime = System.currentTimeMillis();
-        long endTime = startTime + TimeUnit.SECONDS.toMillis(TEST_DURATION_SECONDS);
+        long endTime = startTime + TimeUnit.SECONDS.toMillis(durationInSeconds);
         
         try
         {
@@ -142,6 +153,7 @@ public class RandomizedCancelCompactionsTest extends CQLTester
                                 taskId,
                                 random.nextDouble() < QUICK_EXIT_CHANCE ? (random.nextBoolean() ? 0 : -1)
                                                                         : random.nextInt(MAX_COMPACTION_SLEEP_MS - MIN_COMPACTION_SLEEP_MS) + MIN_COMPACTION_SLEEP_MS,
+                                endTime,
                                 tasksCompleted,
                                 tasksCancelled,
                                 tasksCancelledBeforeStart,
@@ -202,7 +214,7 @@ public class RandomizedCancelCompactionsTest extends CQLTester
                                 return true;
                             },
                             predicate,
-                            OperationType.ANTICOMPACTION,
+                            cancellationType,
                             false,
                             false,
                             false,
@@ -223,8 +235,8 @@ public class RandomizedCancelCompactionsTest extends CQLTester
             });
             
             // Wait for test duration
-            taskCreator.get(TEST_DURATION_SECONDS + 5, TimeUnit.SECONDS);
-            taskCanceller.get(TEST_DURATION_SECONDS + 5, TimeUnit.SECONDS);
+            taskCreator.get(durationInSeconds + 5, TimeUnit.SECONDS);
+            taskCanceller.get(durationInSeconds + 5, TimeUnit.SECONDS);
             
             // Stop test
             testRunning.set(false);
@@ -296,7 +308,10 @@ public class RandomizedCancelCompactionsTest extends CQLTester
                          tasksCancelledBeforeStart.get() + tasksCancelledAfterStart.get(), 
                          tasksCancelled.get());
 
-            assertEquals("Cancellations should all succeed", cancellationAttempts.get(), cancellationSuccess.get());
+            if (cancellationType.priority <= OperationType.COMPACTION.priority)
+                assertEquals("Cancellations should all succeed", cancellationAttempts.get(), cancellationSuccess.get());
+            else
+                assertEquals("No tasks should be cancelled", 0, tasksCancelledBeforeStart.get() + tasksCancelledAfterStart.get());
         }
         finally
         {
@@ -342,6 +357,7 @@ public class RandomizedCancelCompactionsTest extends CQLTester
         private final Set<SSTableReader> sstables;
         private final int taskId;
         private final int sleepTimeMs;
+        private final long testEndTime;
         private final AtomicInteger completedCounter;
         private final AtomicInteger cancelledCounter;
         private final AtomicInteger cancelledBeforeStartCounter;
@@ -363,6 +379,7 @@ public class RandomizedCancelCompactionsTest extends CQLTester
                                        Set<SSTableReader> sstables, 
                                        int taskId,
                                        int sleepTimeMs,
+                                       long testEndTime,
                                        AtomicInteger completedCounter,
                                        AtomicInteger cancelledCounter,
                                        AtomicInteger cancelledBeforeStartCounter,
@@ -373,6 +390,7 @@ public class RandomizedCancelCompactionsTest extends CQLTester
             this.sstables = sstables;
             this.taskId = taskId;
             this.sleepTimeMs = sleepTimeMs;
+            this.testEndTime = testEndTime;
             this.completedCounter = completedCounter;
             this.cancelledCounter = cancelledCounter;
             this.cancelledBeforeStartCounter = cancelledBeforeStartCounter;
@@ -436,7 +454,8 @@ public class RandomizedCancelCompactionsTest extends CQLTester
                         logger.debug("Task {} stop requested after {}ms", taskId, slept);
                         break;
                     }
-                    Thread.sleep(Math.min(100, sleepTimeMs - slept));
+                    if (System.currentTimeMillis() < testEndTime) // finish quickly if the test run time is done
+                        Thread.sleep(Math.min(100, sleepTimeMs - slept));
                     slept += 100;
                 }
                 

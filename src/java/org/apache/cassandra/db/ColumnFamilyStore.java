@@ -3189,6 +3189,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                     return null;
                 }
 
+                // We have checked that there are no operations with overriding priority and can now stop all the tasks
+                // we find satisfying the sstables predicate. If new higher-priority tasks happen to appear in-between,
+                // we will still stop them; any task that appears at this point is in violation of the compaction pause
+                // we are operating under and is okay to cancel.
+
                 // Cancel scheduled compactions matching predicate. This must be done first because tasks progress from
                 // scheduled to active.
                 CompactionManager.instance.active.cancelScheduledTasksAffecting(toInterruptFor, sstablesPredicate);
