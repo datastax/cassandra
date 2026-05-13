@@ -585,7 +585,7 @@ public class CancelCompactionsTest extends CQLTester
         Thread t = new Thread(() -> {
             Uninterruptibles.awaitUninterruptibly(waitForBeginCompaction);
             getCurrentColumnFamilyStore().getCompactionStrategyContainer().pause();
-            CompactionManager.instance.active.cancelScheduledTasksAffecting(cfss, Predicates.alwaysTrue());
+            CompactionManager.instance.active.cancelScheduledTasksAffecting(cfss, Predicates.alwaysTrue(), UNIT_TESTS);
             CompactionManager.instance.interruptCompactionFor(Iterables.transform(cfss, ColumnFamilyStore::metadata),
                                                               Predicates.alwaysTrue(), false, UNIT_TESTS);
             waitForStart.countDown();
