@@ -35,7 +35,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -47,7 +46,6 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v9.OptimizedRowAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.disk.v9.WidePrimaryKeyMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
@@ -66,6 +64,7 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 
+import static org.apache.cassandra.Util.makeKey;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -168,23 +167,12 @@ public class KeyLookupBench
         return primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
     }
 
-    private static DecoratedKey makeKey(TableMetadata table, Object... partitionKeys)
-    {
-        ByteBuffer key;
-        if (TypeUtil.isComposite(table.partitionKeyType))
-            key = ((CompositeType) table.partitionKeyType).decompose(partitionKeys);
-        else
-            key = table.partitionKeyType.decomposeUntyped(partitionKeys[0]);
-        return table.partitioner.decorateKey(key);
-    }
-
     private PrimaryKey[] generatePrimaryKeys(OptimizedRowAwarePrimaryKeyFactory factory)
     {
         PrimaryKey[] primaryKeys = new PrimaryKey[rows];
         int partition = 0;
         int partitionRowCounter = 0;
-        ClusteringStringGenerator clusteringStringGenerator =
-        new ClusteringStringGenerator(metadata);
+        ClusteringStringGenerator clusteringStringGenerator = new ClusteringStringGenerator(metadata);
         for (int index = 0; index < rows; index++)
         {
             primaryKeys[index] = factory.create(makeKey(metadata, (long) partition, (long) partition),
