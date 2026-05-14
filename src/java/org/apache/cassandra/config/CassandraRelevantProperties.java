@@ -286,7 +286,6 @@ public enum CassandraRelevantProperties
 
     MEMTABLE_TRIE_SIZE_LIMIT("cassandra.trie_size_limit_mb"),
 
-    /** This property indicates if the code is running under the in-jvm dtest framework */
     /**
      * Maximum number of log statements cached per NoSpamLogger instance.
      * This prevents unbounded memory growth when log messages contain dynamic content.
@@ -308,6 +307,7 @@ public enum CassandraRelevantProperties
      */
     NOSPAM_LOGGER_LOGGERS_EXPIRE_MINUTES("cassandra.nospam_logger.loggers_expire_minutes", "60"),
 
+    /** This property indicates if the code is running under the in-jvm dtest framework */
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),
 
     /** Represents the maximum size (in bytes) of a serialized mutation that can be cached **/
