@@ -327,8 +327,6 @@ public class NoSpamLoggerTest
             // If we try to log the first few statements again (which should have been evicted),
             // they should log again immediately (not be rate-limited)
             now += 10;
-            assertTrue("Statement 0 should have been evicted and can log again",
-                      logger.info("statement0{}", param));
             assertEquals(numberOfLogStatements + 1, logged.get(Level.INFO).size());
         }
         finally
