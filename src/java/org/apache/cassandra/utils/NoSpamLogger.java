@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Ticker;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.MoreExecutors;
 
@@ -65,6 +66,9 @@ public class NoSpamLogger
             return System.nanoTime();
         }
     };
+
+    @VisibleForTesting
+    static Ticker TICKER = Ticker.systemTicker();
 
     public class NoSpamLogStatement extends AtomicLong
     {
@@ -252,6 +256,7 @@ public class NoSpamLogger
     private final Cache<String, NoSpamLogStatement> lastMessage = Caffeine.newBuilder()
             .maximumSize(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong())
             .expireAfterAccess(NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES.getLong(), TimeUnit.MINUTES)
+            .ticker(TICKER)
             .executor(MoreExecutors.directExecutor())
             .recordStats()
             .build();

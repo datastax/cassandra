@@ -19,7 +19,6 @@
 package org.apache.cassandra.utils;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_MAX_LOGGERS;
-import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER;
 import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES;
 import static org.junit.Assert.*;
 
@@ -80,6 +79,7 @@ public class NoSpamLoggerTest
    static final String statement = "swizzle{}";
    static final String param = "";
    static long now;
+   static long tickerTime;
 
    @BeforeClass
    public static void setUpClass() throws Exception
@@ -92,6 +92,8 @@ public class NoSpamLoggerTest
             return now;
         }
        };
+       
+       NoSpamLogger.TICKER = () -> tickerTime;
    }
 
    @Before
@@ -293,7 +295,7 @@ public class NoSpamLoggerTest
      * This prevents memory exhaustion from dynamic log messages (e.g., queries with unique strings).
      */
     @Test
-    public void testNoSpamLogStatementCacheBounded() throws Exception
+    public void testNoSpamLogStatementCacheBounded()
     {
         int maxStatementsPerLogger = 10;
         System.setProperty("cassandra.nospam_logger.max_statements_per_logger", String.valueOf(maxStatementsPerLogger));
@@ -340,30 +342,44 @@ public class NoSpamLoggerTest
      * Test that log statements expire after the configured inactivity period.
      */
     @Test
-    public void testNoSpamLogStatementsCacheTimeBasedEviction() throws Exception
+    public void testNoSpamLogStatementsCacheTimeBasedEviction()
     {
         System.setProperty("cassandra.nospam_logger.statements_expire_minutes", "1");
         try
         {
             NoSpamLogger.clearWrappedLoggersForTest();
             now = 0;
+            tickerTime = 0;
             NoSpamLogger logger = NoSpamLogger.getLogger(mock, 5, TimeUnit.NANOSECONDS);
 
             assertTrue(logger.info("test{}", param));
             assertEquals(1, logged.get(Level.INFO).size());
+            assertEquals("Cache should contain 1 statement", 1, logger.getStatementsCount());
 
             // Try to log again immediately - should be rate-limited
             assertFalse(logger.info("test{}", param));
             assertEquals(1, logged.get(Level.INFO).size());
+            assertEquals("Cache should still contain 1 statement", 1, logger.getStatementsCount());
 
-            // Advance time by more than 1 minute (60 minutes in nanoseconds)
-            now += TimeUnit.MINUTES.toNanos(NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES.getLong()+1);
+            // Advance BOTH clocks by more than 1 minute
+            // `now` is used for rate limiting (NoSpamLogger.CLOCK)
+            // `tickerTime` is used for cache expiration (Caffeine's Ticker)
+            long advanceTime = TimeUnit.MINUTES.toNanos(NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES.getLong() + 1);
+            now += advanceTime;
+            tickerTime += advanceTime;
+            
+            // Trigger cache cleanup to process expired entries
+            logger.cleanUpStatementsForTest();
+            
+            // Verify the statement was evicted from cache
+            assertEquals("Cache should be empty after expiration", 0, logger.getStatementsCount());
 
             // The statement should have expired from cache, so it should log again
             // even though we haven't waited for the rate limit interval
             assertTrue("Statement should have expired and can log again",
                       logger.info("test{}", param));
             assertEquals(2, logged.get(Level.INFO).size());
+            assertEquals("Cache should contain 1 statement again", 1, logger.getStatementsCount());
         }
         finally
         {
@@ -376,13 +392,13 @@ public class NoSpamLoggerTest
      * Test that NoSpamLogger instances can be evicted from the NoSpamLoggers cache.
      * This test verifies the cache respects the configured expiration time by demonstrating
      * that entries accessed long ago will be evicted when cleanup is triggered.
-     *
+     * <p>
      * Note: The NoSpamLogStatements cache is static and initialized at class load time with the
      * default 60-minute expiration. We cannot change this at runtime, so this test verifies
      * the eviction mechanism works by creating entries, waiting, and forcing cleanup.
      */
     @Test
-    public void testNoSpamLoggerCacheTimeBasedEviction() throws Exception
+    public void testNoSpamLoggerCacheTimeBasedEviction()
     {
         NoSpamLogger.clearWrappedLoggersForTest();
         now = 0;
@@ -444,7 +460,7 @@ public class NoSpamLoggerTest
         assertSame("Should return cached instance", nsl1, nsl1Again);
         assertEquals(2, NoSpamLogger.getWrappedLoggersCount());
 
-        // Clear the cache to simulate expiration
+        // Forcefully clear all cached loggers (invalidateAll) (to simulate expiration)
         NoSpamLogger.clearWrappedLoggersForTest();
         assertEquals(0, NoSpamLogger.getWrappedLoggersCount());
 
@@ -462,7 +478,7 @@ public class NoSpamLoggerTest
      * Test that the {@link NoSpamLogger} cache is bounded.
      */
     @Test
-    public void testNoSpamLoggerCacheBounded() throws Exception
+    public void testNoSpamLoggerCacheBounded()
     {
         NoSpamLogger.clearWrappedLoggersForTest();
         now = 5;
@@ -506,6 +522,6 @@ public class NoSpamLoggerTest
         
         // Verify the wrappedLoggers cache size is bounded to the configured maximum
         long cacheSize = NoSpamLogger.getWrappedLoggersCount();
-        assertEquals("Wrapped loggers cache size should be at most " + maxLoggers + " (was " + cacheSize + ")", cacheSize, maxLoggers);
+        assertEquals(String.format("Wrapped loggers cache size should be at most %d (was %d)", maxLoggers, cacheSize), cacheSize, maxLoggers);
     }
 }
