@@ -36,6 +36,7 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
@@ -128,9 +129,10 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
     public AbstractAllocatorMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(metadataRef, commitLogLowerBound);
-        this.allocator = MEMORY_POOL.newAllocator(metadataRef.toString());
-        this.initialComparator = metadata.get().comparator;
-        this.initialFactory = metadata().params.memtable.factory();
+        TableMetadata tableMetadata = metadataRef.get();
+        this.allocator = MEMORY_POOL.newAllocator(tableMetadata.toString());
+        this.initialComparator = tableMetadata.comparator;
+        this.initialFactory = tableMetadata.params.memtable.factory();
         this.owner = owner;
         scheduleFlush();
     }
@@ -170,8 +172,9 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         switch (reason)
         {
         case SCHEMA_CHANGE:
-            return initialComparator != metadata().comparator // If the CF comparator has changed, because our partitions reference the old one
-                   || !initialFactory.equals(metadata().params.memtable.factory()); // If a different type of memtable is requested
+            TableMetadata tableMetadata = metadata.get(); // do not use metadata() as this may be overridden
+            return initialComparator != tableMetadata.comparator // If the CF comparator has changed, because our partitions reference the old one
+                   || !initialFactory.equals(tableMetadata.params.memtable.factory()); // If a different type of memtable is requested
         case OWNED_RANGES_CHANGE:
             return false; // by default we don't use the local ranges, thus this has no effect
         default:
