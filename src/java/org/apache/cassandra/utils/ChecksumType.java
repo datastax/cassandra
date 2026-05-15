@@ -18,11 +18,14 @@
 package org.apache.cassandra.utils;
 
 import java.nio.ByteBuffer;
+import java.util.Properties;
+import java.util.zip.CRC32C;
 import java.util.zip.Checksum;
 import java.util.zip.CRC32;
 import java.util.zip.Adler32;
 
 import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 
 public enum ChecksumType
 {
@@ -38,7 +41,7 @@ public enum ChecksumType
         @Override
         public void update(Checksum checksum, ByteBuffer buf)
         {
-            ((Adler32)checksum).update(buf);
+            checksum.update(buf);
         }
 
     },
@@ -54,7 +57,39 @@ public enum ChecksumType
         @Override
         public void update(Checksum checksum, ByteBuffer buf)
         {
-            ((CRC32)checksum).update(buf);
+            checksum.update(buf);
+        }
+
+    },
+    CRC32C
+    {
+
+        @Override
+        public Checksum newInstance()
+        {
+            return new CRC32C();
+        }
+
+        @Override
+        public void update(Checksum checksum, ByteBuffer buf)
+        {
+            checksum.update(buf);
+        }
+
+    },
+    CRC64NVME
+    {
+
+        @Override
+        public Checksum newInstance()
+        {
+            return new CRC64NVME();
+        }
+
+        @Override
+        public void update(Checksum checksum, ByteBuffer buf)
+        {
+            checksum.update(buf);
         }
 
     };
