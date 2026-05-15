@@ -171,11 +171,12 @@ public class TrieBackedPartition implements Partition
                                              int tombstoneCount,
                                              DeletionAwareTrie<Object, TrieTombstoneMarker> trie,
                                              TableMetadata metadata,
+                                             TableMetadata droppedColumnsSource,
                                              EnsureOnHeap ensureOnHeap)
     {
         return ensureOnHeap == EnsureOnHeap.NOOP
-               ? new TrieBackedPartition(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata)
-               : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata, ensureOnHeap);
+               ? new WithDroppedColumnsSource(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata, droppedColumnsSource)
+               : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata, droppedColumnsSource, ensureOnHeap);
     }
 
     /// Implementation of an iterator over rows. Note that because the legacy containers store deleted rows as [Row]s
@@ -439,6 +440,13 @@ public class TrieBackedPartition implements Partition
         return null;
     }
 
+    /// Source of dropped columns, if they could be different from the metadata in use.
+    /// To be overridden by memtable partitions.
+    protected TableMetadata droppedColumnsSource()
+    {
+        return metadata;
+    }
+
     /// Implementation of [UnfilteredRowIterator] for this partition.
     ///
     /// Looks for row and tombstone markers in the trie and presents each branch as a [TrieBackedRow] or
@@ -459,7 +467,7 @@ public class TrieBackedPartition implements Partition
             super(trie, Direction.fromBoolean(reversed), TrieBackedPartition::combineDataAndDeletionForUnfilteredIterator, false);
             this.selection = selection;
             this.reversed = reversed;
-            Row staticRow = TrieBackedPartition.this.staticRow().filter(selection, metadata());
+            Row staticRow = TrieBackedPartition.this.staticRow().filter(selection, droppedColumnsSource());
             this.staticRow = staticRow != null ? staticRow : Rows.EMPTY_STATIC_ROW;
         }
 
@@ -471,7 +479,7 @@ public class TrieBackedPartition implements Partition
             {
                 // Row.
                 Row row = toRow(tailTrie, getClustering(bytes, byteLength));
-                return row != null ? row.filter(selection, metadata()) : null;
+                return row != null ? row.filter(selection, droppedColumnsSource()) : null;
             }
             else
             {
@@ -586,8 +594,25 @@ public class TrieBackedPartition implements Partition
         return Partition.toString(this);
     }
 
+    private static class WithDroppedColumnsSource extends TrieBackedPartition
+    {
+        final TableMetadata droppedColumnsSource;
+
+        public WithDroppedColumnsSource(DecoratedKey partitionKey, RegularAndStaticColumns columns, EncodingStats stats, int rowCountIncludingStatic, int tombstoneCount, DeletionAwareTrie<Object, TrieTombstoneMarker> trie, TableMetadata metadata, TableMetadata droppedColumnsSource)
+        {
+            super(partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata);
+            this.droppedColumnsSource = droppedColumnsSource;
+        }
+
+        @Override
+        protected TableMetadata droppedColumnsSource()
+        {
+            return droppedColumnsSource;
+        }
+    }
+
     /// A snapshot of the current [TrieBackedPartition] data, copied on heap when retrieved.
-    private static final class WithEnsureOnHeap extends TrieBackedPartition
+    private static final class WithEnsureOnHeap extends WithDroppedColumnsSource
     {
         EnsureOnHeap ensureOnHeap;
 
@@ -598,9 +623,10 @@ public class TrieBackedPartition implements Partition
                                 int tombstoneCount,
                                 DeletionAwareTrie<Object, TrieTombstoneMarker> trie,
                                 TableMetadata metadata,
+                                TableMetadata droppedColumnsSource,
                                 EnsureOnHeap ensureOnHeap)
         {
-            super(partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata);
+            super(partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata, droppedColumnsSource);
             this.ensureOnHeap = ensureOnHeap;
         }
 
