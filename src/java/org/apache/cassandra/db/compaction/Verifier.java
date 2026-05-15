@@ -80,6 +80,8 @@ import static com.google.common.base.Preconditions.checkState;
 
 public class Verifier implements Closeable
 {
+    private static final List<Component> DIGEST_COMPONENTS = ImmutableList.of(Component.DIGEST, Component.DIGEST_CRC32C, Component.DIGEST_CRC64NVME);
+
     private final @Nullable CompactionRealm realm;
     private final SSTableReader sstable;
 
@@ -250,12 +252,17 @@ public class Verifier implements Closeable
         {
             validator = null;
 
-            if (sstable.descriptor.fileFor(Component.DIGEST).exists())
+            for (Component component : DIGEST_COMPONENTS)
             {
-                validator = DataIntegrityMetadata.fileDigestValidator(sstable.descriptor);
-                validator.validate();
+                if (sstable.descriptor.fileFor(component).exists())
+                {
+                    validator = DataIntegrityMetadata.fileDigestValidator(sstable.descriptor, component);
+                    validator.validate();
+                    break;
+                }
             }
-            else
+
+            if (validator == null)
             {
                 outputHandler.output("Data digest missing, assuming extended verification of disk values");
                 extended = true;

@@ -108,9 +108,9 @@ public class DataIntegrityMetadata
         }
     }
 
-    public static FileDigestValidator fileDigestValidator(Descriptor desc) throws IOException
+    public static FileDigestValidator fileDigestValidator(Descriptor desc, Component digestComponent) throws IOException
     {
-        return new FileDigestValidator(desc);
+        return new FileDigestValidator(desc, digestComponent);
     }
 
     public static class FileDigestValidator implements Closeable
@@ -121,11 +121,11 @@ public class DataIntegrityMetadata
         private final Descriptor descriptor;
         private long storedDigestValue;
 
-        public FileDigestValidator(Descriptor descriptor) throws IOException
+        public FileDigestValidator(Descriptor descriptor, Component digestComponent) throws IOException
         {
             this.descriptor = descriptor;
-            checksum = ChecksumType.CRC32.newInstance();
-            digestReader = RandomAccessReader.open(descriptor.fileFor(Component.DIGEST));
+            checksum = checksumFor(digestComponent).newInstance();
+            digestReader = RandomAccessReader.open(descriptor.fileFor(digestComponent));
             dataReader = RandomAccessReader.open(descriptor.fileFor(Component.DATA));
             try
             {
@@ -137,6 +137,18 @@ public class DataIntegrityMetadata
                 // Attempting to create a FileDigestValidator without a DIGEST file will fail
                 throw new IOException("Corrupted SSTable : " + descriptor.fileFor(Component.DATA));
             }
+        }
+
+        private static ChecksumType checksumFor(Component digestComponent)
+        {
+            if (digestComponent == Component.DIGEST)
+                return ChecksumType.CRC32;
+            else if (digestComponent == Component.DIGEST_CRC32C)
+                return ChecksumType.CRC32C;
+            else if (digestComponent == Component.DIGEST_CRC64NVME)
+                return ChecksumType.CRC64NVME;
+            else
+                throw new IllegalArgumentException("Unsupported digest component " + digestComponent);
         }
 
         // Validate the entire file

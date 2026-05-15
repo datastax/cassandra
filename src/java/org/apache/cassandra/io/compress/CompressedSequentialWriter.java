@@ -27,7 +27,9 @@ import java.nio.channels.FileChannel;
 import java.util.Optional;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
+import java.util.zip.Checksum;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +42,7 @@ import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.utils.Throwables.merge;
 
@@ -70,6 +73,8 @@ public class CompressedSequentialWriter extends SequentialWriter
 
     private final int maxCompressedLength;
 
+    private final ChecksumType checksumType;
+
     /**
      * When corruption is found, the file writer is reset to previous data point but we can't reset the CRC checksum.
      * So we have to recompute digest value.
@@ -82,6 +87,7 @@ public class CompressedSequentialWriter extends SequentialWriter
      * @param file File to write
      * @param offsetsPath File name to write compression metadata
      * @param digestFile File to write digest
+     * @param checksumType The type of checksum in the digest file
      * @param option Write option (buffer size and type will be set the same as compression params)
      * @param parameters Compression mparameters
      * @param sstableMetadataCollector Metadata collector
@@ -89,6 +95,7 @@ public class CompressedSequentialWriter extends SequentialWriter
     public CompressedSequentialWriter(File file,
                                       File offsetsPath,
                                       File digestFile,
+                                      ChecksumType checksumType,
                                       SequentialWriterOption option,
                                       CompressionParams parameters,
                                       MetadataCollector sstableMetadataCollector)
@@ -112,7 +119,18 @@ public class CompressedSequentialWriter extends SequentialWriter
         metadataWriter = CompressionMetadata.Writer.open(parameters, offsetsPath);
 
         this.sstableMetadataCollector = sstableMetadataCollector;
-        crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)));
+        this.checksumType = checksumType;
+        crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)), checksumType);
+    }
+
+    public CompressedSequentialWriter(File file,
+                                      File offsetsPath,
+                                      File digestFile,
+                                      SequentialWriterOption option,
+                                      CompressionParams parameters,
+                                      MetadataCollector sstableMetadataCollector)
+    {
+        this(file, offsetsPath, digestFile, ChecksumType.CRC32, option, parameters, sstableMetadataCollector);
     }
 
     @Override
@@ -460,7 +478,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             try (FileChannel fileChannel = StorageProvider.instance.writeTimeReadFileChannelFor(file);
                  InputStream stream = Channels.newInputStream(fileChannel))
             {
-                CRC32 checksum = new CRC32();
+                Checksum checksum = checksumType.newInstance();
                 try (CheckedInputStream checkedInputStream = new CheckedInputStream(stream, checksum))
                 {
                     byte[] chunk = new byte[64 * 1024];
