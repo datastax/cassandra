@@ -42,6 +42,7 @@ import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
@@ -66,13 +67,18 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Throwables;
 
 public abstract class SortedTableWriter extends SSTableWriter
 {
     protected static final Logger logger = LoggerFactory.getLogger(SortedTableWriter.class);
+
+    private static final ChecksumType checksumType = getChecksumType();
+    private static final Component digestComponent = getDigestComponent();
+    public static final String SSTABLE_CHECKSUM_TYPE_PROPERTY = "cassandra.sstable_checksum_type";
+
     protected final FileHandle.Builder dbuilder;
     protected final SequentialWriter dataFile;
     protected DataPosition dataMark;
@@ -104,6 +110,34 @@ public abstract class SortedTableWriter extends SSTableWriter
         isInternalKeyspace = SchemaConstants.isInternalKeyspace(metadata.keyspace);
     }
 
+    private static ChecksumType getChecksumType()
+    {
+        String checksumTypeProp = System.getProperty(SSTABLE_CHECKSUM_TYPE_PROPERTY, ChecksumType.CRC32.name());
+        try
+        {
+            return ChecksumType.valueOf(checksumTypeProp.toUpperCase());
+        }
+        catch (IllegalArgumentException e)
+        {
+            throw new ConfigurationException(String.format("Invalid value for system property 'cassandra.sstable_checksum_type': %s", checksumTypeProp), e);
+        }
+    }
+
+    private static Component getDigestComponent()
+    {
+        switch (checksumType)
+        {
+            case CRC32:
+                return Component.DIGEST;
+            case CRC32C:
+                return Component.DIGEST_CRC32C;
+            case CRC64NVME:
+                return Component.DIGEST_CRC64NVME;
+            default:
+                throw new IllegalStateException("Unexpected checksumType for digest file: " + checksumType);
+        }
+    }
+
     protected static SequentialWriter constructDataFileWriter(Descriptor descriptor,
                                                               TableMetadataRef metadata,
                                                               MetadataCollector metadataCollector,
@@ -116,7 +150,8 @@ public abstract class SortedTableWriter extends SSTableWriter
 
             return new CompressedSequentialWriter(descriptor.fileFor(Component.DATA),
                                                   descriptor.fileFor(Component.COMPRESSION_INFO),
-                                                  descriptor.fileFor(Component.DIGEST),
+                                                  descriptor.fileFor(digestComponent),
+                                                  checksumType,
                                                   writerOption,
                                                   compressionParams,
                                                   metadataCollector);
@@ -125,7 +160,8 @@ public abstract class SortedTableWriter extends SSTableWriter
         {
             return new ChecksummedSequentialWriter(descriptor.fileFor(Component.DATA),
                                                    descriptor.fileFor(Component.CRC),
-                                                   descriptor.fileFor(Component.DIGEST),
+                                                   descriptor.fileFor(digestComponent),
+                                                   checksumType,
                                                    writerOption);
         }
     }
