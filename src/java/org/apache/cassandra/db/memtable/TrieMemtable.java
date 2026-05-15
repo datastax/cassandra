@@ -147,11 +147,15 @@ public class TrieMemtable extends AbstractShardedMemtable
     @Unmetered
     private final TrieMemtableMetricsView metrics;
 
+    @Unmetered
+    private final TableMetadata actualMetadata;
+
     TrieMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner, Integer shardCountOption)
     {
         super(commitLogLowerBound, metadataRef, owner, shardCountOption);
         this.metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
-        this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics, owner.readOrdering());
+        this.actualMetadata = metadataRef.get();
+        this.shards = generatePartitionShards(boundaries.shardCount(), actualMetadata, metrics, owner.readOrdering());
         this.mergedTrie = makeMergedTrie(shards);
         logger.trace("Created memtable with {} shards", this.shards.length);
     }
@@ -162,7 +166,7 @@ public class TrieMemtable extends AbstractShardedMemtable
     }
 
     private static MemtableShard[] generatePartitionShards(int splits,
-                                                           TableMetadataRef metadata,
+                                                           TableMetadata metadata,
                                                            TrieMemtableMetricsView metrics,
                                                            OpOrder opOrder)
     {
@@ -182,6 +186,23 @@ public class TrieMemtable extends AbstractShardedMemtable
         for (MemtableShard shard : shards)
             tries.add(shard.data);
         return DeletionAwareTrie.mergeDistinct(tries);
+    }
+
+    @Override
+    public TableMetadata metadata()
+    {
+        return actualMetadata;
+    }
+
+    @Override
+    public boolean shouldSwitch(ColumnFamilyStore.FlushReason reason)
+    {
+        if (super.shouldSwitch(reason))
+            return true;
+        if (reason != ColumnFamilyStore.FlushReason.SCHEMA_CHANGE)
+            return false;
+        // If the columns definition changes, we need to flush as we would need to remap column indexes.
+        return !actualMetadata.regularAndStaticColumns().equals(metadata.get().regularAndStaticColumns());
     }
 
     @Override
@@ -380,7 +401,8 @@ public class TrieMemtable extends AbstractShardedMemtable
             mergedTrie.subtrie(toComparableBound(keyRange.left, includeStart),
                                toComparableBound(keyRange.right, !includeStop));
 
-        return new MemtableUnfilteredPartitionIterator(metadata(),
+        return new MemtableUnfilteredPartitionIterator(actualMetadata,
+                                                       metadata.get(),
                                                        allocator.ensureOnHeap(),
                                                        subMap,
                                                        columnFilter,
@@ -400,10 +422,10 @@ public class TrieMemtable extends AbstractShardedMemtable
     {
         int shardIndex = boundaries.getShardForKey(key);
         DeletionAwareTrie<Object, TrieTombstoneMarker> trie = shards[shardIndex].data.tailTrie(key);
-        return createPartition(metadata(), allocator.ensureOnHeap(), key, trie);
+        return createPartition(metadata(), metadata.get(), allocator.ensureOnHeap(), key, trie);
     }
 
-    private static TrieBackedPartition createPartition(TableMetadata metadata, EnsureOnHeap ensureOnHeap, DecoratedKey key, DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    private static TrieBackedPartition createPartition(TableMetadata metadata, TableMetadata droppedColumnsSource, EnsureOnHeap ensureOnHeap, DecoratedKey key, DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
         if (trie == null)
             return null;
@@ -420,6 +442,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                                           holder.tombstoneCount(),
                                           trie,
                                           metadata,
+                                          droppedColumnsSource,
                                           ensureOnHeap);
     }
 
@@ -587,7 +610,7 @@ public class TrieMemtable extends AbstractShardedMemtable
 
             public Iterator<TrieBackedPartition> iterator()
             {
-                return new PartitionIterator(toFlush, metadata(), EnsureOnHeap.NOOP);
+                return new PartitionIterator(toFlush, actualMetadata, metadata.get(), EnsureOnHeap.NOOP);
             }
 
             public long partitionKeysSize()
@@ -643,18 +666,18 @@ public class TrieMemtable extends AbstractShardedMemtable
         @Unmetered
         private final TrieMemtableMetricsView metrics;
 
-        private final TableMetadataRef metadata;
+        private final TableMetadata metadata;
 
         private TriePartitionUpdater noIndexUpdater;
         private TriePartitionUpdaterLegacyIndex legacyIndexUpdater;
 
-        MemtableShard(TableMetadataRef metadata, TrieMemtableMetricsView metrics, OpOrder opOrder)
+        MemtableShard(TableMetadata metadata, TrieMemtableMetricsView metrics, OpOrder opOrder)
         {
             this(metadata, AbstractAllocatorMemtable.MEMORY_POOL.newAllocator(metadata.toString()), metrics, opOrder);
         }
 
         @VisibleForTesting
-        MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics, OpOrder opOrder)
+        MemtableShard(TableMetadata metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics, OpOrder opOrder)
         {
             this.metadata = metadata;
             this.allocator = allocator;
@@ -683,7 +706,7 @@ public class TrieMemtable extends AbstractShardedMemtable
             else
             {
                 if (legacyIndexUpdater == null)
-                    legacyIndexUpdater = new TriePartitionUpdaterLegacyIndex(this, data, metadata.get());
+                    legacyIndexUpdater = new TriePartitionUpdaterLegacyIndex(this, data, metadata);
                 legacyIndexUpdater.setIndexContext(indexer);
                 return legacyIndexUpdater;
             }
@@ -780,7 +803,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                 return null;
 
             Map.Entry<ByteComparable.Preencoded, PartitionData> entry = iter.next();
-            return getPartitionKeyFromPath(metadata.get(), entry.getKey());
+            return getPartitionKeyFromPath(metadata, entry.getKey());
         }
 
         public DecoratedKey minPartitionKey()
@@ -828,11 +851,13 @@ public class TrieMemtable extends AbstractShardedMemtable
     static class PartitionIterator extends TrieTailsIterator.DeletionAwareWithoutCoveringDeletions<Object, TrieTombstoneMarker, TrieBackedPartition>
     {
         final TableMetadata metadata;
+        final TableMetadata droppedColumnsSource;
         final EnsureOnHeap ensureOnHeap;
-        PartitionIterator(DeletionAwareTrie<Object, TrieTombstoneMarker> source, TableMetadata metadata, EnsureOnHeap ensureOnHeap)
+        PartitionIterator(DeletionAwareTrie<Object, TrieTombstoneMarker> source, TableMetadata metadata, TableMetadata droppedColumnsSource, EnsureOnHeap ensureOnHeap)
         {
             super(source, Direction.FORWARD, TrieBackedPartition.IS_PARTITION_BOUNDARY);
             this.metadata = metadata;
+            this.droppedColumnsSource = droppedColumnsSource;
             this.ensureOnHeap = ensureOnHeap;
         }
 
@@ -850,6 +875,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                                               pd.tombstoneCount(),
                                               tailTrie,
                                               metadata,
+                                              droppedColumnsSource,
                                               ensureOnHeap);
         }
     }
@@ -866,13 +892,14 @@ public class TrieMemtable extends AbstractShardedMemtable
         private final long minLocalDeletionTime;
 
         public MemtableUnfilteredPartitionIterator(TableMetadata metadata,
+                                                   TableMetadata droppedColumnsSource,
                                                    EnsureOnHeap ensureOnHeap,
                                                    DeletionAwareTrie<Object, TrieTombstoneMarker> source,
                                                    ColumnFilter columnFilter,
                                                    DataRange dataRange,
                                                    long minLocalDeletionTime)
         {
-            this.iter = new PartitionIterator(source, metadata, ensureOnHeap);
+            this.iter = new PartitionIterator(source, metadata, droppedColumnsSource, ensureOnHeap);
             this.metadata = metadata;
             this.columnFilter = columnFilter;
             this.dataRange = dataRange;
