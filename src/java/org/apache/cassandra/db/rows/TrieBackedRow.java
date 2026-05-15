@@ -497,7 +497,8 @@ public class TrieBackedRow extends AbstractRow
     private static ByteComparable columnKey(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column)
     {
         int id = columnIds.getValue(column.name);
-        assert id != COLUMN_NOT_PRESENT;
+        if (id == COLUMN_NOT_PRESENT)
+            return MISSING_COLUMN_KEY;
         return encodeUnsignedInt(id);
     }
 
@@ -697,15 +698,15 @@ public class TrieBackedRow extends AbstractRow
     }
 
     @Override
-    public Row filter(ColumnFilter filter, TableMetadata metadata)
+    public Row filter(ColumnFilter filter, TableMetadata droppedColumnsSource)
     {
-        return filter(filter, DeletionTime.LIVE, false, metadata);
+        return filter(filter, DeletionTime.LIVE, false, droppedColumnsSource);
     }
 
     @Override
-    public Row filter(ColumnFilter filter, DeletionTime activeDeletion, boolean setActiveDeletionToRow, TableMetadata metadata)
+    public Row filter(ColumnFilter filter, DeletionTime activeDeletion, boolean setActiveDeletionToRow, TableMetadata droppedColumnsSource)
     {
-        Map<ByteBuffer, DroppedColumn> droppedColumns = metadata.droppedColumns;
+        Map<ByteBuffer, DroppedColumn> droppedColumns = droppedColumnsSource.droppedColumns;
 
         boolean mayFilterColumns = !filter.fetchesAllColumns(isStatic()) || !filter.allFetchedColumnsAreQueried();
         // When merging sstable data in Row.Merger#merge(), rowDeletion is removed if it doesn't supersede activeDeletion.
@@ -713,10 +714,6 @@ public class TrieBackedRow extends AbstractRow
         DeletionAwareTrie<Object, TrieTombstoneMarker> filteredData = data;
         if (!mayFilterColumns && !mayHaveDeleted && droppedColumns.isEmpty())
             return this;
-
-        // Metadata changes are not something we can handle.
-        if (!columns.equals(metadata.regularAndStaticColumns().columns(isStatic())))
-            throw new IllegalArgumentException("Metadata columns do not match");
 
         if (!droppedColumns.isEmpty())
         {
@@ -730,7 +727,7 @@ public class TrieBackedRow extends AbstractRow
                 {
                     drops.add(RangeTrie.branch(columnKey(columnIds, c),
                                                BYTE_COMPARABLE_VERSION,
-                                               TrieTombstoneMarker.covering(dropped.droppedTime, Integer.MIN_VALUE, TrieTombstoneMarker.Kind.COLUMN)));
+                                               TrieTombstoneMarker.covering(dropped.droppedTime, 0, TrieTombstoneMarker.Kind.COLUMN)));
                 }
             }
             if (!drops.isEmpty())
