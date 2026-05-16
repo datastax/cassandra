@@ -946,6 +946,7 @@
 
         <dependency groupId="io.micrometer" artifactId="micrometer-core"/>
         <dependency groupId="org.latencyutils" artifactId="LatencyUtils"/>
+        <dependency groupId="software.amazon.awssdk.crt" artifactId="aws-crt" version="0.45.4"/>
       </artifact:pom>
     </target>
 

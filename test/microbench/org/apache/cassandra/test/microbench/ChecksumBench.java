@@ -22,10 +22,9 @@ import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
 import com.google.common.primitives.Longs;
 
-import org.apache.cassandra.utils.CRC64NVME;
+import software.amazon.awssdk.crt.checksums.CRC64NVME;
 import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MD5Digest;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
