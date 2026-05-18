@@ -755,7 +755,7 @@
       <dependency>
         <groupId>io.netty</groupId>
         <artifactId>netty-all</artifactId>
-        <version>4.1.132.Final</version>
+        <version>4.1.133.Final</version>
         <exclusions>
           <exclusion>
             <groupId>io.netty</groupId>
