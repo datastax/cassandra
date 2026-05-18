@@ -48,7 +48,6 @@ import org.apache.cassandra.tools.StandaloneScrubber;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.apache.cassandra.utils.Clock;
-import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.assertj.core.data.Offset;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_UTIL_ALLOW_TOOL_REINIT_FOR_TEST;
@@ -230,7 +229,7 @@ public class TTLTest extends CQLTester
     @Test
     public void testImprovedMaxTTL()
     {
-        Assume.assumeTrue(DatabaseDescriptor.getStorageCompatibilityMode() != StorageCompatibilityMode.CASSANDRA_4);
+        Assume.assumeFalse(DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5));
         createTable("CREATE TABLE %s (k int PRIMARY KEY, i int)");
         disableCompaction();
         long t0 = Clock.Global.currentTimeMillis();
