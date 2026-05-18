@@ -90,6 +90,9 @@ public abstract class Cell<V> extends ColumnData
 
     public static long getVersionedMaxDeletiontionTime()
     {
+        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+            return Cell.MAX_DELETION_TIME_2038_LEGACY_CAP;
+
         if (DatabaseDescriptor.getStorageCompatibilityMode().disabled())
             // The whole cluster is 2016, we're out of the 2038/2106 mixed cluster scenario. Shortcut to avoid the 'minClusterVersion' volatile read
             return Cell.MAX_DELETION_TIME;
