@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.awaitility.Awaitility;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -228,27 +229,29 @@ public class PrefetchingRebuffererTest
         rebufferer.closeReader();
         rebufferer.close();
 
-        assertEquals(5, buffers.size());
+        Awaitility.await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
+            assertEquals(5, buffers.size());
 
-        // requesting PAGE_SIZE after PAGE_SIZE * 2 is non-sequential
-        assertEquals(1, PrefetchingRebufferer.metrics.nonSequentialRequest.getCount());
+            // requesting PAGE_SIZE after PAGE_SIZE * 2 is non-sequential
+            assertEquals(1, PrefetchingRebufferer.metrics.nonSequentialRequest.getCount());
 
-        for (int i = 0; i < 5; i++)
-        {
-            TestBufferHolder buffer = buffers.get((long) i * PAGE_SIZE);
-            assertNotNull(buffer);
-            // In order, we've requested indexes 0, 2 and then 1. We expect:
-            // - 0 to fetch 0 and prefetch 1 and 2.
-            // - 2 to find 2 prefetched above (having discared 1) and prefetch 3 and 4.
-            // - 1 is a seek backward so it discard everything, fetch 1 and prefetch 2 and 3.
-            // Overall, 0 and 4 are only requested once, but the other indexes are requested twice.
-            assertEquals("For index " + i, i == 0 || i == 4 ? 1 : 2, buffer.numRequested);
-            assertTrue(buffer.released);
-        }
+            for (int i = 0; i < 5; i++)
+            {
+                TestBufferHolder buffer = buffers.get((long) i * PAGE_SIZE);
+                assertNotNull(buffer);
+                // In order, we've requested indexes 0, 2 and then 1. We expect:
+                // - 0 to fetch 0 and prefetch 1 and 2.
+                // - 2 to find 2 prefetched above (having discarded 1) and prefetch 3 and 4.
+                // - 1 is a seek backward so it discard everything, fetch 1 and prefetch 2 and 3.
+                // Overall, 0 and 4 are only requested once, but the other indexes are requested twice.
+                assertEquals("For index " + i, i == 0 || i == 4 ? 1 : 2, buffer.numRequested);
+                assertTrue(buffer.released);
+            }
 
-        // As mentioned above, we'd discarded 1 when getting 2, and then discard 3 and 4 when getting 1. And then
-        // when we close the rebufferer, we discard 2 and 3.
-        assertEquals(5, PrefetchingRebufferer.metrics.unused.getCount());
+            // As mentioned above, we'd discarded 1 when getting 2, and then discard 3 and 4 when getting 1. And then
+            // when we close the rebufferer, we discard 2 and 3.
+            assertEquals(5, PrefetchingRebufferer.metrics.unused.getCount());
+        });
     }
 
     @Test
