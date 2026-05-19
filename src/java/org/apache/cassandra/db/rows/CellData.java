@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DeletionPurger;
+import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -29,7 +30,7 @@ import org.apache.cassandra.utils.CassandraUInt;
 import org.apache.cassandra.utils.memory.ByteBufferCloner;
 import org.apache.cassandra.utils.memory.Cloner;
 
-public interface CellData<V, C extends CellData<?, ?>>
+public interface CellData<V, C extends CellData<?, ?>> extends IDataSize
 {
     public static final int NO_TTL = 0;
     public static final long NO_DELETION_TIME = Long.MAX_VALUE;

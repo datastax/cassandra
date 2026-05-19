@@ -21,6 +21,7 @@ package org.apache.cassandra.db.memtable;
 import java.nio.ByteBuffer;
 
 import org.agrona.concurrent.UnsafeBuffer;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.rows.AbstractBufferCellData;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
@@ -102,14 +103,6 @@ public abstract class TrieCellData extends AbstractBufferCellData
         return TrieMemtable.TrieSerializer.TYPE_CELL_EXTERNAL_VALUE;
     }
 
-    public static long offTrieSize(CellData<?, ?> cell)
-    {
-        int sz = cell.valueSize();
-        return cellValueCanBeEmbedded(cell, sz)
-               ? 0
-               : sz;
-    }
-
     private static boolean cellValueCanBeEmbedded(CellData<?, ?> cell, int length)
     {
         // No expiration time implies no TTL
@@ -158,6 +151,23 @@ public abstract class TrieCellData extends AbstractBufferCellData
     {
         // Managed separately by trie/external handler
         return 0;
+    }
+
+    public static long offTrieSize(CellData<?, ?> cell)
+    {
+        int sz = cell.valueSize();
+        return cellValueCanBeEmbedded(cell, sz)
+               ? 0
+               : sz;
+    }
+
+    @Override
+    public int dataSize()
+    {
+        return TypeSizes.LONG_SIZE
+               + TypeSizes.INT_SIZE
+               + TypeSizes.INT_SIZE
+               + valueSize();
     }
 
     public static TrieCellData embedded(UnsafeBuffer buffer, int inBufferPos, int length)
