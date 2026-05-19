@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.MetricNameFactory;
 import org.apache.cassandra.metrics.MicrometerMetrics;
@@ -63,7 +64,7 @@ public class FilterFactory
             logger.warn("Cannot provide an optimal BloomFilter for {} elements ({}/{} buckets per element).", numElements, bucketsPerElement, targetBucketsPerElem);
         }
         BloomCalculations.BloomSpecification spec = BloomCalculations.computeBloomSpec(bucketsPerElement);
-        return createFilter(spec.K, numElements, spec.bucketsPerElement, memoryLimiter);
+        return createFilter(spec.K, numElements, spec.bucketsPerElement, memoryLimiter, true);
     }
 
     /**
@@ -81,21 +82,38 @@ public class FilterFactory
 
     public static IFilter getFilter(long numElements, double maxFalsePosProbability, MemoryLimiter memoryLimiter)
     {
+        return createFilter(numElements, maxFalsePosProbability, memoryLimiter, true);
+    }
+
+    public static IFilter getFilterForWrite(long numElements, double maxFalsePosProbability, OperationType operationType)
+    {
+        return getFilterForWrite(numElements, maxFalsePosProbability, operationType, BloomFilter.memoryLimiter);
+    }
+
+    @VisibleForTesting
+    static IFilter getFilterForWrite(long numElements, double maxFalsePosProbability, OperationType operationType, MemoryLimiter memoryLimiter)
+    {
+        boolean ignoreMemoryLimit = operationType == OperationType.FLUSH && BloomFilter.ignoreMemoryLimitOnFlush();
+        return createFilter(numElements, maxFalsePosProbability, memoryLimiter, !ignoreMemoryLimit);
+    }
+
+    private static IFilter createFilter(long numElements, double maxFalsePosProbability, MemoryLimiter memoryLimiter, boolean failOnExceedingLimit)
+    {
         assert maxFalsePosProbability <= 1.0 : "Invalid probability";
         if (maxFalsePosProbability == 1.0)
             return AlwaysPresent;
         int bucketsPerElement = BloomCalculations.maxBucketsPerElement(numElements);
         BloomCalculations.BloomSpecification spec = BloomCalculations.computeBloomSpec(bucketsPerElement, maxFalsePosProbability);
-        return createFilter(spec.K, numElements, spec.bucketsPerElement, memoryLimiter);
+        return createFilter(spec.K, numElements, spec.bucketsPerElement, memoryLimiter, failOnExceedingLimit);
     }
 
     @SuppressWarnings("resource")
-    private static IFilter createFilter(int hash, long numElements, int bucketsPer, MemoryLimiter memoryLimiter)
+    private static IFilter createFilter(int hash, long numElements, int bucketsPer, MemoryLimiter memoryLimiter, boolean failOnExceedingLimit)
     {
         try
         {
             long numBits = (numElements * bucketsPer) + BITSET_EXCESS;
-            IBitSet bitset = new OffHeapBitSet(numBits, memoryLimiter);
+            IBitSet bitset = new OffHeapBitSet(numBits, memoryLimiter, failOnExceedingLimit);
             return new BloomFilter(hash, bitset);
         }
         catch (MemoryLimiter.ReachedMemoryLimitException | OutOfMemoryError e)

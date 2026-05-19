@@ -63,6 +63,12 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
     @VisibleForTesting
     public static boolean recreateOnFPChanceChange = Boolean.getBoolean(RECREATE_ON_FP_CHANCE_CHANGE);
 
+    /**
+     * If true, Bloom filters ignore the memory limit during flush. CNDB uses this to avoid missing Bloom filters
+     * when reloading from remote storage.
+     */
+    public static final String IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP = Config.PROPERTY_PREFIX + "bf.ignore_memory_limit_on_flush";
+
     public static final MemoryLimiter memoryLimiter = new MemoryLimiter(maxMemory != 0 ? maxMemory : Long.MAX_VALUE,
                                                                         "Allocating %s for Bloom filter would reach max of %s (current %s)");
 
@@ -91,6 +97,14 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         super(copy);
         this.hashCount = copy.hashCount;
         this.bitset = copy.bitset;
+    }
+
+    /**
+     * @return true to ignore bloom filter memory limit during flush
+     */
+    public static boolean ignoreMemoryLimitOnFlush()
+    {
+        return Boolean.getBoolean(IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP);
     }
 
     /**
