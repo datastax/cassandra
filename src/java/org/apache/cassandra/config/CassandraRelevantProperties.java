@@ -460,11 +460,13 @@ public enum CassandraRelevantProperties
 
     /**
      * Used to determine the block size and block mask for the clustering key store writer.
+     * The blocks should not be too small and not be too large. See {@link KeyStoreWriter} for details.
      */
     SAI_KEY_STORE_CLUSTERING_BLOCK_SHIFT("cassandra.sai.key_store_clustering_block_shift", "4"),
 
     /**
      * Used to determine the block size and block mask for the partition key store writer.
+     * The blocks should not be too small and not be too large. See {@link KeyStoreWriter} for details.
      */
     SAI_KEY_STORE_PARTITION_BLOCK_SHIFT("cassandra.sai.key_store_partition_block_shift", "4"),
 

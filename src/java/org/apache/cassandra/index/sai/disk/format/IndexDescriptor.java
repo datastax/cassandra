@@ -446,13 +446,13 @@ public class IndexDescriptor
         @Override
         public boolean hasClustering()
         {
-            return IndexDescriptor.this.hasClustering;
+            return hasClustering;
         }
 
         @Override
         public ClusteringComparator comparator()
         {
-            return IndexDescriptor.this.comparator;
+            return comparator;
         }
 
         @Override
@@ -678,7 +678,7 @@ public class IndexDescriptor
                 {
                     if (logger.isTraceEnabled())
                     {
-                        logger.trace(this.parent().logMessage("Opening {} file handle for {} ({})"),
+                        logger.trace(this.parent().logMessage("Opening file handle for {} ({})"),
                                      file, FBUtilities.prettyPrintMemory(file.length()));
                     }
                     FileHandle.Builder b = builder.order(byteOrder());
