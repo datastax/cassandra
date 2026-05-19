@@ -397,6 +397,12 @@ public class BigTableWriter extends SortedTableWriter<BigFormatPartitionWriter, 
         }
 
         @Override
+        protected OperationType getOperationType()
+        {
+            return ensuringInBuildInternalContext(operationType);
+        }
+
+        @Override
         protected SequentialWriter openDataWriter()
         {
             checkState(!dataWriterOpened, "Data writer has been already opened.");

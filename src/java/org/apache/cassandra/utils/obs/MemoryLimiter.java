@@ -35,12 +35,12 @@ public class MemoryLimiter
         this.exceptionFormat = exceptionFormat;
     }
 
-    public void increment(long bytesCount) throws ReachedMemoryLimitException
+    public void increment(long bytesCount, boolean failOnExceedingLimit) throws ReachedMemoryLimitException
     {
         assert bytesCount >= 0;
         long bytesCountAfterAllocation = this.currentMemory.addAndGet(bytesCount);
         // if overflow or exceeded max memory
-        if (bytesCountAfterAllocation < 0 || bytesCountAfterAllocation >= maxMemory)
+        if (bytesCountAfterAllocation < 0 || (failOnExceedingLimit && bytesCountAfterAllocation >= maxMemory))
         {
             this.currentMemory.addAndGet(-bytesCount);
 
