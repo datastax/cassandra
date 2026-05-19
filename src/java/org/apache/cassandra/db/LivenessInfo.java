@@ -38,7 +38,7 @@ import org.apache.cassandra.utils.ObjectSizes;
  * unaffected (of course, the rest of said row data might be ttl'ed on its own but this is
  * separate).
  */
-public class LivenessInfo implements IMeasurableMemory
+public class LivenessInfo implements IMeasurableMemory, IDataSize
 {
     public static final long NO_TIMESTAMP = Long.MIN_VALUE;
     public static final int NO_TTL = Cell.NO_TTL;
