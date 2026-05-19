@@ -515,4 +515,80 @@ public class NoSpamLoggerTest
         long cacheSize = NoSpamLogger.getWrappedLoggersCount();
         assertEquals("All loggers should be cached without size-based eviction", loggersToCreate, cacheSize);
     }
+
+    /**
+     * Test that the NoSpamLogStatement cache uses custom per-entry expiry based on each logger's minIntervalNanos.
+     * This test verifies that different NoSpamLogger instances with different intervals result in
+     * different expiry times for their cached statements.
+     */
+    @Test
+    public void testNoSpamLogStatementCacheCustomExpiry()
+    {
+        NoSpamLogger.clearWrappedLoggersForTest();
+        now = 0;
+        tickerTime = 0;
+
+        // Create three NoSpamLogger instances with different intervals
+        int[] intervals = {2, 5, 10};
+        NoSpamLogger[] loggers = new NoSpamLogger[intervals.length];
+        
+        for (int i = 0; i < intervals.length; i++)
+        {
+            // Create a unique Logger instance for each interval to get separate NoSpamLogger instances
+            final int index = i;
+            Logger testLogger = new SubstituteLogger("testLogger" + i, null, true)
+            {
+                @Override
+                public void info(String statement, Object... args)
+                {
+                    logged.get(Level.INFO).offer(Pair.create(statement, args));
+                }
+
+                @Override
+                public int hashCode()
+                {
+                    return System.identityHashCode(this);
+                }
+
+                @Override
+                public boolean equals(Object o)
+                {
+                    return this == o;
+                }
+            };
+            
+            loggers[i] = NoSpamLogger.getLogger(testLogger, intervals[i], TimeUnit.SECONDS);
+            
+            // Log 3 messages from each logger
+            for (int j = 1; j <= 3; j++)
+            {
+                assertTrue(loggers[i].info("message" + j));
+                now += intervals[i] * 1_000_000_000L + 1; // Advance past the interval to allow next log
+            }
+            assertEquals(3, loggers[i].getStatementsCount());
+        }
+        
+        assertEquals(9, logged.get(Level.INFO).size());
+
+        // Test expiry at different time points
+        // Entries were created at tickerTime=0, so they expire at their interval time
+        int[] checkTimes = {3, 6, 11};
+        
+        for (int timeIdx = 0; timeIdx < checkTimes.length; timeIdx++)
+        {
+            tickerTime = TimeUnit.SECONDS.toNanos(checkTimes[timeIdx]);
+            
+            for (int i = 0; i < loggers.length; i++)
+            {
+                loggers[i].cleanUpStatementsForTest();
+                
+                // Entries expire at (creation_time + interval), created at time 0
+                // So they expire when tickerTime > interval
+                int expected = (intervals[i] < checkTimes[timeIdx]) ? 0 : 3;
+                assertEquals(String.format("After %ds, %d-second logger should have %d statements",
+                            checkTimes[timeIdx], intervals[i], expected),
+                            expected, loggers[i].getStatementsCount());
+            }
+        }
+    }
 }
