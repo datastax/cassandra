@@ -21,6 +21,7 @@ package org.apache.cassandra.db.rows;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.DeletionPurger;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.ValueAccessor;
@@ -118,6 +119,16 @@ public abstract class AbstractBufferCellData implements CellData<ByteBuffer, Abs
         ByteBuffer marked = CounterContext.instance().markLocalToBeCleared(value);
         return marked == value ? this : new BufferCellData(marked, timestamp(), localDeletionTime(), ttl(), true);
     }
+
+    @Override
+    public int dataSize()
+    {
+        return TypeSizes.sizeof(timestamp())
+               + TypeSizes.sizeof(ttl())
+               + TypeSizes.sizeof(localDeletionTime())
+               + valueSize();
+    }
+
 
     @Override
     public String toString()

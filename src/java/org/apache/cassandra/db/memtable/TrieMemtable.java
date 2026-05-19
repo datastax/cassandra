@@ -319,7 +319,7 @@ public class TrieMemtable extends AbstractShardedMemtable
     public long getEstimatedAverageRowSize()
     {
         if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
-            estimatedAverageRowSize = new MemtableAverageRowSize(this, mergedTrie.contentOnlyTrie());
+            estimatedAverageRowSize = new MemtableAverageRowSize(this, mergedTrie);
         return estimatedAverageRowSize.rowSize;
     }
 
@@ -1219,7 +1219,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         public int updateInPlace(UnsafeBuffer buffer, int inBufferPos, int offsetBits, Object newContent) throws TrieSpaceExhaustedException
         {
             // We can always set in place, but we may need to release previously held buffer.
-            if (manager.releaseNeeded())
+            if (releaseNeeded(offsetBits))
                 release(buffer, inBufferPos, offsetBits);
 
             return serialize(newContent, shouldPresentAfterBranch(offsetBits), buffer, inBufferPos);

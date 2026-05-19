@@ -44,6 +44,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadLocalRandom;
@@ -2292,6 +2293,28 @@ public abstract class CQLTester
         assertRowsIgnoringOrderInternal(result, true, rows);
     }
 
+    private static int compareTypedLists(List<ColumnSpecification> spec, List<ByteBuffer> a, List<ByteBuffer> b)
+    {
+        var itSpec = spec.iterator();
+        var itA = a.iterator();
+        var itB = b.iterator();
+        while (itSpec.hasNext())
+        {
+            if (!itA.hasNext())
+                return itB.hasNext() ? -1 : 0;
+            if (!itB.hasNext())
+                return 1;
+            var ea = itA.next();
+            var eb = itB.next();
+            var espec = itSpec.next();
+            var diff = espec.type.compare(ea, eb);
+            if (diff != 0)
+                return diff;
+        }
+        assert !itA.hasNext() && !itB.hasNext();
+        return 0;
+    }
+
     private static void assertRowsIgnoringOrderInternal(UntypedResultSet result, boolean ignoreExtra, Object[]... rows)
     {
         if (result == null)
@@ -2303,7 +2326,7 @@ public abstract class CQLTester
 
         List<ColumnSpecification> meta = result.metadata();
 
-        Set<List<ByteBuffer>> expectedRows = new HashSet<>(rows.length);
+        Set<List<ByteBuffer>> expectedRows = new TreeSet<>((a, b) -> compareTypedLists(meta, a, b));
         for (Object[] expected : rows)
         {
             Assert.assertEquals("Invalid number of (expected) values provided for row", expected.length, meta.size());
@@ -2325,7 +2348,7 @@ public abstract class CQLTester
             expectedRows.add(expectedRow);
         }
 
-        Set<List<ByteBuffer>> actualRows = new HashSet<>(result.size());
+        Set<List<ByteBuffer>> actualRows = new TreeSet<>((a, b) -> compareTypedLists(meta, a, b));
         for (UntypedResultSet.Row actual : result)
         {
             List<ByteBuffer> actualRow = new ArrayList<>(meta.size());

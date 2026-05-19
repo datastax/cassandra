@@ -28,11 +28,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -54,12 +56,13 @@ public class MemtableThreadedTest extends CQLTester
     @Parameterized.Parameters(name = "{0}")
     public static List<Object> parameters()
     {
-        return ImmutableList.of("SkipListMemtable",
-                                "TrieMemtable",
-                                "TrieMemtableStage1",
-                                "TrieMemtableStage2",
-                                "TrieMemtableStage3",
-                                "PersistentMemoryMemtable");
+        return ImmutableList.of("skiplist",
+                                "skiplist_sharded",
+                                "trie",
+                                "trie_stage1",
+                                "trie_stage2",
+                                "trie_stage3",
+                                "persistent_memory");
     }
 
     @BeforeClass
@@ -173,10 +176,12 @@ public class MemtableThreadedTest extends CQLTester
                                   boolean checkSequence)
     throws Exception
     {
+        Assume.assumeFalse("Cannot use skiplist_sharded in CC4 compatibility mode.",
+                           DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) && memtableClass.contains("sharded"));
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
         table = createTable(keyspace, "CREATE TABLE %s ( pk bigint, ck bigint, value bigint, seq bigint, PRIMARY KEY(pk, ck))" +
                                       " with compression = {'enabled': false}" +
-                                      " and memtable = { 'class': '" + memtableClass + "'}" +
+                                      " and memtable = '" + memtableClass + "'" +
                                       " and compaction = { 'class': 'UnifiedCompactionStrategy', 'min_sstable_size_in_mb': '1' }"); // to trigger splitting of sstables, STAR-1826
         execute("use " + keyspace + ';');
 

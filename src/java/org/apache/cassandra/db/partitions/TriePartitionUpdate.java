@@ -234,6 +234,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                         if (o == TrieBackedRow.COMPLEX_COLUMN_MARKER)
                             return o;
 
+                        if (o == LivenessInfo.EMPTY)
+                            return o;   // Empty liveness should remain unchanged.
+
                         if (o instanceof LivenessInfo)
                             return ((LivenessInfo) o).withUpdatedTimestamp(newTimestamp);
 
@@ -353,8 +356,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             Row row = it.next();
             metadata().comparator.validate(row.clustering());
-            for (ColumnData cd : row)
-                cd.validate();
+
+            for (Cell<?> cell : row.cells())
+                cell.validate();
         }
     }
 
