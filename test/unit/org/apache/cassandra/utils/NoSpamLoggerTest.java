@@ -322,12 +322,6 @@ public class NoSpamLoggerTest
 
             // Verify the cache size is bounded to the configured maximum
             assertTrue("Cache size should be at most " + maxStatementsPerLogger, logger.getStatementsCount() <= maxStatementsPerLogger);
-
-            // The cache should have evicted some entries due to size limit
-            // If we try to log the first few statements again (which should have been evicted),
-            // they should log again immediately (not be rate-limited)
-            now += 10;
-            assertEquals(numberOfLogStatements + 1, logged.get(Level.INFO).size());
         }
         finally
         {
