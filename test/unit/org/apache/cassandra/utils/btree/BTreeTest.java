@@ -442,6 +442,42 @@ public class BTreeTest
         }
     }
 
+    @Test
+    public void testFastBuilderValidateEmptyDetectsBufferedValues()
+    {
+        try (BTree.FastBuilder<Integer> builder = BTree.fastBuilder())
+        {
+            assertTrue("New FastBuilder should start empty",
+                       builder.validateEmpty());
+
+            builder.add(1);
+            assertFalse("FastBuilder with buffered values should not validate as empty",
+                        builder.validateEmpty());
+        }
+    }
+
+    @Test
+    public void testFastBuilderValidateEmptyAfterCloseClearsOverflowState()
+    {
+        BTree.FastBuilder<Integer> builder = BTree.fastBuilder();
+        try
+        {
+            // Add enough values to trigger overflow and populate savedBuffer/savedNextKey.
+            for (int i = 0; i < 40; i++)
+                builder.add(i);
+
+            assertFalse("FastBuilder with saved overflow state should not validate as empty",
+                        builder.validateEmpty());
+        }
+        finally
+        {
+            builder.close();
+        }
+
+        assertTrue("FastBuilder.close() should clear buffered and saved overflow state",
+                   builder.validateEmpty());
+    }
+
     /**
      * <code>UpdateFunction</code> that count the number of call made to apply for each value.
      */
