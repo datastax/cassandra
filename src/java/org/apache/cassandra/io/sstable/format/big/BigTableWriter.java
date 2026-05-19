@@ -95,12 +95,12 @@ public class BigTableWriter extends SortedTableWriter
                           Set<Component> indexComponents)
     {
         super(descriptor, components(metadata.getLocal(), indexComponents), lifecycleNewTracker, WRITER_OPTION, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
+        operationType = lifecycleNewTracker.opType();
         iwriter = new IndexWriter(keyCount);
 
         this.rowIndexEntrySerializer = new BigTableRowIndexEntry.Serializer(descriptor.version, header);
         columnIndexWriter = new ColumnIndex(this.header, dataFile, descriptor.version, this.observers, rowIndexEntrySerializer.indexInfoSerializer());
         txnProxy = new TransactionalProxy();
-        operationType = lifecycleNewTracker.opType();
     }
 
     private static Set<Component> components(TableMetadata metadata, Collection<Component> indexComponents)
@@ -310,7 +310,7 @@ public class BigTableWriter extends SortedTableWriter
             indexFile = new SequentialWriter(descriptor.fileFor(Component.PRIMARY_INDEX), WRITER_OPTION);
             builder = SSTableReaderBuilder.primaryIndexWriteTimeBuilder(descriptor, Component.PRIMARY_INDEX, operationType, false);
             summary = new IndexSummaryBuilder(keyCount, metadata().params.minIndexInterval, Downsampling.BASE_SAMPLING_LEVEL);
-            bf = FilterFactory.getFilter(keyCount, metadata().params.bloomFilterFpChance);
+            bf = FilterFactory.getFilterForWrite(keyCount, metadata().params.bloomFilterFpChance, operationType);
             // register listeners to be alerted when the data files are flushed
             indexFile.setPostFlushListener(() -> summary.markIndexSynced(indexFile.getLastFlushOffset()));
             dataFile.setPostFlushListener(() -> summary.markDataSynced(dataFile.getLastFlushOffset()));

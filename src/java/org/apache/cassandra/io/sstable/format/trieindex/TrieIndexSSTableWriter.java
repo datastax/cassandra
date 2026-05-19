@@ -347,7 +347,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             }
 
             partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
-            bf = FilterFactory.getFilter(keyCount, table.params.bloomFilterFpChance);
+            bf = FilterFactory.getFilterForWrite(keyCount, table.params.bloomFilterFpChance, operationType);
 
             // register listeners to be alerted when the data files are flushed
             partitionIndexFile.setPostFlushListener(() -> partitionIndex.markPartitionIndexSynced(partitionIndexFile.getLastFlushOffset()));

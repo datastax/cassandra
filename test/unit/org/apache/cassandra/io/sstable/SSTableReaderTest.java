@@ -70,12 +70,15 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.IPartitioner;
@@ -183,6 +186,7 @@ public class SSTableReaderTest
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         BloomFilter.recreateOnFPChanceChange = false;
+        System.clearProperty(BloomFilter.IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP);
 
         Throwable exceptions = null;
         for (Ref<?> ref : refsToRelease)
@@ -201,6 +205,9 @@ public class SSTableReaderTest
             fail("Unable to release all tracked references " + exceptions);
 
         refsToRelease.clear();
+
+        // wait for async cleanup completion to avoid impacting BF memory limiter
+        LifecycleTransaction.waitForDeletions();
     }
 
     @Test
@@ -1366,6 +1373,31 @@ public class SSTableReaderTest
         return Sets.difference(cfs.getLiveSSTables(), before).iterator().next();
     }
 
+    private SSTableReader getNewSSTable(ColumnFamilyStore cfs, int numKeys, int step, OperationType operationType)
+    {
+        NavigableMap<DecoratedKey, PartitionUpdate> updates = new TreeMap<>();
+        for (int j = 0; j < numKeys; j += step)
+        {
+            PartitionUpdate update = new RowUpdateBuilder(cfs.metadata(), j, String.valueOf(j))
+                                     .clustering("0")
+                                     .add("val", ByteBufferUtil.EMPTY_BYTE_BUFFER)
+                                     .buildUpdate();
+            updates.put(update.partitionKey(), update);
+        }
+
+        SerializationHeader header = new SerializationHeader(true, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS);
+        LifecycleTransaction txn = LifecycleTransaction.offline(operationType, cfs.metadata);
+        SSTableMultiWriter writer = cfs.createSSTableMultiWriter(cfs.newSSTableDescriptor(cfs.getDirectories().getDirectoryForNewSSTables()),
+                                                                 numKeys, 0, null, false, header, txn);
+        try (SSTableTxnWriter txnWriter = new SSTableTxnWriter(txn, writer))
+        {
+            for (PartitionUpdate update : updates.values())
+                txnWriter.append(update.unfilteredIterator());
+
+            return txnWriter.finish(true, cfs.getStorageHandler()).iterator().next();
+        }
+    }
+
     @Test
     public void testGetApproximateKeyCount() throws Exception
     {
@@ -1496,16 +1528,60 @@ public class SSTableReaderTest
     @Test
     public void testSSTableFlushBloomFilterReachedLimit() throws Exception
     {
+        testSSTableFlushBloomFilterMemoryLimit(false);
+    }
+
+    @Test
+    public void testSSTableFlushBloomFilterIgnoreMemoryLimit() throws Exception
+    {
+        testSSTableFlushBloomFilterMemoryLimit(true);
+    }
+
+    private void testSSTableFlushBloomFilterMemoryLimit(boolean ignoreMemoryLimitOnFlush) throws Exception
+    {
         final int numKeys = 100; // will use about 128 bytes
         final Keyspace keyspace = Keyspace.open(KEYSPACE1);
         final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
 
         SSTableReader sstable;
-        long bfSpace = BloomFilter.memoryLimiter.maxMemory -  BloomFilter.memoryLimiter.memoryAllocated() - 100;
+        long bfSpace = BloomFilter.memoryLimiter.maxMemory - BloomFilter.memoryLimiter.memoryAllocated() - 100;
         try
         {
-            BloomFilter.memoryLimiter.increment(bfSpace);
+            System.setProperty(BloomFilter.IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP, Boolean.toString(ignoreMemoryLimitOnFlush));
+            BloomFilter.memoryLimiter.increment(bfSpace, true);
             sstable = getNewSSTable(cfs, numKeys, 1);
+            if (ignoreMemoryLimitOnFlush)
+            {
+                Assert.assertTrue(PathUtils.exists(sstable.descriptor.pathFor(Component.FILTER)));
+                Assert.assertNotSame(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
+            }
+            else
+            {
+                Assert.assertFalse(PathUtils.exists(sstable.descriptor.pathFor(Component.FILTER)));
+                Assert.assertSame(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
+            }
+        }
+        finally
+        {
+            // reset
+            BloomFilter.memoryLimiter.decrement(bfSpace);
+        }
+    }
+
+    @Test
+    public void testSSTableNonFlushBloomFilterDoesNotIgnoreMemoryLimit() throws Exception
+    {
+        final int numKeys = 100; // will use about 128 bytes
+        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
+
+        SSTableReader sstable;
+        long bfSpace = BloomFilter.memoryLimiter.maxMemory - BloomFilter.memoryLimiter.memoryAllocated() - 100;
+        try
+        {
+            System.setProperty(BloomFilter.IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP, "true");
+            BloomFilter.memoryLimiter.increment(bfSpace, true);
+            sstable = trackReleaseableRef(() -> getNewSSTable(cfs, numKeys, 1, OperationType.WRITE));
             Assert.assertFalse(PathUtils.exists(sstable.descriptor.pathFor(Component.FILTER)));
             Assert.assertSame(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
         }

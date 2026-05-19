@@ -37,6 +37,7 @@ import org.junit.Test;
 
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -54,6 +55,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.USE_MICROM
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class BloomFilterTest
@@ -102,6 +105,7 @@ public class BloomFilterTest
     @After
     public void destroy()
     {
+        System.clearProperty(BloomFilter.IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP);
         bfInvHashes.close();
         assertEquals(0, memoryLimiter.memoryAllocated());
     }
@@ -294,6 +298,60 @@ public class BloomFilterTest
 
                 assertEquals(memBefore, memoryLimiter.memoryAllocated());
             }
+        }
+    }
+
+    @Test
+    public void testMaxMemoryExceededForNonFlush()
+    {
+        long allocSize = 2L * (1 << 20);
+        double fpChance = 0.01;
+
+        long initialOOM = FilterFactory.metrics.oomErrors();
+        MemoryLimiter memoryLimiter = new MemoryLimiter(1, "Allocating %s for bloom filter would reach max of %s (current %s)");
+        try (IFilter filter = FilterFactory.getFilterForWrite(allocSize, fpChance, OperationType.COMPACTION, memoryLimiter))
+        {
+            assertSame(FilterFactory.AlwaysPresent, filter);
+            assertEquals(initialOOM + 1, FilterFactory.metrics.oomErrors());
+        }
+
+        System.setProperty(BloomFilter.IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP, "true");
+        try (IFilter filter = FilterFactory.getFilterForWrite(allocSize, fpChance, OperationType.COMPACTION, memoryLimiter))
+        {
+            assertSame(FilterFactory.AlwaysPresent, filter);
+            assertEquals(initialOOM + 2, FilterFactory.metrics.oomErrors());
+        }
+    }
+
+    @Test
+    public void testMaxMemoryExceededForFlush()
+    {
+        long allocSize = 2L * (1 << 20);
+        double fpChance = 0.01;
+
+        long initialOOM = FilterFactory.metrics.oomErrors();
+        MemoryLimiter memoryLimiter = new MemoryLimiter(1, "Allocating %s for bloom filter would reach max of %s (current %s)");
+        try (IFilter filter = FilterFactory.getFilterForWrite(allocSize, fpChance, OperationType.FLUSH, memoryLimiter))
+        {
+            assertSame(FilterFactory.AlwaysPresent, filter);
+            assertEquals(initialOOM + 1, FilterFactory.metrics.oomErrors());
+        }
+    }
+
+    @Test
+    public void testMaxMemoryExceededForFlushIgnoreMemoryLimit()
+    {
+        long allocSize = 2L * (1 << 20);
+        double fpChance = 0.01;
+
+        long initialOOM = FilterFactory.metrics.oomErrors();
+        MemoryLimiter memoryLimiter = new MemoryLimiter(1, "Allocating %s for bloom filter would reach max of %s (current %s)");
+        System.setProperty(BloomFilter.IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP, "true");
+        try (IFilter filter = FilterFactory.getFilterForWrite(allocSize, fpChance, OperationType.FLUSH, memoryLimiter))
+        {
+            assertNotSame(FilterFactory.AlwaysPresent, filter);
+            assertTrue(filter.offHeapSize() > 0);
+            assertEquals(initialOOM, FilterFactory.metrics.oomErrors());
         }
     }
 
