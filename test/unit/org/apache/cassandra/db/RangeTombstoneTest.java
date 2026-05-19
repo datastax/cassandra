@@ -194,12 +194,11 @@ public class RangeTombstoneTest
         Collection<RangeTombstone> rt = rangeTombstones(partition);
         assertEquals(0, rt.size());
 
-        // Note: if the slice start matches the tombstone end, the result is transformed to deleted row.
-        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(11).toIncl(16).build());
+        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(11).toIncl(15).build());
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 
-        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(19).toIncl(25).build());
+        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(20).toIncl(25).build());
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 
@@ -231,7 +230,7 @@ public class RangeTombstoneTest
         rt = rangeTombstones(partition);
         assertEquals(0, rt.size());
 
-        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(1).toIncl(6).build());
+        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(1).toIncl(5).build());
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 
@@ -239,7 +238,7 @@ public class RangeTombstoneTest
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 
-        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(4).toIncl(6).build());
+        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(5).toIncl(6).build());
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 

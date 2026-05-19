@@ -97,6 +97,7 @@ public abstract class AbstractCell<V> extends Cell<V>
         return new BufferCell(column, isTombstone() ? newTimestamp - 1 : newTimestamp, ttl(), localDeletionTime(), buffer(), path());
     }
 
+    @Override
     public int dataSize()
     {
         CellPath path = path();
