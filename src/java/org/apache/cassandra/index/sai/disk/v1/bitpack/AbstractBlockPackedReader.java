@@ -113,6 +113,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
      * @param targetValue Value to search for
      * @return The row ID of the floor value, or -1 if the target is smaller than all values
      */
+    @Override
     public long floorRowId(long targetValue)
     {
         // Check if we're before the start of the array

@@ -61,6 +61,65 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 @NotThreadSafe
 public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
 {
+    @ThreadSafe
+    public static class Factory extends SkinnyPrimaryKeyMap.Factory
+    {
+        private final IndexComponents.ForRead perSSTableComponents;
+        private final ClusteringComparator clusteringComparator;
+        private final KeyLookup clusteringKeyReader;
+        private FileHandle clusteringKeyBlockOffsetsFile = null;
+        private FileHandle clustingingKeyBlocksFile = null;
+
+        public Factory(IndexComponents.ForRead perSSTableComponents,
+                       OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
+                       SSTableReader sstable)
+        {
+            super(perSSTableComponents, primaryKeyFactory, sstable);
+
+            try
+            {
+                this.perSSTableComponents = perSSTableComponents;
+                this.clusteringKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle();
+                this.clustingingKeyBlocksFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle();
+                this.clusteringComparator = sstable.metadata().comparator;
+                NumericValuesMeta clusteringKeyBlockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)));
+                KeyLookupMeta clusteringKeyMeta = new KeyLookupMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS)));
+                this.clusteringKeyReader = new KeyLookup(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile,
+                                                         clusteringKeyMeta, clusteringKeyBlockOffsetsMeta);
+            }
+            catch (Throwable t)
+            {
+                throw Throwables.unchecked(Throwables.close(t, clusteringKeyBlockOffsetsFile, clustingingKeyBlocksFile));
+            }
+        }
+
+        @Override
+        @SuppressWarnings({ "resource", "RedundantSuppression" })
+        public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
+        {
+            LongArray rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
+            LongArray partitionIdToToken = new LongArray.DeferredLongArray(partitionReaderFactory::open);
+            try
+            {
+
+                return new WidePrimaryKeyMap(rowIdToToken, partitionIdToToken, partitionKeyReader.openCursor(),
+                                             clusteringKeyReader.openCursor(), partitioner, primaryKeyFactory, clusteringComparator, sstableId,
+                                             hasStaticColumns);
+            }
+            catch (IOException e)
+            {
+                throw new UncheckedIOException(e);
+            }
+        }
+
+        @Override
+        public void close()
+        {
+            super.close();
+            FileUtils.closeQuietly(Arrays.asList(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile));
+        }
+    }
+
     private final ClusteringComparator clusteringComparator;
     private final KeyLookup.Cursor clusteringKeyCursor;
 
@@ -234,64 +293,5 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         if (nextPartitionRowId == -1)
             nextPartitionRowId = partitionArray.length();
         return nextPartitionRowId;
-    }
-
-    @ThreadSafe
-    public static class Factory extends SkinnyPrimaryKeyMap.Factory
-    {
-        private final IndexComponents.ForRead perSSTableComponents;
-        private final ClusteringComparator clusteringComparator;
-        private final KeyLookup clusteringKeyReader;
-        private FileHandle clusteringKeyBlockOffsetsFile = null;
-        private FileHandle clustingingKeyBlocksFile = null;
-
-        public Factory(IndexComponents.ForRead perSSTableComponents,
-                       OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
-                       SSTableReader sstable)
-        {
-            super(perSSTableComponents, primaryKeyFactory, sstable);
-
-            try
-            {
-                this.perSSTableComponents = perSSTableComponents;
-                this.clusteringKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle();
-                this.clustingingKeyBlocksFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle();
-                this.clusteringComparator = sstable.metadata().comparator;
-                NumericValuesMeta clusteringKeyBlockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)));
-                KeyLookupMeta clusteringKeyMeta = new KeyLookupMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS)));
-                this.clusteringKeyReader = new KeyLookup(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile,
-                                                         clusteringKeyMeta, clusteringKeyBlockOffsetsMeta);
-            }
-            catch (Throwable t)
-            {
-                throw Throwables.unchecked(Throwables.close(t, clusteringKeyBlockOffsetsFile, clustingingKeyBlocksFile));
-            }
-        }
-
-        @Override
-        @SuppressWarnings({ "resource", "RedundantSuppression" })
-        public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
-        {
-            LongArray rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
-            LongArray partitionIdToToken = new LongArray.DeferredLongArray(partitionReaderFactory::open);
-            try
-            {
-
-                return new WidePrimaryKeyMap(rowIdToToken, partitionIdToToken, partitionKeyReader.openCursor(),
-                                             clusteringKeyReader.openCursor(), partitioner, primaryKeyFactory, clusteringComparator, sstableId,
-                                             hasStaticColumns);
-            }
-            catch (IOException e)
-            {
-                throw new UncheckedIOException(e);
-            }
-        }
-
-        @Override
-        public void close()
-        {
-            super.close();
-            FileUtils.closeQuietly(Arrays.asList(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile));
-        }
     }
 }

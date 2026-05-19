@@ -34,7 +34,7 @@ public enum IndexComponentType
      */
     META("Meta"),
     /**
-     * KDTree written by {@code BKDWriter} indexes mappings of term to one ore more segment row IDs
+     * KDTree written by {@code BKDWriter} indexes mappings of term to one or more segment row IDs
      * (segment row ID = SSTable row ID - segment row ID offset).
      *
      * V1
