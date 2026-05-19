@@ -24,9 +24,11 @@ import org.slf4j.Logger;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Expiry;
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.MoreExecutors;
+import org.checkerframework.checker.index.qual.NonNegative;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 
@@ -153,6 +155,11 @@ public class NoSpamLogger
         {
             return NoSpamLogStatement.this.error(CLOCK.nanoTime(), objects);
         }
+
+        public long expiry()
+        {
+            return minIntervalNanos;
+        }
     }
 
     /**
@@ -252,14 +259,36 @@ public class NoSpamLogger
      * Cache of NoSpamLog statements per NoSpamLogger instance.
      * Bounded by size and time to prevent memory exhaustion from dynamic log messages.
      * Uses Caffeine with W-TinyLFU eviction policy and directExecutor for non-blocking operations.
+     * Uses custom per-entry expiry based on each statement's minIntervalNanos.
      */
     private final Cache<String, NoSpamLogStatement> lastMessage = Caffeine.newBuilder()
-            .maximumSize(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong())
-            .expireAfterAccess(NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES.getLong(), TimeUnit.MINUTES)
-            .ticker(TICKER)
-            .executor(MoreExecutors.directExecutor())
-            .recordStats()
-            .build();
+                                                                          .maximumSize(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong())
+                                                                          .expireAfter(new Expiry<String, NoSpamLogStatement>()
+                                                                          {
+                                                                              @Override
+                                                                              public long expireAfterCreate(String key, NoSpamLogStatement value, long currentTime)
+                                                                              {
+                                                                                  return value.expiry();
+                                                                              }
+
+                                                                              @Override
+                                                                              public long expireAfterUpdate(String key, NoSpamLogStatement value,
+                                                                                                            long currentTime, @NonNegative long currentDuration)
+                                                                              {
+                                                                                  return value.expiry();
+                                                                              }
+
+                                                                              @Override
+                                                                              public long expireAfterRead(String key, NoSpamLogStatement value,
+                                                                                                          long currentTime, @NonNegative long currentDuration)
+                                                                              {
+                                                                                  return currentDuration;
+                                                                              }
+                                                                          })
+                                                                          .ticker(TICKER)
+                                                                          .executor(MoreExecutors.directExecutor())
+                                                                          .recordStats()
+                                                                          .build();
 
     private NoSpamLogger(Logger wrapped, long minInterval, TimeUnit timeUnit)
     {

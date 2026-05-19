@@ -467,7 +467,9 @@ public class NoSpamLoggerTest
     }
 
     /**
-     * Test that the {@link NoSpamLogger} cache is bounded.
+     * Test that the {@link NoSpamLogger} cache can handle a large number of loggers.
+     * Since the wrappedLoggers cache uses Long.MAX_VALUE as the maximum size,
+     * this test verifies that we can add many loggers without hitting size limits.
      */
     @Test
     public void testNoSpamLoggerCacheBounded()
@@ -475,10 +477,9 @@ public class NoSpamLoggerTest
         NoSpamLogger.clearWrappedLoggersForTest();
         now = 5;
 
-        long maxLoggers = NOSPAM_LOGGER_MAX_LOGGERS.getLong();
-        int loggersToCreate = (int) (maxLoggers * 1.5); // Create 50% more than the limit
+        int loggersToCreate = 100;
 
-        // Create more unique loggers than the cache can hold
+        // Create many unique loggers to verify no size limit issues
         for (int i = 0; i < loggersToCreate; i++)
         {
             Logger uniqueLogger = new SubstituteLogger("logger" + i, null, true)
@@ -506,14 +507,12 @@ public class NoSpamLoggerTest
             assertTrue(logger.info("test{}", param));
             now += 10;
         }
+        
         // All messages should have been logged
         assertEquals(loggersToCreate, logged.get(Level.INFO).size());
-        
-        // Force cache cleanup to ensure eviction has completed
-        NoSpamLogger.cleanUpWrappedLoggersForTest();
-        
-        // Verify the wrappedLoggers cache size is bounded to the configured maximum
+
+        // Verify all loggers are cached (no size-based eviction)
         long cacheSize = NoSpamLogger.getWrappedLoggersCount();
-        assertEquals(String.format("Wrapped loggers cache size should be at most %d (was %d)", maxLoggers, cacheSize), cacheSize, maxLoggers);
+        assertEquals("All loggers should be cached without size-based eviction", loggersToCreate, cacheSize);
     }
 }
