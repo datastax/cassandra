@@ -27,6 +27,8 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.utils.Pair;
 import org.assertj.core.api.Assertions;
 
@@ -93,18 +95,25 @@ public class MultiRangeReadCommandCQLTest extends ReadCommandCQLTester<MultiRang
                           multiRangeError);
 
         // test ANN index-based ORDER BY
-        createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY (k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
-        String truncationError = "no viable alternative at input '..'";
-        assertToCQLString("SELECT * FROM %s ORDER BY v ANN OF [1, 2] LIMIT 10",
-                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE (token(k) <= ? OR token(k) > ?) ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
-                          truncationError);
-        assertToCQLString("SELECT * FROM %s WHERE n = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
-                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND n = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE (token(k) <= ? OR token(k) > ?) AND n = ? ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
-                          truncationError);
+        SAIUtil.withVersionsOnOrAfter(Version.JVECTOR_EARLIEST, version -> {
+
+            createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY (k, c))");
+            createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+            // the synthetic score column makes us not to send a wildcard column filter but individual column selections
+            String columns = version.onOrAfter(Version.SYNTHETIC_COLUMN_EARLIEST) ? "n, v" : "*";
+            String truncationError = "no viable alternative at input '..'";
+
+            assertToCQLString("SELECT * FROM %s ORDER BY v ANN OF [1, 2] LIMIT 10",
+                              "SELECT " + columns + " FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
+                              "SELECT " + columns + " FROM %s WHERE (token(k) <= ? OR token(k) > ?) ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
+                              truncationError);
+            assertToCQLString("SELECT * FROM %s WHERE n = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
+                              "SELECT " + columns + " FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND n = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
+                              "SELECT " + columns + " FROM %s WHERE (token(k) <= ? OR token(k) > ?) AND n = ? ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
+                              truncationError);
+        });
     }
 
     @Override

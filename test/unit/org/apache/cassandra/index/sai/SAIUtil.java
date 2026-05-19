@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
@@ -133,6 +134,32 @@ public class SAIUtil
         catch (Exception e)
         {
             throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Runs the provided tester for each SAI version on or after the provided version.
+     *
+     * @param version the version to start testing from
+     * @param tester a tester consuming the tested version
+     */
+    public static void withVersionsOnOrAfter(Version version, Consumer<Version> tester)
+    {
+        Version currentVersion = currentVersion();
+        try
+        {
+            for (Version testedVersion : Version.ALL)
+            {
+                if (!testedVersion.onOrAfter(version))
+                    continue;
+
+                SAIUtil.setCurrentVersion(testedVersion);
+                tester.accept(testedVersion);
+            }
+        }
+        finally
+        {
+            SAIUtil.setCurrentVersion(currentVersion);
         }
     }
 
