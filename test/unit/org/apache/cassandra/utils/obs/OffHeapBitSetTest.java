@@ -29,6 +29,8 @@ import org.junit.Test;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -47,7 +49,7 @@ public class OffHeapBitSetTest
 
     private void testOffHeapSerialization(boolean oldBfFormat) throws Exception
     {
-        try (OffHeapBitSet bs = new OffHeapBitSet(100000, memoryLimiter))
+        try (OffHeapBitSet bs = new OffHeapBitSet(100000, memoryLimiter, true))
         {
             for (long i = 0; i < bs.capacity(); i++)
                 if (random.nextBoolean())
@@ -78,7 +80,7 @@ public class OffHeapBitSetTest
     public void testBitSetGetClear() throws Exception
     {
         int size = Integer.MAX_VALUE / 4000;
-        try (OffHeapBitSet bs = new OffHeapBitSet(size, memoryLimiter))
+        try (OffHeapBitSet bs = new OffHeapBitSet(size, memoryLimiter, true))
         {
             List<Integer> randomBits = Lists.newArrayList();
             for (int i = 0; i < 10; i++)
@@ -98,17 +100,38 @@ public class OffHeapBitSetTest
         }
     }
 
+    @Test
+    public void testDoNotFailOnExceedingLimit() throws MemoryLimiter.ReachedMemoryLimitException
+    {
+        MemoryLimiter memoryLimiter = new MemoryLimiter(1000L, "Allocating %s for bloom filter would reach max of %s (current %s)");
+        long numBits = 10000000L;
+        try (OffHeapBitSet bs = new OffHeapBitSet(numBits, memoryLimiter, false))
+        {
+            assertThat(bs).isNotNull();
+            assertThat(memoryLimiter.memoryAllocated()).isGreaterThan(memoryLimiter.maxMemory);
+        }
+    }
+
+    @Test
+    public void testFailOnExceedingLimit()
+    {
+        MemoryLimiter memoryLimiter = new MemoryLimiter(1000L, "Allocating %s for bloom filter would reach max of %s (current %s)");
+        long numBits = 10000000L;
+        assertThatThrownBy(() -> new OffHeapBitSet(numBits, memoryLimiter, true))
+        .isInstanceOf(MemoryLimiter.ReachedMemoryLimitException.class);
+    }
+
     @Test(expected = UnsupportedOperationException.class)
     public void testUnsupportedLargeSize() throws Exception
     {
         long size = 64L * Integer.MAX_VALUE + 1; // Max size 16G * 8 bits
-        OffHeapBitSet bs = new OffHeapBitSet(size, memoryLimiter);
+        OffHeapBitSet bs = new OffHeapBitSet(size, memoryLimiter, true);
     }
 
     @Test
     public void testInvalidIndex() throws Exception
     {
-        OffHeapBitSet bs = new OffHeapBitSet(10, memoryLimiter);
+        OffHeapBitSet bs = new OffHeapBitSet(10, memoryLimiter, true);
         int invalidIdx[] = {-1, 64, 1000};
 
         for (int i : invalidIdx)

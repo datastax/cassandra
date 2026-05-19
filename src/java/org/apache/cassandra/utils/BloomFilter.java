@@ -36,6 +36,12 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
 {
     private static final long maxMemory = CassandraRelevantProperties.BF_MAX_MEMORY_MB.getLong() << 20;
 
+    /**
+     * If true, Bloom filters ignore the memory limit during flush. CNDB uses this to avoid missing Bloom filters
+     * when reloading from remote storage.
+     */
+    public static final String IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP = CassandraRelevantProperties.BF_IGNORE_MEMORY_LIMIT_ON_FLUSH.getKey();
+
     public static final MemoryLimiter memoryLimiter = new MemoryLimiter(maxMemory != 0 ? maxMemory : Long.MAX_VALUE,
                                                                         "Allocating %s for Bloom filter would reach max of %s (current %s)");
 
@@ -63,6 +69,14 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         super(copy);
         this.hashCount = copy.hashCount;
         this.bitset = copy.bitset;
+    }
+
+    /**
+     * @return true to ignore bloom filter memory limit during flush
+     */
+    public static boolean ignoreMemoryLimitOnFlush()
+    {
+        return CassandraRelevantProperties.BF_IGNORE_MEMORY_LIMIT_ON_FLUSH.getBoolean();
     }
 
     /**

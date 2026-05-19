@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.writers.SSTableDataSink;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.guardrails.Threshold;
@@ -573,7 +574,7 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
             this.metadata = b.getTableMetadataRef();
             this.components = b.getComponents();
 
-            bf = FilterFactory.getFilter(b.getKeyCount(), b.getTableMetadataRef().getLocal().params.bloomFilterFpChance);
+            bf = FilterFactory.getFilterForWrite(b.getKeyCount(), b.getTableMetadataRef().getLocal().params.bloomFilterFpChance, b.getOperationType());
         }
 
         protected void flushBf()
@@ -636,6 +637,8 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
 
             return (B) this;
         }
+
+        protected abstract OperationType getOperationType();
 
         protected abstract SequentialWriter openDataWriter();
 
