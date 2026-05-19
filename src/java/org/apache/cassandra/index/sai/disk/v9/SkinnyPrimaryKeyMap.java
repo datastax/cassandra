@@ -98,17 +98,21 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
             {
                 this.perSSTableComponents = perSSTableComponents;
                 metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
+
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
                 this.tokensFile = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES).createFileHandle();
                 this.tokenReaderFactory = new BlockPackedReader(tokensFile, tokensMeta);
+
                 NumericValuesMeta partitionsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_SIZES)));
                 this.partitionsFile = perSSTableComponents.get(IndexComponentType.PARTITION_SIZES).createFileHandle();
                 this.partitionReaderFactory = new MonotonicBlockPackedReader(partitionsFile, partitionsMeta);
+
                 NumericValuesMeta partitionKeyBlockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS)));
                 KeyLookupMeta partitionKeysMeta = new KeyLookupMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCKS)));
                 this.partitionKeyBlocksFile = perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCKS).createFileHandle();
                 this.partitionKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS).createFileHandle();
                 this.partitionKeyReader = new KeyLookup(partitionKeyBlocksFile, partitionKeyBlockOffsetsFile, partitionKeysMeta, partitionKeyBlockOffsetsMeta);
+
                 this.partitioner = sstable.metadata().partitioner;
                 this.primaryKeyFactory = primaryKeyFactory;
                 this.sstableId = sstable.getId();
@@ -252,7 +256,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
 
     /**
      * Generic token collision detection that handles both ceiling and floor operations.
-     * Look for token collision by if the adjacent token in the token array matches the
+     * Look for token collision if the adjacent token in the token array matches the
      * current token. If we find a collision, we need to compare the partition key instead.
      *
      * @param primaryKey the key to search for
@@ -260,7 +264,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
      * @param direction  1 for ceiling (forward search), -1 for floor (backward search)
      * @return the adjusted row ID after collision detection
      */
-    protected long tokenCollisionDetection(PrimaryKey primaryKey, long rowId, int direction)
+    private long tokenCollisionDetection(PrimaryKey primaryKey, long rowId, int direction)
     {
         assert direction == 1 || direction == -1 : "Direction must be 1 (ceiling) or -1 (floor)";
 
