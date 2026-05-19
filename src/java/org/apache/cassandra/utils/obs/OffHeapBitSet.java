@@ -43,7 +43,7 @@ public class OffHeapBitSet implements IBitSet
     private final Memory bytes;
     private final MemoryLimiter memoryLimiter;
 
-    public OffHeapBitSet(long numBits, MemoryLimiter memoryLimiter) throws MemoryLimiter.ReachedMemoryLimitException
+    public OffHeapBitSet(long numBits, MemoryLimiter memoryLimiter, boolean failOnExceedingLimit) throws MemoryLimiter.ReachedMemoryLimitException
     {
         this.memoryLimiter = memoryLimiter;
         // returns the number of 64 bit words it would take to hold numBits
@@ -52,7 +52,7 @@ public class OffHeapBitSet implements IBitSet
             throw new UnsupportedOperationException("Bloom filter size is > 16GB, reduce the bloom_filter_fp_chance");
 
         long byteCount = wordCount * 8L;
-        bytes = allocate(byteCount, memoryLimiter); // Can possibly throw OOM, but we handle it in the caller
+        bytes = allocate(byteCount, memoryLimiter, failOnExceedingLimit); // Can possibly throw OOM, but we handle it in the caller
         // flush/clear the existing memory.
         clear();
     }
@@ -63,9 +63,9 @@ public class OffHeapBitSet implements IBitSet
         this.bytes = bytes;
     }
 
-    private static Memory allocate(long byteCount, MemoryLimiter memoryLimiter) throws MemoryLimiter.ReachedMemoryLimitException
+    private static Memory allocate(long byteCount, MemoryLimiter memoryLimiter, boolean failOnExceedingLimit) throws MemoryLimiter.ReachedMemoryLimitException
     {
-        memoryLimiter.increment(byteCount);
+        memoryLimiter.increment(byteCount, failOnExceedingLimit);
         try
         {
             return Memory.allocate(byteCount);
@@ -169,7 +169,7 @@ public class OffHeapBitSet implements IBitSet
     public static <I extends InputStream & DataInput> OffHeapBitSet deserialize(I in, boolean oldBfFormat, MemoryLimiter memoryLimiter) throws IOException, MemoryLimiter.ReachedMemoryLimitException
     {
         long byteCount = in.readInt() * 8L;
-        Memory memory = allocate(byteCount, memoryLimiter);
+        Memory memory = allocate(byteCount, memoryLimiter, true);
         if (oldBfFormat)
         {
             for (long i = 0; i < byteCount; )

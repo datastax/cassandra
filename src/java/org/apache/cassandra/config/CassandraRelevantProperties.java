@@ -85,6 +85,10 @@ public enum CassandraRelevantProperties
      */
     BF_FP_CHANCE_TOLERANCE("cassandra.bf.fp_chance_tolerance", "0.000001"),
     /**
+     * If true, Bloom filters ignore the memory limit during flush.
+     */
+    BF_IGNORE_MEMORY_LIMIT_ON_FLUSH("cassandra.bf.ignore_memory_limit_on_flush", "false"),
+    /**
      * The maximum memory to be used by all loaded bloom filters. If the limit is exceeded, pass-through filter will be
      * used until some filters get unloaded.
      */
