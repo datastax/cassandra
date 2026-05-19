@@ -3390,6 +3390,7 @@ public class BTree
             }
         }
 
+        @VisibleForTesting
         public boolean validateEmpty()
         {
             LeafOrBranchBuilder cur = leaf();
