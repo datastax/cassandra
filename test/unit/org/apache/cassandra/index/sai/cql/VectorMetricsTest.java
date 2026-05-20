@@ -104,8 +104,18 @@ public class VectorMetricsTest extends VectorTester
         boolean fusedPQ = JVectorVersionUtil.versionSupportsFused(version);
         long pqMemoryAfterFlush = vectorMetrics.quantizationMemoryBytes.sum();
 
-        assertEquals("Version " + version + " (FusedPQ: " + fusedPQ + ") PQ memory after flush",
-                    fusedPQ ? 0L : 1L, fusedPQ ? pqMemoryAfterFlush : (pqMemoryAfterFlush > 0 ? 1L : 0L));
+        if (fusedPQ)
+        {
+            // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
+            assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ",
+                        0L, pqMemoryAfterFlush);
+        }
+        else
+        {
+            // Without FusedPQ, PQ vectors are stored separately, so we expect some memory usage
+            assertTrue("Version " + version + " should have PQ memory without FusedPQ",
+                      pqMemoryAfterFlush > 0);
+        }
         
         assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum()); // unique vectors means no cache required
         assertEquals(1, vectorMetrics.onDiskGraphsCount.sum());
@@ -114,8 +124,18 @@ public class VectorMetricsTest extends VectorTester
         compact();
         long pqMemoryAfterCompaction = vectorMetrics.quantizationMemoryBytes.sum();
 
-        assertEquals("Version " + version + " (FusedPQ: " + fusedPQ + ") PQ memory after compaction",
-                    fusedPQ ? 0L : 1L, fusedPQ ? pqMemoryAfterCompaction : (pqMemoryAfterCompaction > 0 ? 1L : 0L));
+        if (fusedPQ)
+        {
+            // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
+            assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ after compaction",
+                        0L, pqMemoryAfterCompaction);
+        }
+        else
+        {
+            // Without FusedPQ, PQ vectors are stored separately, so we expect some memory usage
+            assertTrue("Version " + version + " should have PQ memory without FusedPQ after compaction",
+                      pqMemoryAfterCompaction > 0);
+        }
         
         assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum()); // unique vectors means no cache required
         assertEquals(1, vectorMetrics.onDiskGraphsCount.sum());
