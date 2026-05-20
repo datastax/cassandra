@@ -61,6 +61,9 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
         // effectively disable the scheduled monitoring task so we control it manually for better test stability
         CassandraRelevantProperties.MONITORING_REPORT_INTERVAL_MS.setInt((int) TimeUnit.HOURS.toMillis(1));
 
+        // enable term statistics, same as in SAITester
+        CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.setBoolean(true);
+
         try (Cluster cluster = init(Cluster.build(1)
                                            .withConfig(c -> c.set("slow_query_log_timeout_in_ms", SLOW_QUERY_LOG_TIMEOUT_IN_MS))
                                            .withInstanceInitializer(BB::install)
