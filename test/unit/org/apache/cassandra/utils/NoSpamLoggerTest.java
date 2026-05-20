@@ -351,10 +351,10 @@ public class NoSpamLoggerTest
             assertEquals(1, logged.get(Level.INFO).size());
             assertEquals("Cache should still contain 1 statement", 1, logger.getStatementsCount());
 
-            // Advance BOTH clocks by more than 1 minute
+            // Advance BOTH clocks by more than `minIntervalInseconds` seconds
             // `now` is used for rate limiting (NoSpamLogger.CLOCK)
             // `tickerTime` is used for cache expiration (Caffeine's Ticker)
-            long advanceTime = TimeUnit.MINUTES.toNanos(minIntervalInseconds + 1);
+            long advanceTime = TimeUnit.SECONDS.toNanos(minIntervalInseconds + 1);
             now += advanceTime;
             tickerTime += advanceTime;
             
