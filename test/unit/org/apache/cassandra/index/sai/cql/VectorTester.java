@@ -222,12 +222,6 @@ public class VectorTester extends SAITester
         {
             SAIUtil.setEnableNVQ(ENABLE_NVQ);
         }
-
-        @Before
-        public void setEnableFused()
-        {
-            SAIUtil.setEnableFused(ENABLE_FUSED);
-        }
     }
 
     /**

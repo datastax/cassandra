@@ -118,30 +118,6 @@ public class SAIUtil
         }
     }
 
-    /**
-     * @deprecated This method is deprecated as FusedPQ is now automatically enabled for version FA and later.
-     * This method only affects pre-FA versions and is kept for backward compatibility with existing tests.
-     * For FA+ versions, FusedPQ is always enabled regardless of this setting.
-     */
-    @Deprecated
-    public static void setEnableFused(boolean enableFused)
-    {
-        try
-        {
-            CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.setBoolean(enableFused);
-            Field field = JVectorVersionUtil.class.getDeclaredField("ENABLE_FUSED");
-            field.setAccessible(true);
-            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-            modifiersField.setAccessible(true);
-            modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-            field.set(null, enableFused);
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
-    }
-
     public static class CustomVersionSelector implements Version.Selector
     {
         private final Version defaultVersion;
