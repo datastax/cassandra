@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.utils;
 
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -165,12 +166,12 @@ public class NoSpamLogger
     /**
      * Cache of NoSpamLogger instances per Logger object.
      * Bounded by size and time to prevent memory exhaustion.
-     * Uses Caffeine with W-TinyLFU eviction policy and directExecutor for non-blocking operations.
+     * Uses Caffeine with W-TinyLFU eviction policy.
      */
     private static final Cache<Logger, NoSpamLogger> wrappedLoggers = Caffeine.newBuilder()
             .maximumSize(NOSPAM_LOGGER_MAX_LOGGERS.getLong())
             .expireAfterAccess(NOSPAM_LOGGER_LOGGERS_EXPIRE_MINUTES.getLong(), TimeUnit.MINUTES)
-            .executor(MoreExecutors.directExecutor())
+            .executor(ForkJoinPool.commonPool())
             .recordStats()
             .build();
 
@@ -248,7 +249,7 @@ public class NoSpamLogger
     /**
      * Cache of NoSpamLog statements per NoSpamLogger instance.
      * Bounded by size and time to prevent memory exhaustion from dynamic log messages.
-     * Uses Caffeine with W-TinyLFU eviction policy and directExecutor for non-blocking operations.
+     * Uses Caffeine with W-TinyLFU eviction policy.
      * Uses custom per-entry expiry based on each statement's minIntervalNanos.
      */
     private final Cache<String, NoSpamLogStatement> lastMessage = Caffeine.newBuilder()
@@ -276,7 +277,7 @@ public class NoSpamLogger
                                                                               }
                                                                           })
                                                                           .ticker(TICKER)
-                                                                          .executor(MoreExecutors.directExecutor())
+                                                                          .executor(ForkJoinPool.commonPool())
                                                                           .recordStats()
                                                                           .build();
 
