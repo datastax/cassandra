@@ -191,10 +191,7 @@ public class VectorTester extends SAITester
         @Parameterized.Parameter(1)
         public boolean ENABLE_NVQ;
 
-        @Parameterized.Parameter(2)
-        public boolean ENABLE_FUSED;
-
-        @Parameterized.Parameters(name = "{0} {1} {2}")
+        @Parameterized.Parameters(name = "{0} {1}")
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
@@ -204,10 +201,7 @@ public class VectorTester extends SAITester
                                   var enableNVQ = JVectorVersionUtil.versionSupportsNVQ(v)
                                                   ? new Boolean[]{ true, false }
                                                   : new Boolean[]{ false };
-                                  // For FA+, FusedPQ is always enabled (tied to version)
-                                  // For pre-FA versions, FusedPQ is not supported
-                                  boolean enableFused = JVectorVersionUtil.versionSupportsFused(v);
-                                  return Arrays.stream(enableNVQ).map(nvq -> new Object[]{ v, nvq, enableFused });
+                                  return Arrays.stream(enableNVQ).map(nvq -> new Object[]{ v, nvq });
                               }).collect(Collectors.toList());
         }
 
