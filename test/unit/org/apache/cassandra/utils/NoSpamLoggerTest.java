@@ -365,7 +365,6 @@ public class NoSpamLoggerTest
             assertEquals("Cache should be empty after expiration", 0, logger.getStatementsCount());
 
             // The statement should have expired from cache, so it should log again
-            // even though we haven't waited for the rate limit interval
             assertTrue("Statement should have expired and can log again",
                       logger.info("test{}", param));
             assertEquals(2, logged.get(Level.INFO).size());
