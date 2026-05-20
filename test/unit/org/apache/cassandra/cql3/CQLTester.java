@@ -2307,7 +2307,20 @@ public abstract class CQLTester
             var ea = itA.next();
             var eb = itB.next();
             var espec = itSpec.next();
-            var diff = espec.type.compare(ea, eb);
+            var diff = 0;
+            if (ea == null || eb == null)
+            {
+                diff = ea == null ? (eb == null ? 0 : -1) : 1;
+            }
+            else try
+            {
+                diff = espec.type.compare(ea, eb);
+            }
+            catch (UnsupportedOperationException e)
+            {
+                diff = ByteBufferUtil.compareUnsigned(ea, eb);
+            }
+
             if (diff != 0)
                 return diff;
         }
