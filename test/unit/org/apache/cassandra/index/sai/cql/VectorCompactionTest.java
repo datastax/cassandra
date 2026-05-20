@@ -89,7 +89,8 @@ abstract public class VectorCompactionTest extends VectorTester
     }
 
     @Before
-    public void setEnableNVQ() {
+    public void setEnableNVQ()
+    {
         SAIUtil.setEnableNVQ(enableNVQ);
     }
 

@@ -21,13 +21,6 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 
 public class JVectorVersionUtil
 {
-    /**
-     * @deprecated This property is deprecated and no longer has any effect. FusedPQ is now automatically enabled
-     * for all indexes using version FA or later (jvector file format version 6+). The property cannot be used to
-     * disable FusedPQ for FA+ versions.
-     */
-    @Deprecated
-    public static final boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
     public static final boolean ENABLE_NVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean();
     public static final int NUM_SUB_VECTORS = CassandraRelevantProperties.SAI_VECTOR_NVQ_NUM_SUB_VECTORS.getInt();
 
