@@ -181,16 +181,6 @@ public class NoSpamLogger
     }
 
     /**
-     * Forces eviction of entries from the wrappedLoggers cache.
-     * This is useful for testing to ensure cache size limits are enforced immediately.
-     */
-    @VisibleForTesting
-    static void cleanUpWrappedLoggersForTest()
-    {
-        wrappedLoggers.cleanUp();
-    }
-
-    /**
      * Returns the current size of the {@link NoSpamLogger} cache.
      * This is useful for testing cache eviction behavior.
      *

@@ -18,8 +18,6 @@
 */
 package org.apache.cassandra.utils;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_MAX_LOGGERS;
-import static org.apache.cassandra.config.CassandraRelevantProperties.NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES;
 import static org.junit.Assert.*;
 
 import java.util.ArrayDeque;
@@ -336,13 +334,13 @@ public class NoSpamLoggerTest
     @Test
     public void testNoSpamLogStatementsCacheTimeBasedEviction()
     {
-        System.setProperty("cassandra.nospam_logger.statements_expire_minutes", "1");
         try
         {
+            int minIntervalInseconds = 10;
             NoSpamLogger.clearWrappedLoggersForTest();
             now = 0;
             tickerTime = 0;
-            NoSpamLogger logger = NoSpamLogger.getLogger(mock, 5, TimeUnit.NANOSECONDS);
+            NoSpamLogger logger = NoSpamLogger.getLogger(mock, minIntervalInseconds, TimeUnit.SECONDS);
 
             assertTrue(logger.info("test{}", param));
             assertEquals(1, logged.get(Level.INFO).size());
@@ -356,7 +354,7 @@ public class NoSpamLoggerTest
             // Advance BOTH clocks by more than 1 minute
             // `now` is used for rate limiting (NoSpamLogger.CLOCK)
             // `tickerTime` is used for cache expiration (Caffeine's Ticker)
-            long advanceTime = TimeUnit.MINUTES.toNanos(NOSPAM_LOGGER_STATEMENTS_EXPIRE_MINUTES.getLong() + 1);
+            long advanceTime = TimeUnit.MINUTES.toNanos(minIntervalInseconds + 1);
             now += advanceTime;
             tickerTime += advanceTime;
             
@@ -375,7 +373,6 @@ public class NoSpamLoggerTest
         }
         finally
         {
-            System.clearProperty("cassandra.nospam_logger.statements_expire_minutes");
             NoSpamLogger.clearWrappedLoggersForTest();
         }
     }
