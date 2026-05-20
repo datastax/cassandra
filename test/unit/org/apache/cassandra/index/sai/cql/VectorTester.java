@@ -204,12 +204,10 @@ public class VectorTester extends SAITester
                                   var enableNVQ = JVectorVersionUtil.versionSupportsNVQ(v)
                                                   ? new Boolean[]{ true, false }
                                                   : new Boolean[]{ false };
-                                  var enableFused = JVectorVersionUtil.versionSupportsFused(v)
-                                                    ? new Boolean[]{ true, false }
-                                                    : new Boolean[]{ false };
-                                  return Arrays.stream(enableNVQ).flatMap(nvq ->
-                                      Arrays.stream(enableFused).map(fused -> new Object[]{ v, nvq, fused })
-                                  );
+                                  // For FA+, FusedPQ is always enabled (tied to version)
+                                  // For pre-FA versions, FusedPQ is not supported
+                                  boolean enableFused = JVectorVersionUtil.versionSupportsFused(v);
+                                  return Arrays.stream(enableNVQ).map(nvq -> new Object[]{ v, nvq, enableFused });
                               }).collect(Collectors.toList());
         }
 

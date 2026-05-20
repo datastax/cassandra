@@ -118,6 +118,12 @@ public class SAIUtil
         }
     }
 
+    /**
+     * @deprecated This method is deprecated as FusedPQ is now automatically enabled for version FA and later.
+     * This method only affects pre-FA versions and is kept for backward compatibility with existing tests.
+     * For FA+ versions, FusedPQ is always enabled regardless of this setting.
+     */
+    @Deprecated
     public static void setEnableFused(boolean enableFused)
     {
         try

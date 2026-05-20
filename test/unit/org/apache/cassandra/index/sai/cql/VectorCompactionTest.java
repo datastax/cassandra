@@ -52,9 +52,7 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 @Ignore
 @RunWith(Parameterized.class)
@@ -404,6 +402,14 @@ abstract public class VectorCompactionTest extends VectorTester
                                 // Note that this tolerance failed at 0.001f, but passes at 0.01f. Assuming this is
                                 // reasonable for now.
                                 assertEquals(1.0f, quantizedSim, 0.01f);
+                            }
+                            else if (numRows >= MIN_PQ_ROWS)
+                            {
+                                // With FA + fused PQ, PQ metadata is present and used by the graph, but there is no
+                                // standalone CompressedVectors instance to validate against.
+                                // TODO: further investigate what other checks are needed here
+                                assertEquals("Expected fused PQ path only for FA+", Version.FA, version);
+                                assertNotNull("Expected PQ metadata for FA fused PQ", searcher.getPQ());
                             }
                             else
                             {
