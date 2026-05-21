@@ -199,11 +199,6 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         assert clusteringRowId < rowIdToTokenArray.length() : "Row ID should be negative and not after the last row";
 
         Clustering<?> foundClustering = readClusteringKey(clusteringRowId);
-        // STATIC CLUSTERING should return only one row representing the entire partition.
-        // Thus, it returns the last row to avoid emitting more rows from the static partition.
-        if (foundClustering.isEmpty())
-            return startOfNextPartition(rowId) - 1;
-
         // Check if this is an exact match by comparing the clustering key
         int cmp = clusteringComparator.compare(foundClustering, key.clustering());
         if (cmp == 0)

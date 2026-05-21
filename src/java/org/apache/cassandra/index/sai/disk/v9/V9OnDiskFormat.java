@@ -60,6 +60,7 @@ public class V9OnDiskFormat extends V8OnDiskFormat
                                                                                             IndexComponentType.GROUP_META,
                                                                                             IndexComponentType.ROW_TO_TOKEN,
                                                                                             IndexComponentType.ROW_TO_PARTITION,
+                                                                                            IndexComponentType.PARTITION_TO_SIZE,
                                                                                             IndexComponentType.PARTITION_KEY_BLOCKS,
                                                                                             IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS,
                                                                                             IndexComponentType.CLUSTERING_KEY_BLOCKS,
@@ -115,6 +116,7 @@ public class V9OnDiskFormat extends V8OnDiskFormat
             case GROUP_META:
             case ROW_TO_TOKEN:
             case ROW_TO_PARTITION:
+            case PARTITION_TO_SIZE:
             case PARTITION_KEY_BLOCKS:
             case CLUSTERING_KEY_BLOCKS:
             case PARTITION_KEY_BLOCK_OFFSETS:
