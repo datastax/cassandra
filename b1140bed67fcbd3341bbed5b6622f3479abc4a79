@@ -1,0 +1,3 @@
+Accidentally, metroHash was used instead of xxHash3.
+Both have very similar performance, and both are high
+quality hashes, so that shouldn't matter.
