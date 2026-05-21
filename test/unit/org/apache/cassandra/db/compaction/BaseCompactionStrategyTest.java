@@ -237,6 +237,7 @@ public class BaseCompactionStrategyTest
         when(ret.isSuitableForCompaction()).thenReturn(true);
         when(ret.getSSTableLevel()).thenReturn(level);
         when(ret.onDiskLength()).thenReturn(bytesOnDisk);
+        when(ret.onDiskComponentsSize()).thenReturn(bytesOnDisk);
         when(ret.uncompressedLength()).thenReturn(bytesOnDisk); // let's assume no compression
         when(ret.hotness()).thenReturn(hotness);
         when(ret.getMaxTimestamp()).thenReturn(timestamp);
