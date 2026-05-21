@@ -1512,6 +1512,34 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             return index;
         }
 
+        // The stats below are set up by getLevels and useful for diagnostics.
+        public int getFanout()
+        {
+            return fanout;
+        }
+
+        public int getThreshold()
+        {
+            return threshold;
+        }
+
+        public double getMinDensity()
+        {
+            return min;
+        }
+
+        public double getMaxDensity()
+        {
+            return max;
+        }
+
+        public double getAverageSSTableSize()
+        {
+            return avg;
+        }
+
+        // We don't expose max overlap as it's not valid until getCompactionAggregates gets called.
+
         void add(CompactionSSTable sstable)
         {
             this.sstables.add(sstable);
@@ -1528,8 +1556,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
 
         private List<CompactionAggregate.UnifiedAggregate> getOversizeShardsAggregates(Arena arena,
-                                                                               Controller controller,
-                                                                               ShardManager shardManager)
+                                                                                       Controller controller,
+                                                                                       ShardManager shardManager)
         {
             List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
             double shardThreshold = fanout * controller.getMaxSstablesPerShardFactor();
