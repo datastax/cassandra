@@ -274,10 +274,23 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             List<UnifiedCompactionStrategy.Level> levels = entry.getValue();
             assertEquals(expectedTs.length, levels.size());
 
+            double expectedMin = 0.0;
             for (int i = 0; i < expectedTs.length; i++)
             {
                 UnifiedCompactionStrategy.Level level = levels.get(i);
                 assertEquals(i, level.getIndex());
+                assertEquals(expectedMin, level.getMinDensity(), 1.0);
+                expectedMin = level.getMaxDensity();
+                assertEquals(level.scalingParameter >= 0 ? level.scalingParameter + 2 : 2, level.getThreshold());
+                assertEquals(2 + Math.abs(level.scalingParameter), level.getFanout());
+                if (level.getSSTables().size() > 0)
+                    assertEquals(level.getSSTables()
+                                      .stream()
+                                      .mapToLong(CompactionSSTable::onDiskLength)
+                                      .summaryStatistics()
+                                      .getAverage(),
+                                 level.getAverageSSTableSize(),
+                                 1.0);
 
                 Collection<CompactionAggregate.UnifiedAggregate> compactionAggregates =
                 level.getCompactionAggregates(entry.getKey(), controller, strategy.getShardManager(), dataSetSizeBytes);
