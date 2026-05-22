@@ -28,7 +28,6 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import com.datastax.driver.core.ResultSet;
-
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ReadCommand;
@@ -494,20 +493,24 @@ public class QueryMetricsTest extends AbstractMetricsTest
         createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
-        // insert some data
         int numPartitions = 11;
         int numRowsPerPartition = 13;
         int numRows = numPartitions * numRowsPerPartition;
+
+        // Create an sstable with rows to be deleted, so that memtable cannot make them disappear.
+        execute("INSERT INTO %s (k, c, n, v) VALUES (?, ?, 1, [1, 1])", numPartitions, numRowsPerPartition);
+        execute("INSERT INTO %s (k, c, n, v) VALUES (?, ?, 1, [1, 1])", numPartitions + 1, numRowsPerPartition);
+        flush();
+
+        // insert some data
         for (int k = 0; k < numPartitions; k++)
             for (int c = 0; c < numRowsPerPartition; c++)
                 execute("INSERT INTO %s (k, c, n, v) VALUES (?, ?, 1, [1, 1])", k, c);
 
         // add a partition tombstone
-        execute("INSERT INTO %s (k, c, n, v) VALUES (?, ?, 1, [1, 1])", numPartitions, numRowsPerPartition);
         execute("DELETE FROM %s WHERE k = ?", numPartitions);
 
         // add a row range tombstone
-        execute("INSERT INTO %s (k, c, n, v) VALUES (?, ?, 1, [1, 1])", numPartitions + 1, numRowsPerPartition);
         execute("DELETE FROM %s WHERE k = ? AND c > 0", numPartitions + 1);
 
         // filter query (goes to the general, filter and range query metrics)
