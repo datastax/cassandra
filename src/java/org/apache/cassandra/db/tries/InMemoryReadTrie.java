@@ -1467,19 +1467,26 @@ public abstract class InMemoryReadTrie<T>
     String dumpChild(int node)
     {
         if (isNullOrLeaf(node))
-            return dumpNode(node);
+            return dumpLeafOrNull(node);
         else
             return Integer.toString(node, 16);
+    }
+
+    private String dumpLeafOrNull(int node)
+    {
+        if (isNull(node))
+            return "NONE";
+        String contentAsText = contentManager.dumpContentId(node);
+        int cell = contentManager.cellUsedIfAny(node);
+        return cell < 0 ? contentAsText : "[@" + Integer.toString(cell, 16) + "] " + contentAsText;
     }
 
     /// For use in debugging, dump info about the given node.
     @SuppressWarnings("unused")
     String dumpNode(int node)
     {
-        if (isNull(node))
-            return "NONE";
-        else if (isLeaf(node))
-            return contentManager.dumpContentId(node);
+        if (isNullOrLeaf(node))
+            return dumpLeafOrNull(node);
         else
         {
             StringBuilder builder = new StringBuilder();
