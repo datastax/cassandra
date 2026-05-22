@@ -146,7 +146,7 @@ class ContentManagerBytes<T> implements ContentManager<T>
         int offset = offset(id);
         if (offset == OFFSET_SPECIAL)
         {
-            serializer.releaseSpecial(id);
+            serializer.releaseSpecial(contentToSpecial(id));
             return;
         }
 
@@ -173,7 +173,7 @@ class ContentManagerBytes<T> implements ContentManager<T>
     {
         int offset = offset(id);
         if (offset == OFFSET_SPECIAL)
-            return serializer.dumpSpecial(id);
+            return serializer.dumpSpecial(contentToSpecial(id));
 
         int cell = id & MASK_ID_TO_CELL;
         return serializer.dumpContent(bufferManager.getBuffer(cell), bufferManager.inBufferOffset(cell), offset);
@@ -182,7 +182,7 @@ class ContentManagerBytes<T> implements ContentManager<T>
     @Override
     public int cellUsedIfAny(int id)
     {
-        return offset(id) == OFFSET_SPECIAL ? -1 : id & MASK_ID_TO_CELL;
+        return offset(id) == OFFSET_SPECIAL ? -1 : (id & MASK_ID_TO_CELL);
     }
 
     @Override
