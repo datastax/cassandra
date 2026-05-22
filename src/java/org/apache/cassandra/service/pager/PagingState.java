@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 
@@ -34,6 +35,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -393,12 +395,19 @@ public class PagingState
         public static RowMark create(TableMetadata metadata, Row row, ProtocolVersion protocolVersion)
         {
             ByteBuffer mark;
-            Preconditions.checkArgument(!protocolVersion.isSmallerOrEqualTo(ProtocolVersion.V3),
-                                        "Protocol version %s no longer supported.",
-                                        protocolVersion);
-            // We froze the serialization version to 3.0 as we need to make sure this this doesn't change
+            if (protocolVersion.isSmallerOrEqualTo(ProtocolVersion.V3))
+            {
+                // In order to be backwards compatible with 2.x, protocol version 3 writes a cell name and path into
+                // the mark. However, Cassandra 3.0 and later never read the cell information.
+                // Since we are no longer compatible with 2.x, it siffices to use an empty cell info.
+                mark = encodeCellName(metadata, row.clustering(), EMPTY_BYTE_BUFFER, null);
+            }
+            else
+            {
+                // We froze the serialization version to 3.0 as we need to make sure this this doesn't change
                 //  It got bumped to 4.0 when 3.0 got dropped, knowing it didn't change
-            mark = Clustering.serializer.serialize(row.clustering(), MessagingService.VERSION_40, makeClusteringTypes(metadata));
+                mark = Clustering.serializer.serialize(row.clustering(), MessagingService.VERSION_40, makeClusteringTypes(metadata));
+            }
             return new RowMark(mark, protocolVersion);
         }
 
