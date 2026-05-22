@@ -471,7 +471,7 @@ public class TrieBackedPartitionMemtableAccountingTest
 
                     if (activeUpdDeletion.deletes(exsCell))
                         size += sizeOf(exsCcd.getCellWithoutPath(exsCell.path()));
-                    else if (updCell != null && (Cells.reconcile(exsCell, updCell) != exsCell && !activeExsDeletion.deletes(updCell)))
+                    else if (updCell != null && Cells.reconcile(exsCell, updCell) != exsCell && !activeExsDeletion.deletes(updCell))
                         size += sizeOf(exsCcd.getCellWithoutPath(exsCell.path()));
                 }
             }

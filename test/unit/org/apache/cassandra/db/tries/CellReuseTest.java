@@ -266,10 +266,7 @@ public class CellReuseTest
     private static void markPrefixContent(InMemoryBaseTrie<?> trie, int pointerAddress, BitSet set, BitSet objs)
     {
         int content = trie.getIntVolatile(pointerAddress);
-        if (content < 0)
-            objs.set(~content);
-        else
-            markChild(trie, content, set, objs);
+        markChild(trie, content, set, objs);
     }
 
     private static void markChild(InMemoryBaseTrie<?> trie, int child, BitSet set, BitSet objs)
@@ -281,12 +278,12 @@ public class CellReuseTest
         {
             int cell = trie.contentManager.cellUsedIfAny(child);
             if (cell < 0)
-                objs.set(~child);
+                objs.set(~cell);
             else
             {
                 set.set(cell >> 5);
                 if (VERBOSE)
-                    System.out.println(trie.contentManager.dumpContentId(child));
+                    System.out.println(trie.dumpNode(child));
             }
         }
     }
