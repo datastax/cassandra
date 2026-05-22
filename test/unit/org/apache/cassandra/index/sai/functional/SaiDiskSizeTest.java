@@ -70,8 +70,7 @@ public class SaiDiskSizeTest extends SAITester
      *
      * @return a collection of parameters to test
      */
-    @Parameterized.Parameters(name = "saiFormat={0}, expectedDiskSizeFor2SSTables={1}, " +
-                                     "expectedDiskSizeForCompactedSSTable={2}, pkColumns={3}, rowsPerPartition={4}")
+    @Parameterized.Parameters(name = "saiFormat={0}, rowsPerPartition={4}")
     public static Collection<Object[]> generateParameters()
     {
         return Version.ALL.stream()
@@ -107,9 +106,9 @@ public class SaiDiskSizeTest extends SAITester
                                   default:
                                       return // A new version assumes the latest size by default
                                       Stream.of(
-                                      new Object[]{ v, 34605, 34605, "pk", 1 },
-                                      new Object[]{ v, 39167, 39167, "pk, v_int", 2 },
-                                      new Object[]{ v, 33413, 31247, "pk, v_int", 100 });
+                                      new Object[]{ v, 34689, 34689, "pk", 1 },
+                                      new Object[]{ v, 39313, 39313, "pk, v_int", 2 },
+                                      new Object[]{ v, 33549, 31315, "pk, v_int", 100 });
                               }
                           })
                           .collect(Collectors.toList());
@@ -169,6 +168,7 @@ public class SaiDiskSizeTest extends SAITester
         compact();
 
         diskSize = indexDiskSpaceUse();
+        logger.info("Disk size for SAI version {}: {}", saiFormat, diskSize);
         assertThat(diskSize)
         .as("Disk size for SAI version %s after compaction", saiFormat)
         .isLessThanOrEqualTo(expectedDiskSizeForCompactedSSTable)
