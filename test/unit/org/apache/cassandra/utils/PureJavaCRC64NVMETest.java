@@ -30,15 +30,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 // We use the same values to test as in AWS S3 SDK tests.
 // See https://github.com/aws/aws-sdk-java-v2/blob/0c5e331bd2544e7d43fabd3db046a95b94d0a2dd/core/checksums/src/test/java/software/amazon/awssdk/checksums/internal/Crc64NvmeChecksumTest.java
-public class CRC64NVMETest {
+public class PureJavaCRC64NVMETest
+{
 
-    private CRC64NVME crc64NVME;
+    private PureJavaCRC64NVME crc64NVME;
     private static final String TEST_STRING = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
     @Before
     public void setUp()
     {
-        crc64NVME = new CRC64NVME();
+        crc64NVME = new PureJavaCRC64NVME();
     }
 
     @Test

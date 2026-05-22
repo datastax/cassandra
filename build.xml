@@ -752,6 +752,7 @@
 
           <dependency groupId="io.micrometer" artifactId="micrometer-core" version="1.5.5"/>
           <dependency groupId="org.latencyutils" artifactId="LatencyUtils" version="2.0.3"/>
+          <dependency groupId="software.amazon.awssdk.crt" artifactId="aws-crt" version="0.45.4" scope="provided"/>
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
         <developer id="alakshman" name="Avinash Lakshman"/>
@@ -946,6 +947,7 @@
 
         <dependency groupId="io.micrometer" artifactId="micrometer-core"/>
         <dependency groupId="org.latencyutils" artifactId="LatencyUtils"/>
+        <dependency groupId="software.amazon.awssdk.crt" artifactId="aws-crt" optional="true"/>
       </artifact:pom>
     </target>
 

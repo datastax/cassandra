@@ -23,7 +23,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.zip.Checksum;
 
-public final class CRC64NVME implements Checksum
+public final class PureJavaCRC64NVME implements Checksum
 {
     private static final long POLY = 0x9A6C9329AC4BC9B5L;
 
