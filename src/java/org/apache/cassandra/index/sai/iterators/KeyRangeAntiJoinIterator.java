@@ -27,6 +27,12 @@ import org.apache.cassandra.io.util.FileUtils;
  * An iterator wrapper that wraps two iterators (left and right) and returns the primary keys from the left iterator
  * that do not match the primary keys from the right iterator. The keys returned by the wrapped iterators must
  * follow token-clustering order.
+ * <p>
+ * In order to avoid false-negatives, the keys on the left side that can potentially match more than one row, e.g.
+ * keys that match whole partitions with static clustering or keys coming from partition-aware indexes (version AA),
+ * are always included in the result. Similarly, the keys on the right side that can potentially match more than one row
+ * are ignored, as they could match any key, but matching any key is not the same as matching all the keys
+ * in the partition. Hence, we cannot skip the whole partition from the result set in that case.
  */
 public class KeyRangeAntiJoinIterator extends KeyRangeIterator
 {
@@ -68,10 +74,11 @@ public class KeyRangeAntiJoinIterator extends KeyRangeIterator
         PrimaryKey key = left.nextOrNull();
         int cmp = compare(key, nextKeyToSkip);
 
-        while (key != null && cmp >= 0)
+        while (key != null && cmp >= 0 && key.pointsToSingleRegularRow())
         {
-            if (cmp == 0)
+            if (cmp == 0 && nextKeyToSkip.pointsToSingleRegularRow())
             {
+                // Only skip keys on the left if we have a precise single-row match
                 key = left.nextOrNull();
             }
             else

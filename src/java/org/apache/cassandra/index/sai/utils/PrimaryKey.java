@@ -129,6 +129,16 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
     }
 
     /**
+     * Returns true only if the key points to a single regular row in an sstable or a memtable.
+     * Some keys do not have this property, e.g. keys which are not row-aware (coming from AA indexes)
+     * or keys pointing to static rows (which means they point to all regular rows in the partition).
+     */
+    default boolean pointsToSingleRegularRow()
+    {
+        return false;
+    }
+
+    /**
      * Returns the {@link Token} associated with this primary key.
      *
      * @return the {@link Token}

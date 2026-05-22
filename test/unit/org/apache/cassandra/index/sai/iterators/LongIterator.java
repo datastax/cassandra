@@ -17,13 +17,18 @@
  */
 package org.apache.cassandra.index.sai.iterators;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.LongFunction;
 
+import org.apache.cassandra.db.BufferDecoratedKey;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class LongIterator extends KeyRangeIterator
 {
@@ -90,6 +95,9 @@ public class LongIterator extends KeyRangeIterator
 
     private PrimaryKey fromTokenAndRowId(long token, long rowId)
     {
-        return SAITester.TEST_FACTORY.createTokenOnly(new Murmur3Partitioner.LongToken(token));
+        Murmur3Partitioner.LongToken longToken = new Murmur3Partitioner.LongToken(token);
+        ByteBuffer keyBytes = ByteBufferUtil.bytes(rowId);
+        DecoratedKey partitionKey = new BufferDecoratedKey(longToken, keyBytes);
+        return SAITester.TEST_FACTORY.create(partitionKey, Clustering.EMPTY);
     }
 }

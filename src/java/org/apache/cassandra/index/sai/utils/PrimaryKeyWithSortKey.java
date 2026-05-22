@@ -162,4 +162,9 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
                primaryKey.ramBytesUsed();
     }
 
+    @Override
+    public boolean pointsToSingleRegularRow()
+    {
+        return primaryKey.pointsToSingleRegularRow();
+    }
 }

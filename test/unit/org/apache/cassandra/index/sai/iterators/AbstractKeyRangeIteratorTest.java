@@ -227,7 +227,7 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
         ByteBuffer pkValue = LongType.instance.getSerializer().serialize(partitionKey);
         ByteBuffer clusteringValue = LongType.instance.getSerializer().serialize(clustering);
         DecoratedKey pk = Murmur3Partitioner.instance.decorateKey(pkValue);
-        Clustering<ByteBuffer> c = clustering == null ? Clustering.EMPTY : Clustering.make(clusteringValue);
+        Clustering<ByteBuffer> c = clustering == null ? Clustering.STATIC_CLUSTERING : Clustering.make(clusteringValue);
         return TEST_PRIMARY_KEY_FACTORY.create(pk, c);
     }
 
