@@ -228,7 +228,7 @@ public class KeyLookupBench
 
         Clustering<?> nextClustering()
         {
-            if (table.comparator.size() == 0)
+            if (!table.hasClustering())
                 return Clustering.EMPTY;
 
             ByteBuffer[] values = new ByteBuffer[table.comparator.size()];
