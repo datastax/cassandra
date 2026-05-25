@@ -83,7 +83,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     }
 
     @Override
-    public void startPartition(DecoratedKey partitionKey) throws IOException
+    public void startPartition(DecoratedKey partitionKey, long position) throws IOException
     {
         if (partitionId >= 0)
             partitionSizeWriter.add(partitionRowCount);

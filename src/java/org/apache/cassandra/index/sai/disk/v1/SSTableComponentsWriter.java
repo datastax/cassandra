@@ -24,6 +24,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -56,7 +57,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     }
 
     @Override
-    public void startPartition(long position)
+    public void startPartition(DecoratedKey decoratedKey, long position)
     {
         currentKeyPartitionOffset = position;
     }

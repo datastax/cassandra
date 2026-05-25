@@ -132,10 +132,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
         try
         {
-            // Implemented in v1
-            perSSTableWriter.startPartition(position);
-            // Implemented in v9
-            perSSTableWriter.startPartition(key);
+            perSSTableWriter.startPartition(key, position);
         }
         catch (Throwable t)
         {

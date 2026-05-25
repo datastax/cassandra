@@ -74,7 +74,7 @@ public class WideRowPrimaryKeyTest extends AbstractPrimaryKeyTest
             if (lastKey == null || lastKey.compareTo(primaryKey.partitionKey()) < 0)
             {
                 lastKey = primaryKey.partitionKey();
-                writer.startPartition(lastKey);
+                writer.startPartition(lastKey, -1);
             }
             writer.nextRow(primaryKey);
         }
