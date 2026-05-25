@@ -103,6 +103,20 @@ public class KeyLookup
      */
     public interface Cursor extends AutoCloseable
     {
+        /**
+         * Finds a pointId for the clustering key in a partition defined by the range of point ids.
+         * The start and end of the range must not exceed the number of keys available.
+         * The keys within the range are expected to be in lexicographical order.
+         * <b>
+         * Should not be used without clustering.
+         *
+         * @param key             the key to seek for within the partition
+         * @param startingPointId the inclusive starting point for the partition
+         * @param endingPointId   the exclusive ending point for the partition
+         *                        Note: this can be equal to the number of keys if this is the last partition
+         * @return a {@code long} representing the pointId of the closest key from the partition
+         * that is >= to the key passed to the method, or -1 if the key passed is > all the keys.
+         */
         long clusteredSeekToKey(ByteComparable key, long startingPointId, long endingPointId);
 
         @Nonnull
@@ -198,19 +212,11 @@ public class KeyLookup
         }
 
         /**
-         * Finds the pointId for a clustering key within a range of pointIds. The start and end of the range must not
-         * exceed the number of keys available. The keys within the range are expected to be in lexicographical order.
+         * Finds a pointId for the clustering key within a partition.
          * <p>
          * If the key is not in the block containing the start of the range, a binary search is done to find
          * the block containing the search key. That block is then searched to return the pointId that corresponds
          * to the key that is either equal to or next highest to the search key.
-         *
-         * @param key             The key to seek for with the partition
-         * @param startingPointId the inclusive starting point for the partition
-         * @param endingPointId   the exclusive ending point for the partition.
-         *                        Note: this can be equal to the number of keys if this is the last partition
-         * @return a {@code long} representing the pointId of the key that is >= to the key passed to the method, or
-         * -1 if the key passed is > all the keys.
          */
         @Override
         public long clusteredSeekToKey(ByteComparable key, long startingPointId, long endingPointId)
@@ -235,7 +241,7 @@ public class KeyLookup
             {
                 long midSearchId = lowSearchId + (highSearchId - lowSearchId) / 2;
 
-                // See if the searchkey exists in the block containing the midSearchId or is above or below it
+                // See if searchKey exists in the block containing the midSearchId or is above or below it
                 int position = moveToBlockAndCompareTo(midSearchId, searchKey);
 
                 if (position == 0)
