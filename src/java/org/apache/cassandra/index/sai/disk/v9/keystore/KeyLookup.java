@@ -95,7 +95,7 @@ public class KeyLookup
     {
         if (keyLookupMeta.keyCount == 0)
             return new EmptyCursor();
-        return new StandardCursor(keysFileHandle, keyBlockOffsetsFactory);
+        return new IndexInputCursor(keysFileHandle, keyBlockOffsetsFactory);
     }
 
     /**
@@ -140,6 +140,9 @@ public class KeyLookup
         @Nonnull
         ByteComparable seekToPointId(long target);
 
+        /**
+         * Resets its state to the first row and reads the key
+         */
         @VisibleForTesting
         void reset() throws IOException;
 
@@ -150,7 +153,6 @@ public class KeyLookup
      * An empty cursor implementation that is returned when keyCount is 0.
      * This cursor has no keys, and all operations either throw exceptions or return sentinel values.
      */
-    @NotThreadSafe
     private static class EmptyCursor implements Cursor
     {
         @Override
@@ -186,7 +188,7 @@ public class KeyLookup
      * It maintains a position to the current key as well as a buffer that can hold one key.
      */
     @NotThreadSafe
-    public class StandardCursor implements Cursor
+    public class IndexInputCursor implements Cursor
     {
         private final IndexInputReader keysInput;
         private final int blockShift;
@@ -205,7 +207,7 @@ public class KeyLookup
         private long currentPointId;
         private long currentBlockIndex;
 
-        StandardCursor(FileHandle keysFileHandle, LongArray.Factory blockOffsetsFactory) throws IOException
+        IndexInputCursor(FileHandle keysFileHandle, LongArray.Factory blockOffsetsFactory) throws IOException
         {
             try
             {
