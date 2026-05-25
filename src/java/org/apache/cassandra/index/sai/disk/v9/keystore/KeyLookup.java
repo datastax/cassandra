@@ -99,15 +99,23 @@ public class KeyLookup
     }
 
     /**
-     * Interface for cursor operations on keys.
+     * This interface is introduced a work around, when a cursor is open for partition with no data.
+     * Fot this an Empty Cursor is implemented
+     * <p>
+     * Otherwise, the main goal is to allow reading the keys from a keys file, 
+     * and quickly seek to a random key by point id.
+     * <p>
+     * Its instances are stateful and not thread-safe, and
+     * maintain a position to the current key as well as a buffer that can hold one key.
      */
+    @NotThreadSafe
     public interface Cursor extends AutoCloseable
     {
         /**
          * Finds a pointId for the clustering key in a partition defined by the range of point ids.
          * The start and end of the range must not exceed the number of keys available.
          * The keys within the range are expected to be in lexicographical order.
-         * <b>
+         * <p>
          * Should not be used without clustering.
          *
          * @param key             the key to seek for within the partition
@@ -119,6 +127,16 @@ public class KeyLookup
          */
         long clusteredSeekToKey(ByteComparable key, long startingPointId, long endingPointId);
 
+        /**
+         * Positions the cursor on the target point id and reads the key at the target to the current key buffer.
+         * <p>
+         * It is allowed to position the cursor before the first item or after the last item;
+         * in these cases the internal buffer is cleared.
+         *
+         * @param target point id to lookup
+         * @return The {@link ByteComparable} containing the key
+         * @throws IndexOutOfBoundsException if the target point id is less than -1 or greater than the number of keys
+         */
         @Nonnull
         ByteComparable seekToPointId(long target);
 
