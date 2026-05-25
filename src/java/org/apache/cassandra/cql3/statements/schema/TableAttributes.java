@@ -38,6 +38,7 @@ import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.MemtableParams;
+import org.apache.cassandra.schema.QueryParams;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.TableParams.Option;
@@ -211,6 +212,9 @@ public final class TableAttributes extends PropertyDefinitions
 
         if (hasOption(Option.READ_REPAIR))
             builder.readRepair(ReadRepairStrategy.fromString(getString(Option.READ_REPAIR)));
+
+        if (hasOption(Option.QUERY_OPTIONS))
+            builder.queryParams(QueryParams.fromMap(getMap(Option.QUERY_OPTIONS)));
 
         return builder.build();
     }

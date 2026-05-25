@@ -57,7 +57,8 @@ public final class TableParams
         ADDITIONAL_WRITE_POLICY,
         CRC_CHECK_CHANCE,
         CDC,
-        READ_REPAIR;
+        READ_REPAIR,
+        QUERY_OPTIONS;
 
         @Override
         public String toString()
@@ -83,6 +84,7 @@ public final class TableParams
     public final ImmutableMap<String, ByteBuffer> extensions;
     public final boolean cdc;
     public final ReadRepairStrategy readRepair;
+    public final QueryParams queryParams;
 
     private TableParams(Builder builder)
     {
@@ -105,6 +107,7 @@ public final class TableParams
         extensions = builder.extensions;
         cdc = builder.cdc;
         readRepair = builder.readRepair;
+        queryParams = builder.queryParams;
     }
 
     public static Builder builder()
@@ -130,7 +133,8 @@ public final class TableParams
                             .additionalWritePolicy(params.additionalWritePolicy)
                             .extensions(params.extensions)
                             .cdc(params.cdc)
-                            .readRepair(params.readRepair);
+                            .readRepair(params.readRepair)
+                            .queryParams(params.queryParams);
     }
 
     public Builder unbuild()
@@ -218,7 +222,8 @@ public final class TableParams
             && memtable.equals(p.memtable)
             && extensions.equals(p.extensions)
             && cdc == p.cdc
-            && readRepair == p.readRepair;
+            && readRepair == p.readRepair
+            && queryParams.equals(p.queryParams);
     }
 
     @Override
@@ -239,7 +244,8 @@ public final class TableParams
                                 memtable,
                                 extensions,
                                 cdc,
-                                readRepair);
+                                readRepair,
+                                queryParams);
     }
 
     @Override
@@ -262,6 +268,7 @@ public final class TableParams
                           .add(Option.EXTENSIONS.toString(), extensions)
                           .add(Option.CDC.toString(), cdc)
                           .add(Option.READ_REPAIR.toString(), readRepair)
+                          .add(Option.QUERY_OPTIONS.toString(), queryParams)
                           .toString();
     }
 
@@ -307,6 +314,8 @@ public final class TableParams
                .newLine()
                .append("AND min_index_interval = ").append(minIndexInterval)
                .newLine()
+               .append("AND query_options = ").append(queryParams.asMap())
+               .newLine()
                .append("AND read_repair = ").appendWithSingleQuotes(readRepair.toString())
                .newLine()
                .append("AND speculative_retry = ").appendWithSingleQuotes(speculativeRetry.toString());
@@ -331,6 +340,7 @@ public final class TableParams
         private ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of();
         private boolean cdc;
         private ReadRepairStrategy readRepair = ReadRepairStrategy.BLOCKING;
+        private QueryParams queryParams = QueryParams.DEFAULT;
 
         public Builder()
         {
@@ -428,6 +438,12 @@ public final class TableParams
         public Builder cdc(boolean val)
         {
             cdc = val;
+            return this;
+        }
+
+        public Builder queryParams(QueryParams val)
+        {
+            queryParams = val;
             return this;
         }
 

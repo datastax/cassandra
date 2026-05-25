@@ -249,7 +249,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
         // Turn off the query optimizer.
         // We need to do this in order to remove unpredictability of query plans, so that we get consistent metrics.
         // We don't want the query optimizer to eliminate the use of indexes.
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
 
         String table = "test_kdtree_postings_metrics_through_write_lifecycle";
         String v1Index = "test_kdtree_postings_metrics_through_write_lifecycle_v1_index";

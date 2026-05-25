@@ -164,6 +164,7 @@ public final class SchemaKeyspace
               + "additional_write_policy text,"
               + "cdc boolean,"
               + "read_repair text,"
+              + "query_options frozen<map<text, text>>,"
               + "PRIMARY KEY ((keyspace_name), table_name))");
 
     private static final TableMetadata Columns =
@@ -1026,6 +1027,9 @@ public final class SchemaKeyspace
                                                      SpeculativeRetryPolicy.fromString("99PERCENTILE"))
                           .cdc(row.has("cdc") && row.getBoolean("cdc"))
                           .readRepair(getReadRepairStrategy(row))
+                          .queryParams(row.has("query_options") ?
+                                      QueryParams.fromMap(row.getFrozenTextMap("query_options")) :
+                                      QueryParams.DEFAULT)
                           .build();
     }
 

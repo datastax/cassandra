@@ -994,7 +994,7 @@ abstract public class Plan
             // In the future we probably will need to take more index metrics into account
             // (e.g. number of distinct values).
 
-            double keysPerSSTable = (double) matchingKeysCount / factory.tableMetrics.sstables;
+            double keysPerSSTable = (double) matchingKeysCount / Math.max(1, factory.tableMetrics.sstables);
 
             double skipCostFactor;
             double postingsCountFactor;

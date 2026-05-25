@@ -26,7 +26,6 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -36,7 +35,7 @@ public class GenericOrderByTest extends SAITester
     public void testOrderingAcrossManySstables()
     {
         // Disable query optimizer to prevent skipping hybrid query logic.
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
         // We don't want our sstables getting compacted away
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val int, str_val ascii)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -81,7 +80,7 @@ public class GenericOrderByTest extends SAITester
     @Test
     public void testOrderingAcrossMemtableAndSSTable() throws Throwable
     {
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
         // We don't want our sstables getting compacted away
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val int, str_val ascii)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");

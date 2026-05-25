@@ -37,7 +37,6 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
-import org.apache.cassandra.index.sai.plan.QueryController;
 
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -585,14 +584,13 @@ public class BM25Test extends SAITester
     @Test
     public void testWithPredicateSearchThenOrder() throws Throwable
     {
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
         testWithPredicate();
     }
 
     @Test
     public void testWidePartitionWithPredicateOrderThenSearch() throws Throwable
     {
-        QueryController.QUERY_OPT_LEVEL = 1;
         testWidePartitionWithPredicate();
     }
 
@@ -714,7 +712,7 @@ public class BM25Test extends SAITester
     public void testOrderingSeveralSSTablesWithMapPredicate() throws Throwable
     {
         // Force search-then-sort
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
         createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, map_category map<int, int>)");
         createAnalyzedIndex("category", true);
         createIndex("CREATE CUSTOM INDEX ON %s (entries(map_category)) USING 'StorageAttachedIndex'");
