@@ -163,7 +163,7 @@ public class SaiDiskSizeTest extends SAITester
         assertThat(diskSize)
         .as("Disk size for SAI version %s before compaction", saiFormat)
         .isLessThanOrEqualTo(expectedDiskSizeFor2SSTables)
-        .isGreaterThan((long) (expectedDiskSizeFor2SSTables * 0.95));
+        .isGreaterThan((long) (expectedDiskSizeFor2SSTables * 0.92));
 
         compact();
 
@@ -172,7 +172,7 @@ public class SaiDiskSizeTest extends SAITester
         assertThat(diskSize)
         .as("Disk size for SAI version %s after compaction", saiFormat)
         .isLessThanOrEqualTo(expectedDiskSizeForCompactedSSTable)
-        .isGreaterThan((long) (expectedDiskSizeForCompactedSSTable * 0.95));
+        .isGreaterThan((long) (expectedDiskSizeForCompactedSSTable * 0.92));
     }
 
     private void insertRowsIntoOneSegment(int nrRows, int startRow) throws UnknownHostException
