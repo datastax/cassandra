@@ -291,7 +291,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     @Override
     public Set<Component> componentsForNewSSTable()
     {
-        return IndexDescriptor.componentsForNewlyFlushedSSTable(indices, version, baseCfs.metadata().comparator.size() > 0);
+        return IndexDescriptor.componentsForNewlyFlushedSSTable(indices, version, baseCfs.metadata().hasClustering());
     }
 
     @Override
