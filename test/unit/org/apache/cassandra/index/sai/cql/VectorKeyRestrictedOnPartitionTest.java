@@ -29,7 +29,6 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.utils.Glove;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -178,7 +177,7 @@ public class VectorKeyRestrictedOnPartitionTest extends VectorKeyRestrictedTeste
     public void testPartitionKeyRestrictionCombinedWithSearchPredicate() throws Throwable
     {
         // Need to test the search then order path
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
 
         // We use a clustered primary key to simplify the mental model for this test.
         // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present

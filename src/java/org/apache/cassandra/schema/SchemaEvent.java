@@ -220,6 +220,7 @@ public final class SchemaEvent extends DiagnosticEvent
         ret.put("compaction", repr(params.compaction));
         ret.put("compression", repr(params.compression));
         ret.put("memtable", repr(params.memtable));
+        ret.put("storageAttachedIndexing", repr(params.storageAttachedIndexingParams));
         if (params.speculativeRetry != null) ret.put("speculativeRetry", params.speculativeRetry.kind().name());
         return ret;
     }
@@ -251,6 +252,14 @@ public final class SchemaEvent extends DiagnosticEvent
     private String repr(MemtableParams params)
     {
         return params.configurationKey();
+    }
+
+    private HashMap<String, Serializable> repr(StorageAttachedIndexingParams sai)
+    {
+        HashMap<String, Serializable> ret = new HashMap<>();
+        if (sai == null) return ret;
+        ret.putAll(sai.asMap());
+        return ret;
     }
 
     private HashMap<String, Serializable> repr(IndexMetadata index)

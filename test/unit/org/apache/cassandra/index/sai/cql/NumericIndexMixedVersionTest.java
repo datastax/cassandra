@@ -25,7 +25,6 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.junit.Assert.assertEquals;
 
@@ -145,7 +144,7 @@ public class NumericIndexMixedVersionTest extends SAITester
     @Test
     public void testMultiVersionCompatibilityWithClustringColumnsIntersection() throws Throwable
     {
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
         SAIUtil.setCurrentVersion(Version.AA);
 
         createTable("CREATE TABLE %s (pk int, ck int, val1 int, val2 int, PRIMARY KEY(pk, ck))");
@@ -178,7 +177,7 @@ public class NumericIndexMixedVersionTest extends SAITester
     @Test
     public void testMultiVersionCompatibilityWithClusteringKeyFiltering() throws Throwable
     {
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
 
         createTable("CREATE TABLE %s (pk text, ck int, val int, is_true boolean, PRIMARY KEY(pk, ck, val)) " +
                     "WITH CLUSTERING ORDER BY (ck DESC, val DESC)");
