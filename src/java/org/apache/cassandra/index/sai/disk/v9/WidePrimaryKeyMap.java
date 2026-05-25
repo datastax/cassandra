@@ -150,7 +150,8 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
                               KeyLookup.Cursor clusteringKeyCursor,
                               IPartitioner partitioner,
                               OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
-                              ClusteringComparator clusteringComparator, SSTableId<?> sstableId,
+                              ClusteringComparator clusteringComparator, 
+                              SSTableId<?> sstableId,
                               boolean hasStaticColumns)
     {
         super(rowIdToTokenArray, rowIdToPartitionIdArray, partitionKeyCursor, partitioner, primaryKeyFactory,
