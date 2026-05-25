@@ -311,7 +311,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
 
         assert keyBytes != null : "Primary key from map did not contain a partition key";
 
-        ByteBuffer decoratedKey = ByteBuffer.wrap(keyBytes);
-        return new BufferDecoratedKey(partitioner.getToken(decoratedKey), decoratedKey);
+        ByteBuffer keyBuffer = ByteBuffer.wrap(keyBytes);
+        return new BufferDecoratedKey(partitioner.getToken(keyBuffer), keyBuffer);
     }
 }
