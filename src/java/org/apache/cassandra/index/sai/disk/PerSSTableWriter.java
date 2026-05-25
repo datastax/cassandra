@@ -31,10 +31,13 @@ public interface PerSSTableWriter
 {
     PerSSTableWriter NONE = key -> {};
 
-    default void startPartition(long position) throws IOException
-    {}
-
-    default void startPartition(DecoratedKey decoratedKey) throws IOException
+    /**
+     * Allows implementations to perform any necessary setup for a new partition.
+     *
+     * @param decoratedKey The key being appended to SSTable.
+     * @param position     The position of the key in the component preferred for reading keys
+     */
+    default void startPartition(DecoratedKey decoratedKey, long position) throws IOException
     {}
 
     void nextRow(PrimaryKey primaryKey) throws IOException;
