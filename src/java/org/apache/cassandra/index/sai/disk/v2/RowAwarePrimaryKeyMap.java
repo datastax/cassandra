@@ -297,7 +297,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
 
             DecoratedKey partitionKey = new BufferDecoratedKey(token, ByteBuffer.wrap(keyBytes));
 
-            Clustering clustering = clusteringComparator.size() == 0
+            Clustering<?> clustering = clusteringComparator.size() == 0
                                     ? Clustering.EMPTY
                                     : clusteringComparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
                                                                                         v -> ByteSourceInverse.nextComponentSource(peekable),
