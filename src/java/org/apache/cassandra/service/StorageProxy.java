@@ -2297,7 +2297,9 @@ public class StorageProxy implements StorageProxyMBean
             metrics.casReadMetrics.serviceTimeMetrics.addNano(serviceLatency);
             metrics.readMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
             metrics.readMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(serviceLatency);
-            Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+            ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name);
+            cfs.metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+            cfs.metric.coordinatorCasReadLatency.update(latency, TimeUnit.NANOSECONDS);
         }
         return result;
     }
