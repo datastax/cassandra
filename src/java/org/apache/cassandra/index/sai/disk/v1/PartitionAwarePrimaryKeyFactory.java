@@ -45,7 +45,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
     }
 
     @Override
-    public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
+    public PrimaryKey create(DecoratedKey partitionKey, Clustering<?> clustering)
     {
         assert partitionKey != null;
         return new PartitionAwarePrimaryKey(partitionKey.getToken(), partitionKey, null);
@@ -98,7 +98,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
-        public Clustering clustering()
+        public Clustering<?> clustering()
         {
             return Clustering.EMPTY;
         }
