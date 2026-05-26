@@ -69,6 +69,16 @@ public class BTreeComplexColumn extends ComplexColumnData
         this.complexDeletion = complexDeletion;
     }
 
+    public static BTreeComplexColumn from(ComplexColumnData ccd)
+    {
+        if (ccd instanceof BTreeComplexColumn)
+            return (BTreeComplexColumn) ccd;
+        BTree.Builder<Cell<?>> builder = BTree.builder(Cell.comparator).auto(false);
+        for (Cell<?> c : ccd)
+            builder.add(c);
+        return new BTreeComplexColumn(ccd.column, builder.build(), ccd.complexDeletion());
+    }
+
     @Override
     public boolean hasCells() {
         return !BTree.isEmpty(this.cells);

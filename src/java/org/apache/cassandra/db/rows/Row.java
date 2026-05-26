@@ -336,7 +336,6 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
      * Merge this row with the given update and return the result.
      *
      * @param update Row to merge in. Must be the same type (b-tree vs trie) as this.
-     * @param onReconcile Function to apply on the result of individual cell merges.
      * @return The merged row.
      */
     public Row mergeWith(Row update);
@@ -573,6 +572,22 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
          * @param complexDeletion the complex deletion time to add.
          */
         public void addComplexDeletion(ColumnMetadata column, DeletionTime complexDeletion);
+
+        /**
+         * Convenience method to add a column (complex or simple) in one step.
+         */
+        default void addColumn(ColumnData cd)
+        {
+            if (cd.column.isSimple())
+                addCell((Cell<?>) cd);
+            else
+            {
+                ComplexColumnData ccd = (ComplexColumnData) cd;
+                addComplexDeletion(ccd.column, ccd.complexDeletion());
+                for (Cell<?> c : ccd)
+                    addCell(c);
+            }
+        }
 
         /**
          * Builds and return built row.
