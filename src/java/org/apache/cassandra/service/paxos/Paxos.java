@@ -60,6 +60,7 @@ import org.apache.cassandra.metrics.ClientRequestSizeMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -928,7 +929,9 @@ public class Paxos
             metrics.casReadMetrics.executionTimeMetrics.addNano(latency);
             metrics.readMetricsForLevel(consistencyForConsensus).executionTimeMetrics.addNano(latency);
             TableMetadata table = read.metadata();
-            Keyspace.open(table.keyspace).getColumnFamilyStore(table.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+            ColumnFamilyStore cfs = Keyspace.open(table.keyspace).getColumnFamilyStore(table.name);
+            cfs.metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+            cfs.metric.coordinatorCasReadLatency.update(latency, TimeUnit.NANOSECONDS);
             if (failedAttemptsDueToContention > 0)
                 metrics.casReadMetrics.contention.update(failedAttemptsDueToContention);
         }
