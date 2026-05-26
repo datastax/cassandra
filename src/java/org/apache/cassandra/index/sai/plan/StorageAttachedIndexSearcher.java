@@ -32,13 +32,10 @@ import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Iterables;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,9 +53,11 @@ import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
+import org.apache.cassandra.db.rows.BTreeComplexColumn;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.ColumnData;
+import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -858,7 +857,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 // Clone the original Row
                 Row originalRow = (Row) content;
                 ArrayList<ColumnData> columnData = new ArrayList<>(originalRow.columnCount() + 1);
-                Iterables.addAll(columnData, originalRow);
+
+                for (var cd : originalRow)
+                    columnData.add(cd instanceof ComplexColumnData ? BTreeComplexColumn.from((ComplexColumnData) cd) : cd);
 
                 // inject +score as a new column
                 float score = ((PrimaryKeyWithScore) primaryKeyWithSortKey).getExactScore(orderer, originalRow);

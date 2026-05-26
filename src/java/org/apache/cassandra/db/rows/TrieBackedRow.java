@@ -144,17 +144,7 @@ public class TrieBackedRow extends AbstractRow
         builder.addPrimaryKeyLivenessInfo(row.primaryKeyLivenessInfo());
         builder.addRowDeletion(row.deletion());
         for (ColumnData cd : row)
-        {
-            if (cd.column.isSimple())
-                builder.addCell((Cell<?>) cd);
-            else
-            {
-                var ccd = (ComplexColumnData) cd;
-                builder.addComplexDeletion(ccd.column, ccd.complexDeletion());
-                for (Cell<?> cell : ccd)
-                    builder.addCell(cell);
-            }
-        }
+            builder.addColumn(cd);
         return builder.build();
     }
 
@@ -446,10 +436,15 @@ public class TrieBackedRow extends AbstractRow
                                          getCellPathType(column).asComparableBytes(path.get(0), version));
     }
 
+    private static int columnId(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column)
+    {
+        return columnIds.getValue(column.name);
+    }
+
     /// Return a cell key (i.e. path in the trie) for the given column and cell path.
     private static ByteComparable cellKey(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column, CellPath path)
     {
-        int id = columnIds.getValue(column.name);
+        int id = columnId(columnIds, column);
         if (id == COLUMN_NOT_PRESENT)
             return MISSING_COLUMN_KEY; // SAI can call cellKey for static columns on regular rows and vice versa
         if (!column.isComplex())
@@ -496,7 +491,7 @@ public class TrieBackedRow extends AbstractRow
     /// Returns the column key, i.e. the column index path in the trie without the part corresponding to the cell path.
     private static ByteComparable columnKey(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column)
     {
-        int id = columnIds.getValue(column.name);
+        int id = columnId(columnIds, column);
         if (id == COLUMN_NOT_PRESENT)
             return MISSING_COLUMN_KEY;
         return encodeUnsignedInt(id);
@@ -882,7 +877,7 @@ public class TrieBackedRow extends AbstractRow
         BitSet fetchedIds = new BitSet();
         for (ColumnMetadata c : fetched)
         {
-            int idx = columnIds.getValue(c.name);
+            int idx = columnId(columnIds, c);
             if (idx == COLUMN_NOT_PRESENT)
                 continue;
             fetchedIds.set(idx);

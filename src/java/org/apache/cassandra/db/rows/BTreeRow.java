@@ -581,12 +581,12 @@ public class BTreeRow extends AbstractRow
         return accumulate((cd, v) -> v + cd.unsharedHeapSizeExcludingData(), heapSize);
     }
 
-    public static Row.Builder sortedBuilder()
+    public static Builder sortedBuilder()
     {
         return new Builder(true);
     }
 
-    public static Row.Builder unsortedBuilder()
+    public static Builder unsortedBuilder()
     {
         return new Builder(false);
     }
