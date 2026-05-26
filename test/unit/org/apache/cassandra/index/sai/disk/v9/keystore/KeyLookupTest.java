@@ -57,6 +57,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class KeyLookupTest extends SaiRandomizedTest
 {
     public static final ByteComparable.Version VERSION = TypeUtil.BYTE_COMPARABLE_VERSION;
+    private static final int BLOCK_SIZE = 4;
     protected IndexDescriptor indexDescriptor;
 
     @Before
@@ -399,7 +400,7 @@ public class KeyLookupTest extends SaiRandomizedTest
     }
 
     @Test
-    public void seekToKeyOnNonPartitionedTest() throws Throwable
+    public void testSeekToKeyOnNonPartitioned() throws Throwable
     {
         Map<Long, byte[]> keys = new HashMap<>();
 
@@ -430,6 +431,313 @@ public class KeyLookupTest extends SaiRandomizedTest
             writer.startPartition();
             writer.add(ByteComparable.preencoded(VERSION, makeKey(9)));
         }, true);
+    }
+
+    @Test
+    public void testEmptyCursor() throws Exception
+    {
+        // Write an empty key store (keyCount = 0)
+        writeKeys(writer -> {
+        }, false);
+
+        withKeyLookupCursor(cursor -> {
+            assertEquals(-1L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(0)), 0L, 10L));
+
+            assertThatThrownBy(() -> cursor.seekToPointId(0))
+            .isInstanceOf(IndexOutOfBoundsException.class)
+            .hasMessage(String.format(KeyLookup.INDEX_OUT_OF_BOUNDS, 0, 0));
+            assertThatThrownBy(() -> cursor.seekToPointId(-1))
+            .isInstanceOf(IndexOutOfBoundsException.class)
+            .hasMessage(String.format(KeyLookup.INDEX_OUT_OF_BOUNDS, -1, 0));
+
+            // Test reset and close should not throw
+            cursor.reset();
+            cursor.close();
+        });
+    }
+
+    @Test
+    public void testSeekToSamePointId() throws Exception
+    {
+        List<byte[]> keys = new ArrayList<>();
+        writeKeys(writer -> {
+            for (int x = 0; x < 100; x++)
+            {
+                byte[] bytes = ByteSourceInverse.readBytes(intByteSource(x));
+                keys.add(bytes);
+                writer.add(ByteComparable.preencoded(VERSION, bytes));
+            }
+        }, false);
+
+        withKeyLookupCursor(cursor -> {
+            // Seek to point 50
+            ByteComparable key1 = cursor.seekToPointId(50);
+            byte[] bytes1 = ByteSourceInverse.readBytes(key1.asComparableBytes(VERSION));
+            assertArrayEquals(keys.get(50), bytes1);
+
+            // Seek to the same point again (target == currentPointId)
+            ByteComparable key2 = cursor.seekToPointId(50);
+            byte[] bytes2 = ByteSourceInverse.readBytes(key2.asComparableBytes(VERSION));
+            assertArrayEquals(keys.get(50), bytes2);
+        });
+    }
+
+    @Test
+    public void testSeekBackwardsInSameBlock() throws Exception
+    {
+        List<byte[]> keys = new ArrayList<>();
+        writeKeys(writer -> {
+            for (int x = 0; x < 20; x++)
+            {
+                byte[] bytes = ByteSourceInverse.readBytes(intByteSource(x));
+                keys.add(bytes);
+                writer.add(ByteComparable.preencoded(VERSION, bytes));
+            }
+        }, false);
+
+        withKeyLookupCursor(cursor -> {
+            int pointInBlock1 = BLOCK_SIZE + 2;
+            ByteComparable key1 = cursor.seekToPointId(pointInBlock1);
+            byte[] bytes1 = ByteSourceInverse.readBytes(key1.asComparableBytes(VERSION));
+            assertArrayEquals(keys.get(pointInBlock1), bytes1);
+
+            int earlierPointInBlock1 = BLOCK_SIZE + 1;
+            ByteComparable key2 = cursor.seekToPointId(earlierPointInBlock1);
+            byte[] bytes2 = ByteSourceInverse.readBytes(key2.asComparableBytes(VERSION));
+            assertArrayEquals(keys.get(earlierPointInBlock1), bytes2);
+        });
+    }
+
+    @Test
+    public void testSeekForwardWithinBlock() throws Exception
+    {
+        List<byte[]> keys = new ArrayList<>();
+        writeKeys(writer -> {
+            for (int x = 0; x < 20; x++)
+            {
+                byte[] bytes = ByteSourceInverse.readBytes(intByteSource(x));
+                keys.add(bytes);
+                writer.add(ByteComparable.preencoded(VERSION, bytes));
+            }
+        }, false);
+
+        withKeyLookupCursor(cursor -> {
+            // Seek to start of block 1
+            int blockStart = BLOCK_SIZE;
+            cursor.seekToPointId(blockStart);
+
+            // Seek forward within the same block (no block reset needed)
+            int pointInSameBlock = blockStart + 2;
+            ByteComparable key = cursor.seekToPointId(pointInSameBlock);
+            byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
+            assertArrayEquals(keys.get(pointInSameBlock), bytes);
+        });
+    }
+
+    @Test
+    public void testClusteredSeekWithMatchAtCurrentPosition() throws Exception
+    {
+        Map<Long, byte[]> keys = new HashMap<>();
+        writeKeys(writer -> {
+            writer.startPartition();
+            for (long pointId = 0; pointId < 10; pointId++)
+            {
+                byte[] key = makeKey((int) pointId * 4);
+                keys.put(pointId, key);
+                writer.add(ByteComparable.preencoded(VERSION, key));
+            }
+
+            writer.startPartition();
+            for (long pointId = 10; pointId < 20; pointId++)
+            {
+                byte[] key = makeKey((int) pointId * 4);
+                keys.put(pointId, key);
+                writer.add(ByteComparable.preencoded(VERSION, key));
+            }
+
+            writer.startPartition();
+            for (long pointId = 20; pointId < 30; pointId++)
+            {
+                byte[] key = makeKey((int) pointId * 4);
+                keys.put(pointId, key);
+                writer.add(ByteComparable.preencoded(VERSION, key));
+            }
+        }, true);
+
+        withKeyLookupCursor(cursor -> {
+            // Position cursor at the start of partition 2 (point id 10)
+            cursor.seekToPointId(10);
+
+            // Now do a clustered seek within partition 2 for the key at position 10
+            // Since cursor is already at the correct position and the key matches,
+            // this should hit the early return.
+            long result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(10L)), 10L, 20L);
+            assertEquals(10L, result);
+        });
+    }
+
+    @Test
+    public void testClusteredSeekAtEndOfKeyCount() throws Exception
+    {
+        int partitionSize = 25;
+        writeKeys(writer -> {
+            writer.startPartition();
+            for (long pointId = 0; pointId < partitionSize; pointId++)
+            {
+                byte[] key = makeKey((int) pointId * 4);
+                writer.add(ByteComparable.preencoded(VERSION, key));
+            }
+        }, true);
+
+        withKeyLookupCursor(cursor -> {
+            // Search for a key that's beyond all keys in the partition, with endingPointId == keyCount
+            long result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(10000)), 0L, partitionSize);
+            assertEquals(-1L, result);
+        });
+    }
+
+    @Test
+    public void testClusteredSeekInLastBlock() throws Exception
+    {
+        Map<Long, byte[]> keys = new HashMap<>();
+        int numBlocks = 3;
+        int totalKeys = numBlocks * BLOCK_SIZE;
+        writeKeys(writer -> {
+            // Create a single partition with exactly totalKeys clustering keys (numBlocks blocks)
+            // This ensures all point ids are in the same partition
+            writer.startPartition();
+            for (long pointId = 0; pointId < totalKeys; pointId++)
+            {
+                byte[] key = makeKey((int) pointId * 4);
+                keys.put(pointId, key);
+                writer.add(ByteComparable.preencoded(VERSION, key));
+            }
+        }, true);
+
+        withKeyLookupCursor(cursor -> {
+            // Search in the last block within the partition
+            // This tests the last block logic in moveToBlockAndCompareTo (lines 335-336)
+            long lastBlockStart = (numBlocks - 1) * BLOCK_SIZE;
+            long result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(lastBlockStart)),
+                                                    lastBlockStart, totalKeys);
+            assertEquals(lastBlockStart, result);
+        });
+    }
+
+    @Test
+    public void testCursorReset() throws Exception
+    {
+        List<byte[]> keys = new ArrayList<>();
+        writeKeys(writer -> {
+            for (int x = 0; x < 50; x++)
+            {
+                byte[] bytes = ByteSourceInverse.readBytes(intByteSource(x));
+                keys.add(bytes);
+                writer.add(ByteComparable.preencoded(VERSION, bytes));
+            }
+        }, false);
+
+        withKeyLookupCursor(cursor -> {
+            cursor.seekToPointId(25);
+
+            cursor.reset();
+
+            ByteComparable key = cursor.seekToPointId(0);
+            byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
+            assertArrayEquals(keys.get(0), bytes);
+        });
+    }
+
+    @Test
+    public void testCursorResetFromSecondPartition() throws Exception
+    {
+        writeKeys(writer -> {
+            writer.startPartition();
+            for (int pointId = 0; pointId < 8; pointId++)
+            {
+                writer.add(ByteComparable.preencoded(VERSION, ByteSourceInverse.readBytes(intByteSource(pointId))));
+            }
+            writer.startPartition();
+            for (int pointId = 8; pointId < 16; pointId++)
+            {
+                writer.add(ByteComparable.preencoded(VERSION, ByteSourceInverse.readBytes(intByteSource(pointId))));
+            }
+        }, true);
+
+        withKeyLookupCursor(cursor -> {
+            ByteComparable key = cursor.seekToPointId(10);
+            byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
+            assertArrayEquals(ByteSourceInverse.readBytes(intByteSource(10)), bytes);
+
+            cursor.reset();
+
+            key = cursor.seekToPointId(0);
+            bytes = ByteSourceInverse.readBytes(key.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
+            assertArrayEquals(ByteSourceInverse.readBytes(intByteSource(0)), bytes);
+
+            key = cursor.seekToPointId(12);
+            bytes = ByteSourceInverse.readBytes(key.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
+            assertArrayEquals(ByteSourceInverse.readBytes(intByteSource(12)), bytes);
+        });
+    }
+
+    @Test
+    public void testMultipleCursorInstances() throws Exception
+    {
+        List<byte[]> keys = new ArrayList<>();
+        writeKeys(writer -> {
+            for (int x = 0; x < 50; x++)
+            {
+                byte[] bytes = ByteSourceInverse.readBytes(intByteSource(x));
+                keys.add(bytes);
+                writer.add(ByteComparable.preencoded(VERSION, bytes));
+            }
+        }, false);
+
+        withKeyLookup(reader -> {
+            // Open multiple cursors and verify they work independently
+            try (KeyLookup.Cursor cursor1 = reader.openCursor();
+                 KeyLookup.Cursor cursor2 = reader.openCursor())
+            {
+                ByteComparable key1 = cursor1.seekToPointId(10);
+                ByteComparable key2 = cursor2.seekToPointId(20);
+
+                byte[] bytes1 = ByteSourceInverse.readBytes(key1.asComparableBytes(VERSION));
+                byte[] bytes2 = ByteSourceInverse.readBytes(key2.asComparableBytes(VERSION));
+
+                assertArrayEquals(keys.get(10), bytes1);
+                assertArrayEquals(keys.get(20), bytes2);
+            }
+        });
+    }
+
+    @Test
+    public void testClusteredSeekBinarySearchPath() throws Exception
+    {
+        Map<Long, byte[]> keys = new HashMap<>();
+        writeKeys(writer -> {
+            // Create enough keys to trigger binary search (multiple blocks)
+            for (int x = 0; x < 200; x += 2)
+            {
+                byte[] key = makeKey(x);
+                keys.put((long) x / 2, key);
+                writer.add(ByteComparable.preencoded(VERSION, key));
+            }
+        }, true);
+
+        withKeyLookupCursor(cursor -> {
+            // Search for a key in the middle, forcing binary search
+            // pointId 50 corresponds to value 100 (since we increment by 2)
+            long result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(50L)), 0L, 100L);
+            assertEquals(50L, result);
+
+            cursor.reset();
+
+            // Search for a key that doesn't exist but falls between existing keys
+            // Key value 51 doesn't exist, next highest is 52 at position 26
+            long result2 = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(51)), 0L, 100L);
+            assertEquals(26L, result2);
+        });
     }
 
     private byte[] makeKey(int value)
@@ -488,6 +796,70 @@ public class KeyLookupTest extends SaiRandomizedTest
         }, false);
     }
 
+    @Test
+    public void testClusteredSeekKeyBeforePartition() throws Exception
+    {
+        writeKeys(writer -> {
+            writer.startPartition();
+            for (int x = 10; x < 26; x += 2)
+            {
+                writer.add(ByteComparable.preencoded(VERSION, ByteSourceInverse.readBytes(intByteSource(x))));
+            }
+        }, true);
+
+        withKeyLookupCursor(cursor -> {
+            long result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(5)), 0L, 8L);
+            assertEquals(0L, result);
+
+            result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(11)), 0L, 8L);
+            assertEquals(1L, result);
+        });
+    }
+
+    @Test
+    public void testClusteredSeekKeyOutsidePartition() throws Exception
+    {
+        writeKeys(writer -> {
+            writer.startPartition();
+            for (int pointId = 0; pointId < 8; pointId++)
+            {
+                writer.add(ByteComparable.preencoded(VERSION, ByteSourceInverse.readBytes(intByteSource(pointId * 2))));
+            }
+            writer.startPartition();
+            for (int pointId = 8; pointId < 16; pointId++)
+            {
+                writer.add(ByteComparable.preencoded(VERSION, ByteSourceInverse.readBytes(intByteSource(pointId * 2))));
+            }
+            writer.startPartition();
+            for (int pointId = 16; pointId < 24; pointId++)
+            {
+                writer.add(ByteComparable.preencoded(VERSION, ByteSourceInverse.readBytes(intByteSource(pointId * 2))));
+            }
+        }, true);
+
+        withKeyLookupCursor(cursor -> {
+            // Search for a key (value 4) that exists in partition 0, but we're searching in partition 1 (pointIds 8-15)
+            // Should return the startingPointId (8) since the search key is before all keys in the search range
+            long result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(4)), 8L, 16L);
+            assertEquals(8L, result);
+
+            // Search for a key (value 10) from partition 0, searching in partition 1
+            // Should also return startingPointId (8)
+            result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(10)), 8L, 16L);
+            assertEquals(8L, result);
+
+            // Search for a key from partition 1 while searching in partition 0
+            // Should return startingPointId (8) of next partition, i.e., partition 1
+            result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(20)), 0L, 8L);
+            assertEquals(8L, result);
+
+            // Search for a key from partition 2 while searching in partition 0
+            // Should return startingPointId (8) of next partition, i.e., partition 1
+            result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(34)), 0L, 8L);
+            assertEquals(8L, result);
+        });
+    }
+
     private ByteSource intByteSource(int value)
     {
         ByteBuffer buffer = Int32Type.instance.decompose(value);
@@ -504,7 +876,7 @@ public class KeyLookupTest extends SaiRandomizedTest
             try (KeyStoreWriter writer = new KeyStoreWriter(components.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
                                                             metadataWriter,
                                                             blockFPWriter,
-                                                            4,
+                                                            BLOCK_SIZE,
                                                             clustering))
             {
                 testCode.accept(writer);
