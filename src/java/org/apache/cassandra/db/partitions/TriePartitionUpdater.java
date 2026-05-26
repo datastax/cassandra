@@ -136,7 +136,6 @@ public class TriePartitionUpdater
 
     Object applyPartitionDeletion(PartitionData existing, DeletionTime unused)
     {
-        existing.clearStats();
         return existing;
     }
 
@@ -145,6 +144,9 @@ public class TriePartitionUpdater
         if (deletion.deletes(existing))
         {
             return LivenessInfo.EMPTY;
+            // FIXME: Need trie code to signal dropped childless LivenessInfo.EMPTY for correct row count tracking
+            // TrieBackedPartition should also be updated.
+
             // TODO: and also do currentPartition.markInsertedRows(-1) in that case?
             // TODO: Does strict row liveness apply here? How do we drop tail trie if it does?
         }
