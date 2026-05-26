@@ -87,7 +87,7 @@ class PrimaryKeyWithSource implements PrimaryKey
     }
 
     @Override
-    public Clustering clustering()
+    public Clustering<?> clustering()
     {
         return primaryKey().clustering();
     }
