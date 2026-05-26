@@ -71,14 +71,14 @@ public class V9OnDiskFormat extends V8OnDiskFormat
     @Override
     public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator)
     {
-        return new OptimizedRowAwarePrimaryKeyFactory(comparator);
+        return new ClusteredRowAwarePrimaryKeyFactory(comparator);
     }
 
     @Override
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
-        assert primaryKeyFactory instanceof OptimizedRowAwarePrimaryKeyFactory;
-        OptimizedRowAwarePrimaryKeyFactory rowAwareFactory = (OptimizedRowAwarePrimaryKeyFactory) primaryKeyFactory;
+        assert primaryKeyFactory instanceof ClusteredRowAwarePrimaryKeyFactory;
+        ClusteredRowAwarePrimaryKeyFactory rowAwareFactory = (ClusteredRowAwarePrimaryKeyFactory) primaryKeyFactory;
         return rowAwareFactory.hasClustering ? new WidePrimaryKeyMap.Factory(perSSTableComponents, rowAwareFactory, sstable)
                                              : new SkinnyPrimaryKeyMap.Factory(perSSTableComponents, rowAwareFactory, sstable);
     }

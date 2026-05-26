@@ -30,9 +30,9 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
-public class OptimizedRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactory
+public class ClusteredRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactory
 {
-    public OptimizedRowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
+    public ClusteredRowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
     {
         super(clusteringComparator);
     }
@@ -40,13 +40,13 @@ public class OptimizedRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactor
     @Override
     public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
     {
-        return new OptimizedRowAwarePrimaryKeyFactory.RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
+        return new ClusteredRowAwarePrimaryKeyFactory.RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
     }
 
     @Override
     public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
     {
-        return new OptimizedRowAwarePrimaryKeyFactory.RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
+        return new ClusteredRowAwarePrimaryKeyFactory.RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
     }
 
     private class RowAwarePrimaryKey extends RowAwarePrimaryKeyFactory.RowAwarePrimaryKey
