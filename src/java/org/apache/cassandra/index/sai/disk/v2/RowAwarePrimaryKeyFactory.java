@@ -57,7 +57,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
     }
 
     @Override
-    public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
+    public PrimaryKey create(DecoratedKey partitionKey, Clustering<?> clustering)
     {
         return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
     }
@@ -71,10 +71,10 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
     {
         private Token token;
         private DecoratedKey partitionKey;
-        private Clustering clustering;
+        private Clustering<?> clustering;
         private Supplier<PrimaryKey> primaryKeySupplier;
 
-        private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
+        private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering<?> clustering, Supplier<PrimaryKey> primaryKeySupplier)
         {
             this.token = token;
             this.partitionKey = partitionKey;
@@ -102,7 +102,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
-        public Clustering clustering()
+        public Clustering<?> clustering()
         {
             loadDeferred();
             return clustering;

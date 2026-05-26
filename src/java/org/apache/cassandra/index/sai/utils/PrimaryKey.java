@@ -97,7 +97,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
          * @param clustering the {@link Clustering}
          * @return a {@link PrimaryKey} contain the partition key and clustering
          */
-        PrimaryKey create(DecoratedKey partitionKey, Clustering clustering);
+        PrimaryKey create(DecoratedKey partitionKey, Clustering<?> clustering);
     }
 
     /**
@@ -147,7 +147,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
      *
      * @return the {@link Clustering}
      */
-    Clustering clustering();
+    Clustering<?> clustering();
 
     /**
      * Return whether the primary key has a clustering, i.e., has non-static clustering column(s).
