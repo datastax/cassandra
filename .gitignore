@@ -67,6 +67,9 @@ nbactions.xml
 out/
 target/
 
+# AI agents
+.ai/
+
 # General
 **/__pycache__
 *.pyc
