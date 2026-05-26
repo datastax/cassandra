@@ -76,7 +76,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         private FileHandle partitionToSizeFile = null;
 
         public Factory(IndexComponents.ForRead perSSTableComponents,
-                       OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
+                       ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory,
                        SSTableReader sstable)
         {
             super(perSSTableComponents, primaryKeyFactory, sstable);
@@ -149,7 +149,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
                               KeyLookup.Cursor partitionKeyCursor,
                               KeyLookup.Cursor clusteringKeyCursor,
                               IPartitioner partitioner,
-                              OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
+                              ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory,
                               ClusteringComparator clusteringComparator, 
                               SSTableId<?> sstableId,
                               boolean hasStaticColumns)

@@ -85,14 +85,14 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         protected final LongArray.Factory rowToPartitionReaderFactory;
         protected final KeyLookup partitionKeyReader;
         protected final IPartitioner partitioner;
-        protected final OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory;
+        protected final ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory;
 
         private FileHandle rowToTokenFile = null;
         private FileHandle rowToPartitionFile = null;
         private FileHandle partitionKeyBlockOffsetsFile = null;
         private FileHandle partitionKeyBlocksFile = null;
 
-        public Factory(IndexComponents.ForRead perSSTableComponents, OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
+        public Factory(IndexComponents.ForRead perSSTableComponents, ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
             try
             {
@@ -157,7 +157,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     protected final LongArray rowIdToPartitionIdArray;
     protected final KeyLookup.Cursor partitionKeyCursor;
     protected final IPartitioner partitioner;
-    protected final OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory;
+    protected final ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory;
     protected final SSTableId<?> sstableId;
     private final boolean hasStaticColumns;
 
@@ -165,7 +165,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
                                   LongArray rowIdToPartitionIdArray,
                                   KeyLookup.Cursor partitionKeyCursor,
                                   IPartitioner partitioner,
-                                  OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
+                                  ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory,
                                   SSTableId<?> sstableId,
                                   boolean hasStaticColumns)
     {

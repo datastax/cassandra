@@ -43,7 +43,7 @@ import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v9.OptimizedRowAwarePrimaryKeyFactory;
+import org.apache.cassandra.index.sai.disk.v9.ClusteredRowAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.disk.v9.WidePrimaryKeyMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -133,7 +133,7 @@ public class KeyLookupBench
         CassandraRelevantProperties.SAI_KEY_STORE_CLUSTERING_BLOCK_SHIFT.setInt(clusteringBlockShift);
         Assert.assertTrue("Version must be at least GA", Version.current(keyspaceName).onOrAfter(Version.GA));
         PerSSTableWriter writer = Version.current(keyspaceName).onDiskFormat().newPerSSTableWriter(indexDescriptor);
-        OptimizedRowAwarePrimaryKeyFactory factory = new OptimizedRowAwarePrimaryKeyFactory(metadata.comparator);
+        ClusteredRowAwarePrimaryKeyFactory factory = new ClusteredRowAwarePrimaryKeyFactory(metadata.comparator);
 
         PrimaryKey[] primaryKeys = generatePrimaryKeys(factory);
         Arrays.sort(primaryKeys);
@@ -167,7 +167,7 @@ public class KeyLookupBench
         return primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
     }
 
-    private PrimaryKey[] generatePrimaryKeys(OptimizedRowAwarePrimaryKeyFactory factory)
+    private PrimaryKey[] generatePrimaryKeys(ClusteredRowAwarePrimaryKeyFactory factory)
     {
         PrimaryKey[] primaryKeys = new PrimaryKey[rows];
         int partition = 0;
