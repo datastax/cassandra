@@ -87,7 +87,7 @@ public final class QueryParams
      * @param max the maximum allowed value (inclusive)
      * @throws ConfigurationException if the value is not a valid integer or is outside the range
      */
-    private void validateIntegerInRange(String optionKey, String value, int min, int max)
+    private static void validateIntegerInRange(String optionKey, String value, int min, int max)
     {
         if (value != null)
         {
