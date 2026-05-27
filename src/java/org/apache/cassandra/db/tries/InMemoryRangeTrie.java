@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import org.apache.cassandra.io.compress.BufferType;
@@ -350,7 +351,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
         ApplyState<S> start(int root)
         {
-            return (ApplyState<S>) super.start(root);
+            return (ApplyState<S>) super.start(root, droppedContentCallback);
         }
 
         private S getFirstChildContent(int node)
@@ -583,9 +584,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
     {
         MutatorStatic(ApplyState<S> applyState,
                       UpsertTransformer<S, U> transformer,
-                      Predicate<NodeFeatures<U>> needsForcedCopy)
+                      Predicate<NodeFeatures<U>> needsForcedCopy,
+                      Consumer<? super S> droppedContentCallback)
         {
-            super(transformer, needsForcedCopy, applyState);
+            super(transformer, needsForcedCopy, droppedContentCallback, applyState);
         }
 
         @Override
@@ -789,9 +791,9 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
     {
         /// See [InMemoryTrie#mutator(UpsertTransformer, Predicate)] for the meaning of the
         /// parameters.
-        Mutator(UpsertTransformer<S, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy)
+        Mutator(UpsertTransformer<S, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy, Consumer<? super S> droppedContentCallback)
         {
-            super(applyState, transformer, needsForcedCopy);
+            super(applyState, transformer, needsForcedCopy, droppedContentCallback);
         }
 
         /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
@@ -823,7 +825,22 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
     public <U extends RangeState<U>> Mutator<U> mutator(final UpsertTransformer<S, U> transformer,
                                                         Predicate<NodeFeatures<U>> needsForcedCopy)
     {
-        return new Mutator<>(transformer, needsForcedCopy);
+        return new Mutator<>(transformer, needsForcedCopy, null);
+    }
+
+    /// Creates a trie mutator that can be used to apply multiple modifications to the trie.
+    ///
+    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value. Applied even if there's no pre-existing value in the memtable trie.
+    /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
+    /// concurrent readers. See NodeFeatures for details.
+    /// @param droppedContentCallback function to call when childless content is dropped because
+    /// [ContentManager#shouldPreserveWithoutChildren] returned false.
+    public <U extends RangeState<U>> Mutator<U> mutator(final UpsertTransformer<S, U> transformer,
+                                                        Predicate<NodeFeatures<U>> needsForcedCopy,
+                                                        Consumer<? super S> droppedContentCallback)
+    {
+        return new Mutator<>(transformer, needsForcedCopy, droppedContentCallback);
     }
 
 

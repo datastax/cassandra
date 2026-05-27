@@ -250,7 +250,7 @@ DELETE FROM %s WHERE ... AND date <= '2026-01-31' AND date >= '2026-01-01'
 ```
 
 ```
- -> partition with 1 rows and 8 tombstones
+ -> partition with 1 rows and 2 tombstones
 *** Start deletion branch
 4080004fe620 -> LIVE -> deletedAt=412[RANGE]
       500460 -> deletedAt=412[RANGE] -> LIVE
@@ -342,7 +342,7 @@ multiple threads including while they are being modified, we do not need to lock
 #### Example
 The trie below
 ```
-40a9e72bd32b9f1ba24041434d450038 -> partition with 2 rows and 4 tombstones
+40a9e72bd32b9f1ba24041434d450038 -> partition with 2 rows and 0 tombstones
                                 *** Start deletion branch
                                 408000500e38 -> Level ROW
                                             01 -> LIVE -> deletedAt=345[COLUMN]
@@ -358,7 +358,7 @@ The trie below
                                             00 -> [?=4058ceb851eb851f ts=385]
                                             01 -> COMPLEX_COLUMN_MARKER
                                               404dab4819dc6f5c05b5754a057d78c99a38 -> [?=4058ceb851eb851f ts=385]
-  ca8e7ee71a25ce664049424d0038 -> partition with 1 rows and 4 tombstones
+  ca8e7ee71a25ce664049424d0038 -> partition with 1 rows and 0 tombstones
                               *** Start deletion branch
                               408000500f38 -> Level ROW
                                           01 -> LIVE -> deletedAt=351[COLUMN]
@@ -370,7 +370,7 @@ The trie below
                                           01 -> COMPLEX_COLUMN_MARKER
                                             40435441ee93ac90d098e89c75b414addb38 -> [?=407a4ab851eb851e ts=352]
                                                 edf143aa8d178f86b4d83a72a7517038 -> [?=405e87ae147ae148 ts=352]
-  cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 8 tombstones
+  cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 2 tombstones
                                   *** Start deletion branch
                                   4080004fe620 -> LIVE -> deletedAt=412[RANGE]
                                         500460 -> deletedAt=412[RANGE] -> LIVE
@@ -411,7 +411,7 @@ translated to the partition key "Apple".
 Here is another representation of the trie above, where we have combined the cells, rows and partitions with their
 type definitions and keys to make it easier to see what the content is describing:
 ```
-40a9e72bd32b9f1ba24041434d450038 -> partition with 2 rows and 4 tombstones at ACME
+40a9e72bd32b9f1ba24041434d450038 -> partition with 2 rows and 0 tombstones at ACME
                                 *** Start deletion branch
                                 408000500e38 -> Level ROW
                                             01 -> LIVE -> deletedAt=345[COLUMN]
@@ -427,7 +427,7 @@ type definitions and keys to make it easier to see what the content is describin
                                             00 -> [total=99.23 ts=385]
                                             01 -> COMPLEX_COLUMN_MARKER
                                               404dab4819dc6f5c05b5754a057d78c99a38 -> [purchases[dab4819d-c6f5-4c05-b575-4a057d78c99a]=99.23 ts=385]
-  ca8e7ee71a25ce664049424d0038 -> partition with 1 rows and 4 tombstones at IBM
+  ca8e7ee71a25ce664049424d0038 -> partition with 1 rows and 0 tombstones at IBM
                               *** Start deletion branch
                               408000500f38 -> Level ROW
                                           01 -> LIVE -> deletedAt=351[COLUMN]
@@ -439,7 +439,7 @@ type definitions and keys to make it easier to see what the content is describin
                                           01 -> COMPLEX_COLUMN_MARKER
                                             40435441ee93ac90d098e89c75b414addb38 -> [purchases[35441ee9-3ac9-40d0-98e8-9c75b414addb]=420.66999999999996 ts=352]
                                                 edf143aa8d178f86b4d83a72a7517038 -> [purchases[3edf143a-a8d1-478f-86b4-d83a72a75170]=122.12 ts=352]
-  cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 8 tombstones at Apple
+  cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 2 tombstones at Apple
                                   *** Start deletion branch
                                   4080004fe620 -> LIVE -> deletedAt=412[RANGE]
                                         500460 -> deletedAt=412[RANGE] -> LIVE
@@ -714,7 +714,7 @@ and then we call the trie code to merge it in.
 The trie code walk this trie in parallel with the in-memory memtable trie. When it reaches the "Apple"
 partition it will see something similar to:
 ```
-40cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 8 tombstones
+40cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 2 tombstones
                                   *** Start deletion branch
                                   -> TO APPLY: LIVE -> deletedAt=513[PARTITION]
                                   4080004fe620 -> LIVE -> deletedAt=412[RANGE]
@@ -738,23 +738,27 @@ partition it will see something similar to:
 Everything between the "TO APPLY" bounds that has a timestamp smaller than 513 is removed from the trie,
 resulting in:
 ```
-40cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 2 tombstones
+40cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 1 tombstones
                                   *** Start deletion branch
                                   -> LIVE -> deletedAt=513[PARTITION]
-                                  408000500d38 -> Level ROW
-                                            38↑ -> Level ROW
-                                          1038 -> Level ROW
-                                            38↑ -> Level ROW
+                                  408000500d38 -> Level ROW + deletedAt=513[PARTITION] -> deletedAt=513[PARTITION] 
+                                            38↑ -> Level ROW + deletedAt=513[PARTITION] -> deletedAt=513[PARTITION]
+                                          1038 -> Level ROW + deletedAt=513[PARTITION] -> deletedAt=513[PARTITION]
+                                            38↑ -> Level ROW + deletedAt=513[PARTITION] -> deletedAt=513[PARTITION]
                                   ↑ -> deletedAt=513[PARTITION] -> LIVE
                                   *** End deletion branch
                                   408000501038 -> [ts=EMPTY]
                                               01 -> COMPLEX_COLUMN_MARKER
 ```
+Note that `Level ROW` markers need to initially be kept in case there is substructure that needs to be presented as
+a deleted row, and because every tombstone marker in the trie has to present the state before and after it, it is also
+updated to include it.
+
 As part of the process of modifying the in-memory trie, the mutation code recognizes that the `COMPLEX_COLUMN_MARKER`
-and the `Level ROW` markers have no children and call the `shouldPreserveWithoutChildren` predicate. As that returns
-false, the marker and the path leading to them is removed.
+and the `Level ROW` markers have no children and call the `shouldPreserveWithoutChildren` predicate. That call returns
+false and the marker and the path leading to them is removed.
 ```
-40cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 2 tombstones
+40cd0a37fd8f053c6c404170706c650038 -> partition with 1 rows and 1 tombstones
                                   *** Start deletion branch
                                   -> LIVE -> deletedAt=513[PARTITION]
                                   ↑ -> deletedAt=513[PARTITION] -> LIVE
@@ -764,7 +768,7 @@ false, the marker and the path leading to them is removed.
 Now `[ts=EMPTY]` (i.e. `LivenessInfo.EMPTY`) has no children and has the `shouldPreserveWithoutChildren` predicate
 called, which tells the trie code to remove it and the path leading to it, resulting in the final
 ```
-40cd0a37fd8f053c6c404170706c650038 -> partition with 0 rows and 2 tombstones
+40cd0a37fd8f053c6c404170706c650038 -> partition with 0 rows and 1 tombstones
                                   *** Start deletion branch
                                   -> LIVE -> deletedAt=513[PARTITION]
                                   ↑ -> deletedAt=513[PARTITION] -> LIVE

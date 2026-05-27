@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -176,7 +177,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
 
         ApplyState<T, D> start(int root)
         {
-            return (ApplyState<T, D>) super.start(root);
+            return (ApplyState<T, D>) super.start(root, droppedContentCallback);
         }
 
         public int alternateBranch()
@@ -263,13 +264,15 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
                 BiFunction<D, V, V> insertedDeleter,
                 Predicate<NodeFeatures<V>> needsForcedCopyInData,
                 Predicate<NodeFeatures<E>> needsForcedCopyInDeletionBranch,
+                Consumer<? super T> droppedContentCallback,
                 boolean deletionsAtFixedPoints)
         {
-            super(dataTransformer, needsForcedCopyInData, applyState);
+            super(dataTransformer, needsForcedCopyInData, droppedContentCallback, applyState);
             this.deletionMutator = new InMemoryRangeTrie.MutatorStatic<>(deletionState,
                                                                          deletionTransformer,
-                                                                         needsForcedCopyInDeletionBranch);
-            this.deleter = new InMemoryTrie.RangeMutator<>(applyState, existingDeleter, needsForcedCopyInDeletionBranch);
+                                                                         needsForcedCopyInDeletionBranch,
+                                                                         (Consumer<D>) droppedContentCallback);
+            this.deleter = new InMemoryTrie.RangeMutator<>(applyState, existingDeleter, needsForcedCopyInDeletionBranch, droppedContentCallback);
             this.insertedDeleter = insertedDeleter;
             this.deletionsAtFixedPoints = deletionsAtFixedPoints;
         }
@@ -540,6 +543,50 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     /// guarantees to concurrent readers, applied in data branches. See [NodeFeatures] for details.
     /// @param needsForcedCopyInDeletions a predicate which decides when to fully copy a branch to provide atomicity
     /// guarantees to concurrent readers, applied in deletion branches. See [NodeFeatures] for details.
+    /// @param droppedContentCallback function to call when childless content is dropped because
+    /// [ContentManager#shouldPreserveWithoutChildren] returned false.
+    public <V, E extends RangeState<E>>
+    Mutator<V, E> mutator(final UpsertTransformer<T, V> dataTransformer,
+                          final UpsertTransformer<D, E> deletionTransformer,
+                          final UpsertTransformer<T, E> existingDeleter,
+                          final BiFunction<D, V, V> insertedDeleter,
+                          boolean deletionsAtFixedPoints,
+                          Predicate<NodeFeatures<V>> needsForcedCopyInData,
+                          Predicate<NodeFeatures<E>> needsForcedCopyInDeletions,
+                          Consumer<? super T> droppedContentCallback)
+    {
+        return new Mutator<>(dataTransformer,
+                             deletionTransformer,
+                             existingDeleter,
+                             insertedDeleter,
+                             needsForcedCopyInData,
+                             needsForcedCopyInDeletions,
+                             droppedContentCallback,
+                             deletionsAtFixedPoints);
+    }
+
+
+    /// Creates a trie mutator that can be used to apply multiple modifications to the trie.
+    ///
+    /// @param dataTransformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value. Applied even if there's no pre-existing value in the memtable trie. The transformer can return null
+    /// if the entry should not be added or preserved.
+    /// @param deletionTransformer a function applied to combine overlapping deletions into a consistent view. Called
+    /// even if there is no pre-existing deletion to convert the marker type. The transformer can return null if
+    /// deletions cancel out or should not be preserved.
+    /// **Note: for code simplicity this transformer is provided only the path to the root of the deletion branch.**
+    /// @param existingDeleter a function used to apply a deletion marker to potentially delete live data. This is
+    /// only called if there is both content and deletion at a given covered point. It should return null if the entry
+    /// is to be deleted.
+    /// @param insertedDeleter a function used to filter incoming entries that are covered by existing deletions
+    /// in this trie, called only if both an entry and a deletion apply to a given point. This function is not provided
+    /// with a path to the modified data.
+    /// @param deletionsAtFixedPoints True if deletion branches are at predetermined positions. See
+    /// [DeletionAwareTrie.MergeResolver#deletionsAtFixedPoints].
+    /// @param needsForcedCopyInData a predicate which decides when to fully copy a branch to provide atomicity
+    /// guarantees to concurrent readers, applied in data branches. See [NodeFeatures] for details.
+    /// @param needsForcedCopyInDeletions a predicate which decides when to fully copy a branch to provide atomicity
+    /// guarantees to concurrent readers, applied in deletion branches. See [NodeFeatures] for details.
     public <V, E extends RangeState<E>>
     Mutator<V, E> mutator(final UpsertTransformer<T, V> dataTransformer,
                           final UpsertTransformer<D, E> deletionTransformer,
@@ -555,6 +602,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
                              insertedDeleter,
                              needsForcedCopyInData,
                              needsForcedCopyInDeletions,
+                             null,
                              deletionsAtFixedPoints);
     }
 
