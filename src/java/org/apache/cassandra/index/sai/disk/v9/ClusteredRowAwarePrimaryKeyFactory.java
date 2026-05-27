@@ -44,7 +44,7 @@ public class ClusteredRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactor
     }
 
     @Override
-    public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
+    public PrimaryKey create(DecoratedKey partitionKey, Clustering<?> clustering)
     {
         return new ClusteredRowAwarePrimaryKeyFactory.RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
     }
