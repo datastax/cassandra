@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.tries;
 
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import com.google.common.base.Predicates;
@@ -197,9 +198,9 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     {
         /// See [InMemoryTrie#mutator(UpsertTransformer, Predicate)] for the meaning of the
         /// parameters.
-        Mutator(UpsertTransformer<T, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy)
+        Mutator(UpsertTransformer<T, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy, Consumer<? super T> droppedContentCallback)
         {
-            super(transformer, needsForcedCopy, applyState);
+            super(transformer, needsForcedCopy, droppedContentCallback, applyState);
         }
 
         /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
@@ -240,10 +241,25 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     /// value. Applied even if there's no pre-existing value in the memtable trie.
     /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
     /// concurrent readers. See NodeFeatures for details.
+    /// @param droppedContentCallback function to call when childless content is dropped because
+    /// [ContentManager#shouldPreserveWithoutChildren] returned false.
+    public <U> Mutator<U> mutator(UpsertTransformer<T, U> transformer,
+                                  Predicate<NodeFeatures<U>> needsForcedCopy,
+                                  Consumer<? super T> droppedContentCallback)
+    {
+        return new Mutator<>(transformer, needsForcedCopy, droppedContentCallback);
+    }
+
+    /// Creates a trie mutator that can be used to apply multiple modifications to the trie.
+    ///
+    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value. Applied even if there's no pre-existing value in the memtable trie.
+    /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
+    /// concurrent readers. See NodeFeatures for details.
     public <U> Mutator<U> mutator(UpsertTransformer<T, U> transformer,
                                   Predicate<NodeFeatures<U>> needsForcedCopy)
     {
-        return new Mutator<>(transformer, needsForcedCopy);
+        return new Mutator<>(transformer, needsForcedCopy, null);
     }
 
     /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
@@ -272,9 +288,10 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
         /// the parameters.
         RangeMutator(ApplyState<T> state,
                      UpsertTransformer<T, S> transformer,
-                     Predicate<NodeFeatures<S>> needsForcedCopy)
+                     Predicate<NodeFeatures<S>> needsForcedCopy,
+                     Consumer<? super T> droppedContentCallback)
         {
-            super(transformer, needsForcedCopy, state);
+            super(transformer, needsForcedCopy, droppedContentCallback, state);
         }
 
         RangeMutator<T, S> start(int root, RangeCursor<S> mutationCursor, int initialForcedCopyDepth)
@@ -407,9 +424,9 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     /// A variation of range mutator to apply sets as deletions of data in the trie.
     public static class SetMutator<T> extends RangeMutator<T, TrieSetCursor.RangeState>
     {
-        SetMutator(ApplyState<T> state, Predicate<NodeFeatures<TrieSetCursor.RangeState>> needsForcedCopy)
+        SetMutator(ApplyState<T> state, Predicate<NodeFeatures<TrieSetCursor.RangeState>> needsForcedCopy, Consumer<? super T> droppedContentCallback)
         {
-            super(state, SetMutator::deleteEntry, needsForcedCopy);
+            super(state, SetMutator::deleteEntry, needsForcedCopy, droppedContentCallback);
         }
 
         void apply(TrieSet set) throws TrieSpaceExhaustedException
@@ -430,22 +447,37 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     /// value. Applied even if there's no pre-existing value in the memtable trie.
     /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
     /// concurrent readers. See NodeFeatures for details.
+    /// @param droppedContentCallback function to call when childless content is dropped because
+    /// [ContentManager#shouldPreserveWithoutChildren] returned false.
+    public <S extends RangeState<S>> RangeMutator<T, S> rangeMutator(UpsertTransformer<T, S> transformer,
+                                                                     Predicate<NodeFeatures<S>> needsForcedCopy,
+                                                                     Consumer<? super T> droppedContentCallback)
+    {
+        return new RangeMutator<>(applyState, transformer, needsForcedCopy, droppedContentCallback);
+    }
+
+    /// Creates a range mutator that can be used to apply multiple modifications/deletions to the trie.
+    ///
+    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value. Applied even if there's no pre-existing value in the memtable trie.
+    /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
+    /// concurrent readers. See NodeFeatures for details.
     public <S extends RangeState<S>> RangeMutator<T, S> rangeMutator(UpsertTransformer<T, S> transformer,
                                                                      Predicate<NodeFeatures<S>> needsForcedCopy)
     {
-        return new RangeMutator<>(applyState, transformer, needsForcedCopy);
+        return new RangeMutator<>(applyState, transformer, needsForcedCopy, null);
     }
 
     /// Creates a set mutator that can be used to apply multiple deletions to the trie.
-    public SetMutator<T> deleter()
+    public SetMutator<T> deleter(Consumer<? super T> droppedContentCallback)
     {
-        return new SetMutator<>(applyState, NodeFeatures::isBranching);
+        return new SetMutator<>(applyState, NodeFeatures::isBranching, droppedContentCallback);
     }
 
     /// Delete all entries covered under the specified TrieSet
     public void delete(TrieSet set) throws TrieSpaceExhaustedException
     {
-        deleter().apply(set);
+        deleter(null).apply(set);
     }
 
     /// Map-like put method, using the apply machinery above which cannot run into stack overflow. When the correct

@@ -454,6 +454,16 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                        (InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>) trie);
     }
 
+    /// Returns true iff the given marker has a row-level deletion on its right side.
+    static boolean startsRowDeletion(TrieTombstoneMarker update)
+    {
+        TrieTombstoneMarker.Covering side = update.rightDeletion();
+        if (side == null)
+            return false;
+
+        return ROW_DELETION_KINDS.contains(side.deletionKind());
+    }
+
     /**
      * Builder for PartitionUpdates
      *
@@ -468,7 +478,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         private final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = TrieBackedRow.newTrie();
         private final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>.Mutator<Object, TrieTombstoneMarker> mutator;
         private final EncodingStats.Collector statsCollector = new EncodingStats.Collector();
+        /// Counts live rows (i.e. instances of LivenessInfo including EMPTY)
         private int rowCountIncludingStatic;
+        /// Counts tombstone ranges and row deletions
         private int tombstoneCount;
         private long dataSize;
 
@@ -488,7 +500,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                    this::applyIncomingTombstone,
                                    this::applyExistingTombstoneToIncomingRow,
                                    true,
-                                   x -> false);
+                                   Predicates.alwaysFalse(),
+                                   Predicates.alwaysFalse(),
+                                   this::dropLevelMarker);
         }
 
         void putInTrie(Row untypedRow)
@@ -720,26 +734,26 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 // We are adding a new tombstone. We are counting tombstones on the row level, so ones that introduce
                 // or close column deletions should not count.
                 // We will only count one of the sides as we want to increase the count by one for each pair.
-                if (hasKind(update.rightDeletion(), ROW_DELETION_KINDS))
+                if (startsRowDeletion(update))
                     ++tombstoneCount;
                 return update;
             }
             else
             {
                 TrieTombstoneMarker merged = update.mergeWith(existing);
-                int hadTombstone = existing.isBoundary() && hasKind(existing.rightDeletion(), ROW_DELETION_KINDS) ? 1 : 0;
-                int hasTombstone = merged != null && merged.isBoundary() && hasKind(merged.rightDeletion(), ROW_DELETION_KINDS) ? 1 : 0;
+                int hadTombstone = existing.isBoundary() && startsRowDeletion(existing) ? 1 : 0;
+                int hasTombstone = merged != null && merged.isBoundary() && startsRowDeletion(merged) ? 1 : 0;
                 tombstoneCount += hasTombstone - hadTombstone;
                 return merged;
             }
         }
 
-        private static boolean hasKind(TrieTombstoneMarker.Covering side, EnumSet<TrieTombstoneMarker.Kind> kinds)
+        private void dropLevelMarker(Object o)
         {
-            if (side == null)
-                return false;
-
-            return kinds.contains(side.deletionKind());
+            if (o == LivenessInfo.EMPTY)
+                --rowCountIncludingStatic;
+            if (o instanceof TrieTombstoneMarker && ((TrieTombstoneMarker) o).rightDeletion() != null)
+                --tombstoneCount;
         }
 
         @Override
