@@ -36,6 +36,7 @@ import org.apache.cassandra.db.compaction.CompactionAggregateStatistics;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
 import org.apache.cassandra.db.compaction.TableOperation;
+import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -115,7 +116,7 @@ public class CompactionMetrics
             // add estimate number of compactions need to be done
             for (String keyspaceName : Schema.instance.getKeyspaces())
             {
-                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                for (ColumnFamilyStore cfs : getColumnFamilyStores(keyspaceName))
                     n += cfs.getCompactionStrategy().getEstimatedRemainingTasks();
             }
             // add number of currently running compactions
@@ -127,7 +128,7 @@ public class CompactionMetrics
             // estimation of compactions need to be done
             for (String keyspaceName : Schema.instance.getKeyspaces())
             {
-                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                for (ColumnFamilyStore cfs : getColumnFamilyStores(keyspaceName))
                 {
                     int taskNumber = cfs.getCompactionStrategy().getEstimatedRemainingTasks();
                     if (taskNumber > 0)
@@ -177,7 +178,7 @@ public class CompactionMetrics
             {
                 Map<String, Double> ksMap = new HashMap<>();
                 resultMap.put(keyspaceName, ksMap);
-                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                for (ColumnFamilyStore cfs : getColumnFamilyStores(keyspaceName))
                     ksMap.put(cfs.getTableName(), cfs.getWA());
             }
 
@@ -220,7 +221,7 @@ public class CompactionMetrics
                                                         for (String keyspaceName : Schema.instance.getKeyspaces())
                                                         {
                                                             // Scan all the compactions strategies of all tables and find those that have compactions in progress.
-                                                            for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                                                            for (ColumnFamilyStore cfs : getColumnFamilyStores(keyspaceName))
                                                                 // For those return the statistics.
                                                                 ret.addAll(cfs.getCompactionStrategy().getStatistics());
                                                         }
@@ -239,7 +240,7 @@ public class CompactionMetrics
                                             {
                                                 Map<String, Map<String, String>> ksMap = new HashMap<>();
                                                 ret.put(keyspaceName, ksMap);
-                                                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                                                for (ColumnFamilyStore cfs : getColumnFamilyStores(keyspaceName))
                                                 {
                                                     Map<String, String> overlaps = cfs.getCompactionStrategy().getMaxOverlapsMap();
                                                     ksMap.put(cfs.getTableName(), overlaps);
@@ -310,6 +311,23 @@ public class CompactionMetrics
                        .sum();
             }
         });
+    }
+
+    /**
+     * Returns a list of all ColumnFamilyStores in a keyspace if it exists.
+     * If the keyspace does not exist, returns an empty list.
+     * This is useful to avoid throwing when a keyspace gets dropped while we are iterating all keyspaces.
+     */
+    private static Collection<ColumnFamilyStore> getColumnFamilyStores(String keyspaceName)
+    {
+        try
+        {
+            return Keyspace.open(keyspaceName).getColumnFamilyStores();
+        }
+        catch (UnknownKeyspaceException e)
+        {
+            return Collections.emptyList();
+        }
     }
 
     /**

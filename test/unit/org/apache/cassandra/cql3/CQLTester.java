@@ -69,6 +69,9 @@ import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+
+import org.apache.cassandra.io.compress.AdaptiveCompressor;
+import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -3579,5 +3582,12 @@ public abstract class CQLTester
             Assert.assertEquals(1, warnings.size());
             Assert.assertEquals(expectedWarning, warnings.get(0));
         }
+    }
+
+    public static String defaultCompressor()
+    {
+        return DatabaseDescriptor.shouldUseAdaptiveCompressionByDefault()
+               ? AdaptiveCompressor.class.getName()
+               : LZ4Compressor.class.getName();
     }
 }
