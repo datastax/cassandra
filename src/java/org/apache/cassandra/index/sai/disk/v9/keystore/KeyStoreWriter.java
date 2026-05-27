@@ -105,6 +105,11 @@ public class KeyStoreWriter implements Closeable
         this.offsetsWriter = keysBlockOffsets;
     }
 
+    /**
+     * Identifies new partition for clustering keys, so clustering keys are written 
+     * in order within a partition.
+     * It is not used for partition keys.
+     */
     public void startPartition()
     {
         assert clustering : "Cannot start a partition on a non-clustering key store";
