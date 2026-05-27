@@ -300,6 +300,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             try
             {
+                logger.debug("IndexBuildDecider#onInitialBuild for index {} returned {}", index.getIndexMetadata().name, IndexBuildDecider.instance.onInitialBuild());
                 initialBuildTask = index.shouldSkipInitialization() ? null : index.getInitializationTask();
             }
             catch (Throwable t)
@@ -312,8 +313,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // if there's no initialization, just mark as built (if it should be queryable) and return:
         if (initialBuildTask == null)
         {
+            logger.debug("No initialization task for index [{}], assuming index is built", index.getIndexMetadata().name);
+
             if (IndexBuildDecider.instance.isIndexQueryableAfterInitialBuild(baseCfs))
                 markIndexBuilt(index, true);
+            else
+                logger.debug("Not marking index [{}] as built because IndexBuildDecider#isIndexQueryableAfterInitialBuild returned false", index.getIndexMetadata().name);
 
             return Futures.immediateFuture(null);
         }
@@ -332,8 +337,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             @Override
             public void onSuccess(Object o)
             {
+                logger.debug("Initial build task completed successfully for index [{}]", index.getIndexMetadata().name);
                 if (IndexBuildDecider.instance.isIndexQueryableAfterInitialBuild(baseCfs))
                     markIndexBuilt(index, true);
+                else
+                    logger.debug("Not marking index [{}] as built because IndexBuildDecider returned false", index.getIndexMetadata().name);
 
                 initialization.set(o);
             }
@@ -853,12 +861,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     private void logAndMarkIndexesFailed(Set<Index> indexes, Throwable indexBuildFailure, boolean isInitialBuild)
     {
-        JVMStabilityInspector.inspectThrowable(indexBuildFailure);
         if (indexBuildFailure != null)
             logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", Index.joinNames(indexes), indexBuildFailure);
         else
             logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", Index.joinNames(indexes));
         indexes.forEach(i -> this.markIndexFailed(i, isInitialBuild));
+        JVMStabilityInspector.inspectThrowable(indexBuildFailure);
     }
 
     /**
@@ -1923,7 +1931,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             propagateLocalIndexStatus(keyspace.getName(), name, status);
             if (!index.isQueryable(status))
-                queryableIndexes.remove(name);
+            {
+                if (queryableIndexes.remove(name))
+                    logger.info("Index [{}] became non-queryable (status: {}))", name, status);
+            }
         }
     }
 
