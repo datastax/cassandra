@@ -96,12 +96,19 @@ public class TriePartitionUpdater
     {
         if (existing == null)
         {
-            currentPartition.markAddedTombstones(1);
+            if (TriePartitionUpdate.startsRowDeletion(update))
+                currentPartition.markAddedTombstones(1);
             return update;
         }
         else
         {
+            // We are adding a new tombstone. We are counting tombstones on the row level, so ones that introduce
+            // or close column deletions should not count.
+            // We will only count one of the sides as we want to increase the count by one for each pair.
             TrieTombstoneMarker merged = update.mergeWith(existing);
+            int hadTombstone = existing.isBoundary() && TriePartitionUpdate.startsRowDeletion(existing) ? 1 : 0;
+            int hasTombstone = merged != null && merged.isBoundary() && TriePartitionUpdate.startsRowDeletion(merged) ? 1 : 0;
+            currentPartition.markAddedTombstones(hasTombstone - hadTombstone);
             return merged;
         }
     }
@@ -152,6 +159,16 @@ public class TriePartitionUpdater
         }
         return existing;
     }
+
+
+    private void dropLevelMarker(Object o)
+    {
+        if (o == LivenessInfo.EMPTY)
+            currentPartition.markInsertedRows(-1);
+        if (o instanceof TrieTombstoneMarker && ((TrieTombstoneMarker) o).rightDeletion() != null)
+            currentPartition.markAddedTombstones(-1);
+    }
+
 
     /// Apply an existing tombstone to incoming data before merging that data in the trie.
     Object applyExistingMarkerToIncomingRow(TrieTombstoneMarker marker, Object content)
