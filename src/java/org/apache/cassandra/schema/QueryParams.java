@@ -102,8 +102,9 @@ public final class QueryParams
             }
             catch (NumberFormatException e)
             {
-                throw new ConfigurationException(format("Invalid value '%s' for option '%s'. Must be a valid integer.",
-                                                       value, optionKey));
+                throw new ConfigurationException(format("Invalid value '%s' for option '%s'. " +
+                                                        "Must be a valid integer between %d and %d (inclusive).",
+                                                        value, optionKey, min, max));
             }
         }
     }
