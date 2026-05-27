@@ -234,6 +234,8 @@ public class KeyLookup
         /**
          * Finds a pointId for the clustering key within a partition.
          * <p>
+         * It assumes the keys within the partition are sorted, as it uses binary search.
+         * <p>
          * If the key is not in the block containing the start of the range, a binary search is done to find
          * the block containing the search key. That block is then searched to return the pointId that corresponds
          * to the key that is either equal to or next highest to the search key.
@@ -241,7 +243,7 @@ public class KeyLookup
         @Override
         public long clusteredSeekToKey(ByteComparable key, long startingPointId, long endingPointId)
         {
-            assert clustering : "Cannot do a clustered seek to a key on non-clustered keys";
+            assert clustering : "Requires clustering so the clustering keys are sorted";
 
             BytesRef searchKey = asBytesRef(key);
 
@@ -252,7 +254,34 @@ public class KeyLookup
             if (currentPointId >= startingPointId && currentPointId < endingPointId && compareKeys(currentKey, searchKey) == 0)
                 return currentPointId;
 
-            // Now do a binary search over the range if points between [lowSearchId, highSearchId)
+            binarySearchKeyInRange(startingPointId, endingPointId, searchKey);
+
+            // Depending on where we are in the block we may need to move forwards to the starting point ID
+            while (currentPointId < startingPointId)
+            {
+                currentPointId++;
+                readCurrentKey();
+                updateCurrentBlockIndex(currentPointId);
+            }
+
+            // Move forward to the ending point ID, returning the point ID if we find our key
+            while (currentPointId < endingPointId)
+            {
+                if (compareKeys(currentKey, searchKey) >= 0)
+                    return currentPointId;
+
+                currentPointId++;
+                if (currentPointId == keyLookupMeta.keyCount)
+                    return -1;
+
+                readCurrentKey();
+                updateCurrentBlockIndex(currentPointId);
+            }
+            return endingPointId < keyLookupMeta.keyCount ? endingPointId : -1;
+        }
+
+        private void binarySearchKeyInRange(long startingPointId, long endingPointId, BytesRef searchKey)
+        {
             long lowSearchId = startingPointId;
             long highSearchId = endingPointId;
 
@@ -278,29 +307,6 @@ public class KeyLookup
 
             updateCurrentBlockIndex(lowSearchId);
             resetToCurrentBlock();
-
-            // Depending on where we are in the block we may need to move forwards to the starting point ID
-            while (currentPointId < startingPointId)
-            {
-                currentPointId++;
-                readCurrentKey();
-                updateCurrentBlockIndex(currentPointId);
-            }
-
-            // Move forward to the ending point ID, returning the point ID if we find our key
-            while (currentPointId < endingPointId)
-            {
-                if (compareKeys(currentKey, searchKey) >= 0)
-                    return currentPointId;
-
-                currentPointId++;
-                if (currentPointId == keyLookupMeta.keyCount)
-                    return -1;
-
-                readCurrentKey();
-                updateCurrentBlockIndex(currentPointId);
-            }
-            return endingPointId < keyLookupMeta.keyCount ? endingPointId : -1;
         }
 
         @VisibleForTesting
