@@ -207,28 +207,28 @@ public class KeyLookup
         private long currentPointId;
         private long currentBlockIndex;
 
-        IndexInputCursor(FileHandle keysFileHandle, LongArray.Factory blockOffsetsFactory) throws IOException
+        IndexInputCursor(FileHandle keysFileHandle, LongArray.Factory blockOffsetsFactory)
         {
             try
             {
                 this.keysInput = IndexInputReader.create(keysFileHandle);
                 SAICodecUtils.validate(this.keysInput);
+
                 this.blockShift = this.keysInput.readVInt();
                 this.blockMask = (1 << this.blockShift) - 1;
                 this.clustering = this.keysInput.readByte() == 1;
-                this.keysFilePointer = this.keysInput.getFilePointer();
-                this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
-                this.currentKey = new BytesRef(keyLookupMeta.maxKeyLength);
-                this.nextBlockKey = new BytesRef(keyLookupMeta.maxKeyLength);
-                keysInput.seek(keysFilePointer);
-                readKey(currentPointId, currentKey);
             }
             catch (Throwable t)
             {
-                if (keysFileHandle != null)
-                    keysFileHandle.close();
-                throw t;
+                throw Throwables.unchecked(Throwables.close(t, keysFileHandle));
             }
+            this.keysFilePointer = this.keysInput.getFilePointer();
+            this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
+            this.currentKey = new BytesRef(keyLookupMeta.maxKeyLength);
+            this.nextBlockKey = new BytesRef(keyLookupMeta.maxKeyLength);
+
+            keysInput.seek(keysFilePointer);
+            readKey(currentPointId, currentKey);
         }
 
         /**
