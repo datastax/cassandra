@@ -19,6 +19,7 @@ package org.apache.cassandra.db.tries;
 
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReferenceArray;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 
@@ -878,6 +879,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         int[] data = new int[16 * STATE_SIZE];
         int currentDepth = -1;
 
+        Consumer<? super T> droppedContentCallback = null;
+
         /// Pointer to the existing node before skipping over content nodes, i.e. this is either the same as
         /// existingPostContentNode or a pointer to a prefix or leaf node whose child is `existingPostContentNode`.
         int existingFullNode()
@@ -959,14 +962,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             this.trie = trie;
         }
 
-        ApplyState<T> start()
+        ApplyState<T> start(int root, Consumer<? super T> droppedContentCallback)
         {
-            return start(trie.root);
-        }
-
-        ApplyState<T> start(int root)
-        {
-            currentDepth = -1;
+            this.currentDepth = -1;
+            this.droppedContentCallback = droppedContentCallback;
             descendInto(root);
             return this;
         }
@@ -1159,6 +1158,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 // remove it.
                 if (!isNull(contentId) && !trie.shouldPreserveWithoutChildren(contentId))
                 {
+                    if (droppedContentCallback != null)
+                        droppedContentCallback.accept(trie.getContent(contentId));
                     trie.releaseContent(contentId);
                     contentId = NONE;
                 }
@@ -1387,6 +1388,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     {
         final UpsertTransformer<T, U> transformer;
         final Predicate<NodeFeatures<U>> needsForcedCopy;
+        final Consumer<? super T> droppedContentCallback;
         final A state;
 
         C mutationCursor;
@@ -1394,10 +1396,12 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
         Mutator(UpsertTransformer<T, U> transformer,
                 Predicate<NodeFeatures<U>> needsForcedCopy,
+                Consumer<? super T> droppedContentCallback,
                 A state)
         {
             this.transformer = transformer;
             this.needsForcedCopy = needsForcedCopy;
+            this.droppedContentCallback = droppedContentCallback;
             this.state = state;
         }
 
@@ -1407,7 +1411,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
             this.mutationCursor = mutationCursor;
             this.forcedCopyDepth = initialForcedCopyDepth;
-            this.state.start(root);
+            this.state.start(root, droppedContentCallback);
             return this;
         }
 
