@@ -459,11 +459,12 @@ public class AdaptiveCompressor implements ICompressor
         // 0.0 if actualRate >= rateLimit
         // 1.0 if actualRate <= 0.8 * rateLimit;
         double rateLimitFactor = Math.min(1.0, Math.max(0.0, (rateLimit - actualRate) / (0.2 * rateLimit)));
+        assert rateLimitFactor >= 0.0 : "rateLimitFactor (" + rateLimitFactor + " out of valid range [0.0, 1.0]";
 
         long pendingCompactions = compactionManager.getPendingTasks();
-        long activeCompactions = compactionManager.getActiveCompactions();
-        long queuedCompactions = pendingCompactions - activeCompactions;
-        double compactionQueuePressure = Math.min(1.0, (double) queuedCompactions / (maxCompactionQueueLength * DatabaseDescriptor.getConcurrentCompactors()));
+        double compactionQueuePressure = Math.min(1.0, (double) pendingCompactions / (maxCompactionQueueLength * DatabaseDescriptor.getConcurrentCompactors()));
+        assert compactionQueuePressure >= 0.0 && compactionQueuePressure <= 1.0
+            : "compactionQueuePressure (" + compactionQueuePressure + ") out of valid range [0.0, 1.0]";
         return compactionQueuePressure * rateLimitFactor;
     }
 
