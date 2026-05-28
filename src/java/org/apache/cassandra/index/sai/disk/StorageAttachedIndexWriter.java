@@ -38,7 +38,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.format.OnDiskFormat;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -90,8 +90,9 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                                       boolean perIndexComponentsOnly,
                                       TableMetrics tableMetrics) throws IOException
     {
-        // We always write at the latest version (through what that version is can be configured for specific cases)
-        var onDiskFormat = Version.current(indexDescriptor.descriptor.ksname).onDiskFormat();
+        // We always use the version of the existing per-sstable components, if any, or the configured current version
+        // if there are no previously existing per-sstable components.
+        OnDiskFormat onDiskFormat = indexDescriptor.versionForNewComponents().onDiskFormat();
         this.indexDescriptor = indexDescriptor;
         // Note: I think there is a silent assumption here. That is, the PK factory we use here must be for the current
         // format version, because that is what `IndexContext.keyFactory` always uses (see ctor)

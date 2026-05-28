@@ -16,13 +16,29 @@
 
 package org.apache.cassandra.index;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UncheckedInternalRequestExecutionException;
+import org.apache.cassandra.service.StorageServiceMBean;
+
+import java.util.Set;
 
 /**
- * Thrown if a secondary index is still in an old version that doesn't support the requested feature.
+ * Thrown if a secondary index or any of its components is still in an old version that doesn't support the requested
+ * feature.
  * </p>
- * Users hitting this exception should probably rebuild their index to a newer version.
+ * Users hitting this exception should probably set the right index version and upgrade their sstables. That way, the
+ * new replacement sstables will use that new version.
+ * </p>
+ * Please note that rebuilding the index with {@code nodetool rebuild_index},
+ * {@link StorageServiceMBean#rebuildSecondaryIndex(String, String, String...)},
+ * {@link ColumnFamilyStore#rebuildSecondaryIndex(String, String, String...)},
+ * {@link SecondaryIndexManager#rebuildIndexesBlocking(Set)}, etc. will not be enough to upgrade the index version,
+ * because sstables are fixed to the index version active when they were first indexed. See CNDB-8756 for details.
+ * </p>
+ * If this error is hit during an index build, when the index has been recorded in the schema, and before it's marked
+ * as queryable, it means that the index also needs to be rebuilt after upgrading the sstables, so it gets marked as
+ * queryable. CNDB-16824 is meant to simplify that.
  */
 public final class FeatureNeedsIndexRebuildException extends UncheckedInternalRequestExecutionException
 {
