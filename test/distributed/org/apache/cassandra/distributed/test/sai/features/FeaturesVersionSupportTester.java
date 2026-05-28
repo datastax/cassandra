@@ -22,6 +22,7 @@ import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.distributed.Cluster;
@@ -34,7 +35,6 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
-import static org.apache.cassandra.distributed.api.ConsistencyLevel.ONE;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 
@@ -63,15 +63,19 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
                               .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                               .start(), 1);
 
+        for (String keyspace : VERSIONS_PER_KEYSPACE.keySet())
+            cluster.schemaChange("CREATE KEYSPACE " + keyspace + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}");
+    }
+
+    @Before
+    public void before()
+    {
         // The first node, which will be the coordinator in all tests, uses the latest version for all keyspaces
         cluster.get(1).runOnInstance(() -> org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion(Version.LATEST));
 
         // The second node will use the tested version as the default, and specific versions for known keyspaces
         String versionString = version.toString();
         cluster.get(2).runOnInstance(() -> org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion(Version.parse(versionString), VERSIONS_PER_KEYSPACE));
-
-        for (String keyspace : VERSIONS_PER_KEYSPACE.keySet())
-            cluster.schemaChange("CREATE KEYSPACE " + keyspace + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}");
     }
 
     @AfterClass
@@ -83,6 +87,8 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
     /**
      * Test that vector indexes are supported with on-disk format versions from {@link Version#CA}.
      * Nodes using older versions should fail their index build, although the index will still exist.
+     * This includes nodes set to use a version that supports ANN, but with a pre-existing index in a version that
+     * doesn't support ANN.
      */
     @Test
     public void testANN()
@@ -92,15 +98,31 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
 
     private void testANN(String keyspace, Version version)
     {
-        cluster.schemaChange("CREATE TABLE " + keyspace + ".ann (k int PRIMARY KEY, v vector<float, 2>)");
+        cluster.schemaChange("CREATE TABLE " + keyspace + ".ann (k int PRIMARY KEY, x int, v vector<float, 2>)");
 
         ICoordinator coordinator = cluster.coordinator(1);
-        coordinator.execute("INSERT INTO " + keyspace + ".ann (k, v) VALUES (0, [1.0, 2.0])", ALL);
-        coordinator.execute("INSERT INTO " + keyspace + ".ann (k, v) VALUES (1, [2.0, 3.0])", ALL);
-        coordinator.execute("INSERT INTO " + keyspace + ".ann (k, v) VALUES (2, [3.0, 4.0])", ALL);
-        coordinator.execute("INSERT INTO " + keyspace + ".ann (k, v) VALUES (3, [4.0, 5.0])", ALL);
+        coordinator.execute("INSERT INTO " + keyspace + ".ann (k, x, v) VALUES (0, 0, [1.0, 2.0])", ALL);
+        coordinator.execute("INSERT INTO " + keyspace + ".ann (k, x, v) VALUES (1, 1, [2.0, 3.0])", ALL);
+        coordinator.execute("INSERT INTO " + keyspace + ".ann (k, x, v) VALUES (2, 2, [3.0, 4.0])", ALL);
+        coordinator.execute("INSERT INTO " + keyspace + ".ann (k, x, v) VALUES (3, 3, [4.0, 5.0])", ALL);
         cluster.forEach(node -> node.flush(keyspace));
 
+        // The second node is on the tested version, so it would accept or reject the index creation depending on
+        // whether that version supports it.
+        testANN(coordinator, keyspace, "does not support vector indexes");
+
+        // Create a non-vector index with the tested version, so there are some per-sstable components around
+        cluster.schemaChange("CREATE CUSTOM INDEX ON " + keyspace + ".ann(x) USING 'StorageAttachedIndex'");
+        SAIUtil.waitForIndexQueryableOnAllNodes(cluster, keyspace);
+
+        // Set the version of the second node to the latest version, so all nodes are in the latest version,
+        // but there is still a non-vector index with components on the tested version.
+        cluster.get(2).runOnInstance(() -> org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion(Version.LATEST));
+        testANN(coordinator, keyspace, "The current sstables have other indexes using the on-disk format version");
+    }
+
+    private void testANN(ICoordinator coordinator, String keyspace, String expectedErrorMessage)
+    {
         String createIndexQuery = "CREATE CUSTOM INDEX ann_idx ON " + keyspace + ".ann(v) USING 'StorageAttachedIndex' " +
                                   "WITH OPTIONS = {'similarity_function' : 'euclidean'}";
         String annSelectQuery = "SELECT k FROM " + keyspace + ".ann ORDER BY v ANN OF [2.5, 3.5] LIMIT 3";
@@ -109,19 +131,22 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
         if (version.onOrAfter(Version.JVECTOR_EARLIEST))
         {
             cluster.schemaChange(createIndexQuery);
-            SAIUtil.waitForIndexQueryableOnFirstNode(cluster, keyspace, "ann_idx");
-            Assertions.assertThat(coordinator.execute(annSelectQuery, ONE)).hasNumberOfRows(3);
-            Assertions.assertThat(coordinator.execute(geoSelectQuery, ONE)).hasNumberOfRows(2);
+            SAIUtil.waitForIndexQueryableOnAllNodes(cluster, keyspace);
+            Assertions.assertThat(coordinator.execute(annSelectQuery, ALL)).hasNumberOfRows(3);
+            Assertions.assertThat(coordinator.execute(geoSelectQuery, ALL)).hasNumberOfRows(2);
         }
         else
         {
             // The on-disk format version in node 2 is too old to support indexes on vector columns.
+            // That can be due to either the default version for new indexes in node 2 for the keyspace, or the
+            // existence of other indexes using an old version that forces the new index to use that same old version.
             cluster.setUncaughtExceptionsFilter((i, t) -> i == 2 &&
                                                           t.getClass().getName().contains(FeatureNeedsIndexRebuildException.class.getName()) &&
-                                                          t.getMessage().contains("does not support vector indexes"));
+                                                          t.getMessage().contains(expectedErrorMessage));
             cluster.schemaChange(createIndexQuery);
             SAIUtil.assertIndexBuildFailed(cluster.get(1), cluster.get(2), keyspace, "ann_idx");
         }
+        cluster.schemaChange("DROP INDEX IF EXISTS " + keyspace + ".ann_idx");
     }
 
     /**
@@ -151,17 +176,17 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
                              "'index_analyzer': '{" +
                              "\"tokenizer\" : {\"name\" : \"standard\"}, " +
                              "\"filters\" : [{\"name\" : \"porterstem\"}]}'}");
-        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, keyspace, "bm25_idx");
+        SAIUtil.waitForIndexQueryableOnAllNodes(cluster, keyspace);
 
         String query = "SELECT k FROM " + keyspace + ".bm25 ORDER BY v BM25 OF 'apple' LIMIT 3";
 
         if (version.onOrAfter(Version.BM25_EARLIEST))
         {
-            Assertions.assertThat(coordinator.execute(query, ONE)).hasNumberOfRows(1);
+            Assertions.assertThat(coordinator.execute(query, ALL)).hasNumberOfRows(1);
         }
         else
         {
-            Assertions.assertThatThrownBy(() -> coordinator.execute(query, ONE))
+            Assertions.assertThatThrownBy(() -> coordinator.execute(query, ALL))
                       .hasMessageContaining(RequestFailureReason.FEATURE_NEEDS_INDEX_REBUILD.name());
         }
     }
@@ -187,9 +212,9 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
         cluster.schemaChange("CREATE CUSTOM INDEX analyzer_idx ON " + keyspace + ".analyzer(v)" +
                              " USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'" +
                              "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, keyspace, "analyzer_idx");
+        SAIUtil.waitForIndexQueryableOnAllNodes(cluster, keyspace);
 
-        Assertions.assertThat(coordinator.execute("SELECT * FROM " + keyspace + ".analyzer WHERE v = 'dogs'", ONE))
+        Assertions.assertThat(coordinator.execute("SELECT * FROM " + keyspace + ".analyzer WHERE v = 'dogs'", ALL))
                   .hasNumberOfRows(1);
     }
 
@@ -222,14 +247,14 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
                              "'query_analyzer': '{" +
                              "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
                              "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
-        SAIUtil.waitForIndexQueryableOnFirstNode(cluster, keyspace, "q_analyzer_idx");
+        SAIUtil.waitForIndexQueryableOnAllNodes(cluster, keyspace);
 
         String query = "SELECT k FROM " + keyspace + ".q_analyzer WHERE v : ";
-        Assertions.assertThat(coordinator.execute(query + "'ast'", ONE)).hasNumberOfRows(3);
-        Assertions.assertThat(coordinator.execute(query + "'astra'", ONE)).hasNumberOfRows(3);
-        Assertions.assertThat(coordinator.execute(query + "'astra2'", ONE)).hasNumberOfRows(1);
-        Assertions.assertThat(coordinator.execute(query + "'fox'", ONE)).hasNumberOfRows(3);
-        Assertions.assertThat(coordinator.execute(query + "'foxes'", ONE)).hasNumberOfRows(1);
+        Assertions.assertThat(coordinator.execute(query + "'ast'", ALL)).hasNumberOfRows(3);
+        Assertions.assertThat(coordinator.execute(query + "'astra'", ALL)).hasNumberOfRows(3);
+        Assertions.assertThat(coordinator.execute(query + "'astra2'", ALL)).hasNumberOfRows(1);
+        Assertions.assertThat(coordinator.execute(query + "'fox'", ALL)).hasNumberOfRows(3);
+        Assertions.assertThat(coordinator.execute(query + "'foxes'", ALL)).hasNumberOfRows(1);
     }
 
     private static void test(BiConsumer<String, Version> testMethod)

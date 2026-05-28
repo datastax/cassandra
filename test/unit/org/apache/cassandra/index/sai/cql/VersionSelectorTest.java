@@ -225,7 +225,7 @@ public class VersionSelectorTest extends SAITester
         }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
                                                        "WITH OPTIONS = {'similarity_function' : 'euclidean'}"),
                      Version.JVECTOR_EARLIEST,
-                     StorageAttachedIndex::vectorUnsupportedByVersionError,
+                     StorageAttachedIndex::vectorUnsupportedByCurrentVersionError,
                      "JVector is not supported in V2OnDiskFormat")
           .withQueries(keyspace -> {
               assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5] LIMIT 3", 3);
@@ -249,7 +249,7 @@ public class VersionSelectorTest extends SAITester
         }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
                                                        "WITH OPTIONS = {'similarity_function' : 'euclidean'}"),
                      Version.JVECTOR_EARLIEST,
-                     StorageAttachedIndex::vectorUnsupportedByVersionError,
+                     StorageAttachedIndex::vectorUnsupportedByCurrentVersionError,
                      "JVector is not supported in V2OnDiskFormat")
           .withQueries(keyspace -> {
               assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v ANN OF [2.5, 3.5] LIMIT 3", 3);
@@ -444,7 +444,7 @@ public class VersionSelectorTest extends SAITester
                 if (version.onOrAfter(minVersionForIndexing))
                 {
                     indexCreator.accept(keyspace);
-                    verifySAIVersionInUse(version, keyspace, TABLE);
+                    verifySAIVersionInUse(keyspace, TABLE, version);
                     verifyQueries(queryResultsVerifier,
                                   keyspace,
                                   version,
@@ -491,7 +491,7 @@ public class VersionSelectorTest extends SAITester
             // create the index for each keyspace, which should use the default current version
             versionsPerKeyspace.keySet().forEach(keyspace -> {
                 indexCreator.accept(keyspace);
-                verifySAIVersionInUse(globalCurrentVersion, keyspace, TABLE);
+                verifySAIVersionInUse(keyspace, TABLE, globalCurrentVersion);
                 verifyQueries(queryResultsVerifier,
                               keyspace,
                               globalCurrentVersion,
@@ -509,14 +509,23 @@ public class VersionSelectorTest extends SAITester
             // and verify the queries and the version of the index
             versionsPerKeyspace.forEach((keyspace, version) -> {
 
-                verifySAIVersionInUse(globalCurrentVersion, keyspace, TABLE);
+                verifySAIVersionInUse(keyspace, TABLE, globalCurrentVersion);
 
                 // Verify if we can rebuild the index, depending on whether the new version supports it
                 if (version.onOrAfter(minVersionForIndexing))
                 {
+                    // If the new version per-sstable components is different from the old version,
+                    // we need to upgrade the sstables first. Otherwise, the index rebuild would ignore the new version.
+                    if (!version.equals(globalCurrentVersion))
+                    {
+                        rebuildTableIndexes(keyspace, TABLE);
+                        verifySAIVersionInUse(keyspace, TABLE, globalCurrentVersion);
+                        upgradeSSTables(keyspace, TABLE);
+                    }
+
                     rebuildTableIndexes(keyspace, TABLE);
                     reloadSSTableIndexInPlace(keyspace, TABLE);
-                    verifySAIVersionInUse(version, keyspace, TABLE);
+                    verifySAIVersionInUse(keyspace, TABLE, version);
                 }
                 else
                 {
