@@ -413,7 +413,11 @@ public enum CassandraRelevantProperties
     /** Whether to validate terms that will be SAI indexed at the coordinator */
     SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
 
-    /** Whether to optimize query plans */
+    /**
+     * Whether to optimize query plans
+     * <p>
+     * This will be overriden at the table level by the option {@code WITH storage_attached_indexing = {'query_optimization_level': 1}}
+     */
     SAI_QUERY_OPTIMIZATION_LEVEL("cassandra.sai.query_optimization_level", "1"),
 
     /**
@@ -421,13 +425,19 @@ public enum CassandraRelevantProperties
      * If enabled, the query optimizer uses, if present, the term statistics stored
      * with the help of histograms in the metadata component of each SSTable index.
      * Using terms statistics is significantly less costly but less precise.
+     * <p>
+     * This will be overriden at the table level by the option {@code WITH storage_attached_indexing = {'use_term_statistics': 'true'}}
      */
     SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS("cassandra.sai.query_optimization.use_term_statistics", "true"),
 
     /** Controls the number of rows read in a single batch when fetching rows for a partition key */
     SAI_PARTITION_ROW_BATCH_SIZE("cassandra.sai.partition_row_batch_size", "100"),
 
-    /** Controls the maximum number of expressions that will be used in a SAI intersection operation. */
+    /**
+     * Controls the maximum number of expressions that will be used in a SAI intersection operation.
+     * <p>
+     * This will be overriden at the table level by the option {@code WITH storage_attached_indexing = {'intersection_clause_limit': 2}}
+     */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
 
     /**

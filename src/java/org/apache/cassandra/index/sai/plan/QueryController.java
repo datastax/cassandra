@@ -106,9 +106,21 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
     private final ColumnFamilyStore cfs;
+
+    /// If set to true, the term statistics in index metadata are used for predicate selectivity estimation
+    /// @see org.apache.cassandra.config.CassandraRelevantProperties#SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS
     private final boolean useTermStatistics;
+
+    /// Zero disables optimization, positive number enables. The higher the value, the more optimization is supposed
+    /// to happen, but currently the highest level is 1.
+    /// @see org.apache.cassandra.config.CassandraRelevantProperties#SAI_QUERY_OPTIMIZATION_LEVEL
     private final int queryOptimizationLevel;
+
+    /// How many index iterators can be intersected when multiple index filters are present in the query.
+    /// We limit them because we empirically found out that intersecting too many iterators doesn't
+    /// @see org.apache.cassandra.config.CassandraRelevantProperties#SAI_QUERY_OPTIMIZATION_LEVEL
     private final int intersectionClauseLimit;
+
     private final ReadCommand command;
     private final Orderer orderer;
     private final QueryContext queryContext;
@@ -168,9 +180,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         this.mergeRange = merge(ranges);
 
         // Optimizer options. Use table-level settings, which fall back to global properties if not set
-        this.queryOptimizationLevel = cfs.metadata().params.queryParams.saiQueryOptimizationLevel();
-        this.intersectionClauseLimit = cfs.metadata().params.queryParams.saiIntersectionClauseLimit();
-        this.useTermStatistics = cfs.metadata().params.queryParams.saiUseTermStatistics();
+        this.queryOptimizationLevel = cfs.metadata().params.storageAttachedIndexingParams.queryOptimizationLevel();
+        this.intersectionClauseLimit = cfs.metadata().params.storageAttachedIndexingParams.intersectionClauseLimit();
+        this.useTermStatistics = cfs.metadata().params.storageAttachedIndexingParams.useTermStatistics();
 
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());

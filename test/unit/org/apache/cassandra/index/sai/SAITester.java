@@ -82,7 +82,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.Plan;
-import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
