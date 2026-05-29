@@ -21,6 +21,7 @@ import java.util.Iterator;
 
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.BiLongAccumulator;
 import org.apache.cassandra.utils.LongAccumulator;
@@ -68,6 +69,17 @@ public abstract class ComplexColumnData extends ColumnData implements Iterable<C
     public abstract long accumulate(LongAccumulator<Cell<?>> accumulator, long initialValue);
 
     public abstract <A> long accumulate(BiLongAccumulator<A, Cell<?>> accumulator, A arg, long initialValue);
+
+    @Override
+    public void digest(Digest digest)
+    {
+        DeletionTime complexDeletion = complexDeletion();
+        if (!complexDeletion.isLive())
+            complexDeletion.digest(digest);
+
+        for (Cell<?> cell : this)
+            cell.digest(digest);
+    }
 
     public abstract ComplexColumnData purge(DeletionPurger purger, long nowInSec);
 

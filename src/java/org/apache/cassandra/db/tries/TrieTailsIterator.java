@@ -20,6 +20,7 @@ package org.apache.cassandra.db.tries;
 import java.util.AbstractMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
 
@@ -99,6 +100,8 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
 
     public V next()
     {
+        if (!hasNext())
+            throw new NoSuchElementException();
         gotNext = false;
         V v = next;
         next = null;
