@@ -144,7 +144,7 @@ public class DeletionTime implements Comparable<DeletionTime>, IMeasurableMemory
     @Override
     public String toString()
     {
-        return this == LIVE ? "LIVE" : String.format("deletedAt=%d, localDeletion=%d", markedForDeleteAt(), localDeletionTime());
+        return this.isLive() ? "LIVE" : String.format("deletedAt=%d, localDeletion=%d", markedForDeleteAt(), localDeletionTime());
     }
 
     public int compareTo(DeletionTime dt)

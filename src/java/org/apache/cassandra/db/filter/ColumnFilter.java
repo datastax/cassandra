@@ -309,7 +309,7 @@ public abstract class ColumnFilter
      *
      * @return the sub-selections or {@code null} if there are none
      */
-    protected abstract SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections();
+    public abstract SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections();
 
     /**
      * Returns a {@code ColumnFilter} builder that fetches all regular columns or all columns (and queries the columns
@@ -628,7 +628,7 @@ public abstract class ColumnFilter
         }
 
         @Override
-        protected SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections()
+        public SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections()
         {
             return null;
         }
@@ -778,7 +778,7 @@ public abstract class ColumnFilter
         }
 
         @Override
-        protected SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections()
+        public SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections()
         {
             return subSelections;
         }
