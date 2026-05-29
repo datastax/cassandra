@@ -26,7 +26,6 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.ByteType;
@@ -179,16 +178,6 @@ public class BTreeComplexColumn extends ComplexColumnData
     {
         for (Cell<?> cell : this)
             cell.validate();
-    }
-
-    @Override
-    public void digest(Digest digest)
-    {
-        if (!complexDeletion.isLive())
-            complexDeletion.digest(digest);
-
-        for (Cell<?> cell : this)
-            cell.digest(digest);
     }
 
     @Override

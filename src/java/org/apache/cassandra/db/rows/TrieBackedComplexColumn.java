@@ -25,7 +25,6 @@ import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.Trie;
@@ -220,12 +219,6 @@ public class TrieBackedComplexColumn extends ComplexColumnData
     }
 
     @Override
-    public void digest(Digest digest)
-    {
-        throw new AssertionError("Should be collected by TrieBackedRow");
-    }
-
-    @Override
     public boolean hasInvalidDeletions()
     {
         throw new AssertionError("Should be collected by TrieBackedRow");
@@ -240,7 +233,21 @@ public class TrieBackedComplexColumn extends ComplexColumnData
     @Override
     public TrieBackedComplexColumn purge(DeletionPurger purger, long nowInSec)
     {
-        throw new AssertionError("Should be done by TrieBackedRow");
+        DeletionAwareTrie<Object, TrieTombstoneMarker> mappedData = data.mapValuesAndDeletions(
+            (Object x) ->
+            {
+                if (x instanceof CellData)
+                {
+                    CellData<?, ?> c = (CellData<?, ?>) x;
+                    return c.purge(purger, nowInSec);
+                }
+                else
+                    return x;   // complex column marker
+            },
+            t -> t.map(deletion -> purger.shouldPurge(deletion) ? null : deletion));
+
+
+        return new TrieBackedComplexColumn(column, mappedData);
     }
 
     @Override
