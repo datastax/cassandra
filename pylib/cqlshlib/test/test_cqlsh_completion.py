@@ -612,7 +612,8 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'memtable_flush_period_in_ms',
                                      'CLUSTERING',
                                      'COMPACT', 'caching', 'comment',
-                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair'])
+                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair',
+                                     'storage_attached_indexing'])
         self.trycompletions(prefix + ' new_table (col_a int PRIMARY KEY) WITH ',
                             choices=['bloom_filter_fp_chance', 'compaction',
                                      'compression',
@@ -621,7 +622,8 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'memtable_flush_period_in_ms',
                                      'CLUSTERING',
                                      'COMPACT', 'caching', 'comment',
-                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair'])
+                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair',
+                                     'storage_attached_indexing'])
         self.trycompletions(prefix + ' new_table (col_a int PRIMARY KEY) WITH bloom_filter_fp_chance ',
                             immediate='= ')
         self.trycompletions(prefix + ' new_table (col_a int PRIMARY KEY) WITH bloom_filter_fp_chance = ',
@@ -685,6 +687,8 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'tombstone_compaction_interval', 'tombstone_threshold',
                                      'enabled', 'unchecked_tombstone_compaction',
                                      'only_purge_repaired_tombstones','provide_overlapping_tombstones'])
+        self.trycompletions(prefix + " new_table (col_a int PRIMARY KEY) WITH storage_attached_indexing = {",
+                            choices=['query_optimization_level', 'intersection_clause_limit', 'use_term_statistics'])
 
     def test_complete_in_create_columnfamily(self):
         self.trycompletions('CREATE C', choices=['COLUMNFAMILY', 'CUSTOM'])
