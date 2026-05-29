@@ -92,6 +92,8 @@ public interface GuardrailsConfig
      */
     boolean getSecondaryIndexesEnabled();
 
+    void setSecondaryIndexesEnabled(boolean enabled);
+
     /**
      * @return The threshold to warn when creating more SASI indexes per table than threshold.
      */

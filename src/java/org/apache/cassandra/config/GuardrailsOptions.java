@@ -182,9 +182,18 @@ public class GuardrailsOptions implements GuardrailsConfig
         enforceDefault("vector_dimensions_fail_threshold", v -> config.vector_dimensions_fail_threshold = v, 8192, 8192, 8192);
 
         enforceDefault("columns_per_table_fail_threshold", v -> config.columns_per_table_fail_threshold = v, -1, 50, 200);
-        enforceDefault("secondary_indexes_per_table_fail_threshold", v -> config.secondary_indexes_per_table_fail_threshold = v, NO_LIMIT, 1, 0);
-        enforceDefault("sasi_indexes_per_table_fail_threshold", v -> config.sasi_indexes_per_table_fail_threshold = v, NO_LIMIT, 0, 0);
-        enforceDefault("materialized_views_per_table_fail_threshold", v -> config.materialized_views_per_table_fail_threshold = v, NO_LIMIT, 2, 0);
+
+        // For secondary indexes: use node-level flag to control feature blocking
+        enforceDefault("secondary_indexes_enabled", v -> config.secondary_indexes_enabled = v, true, true, false);
+        enforceDefault("secondary_indexes_per_table_fail_threshold", v -> config.secondary_indexes_per_table_fail_threshold = v, NO_LIMIT, 1, NO_LIMIT);
+
+        // For SASI indexes: use node-level flag (deprecated in CC5, will throw startup exception if enabled)
+        enforceDefault("sasi_indexes_enabled", v -> config.sasi_indexes_enabled = v, false, false, false);
+        enforceDefault("sasi_indexes_per_table_fail_threshold", v -> config.sasi_indexes_per_table_fail_threshold = v, NO_LIMIT, NO_LIMIT, NO_LIMIT);
+
+        // For materialized views: use node-level flag to control feature blocking
+        enforceDefault("materialized_views_enabled", v -> config.materialized_views_enabled = v, false, false, false);
+        enforceDefault("materialized_views_per_table_fail_threshold", v -> config.materialized_views_per_table_fail_threshold = v, NO_LIMIT, 2, NO_LIMIT);
         enforceDefault("tables_warn_threshold", v -> config.tables_warn_threshold = v, -1, 100, 100);
         enforceDefault("tables_fail_threshold", v -> config.tables_fail_threshold = v, -1, 200, 200);
 
@@ -384,6 +393,21 @@ public class GuardrailsOptions implements GuardrailsConfig
     }
 
     @Override
+    public boolean getSecondaryIndexesEnabled()
+    {
+        return config.secondary_indexes_enabled;
+    }
+
+    @Override
+    public void setSecondaryIndexesEnabled(boolean enabled)
+    {
+        updatePropertyWithLogging("secondary_indexes_enabled",
+                                  enabled,
+                                  () -> config.secondary_indexes_enabled,
+                                  x -> config.secondary_indexes_enabled = x);
+    }
+
+    @Override
     public int getSasiIndexesPerTableWarnThreshold()
     {
         return config.sasi_indexes_per_table_warn_threshold;
@@ -402,7 +426,7 @@ public class GuardrailsOptions implements GuardrailsConfig
                                   warn,
                                   () -> config.sasi_indexes_per_table_warn_threshold,
                                   x -> config.sasi_indexes_per_table_warn_threshold = x);
-        updatePropertyWithLogging("sai_indexes_per_table_fail_threshold",
+        updatePropertyWithLogging("sasi_indexes_per_table_fail_threshold",
                                   fail,
                                   () -> config.sasi_indexes_per_table_fail_threshold,
                                   x -> config.sasi_indexes_per_table_fail_threshold = x);
@@ -670,20 +694,6 @@ public class GuardrailsOptions implements GuardrailsConfig
                                   enabled,
                                   () -> config.drop_keyspace_enabled,
                                   x -> config.drop_keyspace_enabled = x);
-    }
-
-    @Override
-    public boolean getSecondaryIndexesEnabled()
-    {
-        return config.secondary_indexes_enabled;
-    }
-
-    public void setSecondaryIndexesEnabled(boolean enabled)
-    {
-        updatePropertyWithLogging("secondary_indexes_enabled",
-                                  enabled,
-                                  () -> config.secondary_indexes_enabled,
-                                  x -> config.secondary_indexes_enabled = x);
     }
 
     @Override
