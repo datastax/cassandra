@@ -19,11 +19,8 @@ package org.apache.cassandra.db.rows;
 
 import java.nio.ByteBuffer;
 import java.util.AbstractCollection;
-import java.util.ArrayList;
-import java.util.BitSet;
 import java.util.Collection;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -53,7 +50,6 @@ import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.RangeTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieEntriesIterator;
-import org.apache.cassandra.db.tries.TrieSet;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.db.tries.TrieTailsIterator;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -97,7 +93,7 @@ public class TrieBackedRow extends AbstractRow
 
     private static final long EMPTY_SIZE = ObjectSizes.measure(new TrieBackedRow(Columns.NONE, EMPTY_COLUMN_IDS, Clustering.EMPTY, LivenessInfo.EMPTY, Row.Deletion.LIVE, EMPTY_ROW));
 
-    private static final int COLUMN_NOT_PRESENT = -1;
+    static final int COLUMN_NOT_PRESENT = -1;
 
     // A column with this ID cannot exist. Used to make sure we don't find anything when we are passed an unknown column definition.
     public static final ByteComparable MISSING_COLUMN_KEY = encodeUnsignedInt(Long.MAX_VALUE);
@@ -176,6 +172,14 @@ public class TrieBackedRow extends AbstractRow
     {
         this(columns,
              columnsMapCache.computeIfAbsent(columns, TrieBackedRow::makeColumnIdsMap),
+             clustering,
+             data);
+    }
+
+    TrieBackedRow(Columns columns, Object2IntHashMap<ColumnIdentifier> columnIds, Clustering<?> clustering, DeletionAwareTrie<Object, TrieTombstoneMarker> data)
+    {
+        this(columns,
+             columnIds,
              clustering,
              getLivenessInfo(data),
              getDeletion(data),
@@ -436,7 +440,7 @@ public class TrieBackedRow extends AbstractRow
                                          getCellPathType(column).asComparableBytes(path.get(0), version));
     }
 
-    private static int columnId(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column)
+    static int columnId(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column)
     {
         return columnIds.getValue(column.name);
     }
@@ -451,6 +455,11 @@ public class TrieBackedRow extends AbstractRow
             return encodeUnsignedInt(id);
         else
             return cellKey(id, column, path);
+    }
+
+    private ByteComparable cellKey(ColumnMetadata column, CellPath path)
+    {
+        return cellKey(columnIds, column, path);
     }
 
     private static ByteSource columnIdPrefix(int columnId)
@@ -485,11 +494,11 @@ public class TrieBackedRow extends AbstractRow
     private static AbstractType<?> getCellPathType(ColumnMetadata column)
     {
         assert column.isComplex();
-        return ((MultiCellCapableType<Object>) column.type).nameComparator();
+        return ((MultiCellCapableType<?>) column.type).nameComparator();
     }
 
     /// Returns the column key, i.e. the column index path in the trie without the part corresponding to the cell path.
-    private static ByteComparable columnKey(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column)
+    static ByteComparable columnKey(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column)
     {
         int id = columnId(columnIds, column);
         if (id == COLUMN_NOT_PRESENT)
@@ -529,7 +538,7 @@ public class TrieBackedRow extends AbstractRow
 
     private Cell<?> getCellInternal(ColumnMetadata c, CellPath path)
     {
-        Object o = data.get(cellKey(columnIds, c, path));
+        Object o = data.get(cellKey(c, path));
         if (o == null || o instanceof Cell)
             return (Cell<?>) o;
         CellData<?, ?> cellData = (CellData<?, ?>) o;
@@ -569,7 +578,7 @@ public class TrieBackedRow extends AbstractRow
     @Override
     public Collection<ColumnMetadata> columns()
     {
-        return new AbstractCollection<ColumnMetadata>()
+        return new AbstractCollection<>()
         {
             @Override public Iterator<ColumnMetadata> iterator()
             {
@@ -705,115 +714,61 @@ public class TrieBackedRow extends AbstractRow
 
         boolean mayFilterColumns = !filter.fetchesAllColumns(isStatic()) || !filter.allFetchedColumnsAreQueried();
         // When merging sstable data in Row.Merger#merge(), rowDeletion is removed if it doesn't supersede activeDeletion.
-        boolean mayHaveDeleted = !activeDeletion.isLive();
-        DeletionAwareTrie<Object, TrieTombstoneMarker> filteredData = data;
+        boolean mayHaveDeleted = !activeDeletion.isLive() && activeDeletion.supersedes(deletion.time());
         if (!mayFilterColumns && !mayHaveDeleted && droppedColumns.isEmpty())
             return this;
 
-        if (!droppedColumns.isEmpty())
+        if (!mayFilterColumns && droppedColumns.isEmpty() && setActiveDeletionToRow)
         {
-            // Filter dropped columns by adding a deletion with the drop time, so that data before the drop time is not
-            // returned.
-            List<RangeTrie<TrieTombstoneMarker>> drops = new ArrayList<>();
-            for (ColumnMetadata c : columns)
+            assert mayHaveDeleted;
+            return new TrieBackedRow(columns, columnIds,
+                                     clustering,
+                                     activeDeletion.deletes(livenessInfo) ? LivenessInfo.EMPTY : livenessInfo,
+                                     Deletion.regular(activeDeletion),
+                                     applyAndSetActiveDeletion(data, activeDeletion));
+        }
+
+        try
+        {
+            TrieColumnFilter tcf = new TrieColumnFilter(columns, columnIds, filter, isStatic(), mayFilterColumns);
+
+            if (!droppedColumns.isEmpty())
             {
-                DroppedColumn dropped = droppedColumns.get(c.name.bytes);
-                if (dropped != null)
-                {
-                    drops.add(RangeTrie.branch(columnKey(columnIds, c),
-                                               BYTE_COMPARABLE_VERSION,
-                                               TrieTombstoneMarker.covering(dropped.droppedTime, 0, TrieTombstoneMarker.Kind.COLUMN)));
-                }
+                // If we are filtering, we only need to drop columns we have selected. If not, a dropped column may be
+                // in the columns set but not filtered out.
+                tcf.applyDroppedColumns(droppedColumns, mayFilterColumns ? filter.fetchedColumns().columns(isStatic()) : columns);
             }
-            if (!drops.isEmpty())
-                filteredData = filteredData.mappingMergeWithDeletion(RangeTrie.merge(drops, TrieTombstoneMarker::merge),
-                                                                     TrieBackedRow::deleteData,
-                                                                     TrieTombstoneMarker::dropShadowedUpdate,
-                                                                     true);
-        }
 
-        if (mayFilterColumns)
+            if (mayHaveDeleted && !setActiveDeletionToRow)
+                tcf.applyDeletion(activeDeletion);
+
+            DeletionAwareTrie<Object, TrieTombstoneMarker> filteredData = tcf.apply(data);
+            if (mayHaveDeleted && setActiveDeletionToRow)
+                filteredData = applyAndSetActiveDeletion(filteredData, activeDeletion);
+
+            if (isEmpty(filteredData))
+                return null;
+
+            // TODO: Should we use `fetched` for `columns`? Note the ids cannot change.
+            return new TrieBackedRow(columns, columnIds, clustering, filteredData);
+        }
+        catch (TrieSpaceExhaustedException e)
         {
-            // TODO: Column filter may include cell-level filters for complex columns, in both fetched and queried
-            Columns queried = filter.queriedColumns().columns(isStatic());
-            BitSet queriedIds = getColumnIds(queried);
-
-            // Getting queried and fetchedButNotQueried separately and merging looks more efficient, but in general
-            // most of the time we'll either have fetched getting all columns or fetched equal to queried.
-            // Filtering by fetched first avoids one operation in the former case.
-            Columns fetched = filter.fetchedColumns().columns(isStatic());
-            BitSet fetchedIds = getColumnIds(fetched);
-            if (fetchedIds.cardinality() != columns.size())
-                filteredData = restrictToColumnSet(filteredData, fetchedIds);
-
-            BitSet fetchedButNotQueried = fetchedIds;
-            fetchedButNotQueried.andNot(queriedIds);
-
-            if (!fetchedButNotQueried.isEmpty())
-            {
-                DeletionAwareTrie<Object, TrieTombstoneMarker> fetchedButNotQueriedData =
-                filteredData.intersect(TrieSet.ranges(BYTE_COMPARABLE_VERSION, true, true, mapIdsToColumnKeys(fetchedButNotQueried)))
-                            .mapValues(TrieBackedRow::dropCellValue);
-
-                filteredData = filteredData.mergeWith(fetchedButNotQueriedData,
-                                                      (x, y) -> y, // fetchedButNotQueried overrides data cells
-                                                      TrieTombstoneMarker::mergeUpdate,
-                                                      noExistingSelfDeletion(),
-                                                      true);
-            }
+            // This cannot happen
+            throw new AssertionError(e);
         }
-        LivenessInfo filteredLivenessInfo = this.livenessInfo;
-        Deletion filteredDeletion = this.deletion;
-
-        if (mayHaveDeleted)
-        {
-            // Apply the given active deletion. If asked to set, add it as a deletion. If not, only drop content that
-            // it deletes.
-            if (setActiveDeletionToRow)
-                filteredData = filteredData.mergeWithDeletion(RangeTrie.branch(ByteComparable.EMPTY,
-                                                                               BYTE_COMPARABLE_VERSION,
-                                                                               TrieTombstoneMarker.covering(activeDeletion, TrieTombstoneMarker.Kind.ROW)),
-                                                              TrieBackedRow::deleteData,
-                                                              TrieTombstoneMarker::mergeUpdate,
-                                                              true);
-            else // we need mappingMerge to make sure that the resolver is called for all update markers so that we can drop them
-                filteredData = filteredData.mappingMergeWithDeletion(RangeTrie.branch(ByteComparable.EMPTY,
-                                                                                      BYTE_COMPARABLE_VERSION,
-                                                                                      TrieTombstoneMarker.covering(activeDeletion, TrieTombstoneMarker.Kind.ROW)),
-                                                                     TrieBackedRow::deleteData,
-                                                                     TrieTombstoneMarker::dropShadowedUpdate,
-                                                                     true);
-            filteredLivenessInfo = getLivenessInfo(filteredData);
-            filteredDeletion = getDeletion(filteredData);
-        }
-
-        // TODO: Should we use `fetched` for `columns`? Note the ids cannot change.
-
-        if (isEmpty(filteredData))
-            return null;
-
-        return new TrieBackedRow(columns, columnIds, clustering, filteredLivenessInfo, filteredDeletion, filteredData);
     }
 
-    private static DeletionAwareTrie<Object, TrieTombstoneMarker> restrictToColumnSet(DeletionAwareTrie<Object, TrieTombstoneMarker> data, BitSet fetchedIds)
+    private static DeletionAwareTrie<Object, TrieTombstoneMarker>
+    applyAndSetActiveDeletion(DeletionAwareTrie<Object, TrieTombstoneMarker> data,
+                              DeletionTime activeDeletion)
     {
-        // Because we do not support column-level deletions for simple columns, we need to keep the row-level deletion
-        // at the root. The intersection below moves it down to the cell level.
-        TrieTombstoneMarker.Covering rowDeletion = TrieTombstoneMarker.applicableDeletion(data, ByteComparable.EMPTY);
-
-        // Restrict to the fetched columns with the liveness info.
-        if (!fetchedIds.isEmpty())
-            data = data.intersect(TrieSet.ranges(BYTE_COMPARABLE_VERSION, true, true, mapIdsToColumnKeys(fetchedIds)));
-        else
-            data = DeletionAwareTrie.singleton(ByteComparable.EMPTY, BYTE_COMPARABLE_VERSION, data.get(ByteComparable.EMPTY));
-
-        // Re-add the row deletion and the ascent-side Level.ROW marker, which we lose in the intersection above.
-        if (rowDeletion != null)
-            data = data.mergeWithDeletion(rowDeletionTrie(rowDeletion),
-                                                          (x, y) -> y, // Row deletion is already applied
-                                                          TrieTombstoneMarker::mergeUpdate,
-                                                          true);
-        return data;
+        return data.mergeWithDeletion(RangeTrie.branch(ByteComparable.EMPTY,
+                                                       BYTE_COMPARABLE_VERSION,
+                                                       TrieTombstoneMarker.covering(activeDeletion, TrieTombstoneMarker.Kind.ROW)),
+                                      TrieBackedRow::deleteData,
+                                      TrieTombstoneMarker::mergeUpdate,
+                                      true);
     }
 
     private static Object deleteData(Object existing, TrieTombstoneMarker marker)
@@ -845,44 +800,9 @@ public class TrieBackedRow extends AbstractRow
         throw new AssertionError("Unknown content type: " + existing);
     }
 
-    private static Object dropCellValue(Object existing)
-    {
-        if (!(existing instanceof CellData))
-            return existing;
-        return ((CellData<?, ?>) existing).withSkippedValue();
-    }
-
-    private static ByteComparable[] mapIdsToColumnKeys(BitSet fetchedIds)
-    {
-        ByteComparable[] keys = new ByteComparable[fetchedIds.cardinality() * 2];
-        int keyPos = 0;
-        for (int i = fetchedIds.nextSetBit(0); i >= 0; i = fetchedIds.nextSetBit(i + 1))
-        {
-            final int id = i;
-            ByteComparable columnKey = encodeUnsignedInt(id);
-            keys[keyPos++] = columnKey; // add twice for inclusive start and end
-            keys[keyPos++] = columnKey;
-        }
-        assert keyPos == keys.length;
-        return keys;
-    }
-
-    private static ByteComparable encodeUnsignedInt(long id)
+    static ByteComparable encodeUnsignedInt(long id)
     {
         return v -> ByteSource.variableLengthUnsignedInteger(id);
-    }
-
-    private BitSet getColumnIds(Columns fetched)
-    {
-        BitSet fetchedIds = new BitSet();
-        for (ColumnMetadata c : fetched)
-        {
-            int idx = columnId(columnIds, c);
-            if (idx == COLUMN_NOT_PRESENT)
-                continue;
-            fetchedIds.set(idx);
-        }
-        return fetchedIds;
     }
 
     @Override
@@ -891,13 +811,17 @@ public class TrieBackedRow extends AbstractRow
         if (filter.allFetchedColumnsAreQueried())
             return this;
 
-        // TODO: Column filter may include cell-level filters for complex columns
         Columns queried = filter.queriedColumns().columns(isStatic());
-        BitSet queriedIds = getColumnIds(queried);
-        if (queriedIds.cardinality() != columns.size())
-            return new TrieBackedRow(columns, columnIds, clustering, livenessInfo, deletion, restrictToColumnSet(data, queriedIds));
-        else
-            return this;
+        try
+        {
+            TrieColumnFilter tcf = new TrieColumnFilter(columns, columnIds, queried);
+            return new TrieBackedRow(columns, columnIds, clustering, livenessInfo, deletion, tcf.apply(data));
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            // can't happen
+            throw new AssertionError(e);
+        }
     }
 
     @Override
@@ -993,7 +917,7 @@ public class TrieBackedRow extends AbstractRow
         {
             // when enforceStrictLiveness is set, a row is considered dead when it's PK liveness info is not present
             DeletionTime rowDeletion = TrieTombstoneMarker.applicableDeletion(data, ByteComparable.EMPTY);
-            if (primaryKeyLivenessInfo().timestamp() < timestamp && rowDeletion == null || rowDeletion.markedForDeleteAt() < timestamp)
+            if (primaryKeyLivenessInfo().timestamp() < timestamp && (rowDeletion == null || rowDeletion.markedForDeleteAt() < timestamp))
                 return null;
         }
 
@@ -1109,7 +1033,7 @@ public class TrieBackedRow extends AbstractRow
     {
         long heapSize = EMPTY_SIZE + clustering.unsharedHeapSizeExcludingData();
         if (data instanceof InMemoryDeletionAwareTrie)
-            heapSize += ((InMemoryDeletionAwareTrie) data).usedSizeOnHeap();
+            heapSize += ((InMemoryDeletionAwareTrie<?, ?>) data).usedSizeOnHeap();
 
         return accumulate(heapSize,
                           (liveness, v) -> v + liveness.unsharedHeapSize(),

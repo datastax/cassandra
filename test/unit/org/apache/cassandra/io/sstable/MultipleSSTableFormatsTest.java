@@ -18,14 +18,10 @@
 
 package org.apache.cassandra.io.sstable;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Maps;
@@ -40,13 +36,9 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
-import org.apache.cassandra.tools.JsonTransformer;
-import org.apache.cassandra.tools.Util;
 import org.assertj.core.api.Assertions;
 
 
@@ -57,7 +49,7 @@ public class MultipleSSTableFormatsTest extends CQLTester
     private final static int overlap = 70;
     private final static int deletionCount = 30;
 
-    private final long seed = 55;//System.nanoTime();
+    private final long seed = System.nanoTime();
     private Random random;
 
     private SSTableFormat<?, ?> savedSSTableFormat;
@@ -76,12 +68,9 @@ public class MultipleSSTableFormatsTest extends CQLTester
         DatabaseDescriptor.setSelectedSSTableFormat(savedSSTableFormat);
     }
 
-    Map<Integer, SSTableFormat> delformat = Maps.newHashMap();
-
-    private Map<Integer, Integer> createSSTables() throws IOException
+    private Map<Integer, Integer> createSSTables()
     {
         Map<Integer, Integer> content = Maps.newHashMap();
-        delformat.clear();
 
         createTable("CREATE TABLE %s (id INT, val INT, PRIMARY KEY (id))");
         disableCompaction();
@@ -98,7 +87,6 @@ public class MultipleSSTableFormatsTest extends CQLTester
                 execute("INSERT INTO %s (id, val) VALUES (?, ?)", i + offset, v);
             }
             offset += cnt - overlap;
-            System.out.println(((TrieMemtable) getCurrentColumnFamilyStore().getCurrentMemtable()).dump());
 
             flush();
         }
@@ -111,23 +99,10 @@ public class MultipleSSTableFormatsTest extends CQLTester
             {
                 int key = random.nextInt(offset + overlap);
                 content.remove(key);
-                delformat.put(key, format);
                 execute("DELETE FROM %s WHERE id = ?", key);
             }
-            System.out.println(((TrieMemtable) getCurrentColumnFamilyStore().getCurrentMemtable()).dump());
 
             flush();
-        }
-
-        for (SSTableReader s : getCurrentColumnFamilyStore().getLiveSSTables())
-        {
-            System.out.println(s);
-            try (ISSTableScanner scanner = s.getScanner())
-            {
-                OutputStream os = new ByteArrayOutputStream();
-                JsonTransformer.toJsonLines(scanner, Util.iterToStream(scanner), false, getCurrentColumnFamilyStore().metadata(), os);
-                System.out.println(os.toString());
-            }
         }
 
         List<SSTableFormat<?, ?>> createdFormats = createdFormats();
@@ -144,33 +119,11 @@ public class MultipleSSTableFormatsTest extends CQLTester
             Assertions.assertThat(r.one().getInt("val")).isEqualTo(entry.getValue());
         }
 
-        for (Map.Entry<Integer, SSTableFormat> entry : delformat.entrySet())
-        {
-            UntypedResultSet r = execute("SELECT val FROM %s WHERE id = ?", entry.getKey());
-            Assertions.assertThat(r.isEmpty());
-        }
-
         Iterator<UntypedResultSet.Row> it = execute("SELECT id, val FROM %s").iterator();
         Map<Integer, Integer> results = Maps.newHashMap();
         while (it.hasNext()) {
             UntypedResultSet.Row row = it.next();
             results.put(row.getInt("id"), row.getInt("val"));
-        }
-        if (!results.equals(content))
-        {
-            Set<Integer> r = Sets.newHashSet(results.keySet());
-            r.removeAll(content.keySet());
-            for (var k : r)
-            {
-                System.out.println(k + " from " + delformat.get(k));
-                UntypedResultSet rr = execute("SELECT val FROM %s WHERE id = ?", k);
-                Assertions.assertThat(rr.isEmpty());
-            }
-            Iterator<UntypedResultSet.Row> itt = execute("SELECT id, val FROM %s").iterator();
-            while (itt.hasNext()) {
-                UntypedResultSet.Row row = itt.next();
-                System.out.println(row.getInt("id"));
-            }
         }
         Assertions.assertThat(results).isEqualTo(content);
     }

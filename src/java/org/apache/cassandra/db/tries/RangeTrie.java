@@ -112,7 +112,7 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
     @Override
     default RangeTrie<S> intersect(TrieSet set)
     {
-        return dir -> new RangeIntersectionCursor<>(cursor(dir), set.cursor(dir));
+        return dir -> new RangeIntersectionCursor.RangeBySet<>(cursor(dir), set.cursor(dir));
     }
 
     /// Constructs a view of the merge of this trie with the given one. The view is live, i.e. any write to any of the
@@ -124,20 +124,6 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
     default RangeTrie<S> mergeWith(RangeTrie<S> other, Trie.MergeResolver<S> resolver)
     {
         return dir -> new MergeCursor.Range<>(resolver, cursor(dir), other.cursor(dir));
-    }
-
-    /// Constructs a view of the merge of this trie with the given one, applying a transformation over all values.
-    /// The view is live, i.e. any write to any of the sources will be reflected in the merged view.
-    ///
-    /// The resolver will be called for any non-null applicable state in any of the two source to transform it to the
-    /// output type, and one of its arguments will be null if the other source has no applicable state.
-    default <E extends RangeState<E>, Q extends RangeState<Q>>
-    RangeTrie<Q> mappingMergeWith(RangeTrie<E> other,
-                                  BiFunction<S, E, Q> resolver)
-    {
-        return dir -> new MergeCursor.RangeMapping<>(resolver,
-                                                     cursor(dir),
-                                                     other.cursor(dir));
     }
 
     /// Constructs a view of the merge of multiple tries. The view is live, i.e. any write to any of the
