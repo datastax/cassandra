@@ -259,16 +259,16 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
      * Look for token collision if the adjacent token in the token array matches the
      * current token. If we find a collision, we need to compare the partition key instead.
      *
-     * @param primaryKey the key to search for
+     * @param key the key to search for
      * @param rowId      the initial row ID from token lookup
      * @param direction  1 for ceiling (forward search), -1 for floor (backward search)
      * @return the adjusted row ID after collision detection
      */
-    private long tokenCollisionDetection(PrimaryKey primaryKey, long rowId, int direction)
+    private long tokenCollisionDetection(PrimaryKey key, long rowId, int direction)
     {
         assert direction == 1 || direction == -1 : "Direction must be 1 (ceiling) or -1 (floor)";
 
-        long tokenValue = primaryKey.token().getLongValue();
+        long tokenValue = key.token().getLongValue();
         long nextRowId = rowId + direction;
 
         // Look for collisions while we haven't reached the boundaries and tokens match
@@ -276,7 +276,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         {
             // For ceiling: check if the partition key at current rowId is >= lookup key
             // For floor: check if the partition key at current rowId is <= lookup key
-            int comparison = readPartitionKey(rowId).compareTo(primaryKey.partitionKey());
+            int comparison = readPartitionKey(rowId).compareTo(key.partitionKey());
             if ((direction == 1 && comparison >= 0) || (direction == -1 && comparison <= 0))
                 return rowId;
 

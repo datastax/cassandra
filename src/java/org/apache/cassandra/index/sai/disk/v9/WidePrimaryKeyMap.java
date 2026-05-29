@@ -197,12 +197,15 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         long clusteringRowId = clusteringKeyCursor.clusteredSeekToKey(
         clusteringComparator.asByteComparable(key.clustering()), rowId, startOfNextPartition(rowId));
 
-        // clusteredSeekToKey returns the ceiling (next greater or equal key) or -1 if not found
-        if (clusteringRowId < 0)
-            return Long.MIN_VALUE;
-        assert clusteringRowId < rowIdToTokenArray.length() : "Row ID should be negative and not after the last row";
+        assert clusteringRowId >= 0 : "Expected to return earlier if the key is bigger than all keys";
+        assert clusteringRowId < rowIdToTokenArray.length() : "Row ID should not be after the last row";
 
         Clustering<?> foundClustering = readClusteringKey(clusteringRowId);
+        // STATIC CLUSTERING should return only one row representing the entire partition.
+        // Thus, it returns the last row to avoid emitting more rows from the static partition.
+        if (foundClustering.isEmpty())
+            return startOfNextPartition(rowId) - 1;
+
         // Check if this is an exact match by comparing the clustering key
         int cmp = clusteringComparator.compare(foundClustering, key.clustering());
         if (cmp == 0)
