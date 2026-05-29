@@ -292,7 +292,7 @@ public class IntersectionTrieTest
                              TrieSet.ranges(VERSION, of(3), null));
 
             testIntersection("", asList(0, 1, 2, 3, 4, 5, 6, 7, 8, 9), trie,
-                             TrieSet.ranges(VERSION, (ByteComparable) null, null));
+                             TrieSet.ranges(VERSION, null, null));
 
             testIntersection("", asList(3, 4, 5, 7, 8), trie,
                              TrieSet.ranges(VERSION, of(3), of(6), of(7), of(9)));
