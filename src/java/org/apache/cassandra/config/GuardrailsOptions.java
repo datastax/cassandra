@@ -92,7 +92,7 @@ public class GuardrailsOptions implements GuardrailsConfig
         validateMaxIntThreshold(config.sai_indexes_per_table_warn_threshold, config.sai_indexes_per_table_fail_threshold, "sai_indexes_per_table");
         validateMaxIntThreshold(config.sai_indexes_total_warn_threshold, config.sai_indexes_total_fail_threshold, "sai_indexes_total");
         validateMaxIntThreshold(config.sasi_indexes_per_table_warn_threshold, config.sasi_indexes_per_table_fail_threshold, "sasi_indexes_per_table", true);
-        validateMaxIntThreshold(config.materialized_views_per_table_warn_threshold, config.materialized_views_per_table_fail_threshold, "materialized_views_per_table", true);
+        validateMaxIntThreshold(config.materialized_views_per_table_warn_threshold, config.materialized_views_per_table_fail_threshold, "materialized_views_per_table");
         config.table_properties_warned = validateTableProperties(config.table_properties_warned, "table_properties_warned");
         config.table_properties_ignored = validateTableProperties(config.table_properties_ignored, "table_properties_ignored");
         config.table_properties_disallowed = validateTableProperties(config.table_properties_disallowed, "table_properties_disallowed");
