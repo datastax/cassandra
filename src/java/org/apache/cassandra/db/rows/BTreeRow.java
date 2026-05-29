@@ -408,10 +408,12 @@ public class BTreeRow extends AbstractRow
         return transformAndFilterColumns(primaryKeyLivenessInfo, deletion, (cd) -> {
 
             ColumnMetadata column = cd.column();
+            if (!filter.fetchedColumnIsQueried(column))
+                return null;
             if (column.isComplex())
                 return ((BTreeComplexColumn)cd).withOnlyQueriedData(filter);
 
-            return filter.fetchedColumnIsQueried(column) ? cd : null;
+            return cd;
         });
     }
 
