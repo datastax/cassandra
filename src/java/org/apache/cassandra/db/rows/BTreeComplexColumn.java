@@ -249,7 +249,7 @@ public class BTreeComplexColumn extends ComplexColumnData
 
     public BTreeComplexColumn withOnlyQueriedData(ColumnFilter filter)
     {
-        return transformAndFilter(complexDeletion, (cell) -> filter.fetchedCellIsQueried(column, cell.path()) ? null : cell);
+        return transformAndFilter(complexDeletion, (cell) -> filter.fetchedCellIsQueried(column, cell.path()) ? cell : null);
     }
 
     private BTreeComplexColumn update(DeletionTime newDeletion, Object[] newCells)

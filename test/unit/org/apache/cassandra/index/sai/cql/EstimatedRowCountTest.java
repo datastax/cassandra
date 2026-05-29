@@ -16,19 +16,18 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Arrays;
+import java.util.Collection;
+
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
 
-import java.util.Arrays;
-import java.util.Collection;
-
 import org.apache.cassandra.config.DataStorageSpec.LongBytesBound;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
-import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.index.sai.SAITester;
 
 /// This is a regression test for CNDB-16363.
