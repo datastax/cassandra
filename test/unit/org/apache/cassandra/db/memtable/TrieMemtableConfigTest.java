@@ -50,14 +50,14 @@ public class TrieMemtableConfigTest extends CQLTester
     public void testShardCountSetByJMX() throws MalformedObjectNameException, ReflectionException, AttributeNotFoundException, InstanceNotFoundException, MBeanException, IOException, InvalidAttributeValueException
     {
         jmxConnection.setAttribute(new ObjectName(TRIE_MEMTABLE_CONFIG_OBJECT_NAME), new Attribute("ShardCount", "7"));
-        assertEquals(7, Integer.parseInt(new TrieMemtable.TrieMemtableConfig().getShardCount()));
+        assertEquals(7, Integer.parseInt(new TrieMemtable.TrieMemtableConfig().getDefaultShardCount()));
     }
 
     @Test
     public void testAutoShardCount() throws MalformedObjectNameException, ReflectionException, AttributeNotFoundException, InstanceNotFoundException, MBeanException, IOException, InvalidAttributeValueException
     {
         jmxConnection.setAttribute(new ObjectName(TRIE_MEMTABLE_CONFIG_OBJECT_NAME), new Attribute("ShardCount", "auto"));
-        assertEquals(4 * FBUtilities.getAvailableProcessors(), Integer.parseInt(new TrieMemtable.TrieMemtableConfig().getShardCount()));
+        assertEquals(4 * FBUtilities.getAvailableProcessors(), Integer.parseInt(new TrieMemtable.TrieMemtableConfig().getDefaultShardCount()));
     }
 
     @Test
