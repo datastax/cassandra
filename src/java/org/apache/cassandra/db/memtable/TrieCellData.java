@@ -72,9 +72,9 @@ public abstract class TrieCellData extends AbstractBufferCellData
     {
         ByteBuffer value = cell.buffer();
         int length = value.remaining();
-        buffer.putLongOrdered(inBufferPos + OFFSET_TIMESTAMP, cell.timestamp());
-        buffer.putIntOrdered(inBufferPos + OFFSET_LOCAL_DELETION_TIME, CellData.deletionTimeLongToUnsignedInteger(cell.localDeletionTime()));
-        buffer.putIntOrdered(inBufferPos + OFFSET_TTL, cell.ttl());
+        buffer.putLong(inBufferPos + OFFSET_TIMESTAMP, cell.timestamp());
+        buffer.putInt(inBufferPos + OFFSET_LOCAL_DELETION_TIME, CellData.deletionTimeLongToUnsignedInteger(cell.localDeletionTime()));
+        buffer.putInt(inBufferPos + OFFSET_TTL, cell.ttl());
 
         boolean isCounterCell = cell.isCounterCell();
         if (isCounterCell && length <= OFFSET_COUNTER_LENGTH)
@@ -97,8 +97,8 @@ public abstract class TrieCellData extends AbstractBufferCellData
 
         // stored externally
         long handle = externalBufferSaver.store(value, length);
-        buffer.putLongOrdered(inBufferPos + OFFSET_EXTERNAL_HANDLE, handle);
-        buffer.putIntOrdered(inBufferPos + OFFSET_EXTERNAL_LENGTH, length);
+        buffer.putLong(inBufferPos + OFFSET_EXTERNAL_HANDLE, handle);
+        buffer.putInt(inBufferPos + OFFSET_EXTERNAL_LENGTH, length);
         buffer.putByte(inBufferPos + OFFSET_EXTERNAL_IS_COUNTER, (byte) (isCounterCell ? 1 : 0));
         return TrieMemtable.TrieSerializer.TYPE_CELL_EXTERNAL_VALUE;
     }

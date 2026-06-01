@@ -98,16 +98,13 @@ import org.apache.cassandra.utils.memory.MemtableBufferAllocator;
 import org.apache.cassandra.utils.memory.NativeAllocator;
 import org.github.jamm.Unmetered;
 
-/**
- * Trie memtable implementation. Improves memory usage, garbage collection efficiency and lookup performance.
- * The implementation is described in detail in the paper:
- *       https://www.vldb.org/pvldb/vol15/p3359-lambov.pdf
- *
- * The configuration takes a single parameter:
- * - shards: the number of shards to split into, defaulting to the number of CPU cores.
- *
- * Also see Memtable_API.md.
- */
+/// Trie memtable implementation. Improves memory usage, garbage collection efficiency and lookup performance.
+/// The implementation is described in detail in the paper:
+///       [https://www.vldb.org/pvldb/vol15/p3359-lambov.pdf]
+///
+/// The configuration takes a single parameter:
+/// - shards: the number of shards to split into, defaulting to the number of CPU cores.
+/// Also see [Memtable_API.md](./Memtable_API.md).
 public class TrieMemtable extends AbstractShardedMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtable.class);
@@ -120,7 +117,6 @@ public class TrieMemtable extends AbstractShardedMemtable
     public static final Predicate<InMemoryBaseTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY =
         features -> TrieBackedPartition.isPartitionBoundary(features.content());
 
-    public static volatile int SHARD_COUNT = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.getInt(autoShardCount());
     public static volatile boolean SHARD_LOCK_FAIRNESS = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS.getBoolean();
 
     public static final String TRIE_MEMTABLE_CONFIG_OBJECT_NAME = "org.apache.cassandra.db:type=TrieMemtableConfig";
@@ -140,7 +136,7 @@ public class TrieMemtable extends AbstractShardedMemtable
     private final MemtableShard[] shards;
 
     /// A merged view of the memtable map. Used for partition range queries and flush.
-    /// For efficiency we serve single partition requests off the shard which offers more direct [InMemoryTrie] methods.
+    /// For efficiency, we serve single partition requests off the shard which offers more direct [InMemoryTrie] methods.
     @VisibleForTesting
     final DeletionAwareTrie<Object, TrieTombstoneMarker> mergedTrie;
 
@@ -313,14 +309,6 @@ public class TrieMemtable extends AbstractShardedMemtable
     public int getShardCount()
     {
         return shards.length;
-    }
-
-    @Override
-    public long getEstimatedAverageRowSize()
-    {
-        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
-            estimatedAverageRowSize = new MemtableAverageRowSize(this, mergedTrie);
-        return estimatedAverageRowSize.rowSize;
     }
 
     /// Returns the minimum timestamp if one available, otherwise `NO_MIN_TIMESTAMP`.
@@ -648,15 +636,15 @@ public class TrieMemtable extends AbstractShardedMemtable
         /// if the underlying map is modified during iteration, they should provide a weakly consistent view of the map
         /// instead.
         ///
-        /// Also, this data is backed by memtable memory, when accessing it callers must specify if it can be accessed
+        /// Also, this data is backed by memtable memory. When accessing it callers must specify if it can be accessed
         /// unsafely, meaning that the memtable will not be discarded as long as the data is used, or whether the data
         /// should be copied on heap for off-heap allocators.
         @VisibleForTesting
         final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> data;
 
-        RegularAndStaticColumns columns;
+        volatile RegularAndStaticColumns columns;
 
-        EncodingStats stats;
+        volatile EncodingStats stats;
 
         @Unmetered  // total pool size should not be included in memtable's deep size
         private final MemtableAllocator allocator;
@@ -841,8 +829,11 @@ public class TrieMemtable extends AbstractShardedMemtable
             // This should never really happen as a flush would be triggered long before this limit is reached.
             throw new AssertionError(e);
         }
-        allocator.offHeap().adjust(dataTrie.usedSizeOffHeap() - offHeap, opGroup);
-        allocator.onHeap().adjust((dataTrie.usedSizeOnHeap() - onHeap), opGroup);
+        finally
+        {
+            allocator.offHeap().adjust(dataTrie.usedSizeOffHeap() - offHeap, opGroup);
+            allocator.onHeap().adjust((dataTrie.usedSizeOnHeap() - onHeap), opGroup);
+        }
         return updater.partitionsAdded;
     }
 
@@ -853,6 +844,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         final TableMetadata metadata;
         final TableMetadata droppedColumnsSource;
         final EnsureOnHeap ensureOnHeap;
+
         PartitionIterator(DeletionAwareTrie<Object, TrieTombstoneMarker> source, TableMetadata metadata, TableMetadata droppedColumnsSource, EnsureOnHeap ensureOnHeap)
         {
             super(source, Direction.FORWARD, TrieBackedPartition.IS_PARTITION_BOUNDARY);
@@ -963,34 +955,15 @@ public class TrieMemtable extends AbstractShardedMemtable
     public static class TrieMemtableConfig implements TrieMemtableConfigMXBean
     {
         @Override
-        public void setShardCount(String shardCount)
+        public void setDefaultShardCount(String shardCount)
         {
-            if ("auto".equalsIgnoreCase(shardCount))
-            {
-                SHARD_COUNT = autoShardCount();
-                CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
-            }
-            else
-            {
-                try
-                {
-                    SHARD_COUNT = Integer.parseInt(shardCount);
-                    CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
-                }
-                catch (NumberFormatException ex)
-                {
-                    logger.warn("Unable to parse {} as valid value for shard count; leaving it as {}",
-                                shardCount, SHARD_COUNT);
-                    return;
-                }
-            }
-            logger.info("Requested setting shard count to {}; set to: {}", shardCount, SHARD_COUNT);
+            AbstractShardedMemtable.SHARDED_MEMTABLE_CONFIG.setDefaultShardCount(shardCount);
         }
 
         @Override
-        public String getShardCount()
+        public String getDefaultShardCount()
         {
-            return "" + SHARD_COUNT;
+            return AbstractShardedMemtable.SHARDED_MEMTABLE_CONFIG.getDefaultShardCount();
         }
 
         @Override
@@ -1209,7 +1182,7 @@ public class TrieMemtable extends AbstractShardedMemtable
             else
             {
                 // We are making a copy of another PartitionData object.
-                buffer.putLongOrdered(inBufferPos + PARTITIONDATA_OFFSET_ROW_COUNT, partitionData.rowCountIncludingStatic());
+                buffer.putIntOrdered(inBufferPos + PARTITIONDATA_OFFSET_ROW_COUNT, partitionData.rowCountIncludingStatic());
                 buffer.putIntOrdered(inBufferPos + PARTITIONDATA_OFFSET_TOMBSTONE_COUNT, partitionData.tombstoneCount());
             }
             return TYPE_PARTITION_DATA;
@@ -1345,6 +1318,8 @@ public class TrieMemtable extends AbstractShardedMemtable
         @Override
         public String dumpContent(UnsafeBuffer buffer, int inBufferPos, int offsetBits)
         {
+            // This method dumps the content of the cell using their most common interpretation. While the labels may be
+            // incorrect for some types, the data is still presented.
             return String.format("Payload: length/type %02x data %s ttl %08x ldt %08x timestamp %016x",
                                  offsetBits,
                                  ByteBufferUtil.bytesToHex(buffer.byteBuffer()
