@@ -133,7 +133,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
      * Some keys do not have this property, e.g. keys which are not row-aware (coming from AA indexes)
      * or keys pointing to static rows (which means they point to all regular rows in the partition).
      */
-    default boolean pointsToSingleRegularRow()
+    default boolean identifiesUniqueRow()
     {
         return false;
     }

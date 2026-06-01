@@ -89,7 +89,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
-        public boolean pointsToSingleRegularRow()
+        public boolean identifiesUniqueRow()
         {
             return clustering() != Clustering.STATIC_CLUSTERING;
         }

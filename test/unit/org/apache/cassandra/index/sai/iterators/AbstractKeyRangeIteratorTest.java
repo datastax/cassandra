@@ -140,7 +140,7 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
 
             // skipping to the same element should also be a no-op
             if (randomBoolean())
-                ri.skipTo(LongIterator.fromToken(totalOrdering[count]));
+                ri.skipTo(LongIterator.makeKey(totalOrdering[count]));
 
             // skip a few elements
             if (nextDouble() < 0.1)
@@ -149,7 +149,7 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
                 if (count + n < totalOrdering.length)
                 {
                     count += n;
-                    ri.skipTo(LongIterator.fromToken(totalOrdering[count]));
+                    ri.skipTo(LongIterator.makeKey(totalOrdering[count]));
                 }
             }
             Assert.assertEquals(totalOrdering[count++], ri.next().token().getLongValue());
@@ -220,7 +220,7 @@ public class AbstractKeyRangeIteratorTest extends SaiRandomizedTest
 
     /**
       * Helper to create PrimaryKey with/without clustering.
-      * Pass null clustering to create a key with Clustering.EMPTY.
+      * Pass null clustering to create a key with {@link Clustering#STATIC_CLUSTERING}.
       */
     static PrimaryKey makeKey(long partitionKey, @Nullable Long clustering)
     {

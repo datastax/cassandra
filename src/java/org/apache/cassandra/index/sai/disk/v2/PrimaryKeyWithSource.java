@@ -186,8 +186,8 @@ class PrimaryKeyWithSource implements PrimaryKey
     }
 
     @Override
-    public boolean pointsToSingleRegularRow()
+    public boolean identifiesUniqueRow()
     {
-        return primaryKey().pointsToSingleRegularRow();
+        return primaryKey().identifiesUniqueRow();
     }
 }

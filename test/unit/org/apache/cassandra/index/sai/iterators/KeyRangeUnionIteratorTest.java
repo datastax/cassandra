@@ -223,15 +223,15 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
         KeyRangeIterator tokens = builder.build();
         Assert.assertNotNull(tokens);
 
-        tokens.skipTo(LongIterator.fromToken(5L));
+        tokens.skipTo(LongIterator.makeKey(5L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(5L, tokens.next().token().getLongValue());
 
-        tokens.skipTo(LongIterator.fromToken(7L));
+        tokens.skipTo(LongIterator.makeKey(7L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(7L, tokens.next().token().getLongValue());
 
-        tokens.skipTo(LongIterator.fromToken(10L));
+        tokens.skipTo(LongIterator.makeKey(10L));
         Assert.assertFalse(tokens.hasNext());
         Assert.assertEquals(1L, tokens.getMinimum().token().getLongValue());
         Assert.assertEquals(9L, tokens.getMaximum().token().getLongValue());
@@ -271,19 +271,19 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
 
         tokens = new LongIterator(new long[] { 0L, 1L, 3L, 5L });
 
-        tokens.skipTo(LongIterator.fromToken(2L));
+        tokens.skipTo(LongIterator.makeKey(2L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(3L, tokens.peek().token().getLongValue());
         Assert.assertEquals(3L, tokens.next().token().getLongValue());
 
-        tokens.skipTo(LongIterator.fromToken(5L));
+        tokens.skipTo(LongIterator.makeKey(5L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(5L, tokens.peek().token().getLongValue());
         Assert.assertEquals(5L, tokens.next().token().getLongValue());
 
         LongIterator empty = new LongIterator(new long[0]);
 
-        empty.skipTo(LongIterator.fromToken(3L));
+        empty.skipTo(LongIterator.makeKey(3L));
         Assert.assertFalse(empty.hasNext());
     }
 
@@ -516,7 +516,7 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
     }
 
     @Test
-    public void testRandomized() throws Throwable
+    public void testRandomKeys() throws Throwable
     {
         for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
         {
@@ -524,7 +524,7 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
             {
                 var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
                 for (int j = 0; j < iteratorCount; j++)
-                    inputs.add(randomPrimaryKeys(i / 10, i / 10));
+                    inputs.add(randomPrimaryKeys(1 + i / 10, 1 + i / 10));
 
                 testMerge(inputs,
                           KeyRangeUnionIteratorTest::union,
@@ -534,19 +534,22 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
     }
 
     @Test
-    public void testSkippingRandomized() throws Throwable
+    public void testSkippingWithRandomKeys() throws Throwable
     {
         for (int iteratorCount = 2; iteratorCount <= 5; iteratorCount++)
         {
             for (int testIteration = 0; testIteration < 200; testIteration++)
             {
+                var avgPartitions = 1 + testIteration / 10;
+                var avgRowsPerPartition = 1 + testIteration / 10;
+
                 var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
                 for (int j = 0; j < iteratorCount; j++)
-                    inputs.add(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+                    inputs.add(randomPrimaryKeys(avgPartitions, avgRowsPerPartition));
 
                 // Generate random skip positions.
                 // Use a different data set so that some skip positions exist in the merged result and some do not.
-                var skips = randomSkips(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+                var skips = randomSkips(randomPrimaryKeys(avgPartitions, avgRowsPerPartition));
 
                 testSkipping(inputs, skips, KeyRangeUnionIteratorTest::unionIterator);
             }

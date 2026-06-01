@@ -74,9 +74,9 @@ public class KeyRangeAntiJoinIterator extends KeyRangeIterator
         PrimaryKey key = left.nextOrNull();
         int cmp = compare(key, nextKeyToSkip);
 
-        while (key != null && cmp >= 0 && key.pointsToSingleRegularRow())
+        while (key != null && cmp >= 0 && key.identifiesUniqueRow())
         {
-            if (cmp == 0 && nextKeyToSkip.pointsToSingleRegularRow())
+            if (cmp == 0 && nextKeyToSkip.identifiesUniqueRow())
             {
                 // Only skip keys on the left if we have a precise single-row match
                 key = left.nextOrNull();

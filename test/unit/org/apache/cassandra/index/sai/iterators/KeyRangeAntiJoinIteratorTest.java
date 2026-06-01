@@ -87,13 +87,13 @@ public class KeyRangeAntiJoinIteratorTest extends AbstractKeyRangeIteratorTest
     }
 
     @Test
-    public void testRandomized() throws Throwable
+    public void testRandomKeys() throws Throwable
     {
         for (int i = 0; i < 200; i++)
         {
             var inputs = new ArrayList<List<PrimaryKey>>(2);
             for (int j = 0; j < 2; j++)
-                inputs.add(randomPrimaryKeys(i / 10, i / 10));
+                inputs.add(randomPrimaryKeys(1 + i / 10, 1 + i / 10));
 
             testMerge(inputs,
                       KeyRangeAntiJoinIteratorTest::antiJoin,
@@ -102,17 +102,20 @@ public class KeyRangeAntiJoinIteratorTest extends AbstractKeyRangeIteratorTest
     }
 
     @Test
-    public void testSkippingRandomized() throws Throwable
+    public void testSkippingWithRandomKeys() throws Throwable
     {
         for (int testIteration = 0; testIteration < 200; testIteration++)
         {
+            var avgPartitions = 1 + testIteration / 10;
+            var avgRowsPerPartition = 1 + testIteration / 10;
+
             var inputs = new ArrayList<List<PrimaryKey>>(2);
             for (int j = 0; j < 2; j++)
-                inputs.add(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+                inputs.add(randomPrimaryKeys(avgPartitions, avgRowsPerPartition));
 
             // Generate random skip positions.
             // Use a different data set so that some skip positions exist in the merged result and some do not.
-            var skips = randomSkips(randomPrimaryKeys(testIteration / 10, testIteration / 10));
+            var skips = randomSkips(randomPrimaryKeys(avgPartitions, avgRowsPerPartition));
 
             testSkipping(inputs, skips, KeyRangeAntiJoinIteratorTest::antiJoinIterator);
         }
@@ -147,17 +150,17 @@ public class KeyRangeAntiJoinIteratorTest extends AbstractKeyRangeIteratorTest
         assertIncreasing(result);
 
         var resultSet = new HashSet<>(result);
-        var singleRowKeysOnTheRight = right.stream().filter(PrimaryKey::pointsToSingleRegularRow).collect(Collectors.toSet());
+        var singleRowKeysOnTheRight = right.stream().filter(PrimaryKey::identifiesUniqueRow).collect(Collectors.toSet());
 
         // Check that the result contains all the keys on the left except the single row ones on the right:
         for (PrimaryKey pk : left)
             assertTrue("Result should contain key " + pk,
-                       resultSet.contains(pk) || pk.pointsToSingleRegularRow() && singleRowKeysOnTheRight.contains(pk));
+                       resultSet.contains(pk) || pk.identifiesUniqueRow() && singleRowKeysOnTheRight.contains(pk));
 
         // Check that the result doesn't contain any of the single-row keys on the right:
         for (PrimaryKey pk : result)
             assertFalse("Result should not contain key " + pk,
-                        pk.pointsToSingleRegularRow() && singleRowKeysOnTheRight.contains(pk));
+                        pk.identifiesUniqueRow() && singleRowKeysOnTheRight.contains(pk));
     }
 
     public static List<Long> convert(KeyRangeIterator tokens)
