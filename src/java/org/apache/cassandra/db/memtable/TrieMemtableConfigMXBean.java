@@ -18,13 +18,15 @@
 
 package org.apache.cassandra.db.memtable;
 
-public interface TrieMemtableConfigMXBean
+public interface TrieMemtableConfigMXBean extends ShardedMemtableConfigMXBean
 {
-    public void setShardCount(String numShards);
-
-    public String getShardCount();
-
+    /**
+     * Change the lock fairness of trie memtables. Applies on the next memtable flush.
+     */
     public void setLockFairness(String fairness);
 
+    /**
+     * Returns the lock fairness of trie memtables.
+     */
     public String getLockFairness();
 }
