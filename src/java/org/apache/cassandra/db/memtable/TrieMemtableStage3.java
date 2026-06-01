@@ -257,14 +257,6 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
         return shards.length;
     }
 
-    @Override
-    public long getEstimatedAverageRowSize()
-    {
-        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
-            estimatedAverageRowSize = new MemtableAverageRowSize(this, mergedTrie.contentOnlyTrie());
-        return estimatedAverageRowSize.rowSize;
-    }
-
     /// Returns the minimum timestamp if one available, otherwise `NO_MIN_TIMESTAMP`.
     /// [EncodingStats] uses a synthetic epoch TS at 2015. We don't want to leak that (CASSANDRA-18118) so we return
     /// `NO_MIN_TIMESTAMP` instead.
@@ -582,9 +574,9 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
         @VisibleForTesting
         final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> data;
 
-        RegularAndStaticColumns columns;
+        volatile RegularAndStaticColumns columns;
 
-        EncodingStats stats;
+        volatile EncodingStats stats;
 
         @Unmetered  // total pool size should not be included in memtable's deep size
         private final MemtableAllocator allocator;
@@ -627,40 +619,38 @@ public class TrieMemtableStage3 extends AbstractShardedMemtable
             }
             try
             {
+                indexer.start();
+                // Add the initial trie size on the first operation. This technically isn't correct (other shards
+                // do take their memory share even if they are empty) but doing it during construction may cause
+                // the allocator to block while we are trying to flush a memtable and become a deadlock.
+                long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
+                long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
                 try
                 {
-                    indexer.start();
-                    // Add the initial trie size on the first operation. This technically isn't correct (other shards
-                    // do take their memory share even if they are empty) but doing it during construction may cause
-                    // the allocator to block while we are trying to flush a memtable and become a deadlock.
-                    long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
-                    long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
-                    try
-                    {
-                        updater.apply(TriePartitionUpdateStage3.asMergableTrie(update));
-                    }
-                    catch (TrieSpaceExhaustedException e)
-                    {
-                        // This should never really happen as a flush would be triggered long before this limit is reached.
-                        throw new AssertionError(e);
-                    }
+                    updater.apply(TriePartitionUpdateStage3.asMergableTrie(update));
+                }
+                catch (TrieSpaceExhaustedException e)
+                {
+                    // This should never really happen as a flush would be triggered long before this limit is reached.
+                    throw new AssertionError(e);
+                }
+                finally
+                {
                     allocator.offHeap().adjust(data.usedSizeOffHeap() - offHeap, opGroup);
                     allocator.onHeap().adjust((data.usedSizeOnHeap() - onHeap) + updater.heapSize, opGroup);
                     partitionCount += updater.partitionsAdded;
                 }
-                finally
-                {
-                    indexer.commit();
-                    updateMinTimestamp(update.stats().minTimestamp);
-                    updateLiveDataSize(updater.dataSize);
-                    updateCurrentOperations(update.operationCount());
-
-                    columns = columns.mergeTo(update.columns());
-                    stats = stats.mergeWith(update.stats());
-                }
             }
             finally
             {
+                indexer.commit();
+                updateMinTimestamp(update.stats().minTimestamp);
+                updateLiveDataSize(updater.dataSize);
+                updateCurrentOperations(update.operationCount());
+
+                columns = columns.mergeTo(update.columns());
+                stats = stats.mergeWith(update.stats());
+
                 writeLock.unlock();
             }
             return updater.colUpdateTimeDelta;
