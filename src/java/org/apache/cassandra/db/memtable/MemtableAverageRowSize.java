@@ -19,15 +19,10 @@
 package org.apache.cassandra.db.memtable;
 
 import org.apache.cassandra.db.DataRange;
-import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.tries.DeletionAwareTrie;
-import org.apache.cassandra.db.tries.Direction;
-import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 
 class MemtableAverageRowSize
@@ -36,63 +31,6 @@ class MemtableAverageRowSize
 
     public final long rowSize;
     public final long operations;
-
-    static class SizeCalculator implements DeletionAwareTrie.ValueConsumer<Object, TrieTombstoneMarker>
-    {
-        long totalSize = 0;
-        long count = 0;
-
-        @Override
-        public void content(Object o)
-        {
-            if (o instanceof IDataSize)
-            {
-                totalSize += ((IDataSize) o).dataSize();
-                ++count;
-            }
-        }
-
-        @Override
-        public void deletionMarker(TrieTombstoneMarker marker)
-        {
-            // Count one side of the marker
-            TrieTombstoneMarker.Covering startedDeletion = marker.rightDeletion();
-            if (startedDeletion != null)
-            {
-                totalSize += startedDeletion.dataSize();
-                ++count;
-            }
-        }
-    }
-
-    public MemtableAverageRowSize(Memtable memtable, DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
-    {
-        // If this is a trie-based memtable, get the row sizes from the trie elements. This achieves two things:
-        // - makes sure the size used is the size reflected in the memtable's dataSize
-        //   (which e.g. excludes clustering keys)
-        // - avoids the conversion to Row, which has non-trivial cost
-
-        SizeCalculator sizeCalculator = new SizeCalculator();
-        trie.process(Direction.FORWARD, sizeCalculator);
-
-        this.rowSize = sizeCalculator.count > 0 ? sizeCalculator.totalSize / sizeCalculator.count : 0;
-        this.operations = memtable.operationCount();
-    }
-
-    public MemtableAverageRowSize(Memtable memtable, Trie<?> trie)
-    {
-        // If this is a trie-based memtable, get the row sizes from the trie elements. This achieves two things:
-        // - makes sure the size used is the size reflected in the memtable's dataSize
-        //   (which e.g. excludes clustering keys)
-        // - avoids the conversion to Row, which has non-trivial cost
-
-
-        SizeCalculator sizeCalculator = new SizeCalculator();
-        trie.process(Direction.FORWARD, sizeCalculator);
-
-        this.rowSize = sizeCalculator.count > 0 ? sizeCalculator.totalSize / sizeCalculator.count : 0;
-        this.operations = memtable.operationCount();
-    }
 
     public MemtableAverageRowSize(Memtable memtable)
     {

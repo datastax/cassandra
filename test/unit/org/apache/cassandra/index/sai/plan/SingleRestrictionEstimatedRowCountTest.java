@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
@@ -89,7 +90,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
     {
         // Use fixed number of shards to make the test predictable; without it, the default is
         // to use the processors count, which may vary depending on the environment where tests are run.
-        TrieMemtable.SHARD_COUNT = 8;
+        AbstractShardedMemtable.SHARDED_MEMTABLE_CONFIG.setDefaultShardCount("8");
 
         createTables();
 
@@ -129,7 +130,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
                 // lazy search on the first shard only; in this scenario each shard iterator will report at least one row,
                 // even if none are matching. We could have run the search on all shards to get more accurate estimates,
                 // but search is expensive, so we accept less accurate estimates for older formats.
-                int maxExpectedRows = useTermStats ? 1 : TrieMemtable.SHARD_COUNT * 2;
+                int maxExpectedRows = useTermStats ? 1 : TrieMemtable.getDefaultShardCount() * 2;
                 test.doTest(version, INT, 1, maxExpectedRows);
                 test.doTest(version, DECIMAL, 1, maxExpectedRows);
                 test.doTest(version, VARINT, 1, maxExpectedRows);

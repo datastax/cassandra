@@ -46,7 +46,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.tools.JsonTransformer;
-import org.apache.cassandra.tools.SSTableExport;
 import org.apache.cassandra.tools.Util;
 import org.assertj.core.api.Assertions;
 
