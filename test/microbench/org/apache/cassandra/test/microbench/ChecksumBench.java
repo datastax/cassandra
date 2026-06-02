@@ -22,10 +22,10 @@ import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
 import com.google.common.primitives.Longs;
 
-import org.apache.cassandra.utils.CRC64NVME;
+import org.apache.cassandra.utils.PureJavaCRC64NVME;
+import software.amazon.awssdk.crt.checksums.CRC64NVME;
 import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MD5Digest;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -137,9 +137,20 @@ public class ChecksumBench
     @Fork(value = 1, jvmArgsAppend = { "-Xmx512M", "-Djmh.executor=CUSTOM",
             "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
     })
-    public byte[] benchCrc64nvme()
+    public byte[] benchAwsCrtCrc64nvme()
     {
         CRC64NVME crc64nvme = new CRC64NVME();
+        crc64nvme.update(array, 0, array.length);
+        return Longs.toByteArray(crc64nvme.getValue());
+    }
+
+    @Benchmark
+    @Fork(value = 1, jvmArgsAppend = { "-Xmx512M", "-Djmh.executor=CUSTOM",
+                                       "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
+    })
+    public byte[] benchPureJavaCrc64nvme()
+    {
+        PureJavaCRC64NVME crc64nvme = new PureJavaCRC64NVME();
         crc64nvme.update(array, 0, array.length);
         return Longs.toByteArray(crc64nvme.getValue());
     }
