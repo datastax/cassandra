@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Collection;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -32,6 +31,7 @@ import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -44,10 +44,14 @@ public class VectorMetricsTest extends VectorTester
     @Parameterized.Parameter
     public Version version;
 
-    @Parameterized.Parameters(name = "{0}")
+    @Parameterized.Parameters(name = "version={0}")
     public static Collection<Object[]> data()
     {
-        return Stream.of(Version.CA, Version.DC).map(v -> new Object[]{ v}).collect(Collectors.toList());
+        // Test all versions that support vector indexes
+        return Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .map(v -> new Object[]{ v })
+                          .collect(Collectors.toList());
     }
 
     @BeforeClass
@@ -92,22 +96,50 @@ public class VectorMetricsTest extends VectorTester
         assertEquals(0, vectorMetrics.onDiskGraphVectorsCount.sum());
         assertEquals(0, vectorMetrics.annGraphSearchLatency.getCount());
 
-        // Insert 10 rows to simplify some of the assertions
         for (int i = 0; i < CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
             execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vectorOf(1 + i, 2 + i, 3 + i));
         flush();
 
-        assertTrue(vectorMetrics.quantizationMemoryBytes.sum() > 0);
-        assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum()); // unique vectors means no cache required
-        assertEquals(1, vectorMetrics.onDiskGraphsCount.sum());
-        assertEquals( CassandraOnHeapGraph.MIN_PQ_ROWS, vectorMetrics.onDiskGraphVectorsCount.sum());
+        // FusedPQ is tied to version: enabled for FA+, disabled for pre-FA
+        boolean fusedPQ = JVectorVersionUtil.versionSupportsFused(version);
+        long pqMemoryAfterFlush = vectorMetrics.quantizationMemoryBytes.sum();
 
-        // Compaction should not impact metrics
-        compact();
-        assertTrue(vectorMetrics.quantizationMemoryBytes.sum() > 0);
+        if (fusedPQ)
+        {
+            // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
+            assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ",
+                        0L, pqMemoryAfterFlush);
+        }
+        else
+        {
+            // Without FusedPQ, PQ vectors are stored separately, so we expect some memory usage
+            assertTrue("Version " + version + " should have PQ memory without FusedPQ",
+                      pqMemoryAfterFlush > 0);
+        }
+        
         assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum()); // unique vectors means no cache required
         assertEquals(1, vectorMetrics.onDiskGraphsCount.sum());
-        assertEquals( CassandraOnHeapGraph.MIN_PQ_ROWS, vectorMetrics.onDiskGraphVectorsCount.sum());
+        assertEquals(CassandraOnHeapGraph.MIN_PQ_ROWS, vectorMetrics.onDiskGraphVectorsCount.sum());
+
+        compact();
+        long pqMemoryAfterCompaction = vectorMetrics.quantizationMemoryBytes.sum();
+
+        if (fusedPQ)
+        {
+            // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
+            assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ after compaction",
+                        0L, pqMemoryAfterCompaction);
+        }
+        else
+        {
+            // Without FusedPQ, PQ vectors are stored separately, so we expect some memory usage
+            assertTrue("Version " + version + " should have PQ memory without FusedPQ after compaction",
+                      pqMemoryAfterCompaction > 0);
+        }
+        
+        assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum()); // unique vectors means no cache required
+        assertEquals(1, vectorMetrics.onDiskGraphsCount.sum());
+        assertEquals(CassandraOnHeapGraph.MIN_PQ_ROWS, vectorMetrics.onDiskGraphVectorsCount.sum());
 
         // Now run a pure ann query and verify we hit the ann graph
         var result = execute("SELECT pk FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 2");
