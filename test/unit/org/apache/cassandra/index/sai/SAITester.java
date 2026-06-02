@@ -158,6 +158,12 @@ public class SAITester extends CQLTester
 
     public static final PrimaryKey.Factory TEST_FACTORY = Version.current(KEYSPACE).onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
+    // Row-aware TEST_FACTORY that runs up to FA format version and does not use clustered row aware
+    public static final PrimaryKey.Factory ROW_AWARE_TEST_FACTORY = (Version.current(KEYSPACE).onOrAfter(Version.GA)
+                                                                     ? Version.FA
+                                                                     : Version.current(KEYSPACE))
+                                                                    .onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
+
     static
     {
         Version.ALL.size();
