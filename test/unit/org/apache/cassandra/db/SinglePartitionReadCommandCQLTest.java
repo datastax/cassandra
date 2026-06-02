@@ -23,6 +23,8 @@ import java.util.List;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 import static java.util.Arrays.asList;
 import static org.junit.Assert.assertTrue;
@@ -208,13 +210,20 @@ public class SinglePartitionReadCommandCQLTest extends ReadCommandCQLTester<Sing
                           "SELECT * FROM %s WHERE k = ? AND c IN (?, ?) ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
 
         // test ANN index-based ORDER BY
-        createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY (k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
-                          "SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
-                          "no viable alternative at input '..'");
+        SAIUtil.withVersionsOnOrAfter(Version.JVECTOR_EARLIEST, version -> {
+
+            createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY (k, c))");
+            createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+            // the synthetic score column makes us not to send a wildcard column filter but individual column selections
+            String columns = version.onOrAfter(Version.SYNTHETIC_COLUMN_EARLIEST) ? "n, v" : "*";
+
+            assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
+                              "SELECT " + columns + " FROM %s WHERE k = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
+                              "SELECT " + columns + " FROM %s WHERE k = ? ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
+                              "no viable alternative at input '..'");
+        });
 
         // test with index and multi-column clustering
         createTable("CREATE TABLE %s (k int, c1 int, c2 int,v int, PRIMARY KEY (k, c1, c2))");

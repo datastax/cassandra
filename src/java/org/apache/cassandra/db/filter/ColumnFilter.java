@@ -947,6 +947,11 @@ public abstract class ColumnFilter
             while (columns.hasNext())
             {
                 ColumnMetadata column = columns.next();
+
+                // Skip synthetic columns in CQL representation as they are internal implementation details
+                if (cql && column.isSynthetic())
+                    continue;
+
                 String columnName = cql ? column.name.toCQLString() : String.valueOf(column.name);
 
                 SortedSet<ColumnSubselection> s = subSelections != null
