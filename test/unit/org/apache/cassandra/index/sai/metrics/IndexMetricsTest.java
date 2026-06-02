@@ -20,6 +20,9 @@ package org.apache.cassandra.index.sai.metrics;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
+
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
@@ -360,10 +363,18 @@ public class IndexMetricsTest extends AbstractMetricsTest
         compact();
         waitForIndexCompaction(KEYSPACE, table, index);
 
-        // Verify that the bytes contains the compression size. Note that the PQ vectors dominates the memory
-        // consumption significatly, which is what makes this test valid. The test fails if we remove the
-        // compressed vector accounting logic from the CassandraDiskAnn.ramBytesUsed() method.
+        // Verify that the bytes includes the compression size. Note that for this test configuration,
+        // the graph memory dominates (~87%), but the PQ vectors still contribute significantly (~12%).
+        // The test fails if we remove the compressed vector accounting logic from the
+        // CassandraDiskAnn.ramBytesUsed() method, proving the fix works correctly.
         long bytesAfterCompaction = (long) getMetricValue(objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics"));
+        System.out.println("KATE: ===== Memory Breakdown =====");
+        System.out.println("KATE: bytesAfterCompaction=" + bytesAfterCompaction + ", minPQBytesExpected=" + minPQBytesExpected);
+        System.out.println("KATE: ENABLE_FUSED=" + JVectorVersionUtil.ENABLE_FUSED);
+        System.out.println("KATE: Version.LATEST=" + Version.LATEST);
+        System.out.println("KATE: Difference (graph + PQ codebook vs expected PQ vectors): " + (bytesAfterCompaction - minPQBytesExpected));
+        System.out.println("KATE: Graph memory is dominating: " + (bytesAfterCompaction > minPQBytesExpected));
+        System.out.println("KATE: ==============================");
         assertTrue("Expected at least " + minPQBytesExpected + " bytes but got " + bytesAfterCompaction,
                    bytesAfterCompaction >= minPQBytesExpected);
 
