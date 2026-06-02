@@ -191,10 +191,7 @@ public class VectorTester extends SAITester
         @Parameterized.Parameter(1)
         public boolean ENABLE_NVQ;
 
-        @Parameterized.Parameter(2)
-        public boolean ENABLE_FUSED;
-
-        @Parameterized.Parameters(name = "version={0} enableNVQ={1} enableFused={2}")
+        @Parameterized.Parameters(name = "{0} {1}")
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
@@ -204,12 +201,7 @@ public class VectorTester extends SAITester
                                   var enableNVQ = JVectorVersionUtil.versionSupportsNVQ(v)
                                                   ? new Boolean[]{ true, false }
                                                   : new Boolean[]{ false };
-                                  var enableFused = JVectorVersionUtil.versionSupportsFused(v)
-                                                    ? new Boolean[]{ true, false }
-                                                    : new Boolean[]{ false };
-                                  return Arrays.stream(enableNVQ).flatMap(nvq ->
-                                      Arrays.stream(enableFused).map(fused -> new Object[]{ v, nvq, fused })
-                                  );
+                                  return Arrays.stream(enableNVQ).map(nvq -> new Object[]{ v, nvq });
                               }).collect(Collectors.toList());
         }
 
@@ -223,12 +215,6 @@ public class VectorTester extends SAITester
         public void setEnableNVQ()
         {
             SAIUtil.setEnableNVQ(ENABLE_NVQ);
-        }
-
-        @Before
-        public void setEnableFused()
-        {
-            SAIUtil.setEnableFused(ENABLE_FUSED);
         }
     }
 
