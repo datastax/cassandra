@@ -18,14 +18,16 @@
 package org.apache.cassandra.utils;
 
 import java.nio.ByteBuffer;
-import java.util.Properties;
 import java.util.zip.CRC32C;
 import java.util.zip.Checksum;
 import java.util.zip.CRC32;
 import java.util.zip.Adler32;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.util.concurrent.FastThreadLocal;
-import org.apache.cassandra.config.CassandraRelevantProperties;
+import software.amazon.awssdk.crt.checksums.CRC64NVME;
 
 public enum ChecksumType
 {
@@ -83,7 +85,9 @@ public enum ChecksumType
         @Override
         public Checksum newInstance()
         {
-            return new CRC64NVME();
+            if (HAS_AWS_CRT_CRC64NVME)
+                return new CRC64NVME();
+            return new PureJavaCRC64NVME();
         }
 
         @Override
@@ -93,6 +97,21 @@ public enum ChecksumType
         }
 
     };
+
+    private static final Logger logger = LoggerFactory.getLogger(ChecksumType.class);
+    private static final boolean HAS_AWS_CRT_CRC64NVME;
+
+    static {
+        boolean available = false;
+        try {
+            Class.forName("software.amazon.awssdk.crt.checksums.CRC64NVME");
+            available = true;
+        } catch (ClassNotFoundException e) {
+            logger.debug("software.amazon.awssdk.crt.checksums.CRC64NVME not found, " +
+                        "falling back to PureJavaCRC64NVME for CRC64NVME checksum");
+        }
+        HAS_AWS_CRT_CRC64NVME = available;
+    }
 
     public abstract Checksum newInstance();
     public abstract void update(Checksum checksum, ByteBuffer buf);
