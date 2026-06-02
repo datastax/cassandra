@@ -862,8 +862,12 @@ public enum CassandraRelevantProperties
     /** Whether to validate terms that will be SAI indexed at the coordinator */
     SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
 
-    // Whether compaction should build vector indexes using a fused graph, aka a graph where the quantized vectors
-    // are stored inline with a graph node. Feature is still experimental, so defaults to false.
+    /**
+     * @deprecated This property is deprecated and no longer has any effect. FusedPQ is now automatically enabled
+     * for all indexes using version FA or later (jvector file format version 6+). The property cannot be used to
+     * disable FusedPQ for FA+ versions.
+     */
+    @Deprecated(since = "cc4")
     SAI_VECTOR_ENABLE_FUSED("cassandra.sai.vector.enable_fused", "false"),
 
     // Use nvq when building graphs in compaction. Disabled by default for now. Enabling will reduce recall slightly

@@ -52,9 +52,7 @@ import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 @Ignore
 @RunWith(Parameterized.class)
@@ -65,7 +63,7 @@ abstract public class VectorCompactionTest extends VectorTester
     // Subclasses must implement this to cover different dimensions
     abstract public int dimension();
 
-    @Parameterized.Parameter(0)
+    @Parameterized.Parameter()
     public Version version;
 
     @Parameterized.Parameter(1)
@@ -94,7 +92,7 @@ abstract public class VectorCompactionTest extends VectorTester
     }
 
     @Before
-    public void setEnableNVQ() throws Throwable
+    public void setEnableNVQ()
     {
         SAIUtil.setEnableNVQ(enableNVQ);
     }
@@ -409,10 +407,13 @@ abstract public class VectorCompactionTest extends VectorTester
                                 // reasonable for now.
                                 assertEquals(1.0f, quantizedSim, 0.01f);
                             }
-                            else
+                            else if (numRows >= MIN_PQ_ROWS)
                             {
-                                // We should only hit this case when we don't have enough rows to build a PQ.
-                                assertTrue("Found " + numRows + " but no PQ", MIN_PQ_ROWS > numRows);
+                                // With FA + fused PQ, PQ metadata is present and used by the graph, but there is no
+                                // standalone CompressedVectors instance to validate against.
+                                // TODO: further investigate what other checks are needed here
+                                assertEquals("Expected fused PQ path only for FA+", Version.FA, version);
+                                assertNotNull("Expected PQ metadata for FA fused PQ", searcher.getPQ());
                             }
                         }
                     }
