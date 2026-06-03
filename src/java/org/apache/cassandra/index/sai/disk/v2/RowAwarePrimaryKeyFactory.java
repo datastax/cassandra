@@ -162,22 +162,25 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             // and clustering for the lookup
             loadDeferred();
 
-            ArrayList<ByteSource> sources = new ArrayList<>(3);
+            int size = (includeToken ? 1 : 0) + 1 + ((hasClustering() || !isPrefix) ? 1 : 0);
+            ByteSource[] sources = new ByteSource[size];
+            int index = 0;
 
             if (includeToken)
-                sources.add(token.asComparableBytes(version));
+                sources[index++] = token.asComparableBytes(version);
 
-            sources.add(ByteSource.of(partitionKey.getKey(), version));
+            sources[index++] = (ByteSource.of(partitionKey.getKey(), version));
 
             if (hasClustering())
                 // It is important that the ClusteringComparator.asBytesComparable method is used
                 // to maintain the correct clustering sort order
-                sources.add(clusteringComparator.asByteComparable(clustering).asComparableBytes(version));
-            else if (isPrefix)
+                sources[index++] = clusteringComparator.asByteComparable(clustering).asComparableBytes(version);
+            else if (!isPrefix)
                 // prefix doesn't include null components
-                sources.add(null);
+                sources[index++] = null;
 
-            return sources.toArray(ByteSource[]::new);
+            assert index == sources.length;
+            return sources;
         }
 
         @Override
