@@ -197,7 +197,9 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         long clusteringRowId = clusteringKeyCursor.clusteredSeekToKey(
         clusteringComparator.asByteComparable(key.clustering()), rowId, startOfNextPartition(rowId));
 
-        assert clusteringRowId >= 0 : "Expected to return earlier if the key is bigger than all keys";
+        // clusteredSeekToKey returns the ceiling (next greater or equal key) or -1 if not found
+        if (clusteringRowId < 0)
+            return Long.MIN_VALUE;
         assert clusteringRowId < rowIdToTokenArray.length() : "Row ID should not be after the last row";
 
         Clustering<?> foundClustering = readClusteringKey(clusteringRowId);
