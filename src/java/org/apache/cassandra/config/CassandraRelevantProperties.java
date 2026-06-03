@@ -948,6 +948,7 @@ public enum CassandraRelevantProperties
     SNAPSHOT_MIN_ALLOWED_TTL_SECONDS("cassandra.snapshot.min_allowed_ttl_seconds", "60"),
     SSL_ENABLE("ssl.enable"),
     SSL_STORAGE_PORT("cassandra.ssl_storage_port"),
+    SSTABLE_CHECKSUM_TYPE("cassandra.sstable.checksum_type", "CRC32"),
     SSTABLE_FORMAT_DEFAULT("cassandra.sstable.format.default"),
 
     // in OSS, when UUID based SSTable generation identifiers are enabled, they use TimeUUID

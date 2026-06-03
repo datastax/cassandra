@@ -22,6 +22,8 @@ import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
 import com.google.common.primitives.Longs;
 import org.apache.cassandra.utils.ChecksumType;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.PureJavaCRC64NVME;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -35,10 +37,13 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 import org.xerial.snappy.PureJavaCrc32C;
+import software.amazon.awssdk.crt.checksums.CRC64NVME;
 
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.CRC32C;
 
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -104,27 +109,59 @@ public class ChecksumBench
         return Longs.toByteArray(pureJavaCrc32C.getValue());
     }
 
-    // Below benchmarks are commented because CRC32C is unavailable in Java 8.
-//    @Benchmark
-//    @Fork(value = 1, jvmArgsAppend = { "-Xmx512M", "-Djmh.executor=CUSTOM",
-//            "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
-//    })
-//    public byte[] benchCrc32c()
-//    {
-//        CRC32C crc32C = new CRC32C();
-//        crc32C.update(array);
-//        return Longs.toByteArray(crc32C.getValue());
-//    }
-//
-//    @Benchmark
-//    @Fork(value = 1, jvmArgsAppend = { "-Xmx512M", "-Djmh.executor=CUSTOM",
-//            "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
-//            "-XX:+UnlockDiagnosticVMOptions", "-XX:-UseCRC32CIntrinsics",
-//    })
-//    public byte[] benchCrc32cNoIntrinsic()
-//    {
-//        CRC32C crc32C = new CRC32C();
-//        crc32C.update(array);
-//        return Longs.toByteArray(crc32C.getValue());
-//    }
+    @Benchmark
+    @Fork(value = 1, jvmArgsAppend = { "-Xmx512M", "-Djmh.executor=CUSTOM",
+            "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
+    })
+    public byte[] benchCrc32c()
+    {
+        CRC32C crc32C = new CRC32C();
+        crc32C.update(array);
+        return Longs.toByteArray(crc32C.getValue());
+    }
+
+    @Benchmark
+    @Fork(value = 1, jvmArgsAppend = { "-Xmx512M", "-Djmh.executor=CUSTOM",
+            "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
+            "-XX:+UnlockDiagnosticVMOptions", "-XX:-UseCRC32CIntrinsics",
+    })
+    public byte[] benchCrc32cNoIntrinsic()
+    {
+        CRC32C crc32C = new CRC32C();
+        crc32C.update(array);
+        return Longs.toByteArray(crc32C.getValue());
+    }
+
+    @Benchmark
+    @Fork(value = 1, jvmArgsAppend = { "-Xmx512M", "-Djmh.executor=CUSTOM",
+                                       "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
+    })
+    public byte[] benchAwsCrtCrc64nvme()
+    {
+        CRC64NVME crc64nvme = new CRC64NVME();
+        crc64nvme.update(array, 0, array.length);
+        return Longs.toByteArray(crc64nvme.getValue());
+    }
+
+    @Benchmark
+    @Fork(value = 1, jvmArgsAppend = { "-Xmx512M", "-Djmh.executor=CUSTOM",
+                                       "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
+    })
+    public byte[] benchPureJavaCrc64nvme()
+    {
+        PureJavaCRC64NVME pureJavaCrc64nvme = new PureJavaCRC64NVME();
+        pureJavaCrc64nvme.update(array, 0, array.length);
+        return Longs.toByteArray(pureJavaCrc64nvme.getValue());
+    }
+
+    @Benchmark
+    @Fork(value = 1, jvmArgsAppend = { "-Xmx512M", "-Djmh.executor=CUSTOM",
+                                       "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
+    })
+    public byte[] benchMd5()
+    {
+        MessageDigest md5 = FBUtilities.newMessageDigest("MD5");
+        md5.update(array, 0, array.length);
+        return md5.digest();
+    }
 }
