@@ -19,11 +19,8 @@
 package org.apache.cassandra.index.sai.disk.v9.keystore;
 
 import java.io.IOException;
-
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
-
-import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
@@ -102,7 +99,7 @@ public class KeyLookup
      * This interface is introduced a work around, when a cursor is open for partition with no data.
      * Fot this an Empty Cursor is implemented
      * <p>
-     * Otherwise, the main goal is to allow reading the keys from a keys file, 
+     * Otherwise, the main goal is to allow reading the keys from a keys file,
      * and quickly seek to a random key by point id.
      * <p>
      * Its instances are stateful and not thread-safe, and
@@ -140,12 +137,6 @@ public class KeyLookup
         @Nonnull
         ByteComparable seekToPointId(long target);
 
-        /**
-         * Resets its state to the first row and reads the key
-         */
-        @VisibleForTesting
-        void reset() throws IOException;
-
         void close() throws IOException;
     }
 
@@ -167,11 +158,6 @@ public class KeyLookup
             throw new IndexOutOfBoundsException(String.format(INDEX_OUT_OF_BOUNDS, target, 0));
         }
 
-        @Override
-        public void reset()
-        {
-            // No-op for empty cursor
-        }
 
         @Override
         public void close()
@@ -247,8 +233,7 @@ public class KeyLookup
 
             BytesRef searchKey = asBytesRef(key);
 
-            updateCurrentBlockIndex(startingPointId);
-            resetToCurrentBlock();
+            positionAtPointId(startingPointId);
 
             // We can return immediately if the currentPointId is within the requested partition range and the keys match
             if (currentPointId >= startingPointId && currentPointId < endingPointId && compareKeys(currentKey, searchKey) == 0)
@@ -258,11 +243,7 @@ public class KeyLookup
 
             // Depending on where we are in the block we may need to move forwards to the starting point ID
             while (currentPointId < startingPointId)
-            {
-                currentPointId++;
-                readCurrentKey();
-                updateCurrentBlockIndex(currentPointId);
-            }
+                advanceToNextKey();
 
             // Move forward to the ending point ID, returning the point ID if we find our key
             while (currentPointId < endingPointId)
@@ -270,12 +251,8 @@ public class KeyLookup
                 if (compareKeys(currentKey, searchKey) >= 0)
                     return currentPointId;
 
-                currentPointId++;
-                if (currentPointId == keyLookupMeta.keyCount)
+                if (!advanceToNextKey())
                     return -1;
-
-                readCurrentKey();
-                updateCurrentBlockIndex(currentPointId);
             }
             return endingPointId < keyLookupMeta.keyCount ? endingPointId : -1;
         }
@@ -305,18 +282,35 @@ public class KeyLookup
                     lowSearchId = midSearchId;
             }
 
-            updateCurrentBlockIndex(lowSearchId);
+            positionAtPointId(lowSearchId);
+        }
+
+        /**
+         * Positions the cursor at the specified point ID by moving to the appropriate block
+         * and reading the key at that position.
+         */
+        private void positionAtPointId(long pointId)
+        {
+            updateCurrentBlockIndex(pointId);
             resetToCurrentBlock();
         }
 
-        @VisibleForTesting
-        public void reset() throws IOException
+        /**
+         * Advances to the next key in the sequence.
+         *
+         * @return true if successfully advanced, false if reached the end of keys
+         */
+        private boolean advanceToNextKey()
         {
-            currentPointId = 0;
-            currentBlockIndex = 0;
-            keysInput.seek(keysFilePointer);
+            currentPointId++;
+            if (currentPointId == keyLookupMeta.keyCount)
+                return false;
+
             readCurrentKey();
+            updateCurrentBlockIndex(currentPointId);
+            return true;
         }
+
 
         @Override
         public void close() throws IOException
@@ -325,13 +319,14 @@ public class KeyLookup
             keysInput.close();
         }
 
-        // Move to a block and see if the key is in the block using compareTo logic to indicate the keys position
-        // relative to the block.
-        // Note: It is down to the caller to position the block after a call to this method.
+        /**
+         * Moves to a block and determines if the key is in the block.
+         *
+         * @return -1 if key is before the block, 0 if key is in the block, 1 if key is after the block
+         */
         private int moveToBlockAndCompareTo(long pointId, BytesRef key)
         {
-            updateCurrentBlockIndex(pointId);
-            resetToCurrentBlock();
+            positionAtPointId(pointId);
 
             if (compareKeys(key, currentKey) < 0)
                 return -1;
@@ -455,12 +450,10 @@ public class KeyLookup
                     currentBlockIndex = blockIndex;
                     resetToCurrentBlock();
                 }
-            }
-            while (currentPointId < target)
-            {
-                currentPointId++;
-                readCurrentKey();
-                updateCurrentBlockIndex(currentPointId);
+
+                // Advance forward to the target position
+                while (currentPointId < target)
+                    advanceToNextKey();
             }
 
             return ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, currentKey.bytes, currentKey.offset, currentKey.length);
