@@ -96,13 +96,13 @@ public class KeyLookup
     }
 
     /**
-     * This interface is introduced a work around, when a cursor is open for partition with no data.
+     * This interface is introduced a workaround, when a cursor is open for partition with no data.
      * Fot this an Empty Cursor is implemented
      * <p>
      * Otherwise, the main goal is to allow reading the keys from a keys file,
      * and quickly seek to a random key by point id.
      * <p>
-     * Its instances are stateful and not thread-safe, and
+     * Its instances can be stateful and not thread-safe and
      * maintain a position to the current key as well as a buffer that can hold one key.
      */
     @NotThreadSafe
@@ -208,6 +208,7 @@ public class KeyLookup
             {
                 throw Throwables.unchecked(Throwables.close(t, keysFileHandle));
             }
+
             this.keysFilePointer = this.keysInput.getFilePointer();
             this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
             this.currentKey = new BytesRef(keyLookupMeta.maxKeyLength);
@@ -241,7 +242,7 @@ public class KeyLookup
 
             binarySearchKeyInRange(startingPointId, endingPointId, searchKey);
 
-            // Depending on where we are in the block we may need to move forwards to the starting point ID
+            // Depending on where we are in the block, we may need to move forwards to the starting point ID
             while (currentPointId < startingPointId)
                 advanceToNextKey();
 
@@ -309,14 +310,6 @@ public class KeyLookup
             readCurrentKey();
             updateCurrentBlockIndex(currentPointId);
             return true;
-        }
-
-
-        @Override
-        public void close() throws IOException
-        {
-            blockOffsets.close();
-            keysInput.close();
         }
 
         /**
@@ -457,6 +450,13 @@ public class KeyLookup
             }
 
             return ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, currentKey.bytes, currentKey.offset, currentKey.length);
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+            blockOffsets.close();
+            keysInput.close();
         }
     }
 }
