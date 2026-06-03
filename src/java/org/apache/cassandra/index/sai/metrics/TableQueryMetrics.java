@@ -64,8 +64,12 @@ public class TableQueryMetrics
     /** Per query metrics for all kinds of queries (timers and histograms). */
     public final EnumMap<QueryKind, PerQuery> perQueryMetrics = new EnumMap<>(QueryKind.class);
 
+    /** Table-level BM25 counters that are not multiplexed by query kind. */
+    public final BM25PerTable bm25PerTable;
+
     public TableQueryMetrics(TableMetadata table)
     {
+        bm25PerTable = new BM25PerTable(table);
         addMetrics(table, QueryKind.ALL, cmd -> true);
         addMetrics(table, QueryKind.SP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition-queries that are filtering only
         addMetrics(table, QueryKind.MP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && !cmd.isSinglePartition()); // multi-partition queries that are filtering only
@@ -111,6 +115,7 @@ public class TableQueryMetrics
     public void record(QueryContext context, ReadCommand command)
     {
         QueryContext.Snapshot snapshot = context.snapshot();
+        bm25PerTable.record(snapshot, command);
         perTableMetrics.values().forEach(m -> m.record(snapshot, command));
         perQueryMetrics.values().forEach(m -> m.record(snapshot, command));
 
@@ -147,6 +152,7 @@ public class TableQueryMetrics
      */
     public void release()
     {
+        bm25PerTable.release();
         perTableMetrics.values().forEach(PerTable::release);
         perQueryMetrics.values().forEach(PerQuery::release);
     }
@@ -229,7 +235,7 @@ public class TableQueryMetrics
         }
 
         @Override
-        public void record(QueryContext.Snapshot snapshot)
+        protected void record(QueryContext.Snapshot snapshot)
         {
             if (snapshot.queryTimeouts > 0)
             {
@@ -281,6 +287,37 @@ public class TableQueryMetrics
 
                 sortThenFilterQueriesCompleted = Metrics.counter(createMetricName("SortThenFilterQueriesCompleted"));
                 filterThenSortQueriesCompleted = Metrics.counter(createMetricName("FilterThenSortQueriesCompleted"));
+            }
+        }
+    }
+
+    /**
+     * Table-level BM25 counters that are not multiplexed by query kind.
+     */
+    public static class BM25PerTable extends AbstractMetrics
+    {
+        public static final String METRIC_TYPE = PerTable.METRIC_TYPE;
+
+        public final Counter totalBM25QueriesCompleted;
+        public final Counter totalBM25QueryTimeouts;
+
+        public BM25PerTable(TableMetadata table)
+        {
+            super(table.keyspace, table.name, METRIC_TYPE);
+            totalBM25QueriesCompleted = Metrics.counter(createMetricName("TotalBM25QueriesCompleted"));
+            totalBM25QueryTimeouts = Metrics.counter(createMetricName("TotalBM25QueryTimeouts"));
+        }
+
+        public void record(QueryContext.Snapshot snapshot, ReadCommand command)
+        {
+            if (!command.isBM25())
+                return;
+
+            totalBM25QueriesCompleted.inc();
+            if (snapshot.queryTimeouts > 0)
+            {
+                assert snapshot.queryTimeouts == 1;
+                totalBM25QueryTimeouts.inc();
             }
         }
     }

@@ -257,6 +257,12 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     }
 
     @Override
+    public boolean isBM25()
+    {
+        return orderer != null && orderer.isBM25();
+    }
+
+    @Override
     public boolean usesIndexFiltering()
     {
         return usesIndexFiltering;
