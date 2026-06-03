@@ -130,6 +130,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             mapWalker.assertResult(mapWalker.afterLastCkInPk1(), -(mapWalker.getId110() + 1) - 1, "after last ck in pk=1 expects inverted next partition first row");
 
             mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
+            mapWalker.assertResult(mapWalker.afterLastRow(), Long.MIN_VALUE, "after last row in last partition expects out of range");
             mapWalker.assertResult(mapWalker.afterLastToken(), Long.MIN_VALUE, "after last expects out of range");
         }
     }
@@ -153,6 +154,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             mapWalker.assertResult(mapWalker.afterLastCkInPk1(), mapWalker.getId110() + 1, "after last ck in pk=1 expects next partition first row");
 
             mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
+            mapWalker.assertResult(mapWalker.afterLastRow(), -1, "after last row in last partition expects out of range");
             mapWalker.assertResult(mapWalker.afterLastToken(), -1, "after last expects out of range");
         }
     }
@@ -176,6 +178,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             mapWalker.assertResult(mapWalker.afterLastCkInPk1(), mapWalker.getId110(), "after last ck in pk=1 expects last ck in pk=1");
 
             mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
+            mapWalker.assertResult(mapWalker.afterLastRow(), mapWalker.count - 1, "after last row in last partition expects the last");
             mapWalker.assertResult(mapWalker.afterLastToken(), mapWalker.count - 1, "after last expects the last");
         }
     }
@@ -203,6 +206,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         private final PrimaryKeyMapFunction rowIdFromPKMethod;
         private final PrimaryKey firstPk;
         private final PrimaryKey lastPk;
+        private final PrimaryKey afterLastPk;
         private final long firstToken;
         private final long lastToken;
         private long id11 = -1;
@@ -224,6 +228,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             this.pk12 = buildPk(partitioner, 1, 2);
             this.pk13 = buildPk(partitioner, 1, 3);
             this.pk110 = buildPk(partitioner, 1, 10);
+            this.afterLastPk = buildPk(partitioner, 1000, 11);
         }
 
 
@@ -249,6 +254,11 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         PrimaryKey exactLastRow()
         {
             return lastPk;
+        }
+
+        PrimaryKey afterLastRow()
+        {
+            return afterLastPk;
         }
 
         PrimaryKey afterLastToken()
