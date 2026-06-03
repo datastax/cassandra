@@ -89,23 +89,6 @@ public abstract class AbstractBlockPackedReader implements LongArray
         return isOutOfRangeState() ? -1 : lastIndex;
     }
 
-    @Override
-    public long indexOf(long targetValue)
-    {
-        // already out of range
-        if (isOutOfRangeState())
-            return Long.MIN_VALUE;
-
-        long index = findBlockIndex(targetValue);
-        lastIndex = index >= 0 ? index : -index - 1;
-        return isOutOfRangeState() ? Long.MIN_VALUE : index;
-    }
-
-    private boolean isOutOfRangeState()
-    {
-        return lastIndex >= valueCount;
-    }
-
     /**
      * Find the row ID of the largest value less than or equal to the target value.
      * This is the floor operation, complementary to ceilingRowId.
@@ -121,6 +104,23 @@ public abstract class AbstractBlockPackedReader implements LongArray
             return -1;
 
         return findBlockRowIdForFloor(targetValue);
+    }
+
+    @Override
+    public long indexOf(long targetValue)
+    {
+        // already out of range
+        if (isOutOfRangeState())
+            return Long.MIN_VALUE;
+
+        long rowId = findBlockIndex(targetValue);
+        lastIndex = rowId >= 0 ? rowId : -rowId - 1;
+        return isOutOfRangeState() ? Long.MIN_VALUE : rowId;
+    }
+
+    private boolean isOutOfRangeState()
+    {
+        return lastIndex >= valueCount;
     }
 
     private long findBlockIndex(long targetValue)
