@@ -30,6 +30,11 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
+/**
+ * Factory for creating row aware primary keys, which does not use token as prefix in comparison.
+ * Thus, it compares by partition key and then clustering key. It is used to store partition keys
+ * and clustering keys separately, greatly reducing the disk size.
+ */
 public class ClusteredRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactory
 {
     public ClusteredRowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
@@ -59,7 +64,7 @@ public class ClusteredRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactor
         @Override
         protected ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
         {
-            ByteSource[] sources = buildComparableSources(version, isPrefix);
+            ByteSource[] sources = buildComparableSources(version, isPrefix, false);
             // Exclude tokenComparable
             return ByteSource.withTerminator(terminator, Arrays.copyOfRange(sources, 1, sources.length));
         }

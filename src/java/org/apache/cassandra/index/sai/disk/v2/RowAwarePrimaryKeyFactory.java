@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.disk.v2;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -150,10 +151,10 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 
         protected ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
         {
-            return ByteSource.withTerminator(terminator, buildComparableSources(version, isPrefix));
+            return ByteSource.withTerminator(terminator, buildComparableSources(version, isPrefix, true));
         }
 
-        protected ByteSource[] buildComparableSources(ByteComparable.Version version, boolean isPrefix)
+        protected ByteSource[] buildComparableSources(ByteComparable.Version version, boolean isPrefix, boolean includeToken)
         {
             // We need to make sure that the key is loaded before returning a
             // byte comparable representation. If we don't, we won't get a correct
@@ -161,22 +162,22 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             // and clustering for the lookup
             loadDeferred();
 
-            ByteSource tokenComparable = token.asComparableBytes(version);
-            ByteSource partitionKeyComparable = ByteSource.of(partitionKey.getKey(), version);
+            ArrayList<ByteSource> sources = new ArrayList<>(3);
 
-            // It is important that the ClusteringComparator.asBytesComparable method is used
-            // to maintain the correct clustering sort order
-            ByteSource clusteringComparable = clusteringComparator.size() == 0 ||
-                                              clustering == null ||
-                                              clustering.isEmpty() ? null
-                                                                   : clusteringComparator.asByteComparable(clustering)
-                                                                                         .asComparableBytes(version);
+            if (includeToken)
+                sources.add(token.asComparableBytes(version));
 
-            // prefix doesn't include null components
-            if (isPrefix && clusteringComparable == null)
-                return new ByteSource[]{ tokenComparable, partitionKeyComparable };
-            else
-                return new ByteSource[]{ tokenComparable, partitionKeyComparable, clusteringComparable };
+            sources.add(ByteSource.of(partitionKey.getKey(), version));
+
+            if (hasClustering())
+                // It is important that the ClusteringComparator.asBytesComparable method is used
+                // to maintain the correct clustering sort order
+                sources.add(clusteringComparator.asByteComparable(clustering).asComparableBytes(version));
+            else if (isPrefix)
+                // prefix doesn't include null components
+                sources.add(null);
+
+            return sources.toArray(ByteSource[]::new);
         }
 
         @Override
@@ -224,9 +225,9 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
                                  token,
                                  partitionKey,
                                  clustering == null ? null : clustering.kind(),
-                                 clustering == null ? null :String.join(",", Arrays.stream(clustering.getBufferArray())
-                                                                                   .map(ByteBufferUtil::bytesToHex)
-                                                                                   .collect(Collectors.toList())));
+                                 clustering == null ? null : Arrays.stream(clustering.getBufferArray())
+                                                                   .map(ByteBufferUtil::bytesToHex)
+                                                                   .collect(Collectors.joining(",")));
         }
 
         @Override
