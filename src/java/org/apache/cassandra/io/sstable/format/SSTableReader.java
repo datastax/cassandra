@@ -116,6 +116,7 @@ import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.CheckedFunction;
+import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -137,6 +138,7 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.AlwaysPresentFilter;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -774,6 +776,18 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * implemenation (this may be the case if there is no index file for the iterator)
      */
     public abstract ScrubPartitionIterator scrubPartitionsIterator() throws IOException;
+
+    public DataIntegrityMetadata.FileDigestValidator maybeGetDigestValidator() throws IOException
+    {
+        File dataFile = descriptor.fileFor(Component.DATA);
+        if (descriptor.fileFor(Component.DIGEST).exists())
+            return new DataIntegrityMetadata.FileDigestValidator(dataFile, descriptor.fileFor(Component.DIGEST), ChecksumType.CRC32);
+        if (descriptor.fileFor(Component.DIGEST_CRC32C).exists())
+            return new DataIntegrityMetadata.FileDigestValidator(dataFile, descriptor.fileFor(Component.DIGEST_CRC32C), ChecksumType.CRC32C);
+        if (descriptor.fileFor(Component.DIGEST_CRC64NVME).exists())
+            return new DataIntegrityMetadata.FileDigestValidator(dataFile, descriptor.fileFor(Component.DIGEST_CRC64NVME), ChecksumType.CRC64NVME);
+        return null;
+    }
 
     public boolean equals(Object that)
     {

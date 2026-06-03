@@ -71,13 +71,14 @@ import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE;
+
 public abstract class SortedTableWriter extends SSTableWriter
 {
     protected static final Logger logger = LoggerFactory.getLogger(SortedTableWriter.class);
 
     private static final ChecksumType checksumType = getChecksumType();
     private static final Component digestComponent = getDigestComponent();
-    public static final String SSTABLE_CHECKSUM_TYPE_PROPERTY = "cassandra.sstable_checksum_type";
 
     protected final FileHandle.Builder dbuilder;
     protected final SequentialWriter dataFile;
@@ -112,14 +113,14 @@ public abstract class SortedTableWriter extends SSTableWriter
 
     private static ChecksumType getChecksumType()
     {
-        String checksumTypeProp = System.getProperty(SSTABLE_CHECKSUM_TYPE_PROPERTY, ChecksumType.CRC32.name());
+        String checksumTypeProp = SSTABLE_CHECKSUM_TYPE.getString();
         try
         {
-            return ChecksumType.valueOf(checksumTypeProp.toUpperCase());
+            return ChecksumType.valueOf(SSTABLE_CHECKSUM_TYPE.getString().toUpperCase());
         }
         catch (IllegalArgumentException e)
         {
-            throw new ConfigurationException(String.format("Invalid value for system property 'cassandra.sstable_checksum_type': %s", checksumTypeProp), e);
+            throw new ConfigurationException(String.format("Invalid value for system property 'cassandra.sstable.checksum_type': %s", checksumTypeProp), e);
         }
     }
 
