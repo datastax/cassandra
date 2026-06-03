@@ -33,7 +33,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.ChecksumType;
 
 import static java.lang.String.format;
-import static org.apache.cassandra.io.sstable.format.SortedTableWriter.SSTABLE_CHECKSUM_TYPE_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class SSTableDigestTest extends TestBaseImpl
@@ -43,7 +43,7 @@ public class SSTableDigestTest extends TestBaseImpl
         try (WithProperties properties = new WithProperties())
         {
             if (checksumType != null)
-                properties.setProperty(SSTABLE_CHECKSUM_TYPE_PROPERTY, checksumType.toString());
+                properties.set(SSTABLE_CHECKSUM_TYPE, checksumType.toString());
 
             try (Cluster cluster = init(Cluster.build(1)
                                                .withDataDirCount(1)
