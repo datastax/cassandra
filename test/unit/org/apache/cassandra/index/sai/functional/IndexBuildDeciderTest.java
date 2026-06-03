@@ -39,8 +39,8 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableContextManager;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.MemtableIndexWriter;
-import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -128,7 +128,7 @@ public class IndexBuildDeciderTest extends SAITester
         assertTrue(sstableContext.contains(secondSSTable));
 
         // SAI#canFlushFromMemtableIndex should be true
-        StorageAttachedIndex sai = (StorageAttachedIndex) group.getIndexes().iterator().next();
+        StorageAttachedIndex sai = group.getIndexes().iterator().next();
         assertTrue(sai.canFlushFromMemtableIndex());
 
         // flush another memtable: it should be flushed with MemtableIndexWriter
@@ -150,8 +150,8 @@ public class IndexBuildDeciderTest extends SAITester
     private int numericIndexFileCount()
     {
         IndexContext context = createIndexContext("v1", Int32Type.instance);
-        return V2OnDiskFormat.instance.perIndexComponentTypes(context).size()
-               + V2OnDiskFormat.instance.perSSTableComponentTypes(false).size();
+        return Version.current(KEYSPACE).onDiskFormat().perIndexComponentTypes(context).size()
+               + Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes(false).size();
     }
 
     public static class IndexBuildDeciderWithoutInitialBuild implements IndexBuildDecider
