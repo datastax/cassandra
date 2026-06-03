@@ -266,7 +266,7 @@ public class ScrubTest
         SSTableReader outputSSTable = cfs.getLiveSSTables().iterator().next();
         assertThat(outputSSTable.descriptor.fileFor(Component.DIGEST).exists()).isTrue();
 
-        try (DataIntegrityMetadata.FileDigestValidator validator = DataIntegrityMetadata.fileDigestValidator(outputSSTable.descriptor, Component.DIGEST))
+        try (DataIntegrityMetadata.FileDigestValidator validator = outputSSTable.maybeGetDigestValidator())
         {
             validator.validate();
         }

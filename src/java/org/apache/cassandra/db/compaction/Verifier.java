@@ -80,8 +80,6 @@ import static com.google.common.base.Preconditions.checkState;
 
 public class Verifier implements Closeable
 {
-    private static final List<Component> DIGEST_COMPONENTS = ImmutableList.of(Component.DIGEST, Component.DIGEST_CRC32C, Component.DIGEST_CRC64NVME);
-
     private final @Nullable CompactionRealm realm;
     private final SSTableReader sstable;
 
@@ -250,19 +248,13 @@ public class Verifier implements Closeable
         outputHandler.output(String.format("Checking computed hash of %s ", sstable));
         try
         {
-            validator = null;
+            validator = sstable.maybeGetDigestValidator();
 
-            for (Component component : DIGEST_COMPONENTS)
+            if (validator != null)
             {
-                if (sstable.descriptor.fileFor(component).exists())
-                {
-                    validator = DataIntegrityMetadata.fileDigestValidator(sstable.descriptor, component);
-                    validator.validate();
-                    break;
-                }
+                validator.validate();
             }
-
-            if (validator == null)
+            else
             {
                 outputHandler.output("Data digest missing, assuming extended verification of disk values");
                 extended = true;

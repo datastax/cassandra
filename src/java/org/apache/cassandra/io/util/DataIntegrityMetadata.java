@@ -108,25 +108,20 @@ public class DataIntegrityMetadata
         }
     }
 
-    public static FileDigestValidator fileDigestValidator(Descriptor desc, Component digestComponent) throws IOException
-    {
-        return new FileDigestValidator(desc, digestComponent);
-    }
-
     public static class FileDigestValidator implements Closeable
     {
+        private final File dataFile;
         private final Checksum checksum;
         private final RandomAccessReader digestReader;
         private final RandomAccessReader dataReader;
-        private final Descriptor descriptor;
         private long storedDigestValue;
 
-        public FileDigestValidator(Descriptor descriptor, Component digestComponent) throws IOException
+        public FileDigestValidator(File dataFile, File digestFile, ChecksumType checksumType)  throws IOException
         {
-            this.descriptor = descriptor;
-            checksum = checksumFor(digestComponent).newInstance();
-            digestReader = RandomAccessReader.open(descriptor.fileFor(digestComponent));
-            dataReader = RandomAccessReader.open(descriptor.fileFor(Component.DATA));
+            this.dataFile = dataFile;
+            this.checksum = checksumType.newInstance();
+            digestReader = RandomAccessReader.open(digestFile);
+            dataReader = RandomAccessReader.open(dataFile);
             try
             {
                 storedDigestValue = Long.parseLong(digestReader.readLine());
@@ -135,20 +130,8 @@ public class DataIntegrityMetadata
             {
                 close();
                 // Attempting to create a FileDigestValidator without a DIGEST file will fail
-                throw new IOException("Corrupted SSTable : " + descriptor.fileFor(Component.DATA));
+                throw new IOException("Corrupted SSTable : " + dataFile);
             }
-        }
-
-        private static ChecksumType checksumFor(Component digestComponent)
-        {
-            if (digestComponent == Component.DIGEST)
-                return ChecksumType.CRC32;
-            else if (digestComponent == Component.DIGEST_CRC32C)
-                return ChecksumType.CRC32C;
-            else if (digestComponent == Component.DIGEST_CRC64NVME)
-                return ChecksumType.CRC64NVME;
-            else
-                throw new IllegalArgumentException("Unsupported digest component " + digestComponent);
         }
 
         // Validate the entire file
@@ -161,7 +144,7 @@ public class DataIntegrityMetadata
             long calculatedDigestValue = checkedInputStream.getChecksum().getValue();
             if (storedDigestValue != calculatedDigestValue)
             {
-                throw new IOException("Corrupted SSTable : " + descriptor.fileFor(Component.DATA)
+                throw new IOException("Corrupted SSTable : " + dataFile
                                       + " storedDigestValue=" + storedDigestValue
                                       + " calculatedDigestValue=" + calculatedDigestValue);
             }
