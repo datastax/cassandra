@@ -52,6 +52,7 @@ public class V9OnDiskFormat extends V8OnDiskFormat
                                                                                               IndexComponentType.GROUP_META,
                                                                                               IndexComponentType.ROW_TO_TOKEN,
                                                                                               IndexComponentType.ROW_TO_PARTITION,
+                                                                                              IndexComponentType.PARTITION_TO_SIZE,
                                                                                               IndexComponentType.PARTITION_KEY_BLOCKS,
                                                                                               IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS);
 
