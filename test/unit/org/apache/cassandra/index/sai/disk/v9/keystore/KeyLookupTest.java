@@ -376,25 +376,15 @@ public class KeyLookupTest extends SaiRandomizedTest
 
         withKeyLookupCursor(cursor -> {
             assertEquals(0L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(0L)), 0L, 10L));
-            cursor.reset();
             assertEquals(160L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(160L)), 160L, 170L));
-            cursor.reset();
             assertEquals(165L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(165L)), 160L, 170L));
-            cursor.reset();
             assertEquals(175L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(175L)), 160L, 176L));
-            cursor.reset();
             assertEquals(176L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(176L)), 160L, 177L));
-            cursor.reset();
             assertEquals(176L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(176L)), 175L, 177L));
-            cursor.reset();
             assertEquals(176L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(701)), 160L, 177L));
-            cursor.reset();
             assertEquals(504L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(504L)), 200L, 600L));
-            cursor.reset();
             assertEquals(-1L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(4000)), 0L, 1000L));
-            cursor.reset();
             assertEquals(-1L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, makeKey(4000)), 999L, 1000L));
-            cursor.reset();
             assertEquals(999L, cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(999L)), 0L, 1000L));
         });
     }
@@ -450,8 +440,7 @@ public class KeyLookupTest extends SaiRandomizedTest
             .isInstanceOf(IndexOutOfBoundsException.class)
             .hasMessage(String.format(KeyLookup.INDEX_OUT_OF_BOUNDS, -1, 0));
 
-            // Test reset and close should not throw
-            cursor.reset();
+            // Test close should not throw
             cursor.close();
         });
     }
@@ -640,8 +629,6 @@ public class KeyLookupTest extends SaiRandomizedTest
         withKeyLookupCursor(cursor -> {
             cursor.seekToPointId(25);
 
-            cursor.reset();
-
             ByteComparable key = cursor.seekToPointId(0);
             byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(VERSION));
             assertArrayEquals(keys.get(0), bytes);
@@ -668,8 +655,6 @@ public class KeyLookupTest extends SaiRandomizedTest
             ByteComparable key = cursor.seekToPointId(10);
             byte[] bytes = ByteSourceInverse.readBytes(key.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
             assertArrayEquals(ByteSourceInverse.readBytes(intByteSource(10)), bytes);
-
-            cursor.reset();
 
             key = cursor.seekToPointId(0);
             bytes = ByteSourceInverse.readBytes(key.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
@@ -730,8 +715,6 @@ public class KeyLookupTest extends SaiRandomizedTest
             // pointId 50 corresponds to value 100 (since we increment by 2)
             long result = cursor.clusteredSeekToKey(ByteComparable.preencoded(VERSION, keys.get(50L)), 0L, 100L);
             assertEquals(50L, result);
-
-            cursor.reset();
 
             // Search for a key that doesn't exist but falls between existing keys
             // Key value 51 doesn't exist, next highest is 52 at position 26
