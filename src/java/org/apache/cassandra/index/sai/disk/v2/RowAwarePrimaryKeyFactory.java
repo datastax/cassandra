@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.disk.v2;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -163,24 +162,25 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             loadDeferred();
 
             int size = (includeToken ? 1 : 0) + 1 + ((hasClustering() || !isPrefix) ? 1 : 0);
-            ByteSource[] sources = new ByteSource[size];
+            ByteSource[] comparableSources = new ByteSource[size];
+
             int index = 0;
 
             if (includeToken)
-                sources[index++] = token.asComparableBytes(version);
+                comparableSources[index++] = token.asComparableBytes(version);
 
-            sources[index++] = (ByteSource.of(partitionKey.getKey(), version));
+            comparableSources[index++] = ByteSource.of(partitionKey.getKey(), version);
 
             if (hasClustering())
                 // It is important that the ClusteringComparator.asBytesComparable method is used
                 // to maintain the correct clustering sort order
-                sources[index++] = clusteringComparator.asByteComparable(clustering).asComparableBytes(version);
+                comparableSources[index++] = clusteringComparator.asByteComparable(clustering).asComparableBytes(version);
             else if (!isPrefix)
                 // prefix doesn't include null components
-                sources[index++] = null;
+                comparableSources[index++] = null;
 
-            assert index == sources.length;
-            return sources;
+            assert index == comparableSources.length;
+            return comparableSources;
         }
 
         @Override

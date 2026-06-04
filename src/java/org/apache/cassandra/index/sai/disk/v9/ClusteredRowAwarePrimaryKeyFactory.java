@@ -64,9 +64,7 @@ public class ClusteredRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactor
         @Override
         protected ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
         {
-            ByteSource[] sources = buildComparableSources(version, isPrefix, false);
-            // Exclude tokenComparable
-            return ByteSource.withTerminator(terminator, Arrays.copyOfRange(sources, 1, sources.length));
+            return ByteSource.withTerminator(terminator, buildComparableSources(version, isPrefix, false));
         }
 
         @Override
