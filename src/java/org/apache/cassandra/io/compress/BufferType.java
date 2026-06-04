@@ -44,7 +44,7 @@ public enum BufferType
 
         public long onHeapSizeWithoutData()
         {
-            return ObjectSizes.DIRECT_BUFFER_DEEP_SIZE;
+            return ObjectSizes.DIRECT_BUFFER_SHALLOW_SIZE;
         }
     };
 
