@@ -633,15 +633,15 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
         private static <C extends CellData<?, C>> C fixCellExpirationTime(C cell)
         {
-            return cell.isExpiring() && cell.localDeletionTime() < 0
-                   ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp() + 1, AbstractCell.MAX_DELETION_TIME)
+            return cell.isExpiring() && cell.localDeletionTime() == CellData.INVALID_DELETION_TIME
+                   ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp() + 1, CellData.MAX_DELETION_TIME_2038_LEGACY_CAP)
                    : cell;
         }
 
         private static LivenessInfo fixLivenessInfoExpirationTime(LivenessInfo livenessInfo)
         {
-            return (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() < 0)
-                   ? livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp() + 1, AbstractCell.MAX_DELETION_TIME)
+            return (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() == CellData.INVALID_DELETION_TIME)
+                   ? livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp() + 1, CellData.MAX_DELETION_TIME_2038_LEGACY_CAP)
                    : livenessInfo;
         }
 
