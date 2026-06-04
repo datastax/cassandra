@@ -16,75 +16,44 @@
 
 package org.apache.cassandra.index.sai.disk;
 
-import java.nio.ByteBuffer;
-import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-
-import org.apache.cassandra.db.BufferDecoratedKey;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.SAIUtil;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-
-import static org.junit.Assert.assertEquals;
 
 /**
  * Tests for {@link PrimaryKeyMap} with tables that have static columns,
  * using the row-aware on-disk format. Static columns create special rows
  * with STATIC_CLUSTERING that need to be handled correctly.
  */
-@RunWith(Parameterized.class)
-public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester
+public class RowAwareStaticClusteringPrimaryKeyMapTest extends RowAwarePrimaryKeyMapTester
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
     private final IndexContext staticContext = SAITester.createIndexContext("static_index", UTF8Type.instance);
 
-    private SSTableReader sstable;
-    private PrimaryKey.Factory pkFactory;
-    private IndexComponents.ForRead perSSTableComponents;
-    private IPartitioner partitioner;
-
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "version={0}")
-    public static List<Object[]> data()
+    @Override
+    protected Set<IndexContext> getIndexContexts()
     {
-        return Version.ALL.stream()
-                          .filter(v -> v.onDiskFormat().indexFeatureSet().isRowAware())
-                          .map(v -> new Object[]{ v })
-                          .collect(Collectors.toList());
+        return Set.of(intContext, textContext, staticContext);
     }
 
-    @Before
-    public void setup() throws Throwable
+    @Override
+    protected void createTableSchema()
     {
-        SAIUtil.setCurrentVersion(version);
-
         // Create a table with static columns and clustering columns
-        createTable("CREATE TABLE %s (pk int, ck int, static_value text static, int_value int, text_value text, PRIMARY KEY (pk, ck)) WITH CLUSTERING ORDER BY (ck ASC)");
+        createTable("CREATE TABLE %s (pk int, ck int, static_value text static, int_value int, text_value text, PRIMARY KEY (pk, ck))");
         execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
         execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
         execute("CREATE CUSTOM INDEX static_index ON %s(static_value) USING 'StorageAttachedIndex'");
+    }
 
+    @Override
+    protected void insertTestData()
+    {
         // Insert data with static columns
         // Partition pk=1: static row + multiple regular rows
         execute("INSERT INTO %s (pk, static_value) VALUES (?, ?)", 1, "static1");
@@ -101,273 +70,197 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1000, 1, 1001, "c1");
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1000, 2, 1002, "c2");
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1000, 3, 1003, "c3");
-
-        // Flush to generate SSTable and SAI components
-        flush();
-
-        // Obtain the just-flushed SSTable
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        this.sstable = cfs.getLiveSSTables().iterator().next();
-
-        // Build IndexDescriptor from the live SSTable using the matching index contexts
-        IndexDescriptor indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext, staticContext));
-        this.pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(cfs.metadata.get().comparator);
-
-        this.perSSTableComponents = indexDescriptor.perSSTableComponents();
-        this.partitioner = sstable.metadata().partitioner;
     }
 
-    @Test
-    public void testExactRowIdOrInvertedCeiling() throws Throwable
+    @Override
+    protected MapWalker createMapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction function)
     {
-        try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
-             PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
-        {
-            MapWalker mapWalker = new MapWalker(map, map::exactRowIdOrInvertedCeiling);
+        return new StaticClusteringMapWalker(map, function);
+    }
 
-            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
-            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
+    private class StaticClusteringMapWalker extends MapWalker
+    {
+        private final PrimaryKey pk1Static;
+        private final PrimaryKey pk1Ck1;
+        private final PrimaryKey pk1Ck2;
+        private final PrimaryKey pk1Ck3;
+        private final PrimaryKey afterLastPk;
+        private long idPk1Static = -1;
+        private long idPk1Ck1 = -1;
+        private long idPk1Ck2 = -1;
+        private long idPk1Ck3 = -1;
+
+        StaticClusteringMapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
+        {
+            super(map, rowIdFromPKMethod);
+            // Pre-compute primary keys for testing
+            this.pk1Static = buildPkStatic(partitioner, 1);
+            this.pk1Ck1 = buildPk(partitioner, 1, 1);
+            this.pk1Ck2 = buildPk(partitioner, 1, 2);
+            this.pk1Ck3 = buildPk(partitioner, 1, 3);
+            this.afterLastPk = buildPk(partitioner, 1000, 11);
+        }
+
+        PrimaryKey beforeFirst()
+        {
+            return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(firstToken - 1));
+        }
+
+        PrimaryKey exactFirstRow()
+        {
+            return firstPk;
+        }
+
+        PrimaryKey exactLastRow()
+        {
+            return lastPk;
+        }
+
+        PrimaryKey afterLastRow()
+        {
+            return afterLastPk;
+        }
+
+        PrimaryKey afterLastToken()
+        {
+            return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(lastToken + 1));
+        }
+
+        PrimaryKey exactPk1Static()
+        {
+            return pk1Static;
+        }
+
+        PrimaryKey exactPk1Ck1()
+        {
+            return pk1Ck1;
+        }
+
+        PrimaryKey exactPk1Ck2()
+        {
+            return pk1Ck2;
+        }
+
+        PrimaryKey exactPk1Ck3()
+        {
+            return pk1Ck3;
+        }
+
+        PrimaryKey betweenPk1StaticAndCk1()
+        {
+            // Create a clustering value between STATIC_CLUSTERING and ck=1
+            // STATIC_CLUSTERING sorts BEFORE all regular clustering values
+            // Use ck=0 which sorts between static and ck=1
+            return buildPk(partitioner, 1, 0);
+        }
+
+        PrimaryKey afterPk1Ck3()
+        {
+            // A key that sorts after ck=3 (the last clustering in pk=1)
+            return buildPk(partitioner, 1, Integer.MAX_VALUE);
+        }
+
+        public long getIdPk1Static()
+        {
+            if (idPk1Static == -1)
+                idPk1Static = rowIdFromPKMethod.apply(pk1Static);
+            return idPk1Static;
+        }
+
+        public long getIdPk1Ck1()
+        {
+            if (idPk1Ck1 == -1)
+                idPk1Ck1 = rowIdFromPKMethod.apply(pk1Ck1);
+            return idPk1Ck1;
+        }
+
+        public long getIdPk1Ck2()
+        {
+            if (idPk1Ck2 == -1)
+                idPk1Ck2 = rowIdFromPKMethod.apply(pk1Ck2);
+            return idPk1Ck2;
+        }
+
+        public long getIdPk1Ck3()
+        {
+            if (idPk1Ck3 == -1)
+                idPk1Ck3 = rowIdFromPKMethod.apply(pk1Ck3);
+            return idPk1Ck3;
+        }
+
+        @Override
+        protected void testExactRowIdOrInvertedCeiling()
+        {
+            assertResult(beforeFirst(), -1, "before first expects the inverted first");
+            assertResult(exactFirstRow(), 0, "exact first row");
 
             // Test static row lookup
-            mapWalker.assertResult(mapWalker.exactPk1Static(), mapWalker.getIdPk1Static(), "exact pk=1 static row");
-            
+            assertResult(exactPk1Static(), getIdPk1Static(), "exact pk=1 static row");
+
             // Test regular clustering rows
-            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getIdPk1Ck1(), "exact pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
-            
+            assertResult(exactPk1Ck1(), getIdPk1Ck1(), "exact pk=1, ck=1");
+            assertResult(exactPk1Ck2(), getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            assertResult(exactPk1Ck3(), getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+
             // Test between static and first clustering row
-            mapWalker.assertResult(mapWalker.betweenPk1StaticAndCk1(), -mapWalker.getIdPk1Ck1() - 1, "between static and ck=1 expects inverted ck=1");
-            
+            assertResult(betweenPk1StaticAndCk1(), -getIdPk1Ck1() - 1, "between static and ck=1 expects inverted ck=1");
+
             // Test after last clustering in partition
-            mapWalker.assertResult(mapWalker.afterPk1Ck3(), -(mapWalker.getIdPk1Ck3() + 1) - 1, "after pk=1 ck=3 expects inverted next partition first row");
+            assertResult(afterPk1Ck3(), -(getIdPk1Ck3() + 1) - 1, "after pk=1 ck=3 expects inverted next partition first row");
 
-            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastToken(), Long.MIN_VALUE, "after last expects out of range");
+            assertResult(exactLastRow(), count - 1, "exact last row");
+            assertResult(afterLastToken(), Long.MIN_VALUE, "after last expects out of range");
         }
-    }
 
-    @Test
-    public void testCeiling() throws Throwable
-    {
-        try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
-             PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
+        @Override
+        protected void testCeiling()
         {
-            MapWalker mapWalker = new MapWalker(map, map::ceiling);
-
-            mapWalker.assertResult(mapWalker.beforeFirst(), 0, "before first expects the first");
-            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
+            assertResult(beforeFirst(), 0, "before first expects the first");
+            assertResult(exactFirstRow(), 0, "exact first row");
 
             // Test static row lookup
-            mapWalker.assertResult(mapWalker.exactPk1Static(), mapWalker.getIdPk1Static(), "exact pk=1 static row");
-            
+            assertResult(exactPk1Static(), getIdPk1Static(), "exact pk=1 static row");
+
             // Test regular clustering rows
-            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getIdPk1Ck1(), "exact pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
-            
+            assertResult(exactPk1Ck1(), getIdPk1Ck1(), "exact pk=1, ck=1");
+            assertResult(exactPk1Ck2(), getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            assertResult(exactPk1Ck3(), getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+
             // Test between static and first clustering - ceiling should return first clustering
-            mapWalker.assertResult(mapWalker.betweenPk1StaticAndCk1(), mapWalker.getIdPk1Ck1(), "between static and ck=1 expects ck=1 (ceiling)");
-            
-            // Test after last clustering in partition - should go to next partition first row
-            mapWalker.assertResult(mapWalker.afterPk1Ck3(), mapWalker.getIdPk1Ck3() + 1, "after pk=1 ck=3 expects next partition first row");
+            assertResult(betweenPk1StaticAndCk1(), getIdPk1Ck1(), "between static and ck=1 expects ck=1 (ceiling)");
 
-            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastToken(), -1, "after last expects out of range");
+            // Test after last clustering in partition - should go to next partition the first row
+            assertResult(afterPk1Ck3(), getIdPk1Ck3() + 1, "after pk=1 ck=3 expects next partition first row");
+
+            assertResult(exactLastRow(), count - 1, "exact last row");
+            assertResult(afterLastToken(), -1, "after last expects out of range");
         }
-    }
 
-    @Test
-    public void testFloor() throws Throwable
-    {
-        try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
-             PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
+        @Override
+        protected void testFloor()
         {
-            MapWalker mapWalker = new MapWalker(map, map::floor);
-
-            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects out of range");
-            mapWalker.assertResult(mapWalker.exactFirstRow(), mapWalker.getIdPk1Static(), "exact first row means the last row in the first partition");
+            assertResult(beforeFirst(), -1, "before first expects out of range");
+            assertResult(exactFirstRow(), getIdPk1Static(), "exact first row means the last row in the first partition");
 
             // Test static row lookup
-            mapWalker.assertResult(mapWalker.exactPk1Static(), mapWalker.getIdPk1Static(), "exact pk=1 static row");
-            
-            // Test regular clustering rows
-            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getIdPk1Ck1(), "exact pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
-            
-            // Test between static and first clustering
-            // ck=0 sorts after STATIC_CLUSTERING but before ck=1
-            // floor(ck=0) should return the row at position 0
-            mapWalker.assertResult(mapWalker.betweenPk1StaticAndCk1(), 0, "between static and ck=1 expects row 0 (floor)");
-            
-            // Test after last clustering in partition - floor should return last clustering
-            mapWalker.assertResult(mapWalker.afterPk1Ck3(), mapWalker.getIdPk1Ck3(), "after pk=1 ck=3 expects ck=3 (floor)");
+            assertResult(exactPk1Static(), getIdPk1Static(), "exact pk=1 static row");
 
-            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastRow(), mapWalker.count - 1, "after last row in last partition expects the last row");
-            mapWalker.assertResult(mapWalker.afterLastToken(), mapWalker.count - 1, "after last expects the last row");
+            // Test regular clustering rows
+            assertResult(exactPk1Ck1(), getIdPk1Ck1(), "exact pk=1, ck=1");
+            assertResult(exactPk1Ck2(), getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            assertResult(exactPk1Ck3(), getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+
+            // Test between static and first clustering
+            // ck=0 sorts after STATIC_CLUSTERING, but before ck=1
+            // floor(ck=0) should return the row at position 0
+            assertResult(betweenPk1StaticAndCk1(), 0, "between static and ck=1 expects row 0 (floor)");
+
+            // Test after last clustering in partition - floor should return last clustering
+            assertResult(afterPk1Ck3(), getIdPk1Ck3(), "after pk=1 ck=3 expects ck=3 (floor)");
+
+            assertResult(exactLastRow(), count - 1, "exact last row");
+            assertResult(afterLastRow(), count - 1, "after last row in last partition expects the last row");
+            assertResult(afterLastToken(), count - 1, "after last expects the last row");
         }
     }
-
-    /**
-     * Functional interface for PrimaryKeyMap API methods that take a PrimaryKey and return a row ID.
-     */
-    @FunctionalInterface
-    private interface PrimaryKeyMapFunction
-    {
-        long apply(PrimaryKey pk);
-    }
-
-     /**
-      * Helper class for testing static clustering columns.
-      * Provides position generators and assertion methods for testing PrimaryKeyMap operations
-      * with static rows.
-      */
-     private class MapWalker
-     {
-         protected final long count;
-         private final PrimaryKey pk1Static;
-         private final PrimaryKey pk1Ck1;
-         private final PrimaryKey pk1Ck2;
-         private final PrimaryKey pk1Ck3;
-         private final PrimaryKeyMapFunction rowIdFromPKMethod;
-         private final PrimaryKey firstPk;
-         private final PrimaryKey lastPk;
-         private final PrimaryKey afterLastPk;
-         private final long firstToken;
-         private final long lastToken;
-         private long idPk1Static = -1;
-         private long idPk1Ck1 = -1;
-         private long idPk1Ck2 = -1;
-         private long idPk1Ck3 = -1;
-
-         MapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
-         {
-             this.rowIdFromPKMethod = rowIdFromPKMethod;
-             this.count = map.count();
-             this.firstPk = map.primaryKeyFromRowId(0);
-             this.firstToken = firstPk.token().getLongValue();
-             this.lastPk = map.primaryKeyFromRowId(count - 1);
-             this.lastToken = lastPk.token().getLongValue();
-
-             // Pre-compute primary keys for testing
-             this.pk1Static = buildPkStatic(partitioner, 1);
-             this.pk1Ck1 = buildPk(partitioner, 1, 1);
-             this.pk1Ck2 = buildPk(partitioner, 1, 2);
-             this.pk1Ck3 = buildPk(partitioner, 1, 3);
-             this.afterLastPk = buildPk(partitioner, 1000, 11);
-         }
-
-         private PrimaryKey buildPk(IPartitioner partitioner, int pk, int ck)
-         {
-             ByteBuffer pkBuf = Int32Type.instance.decompose(pk);
-             Token token = partitioner.getToken(pkBuf);
-             DecoratedKey key = new BufferDecoratedKey(token, pkBuf);
-             Clustering<ByteBuffer> clustering = Clustering.make(Int32Type.instance.decompose(ck));
-             return pkFactory.create(key, clustering);
-         }
-
-         private PrimaryKey buildPkStatic(IPartitioner partitioner, int pk)
-         {
-             ByteBuffer pkBuf = Int32Type.instance.decompose(pk);
-             Token token = partitioner.getToken(pkBuf);
-             DecoratedKey key = new BufferDecoratedKey(token, pkBuf);
-             // Static clustering is represented by Clustering.STATIC_CLUSTERING
-             return pkFactory.create(key, Clustering.STATIC_CLUSTERING);
-         }
-
-         PrimaryKey beforeFirst()
-         {
-             return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(firstToken - 1));
-         }
-
-         PrimaryKey exactFirstRow()
-         {
-             return firstPk;
-         }
-
-         PrimaryKey exactLastRow()
-         {
-             return lastPk;
-         }
-
-         PrimaryKey afterLastRow()
-         {
-             return afterLastPk;
-         }
-
-         PrimaryKey afterLastToken()
-         {
-             return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(lastToken + 1));
-         }
-
-         PrimaryKey exactPk1Static()
-         {
-             return pk1Static;
-         }
-
-         PrimaryKey exactPk1Ck1()
-         {
-             return pk1Ck1;
-         }
-
-         PrimaryKey exactPk1Ck2()
-         {
-             return pk1Ck2;
-         }
-
-         PrimaryKey exactPk1Ck3()
-         {
-             return pk1Ck3;
-         }
-
-         PrimaryKey betweenPk1StaticAndCk1()
-         {
-             // Create a clustering value between STATIC_CLUSTERING and ck=1
-             // STATIC_CLUSTERING sorts BEFORE all regular clustering values
-             // Use ck=0 which sorts between static and ck=1
-             return buildPk(partitioner, 1, 0);
-         }
-
-         PrimaryKey afterPk1Ck3()
-         {
-             // A key that sorts after ck=3 (the last clustering in pk=1)
-             return buildPk(partitioner, 1, Integer.MAX_VALUE);
-         }
-
-         void assertResult(PrimaryKey pk, long expected, String expectationMessage)
-         {
-             long actual = rowIdFromPKMethod.apply(pk);
-             assertEquals(expectationMessage, expected, actual);
-         }
-
-         public long getIdPk1Static()
-         {
-             if (idPk1Static == -1)
-                 idPk1Static = rowIdFromPKMethod.apply(pk1Static);
-             return idPk1Static;
-         }
-
-         public long getIdPk1Ck1()
-         {
-             if (idPk1Ck1 == -1)
-                 idPk1Ck1 = rowIdFromPKMethod.apply(pk1Ck1);
-             return idPk1Ck1;
-         }
-
-         public long getIdPk1Ck2()
-         {
-             if (idPk1Ck2 == -1)
-                 idPk1Ck2 = rowIdFromPKMethod.apply(pk1Ck2);
-             return idPk1Ck2;
-         }
-
-         public long getIdPk1Ck3()
-         {
-             if (idPk1Ck3 == -1)
-                 idPk1Ck3 = rowIdFromPKMethod.apply(pk1Ck3);
-             return idPk1Ck3;
-         }
-     }
 }

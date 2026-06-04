@@ -16,71 +16,40 @@
 
 package org.apache.cassandra.index.sai.disk;
 
-import java.nio.ByteBuffer;
-import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-
-import org.apache.cassandra.db.BufferDecoratedKey;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.SAIUtil;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-
-import static org.junit.Assert.assertEquals;
 
 /**
  * Wide-table tests (with clustering columns) for
  * {@link PrimaryKeyMap} using the row-aware on-disk format.
  */
-@RunWith(Parameterized.class)
-public class RowAwareWidePrimaryKeyMapTest extends SAITester
+public class RowAwareWidePrimaryKeyMapTest extends RowAwarePrimaryKeyMapTester
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
 
-    private SSTableReader sstable;
-    private PrimaryKey.Factory pkFactory;
-    private IndexComponents.ForRead perSSTableComponents;
-    private IPartitioner partitioner;
-
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "version={0}")
-    public static List<Object[]> data()
+    @Override
+    protected Set<IndexContext> getIndexContexts()
     {
-        return Version.ALL.stream()
-                          .filter(v -> v.onDiskFormat().indexFeatureSet().isRowAware())
-                          .map(v -> new Object[]{ v })
-                          .collect(Collectors.toList());
+        return Set.of(intContext, textContext);
     }
 
-    @Before
-    public void setup() throws Throwable
+    @Override
+    protected void createTableSchema()
     {
-        SAIUtil.setCurrentVersion(version);
-
         createTable("CREATE TABLE %s (pk int, ck int, int_value int, text_value text, PRIMARY KEY (pk, ck)) WITH CLUSTERING ORDER BY (ck ASC)");
         execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
         execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
+    }
 
+    @Override
+    protected void insertTestData()
+    {
         // Insert multiple rows per partition to exercise clustering ordering
         // Partition pk=1
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1, 1, 11, "a1");
@@ -95,145 +64,33 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
         // Partition pk=1000
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1000, 1, 1001, "c1");
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1000, 2, 1002, "c2");
-
-        // Flush to generate SSTable and SAI components
-        flush();
-
-        // Obtain the just-flushed SSTable
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        this.sstable = cfs.getLiveSSTables().iterator().next();
-
-        // Build IndexDescriptor from the live SSTable using the matching index contexts
-        IndexDescriptor indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext));
-        this.pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(cfs.metadata.get().comparator);
-
-        this.perSSTableComponents = indexDescriptor.perSSTableComponents();
-        this.partitioner = sstable.metadata().partitioner;
     }
 
-    @Test
-    public void testExactRowIdOrInvertedCeiling() throws Throwable
+    @Override
+    protected MapWalker createMapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction function)
     {
-        try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
-             PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
-        {
-            MapWalker mapWalker = new MapWalker(map, map::exactRowIdOrInvertedCeiling);
-
-            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
-            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
-
-            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getId11(), "exact pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
-            mapWalker.assertResult(mapWalker.exactPk1Ck10(), mapWalker.getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
-            mapWalker.assertResult(mapWalker.betweenPk1Ck3AndCk10(), -mapWalker.getId110() - 1, "between pk=1 ck=3 and ck=10 expects inverted ck=10");
-            mapWalker.assertResult(mapWalker.afterLastCkInPk1(), -(mapWalker.getId110() + 1) - 1, "after last ck in pk=1 expects inverted next partition first row");
-
-            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastToken(), Long.MIN_VALUE, "after last expects out of range");
-        }
+        return new WideMapWalker(map, function);
     }
 
-    @Test
-    public void testCeiling() throws Throwable
+    private class WideMapWalker extends MapWalker
     {
-        try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
-             PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
-        {
-            MapWalker mapWalker = new MapWalker(map, map::ceiling);
-
-            mapWalker.assertResult(mapWalker.beforeFirst(), 0, "before first expects the first");
-            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
-
-            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getId11(), "exact pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
-            mapWalker.assertResult(mapWalker.exactPk1Ck10(), mapWalker.getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
-            mapWalker.assertResult(mapWalker.betweenPk1Ck3AndCk10(), mapWalker.getId110(), "between pk=1 ck=3 and ck=10 expects ck=10");
-            mapWalker.assertResult(mapWalker.afterLastCkInPk1(), mapWalker.getId110() + 1, "after last ck in pk=1 expects next partition first row");
-
-            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastToken(), -1, "after last expects out of range");
-        }
-    }
-
-    @Test
-    public void testFloor() throws Throwable
-    {
-        try (PrimaryKeyMap.Factory factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
-             PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
-        {
-            MapWalker mapWalker = new MapWalker(map, map::floor);
-
-            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects out of range");
-            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
-
-            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getId11(), "exact pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
-            mapWalker.assertResult(mapWalker.exactPk1Ck10(), mapWalker.getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
-            mapWalker.assertResult(mapWalker.betweenPk1Ck3AndCk10(), mapWalker.getId13(), "between pk=1 ck=3 and ck=10 expects ck=3");
-            mapWalker.assertResult(mapWalker.afterLastCkInPk1(), mapWalker.getId110(), "after last ck in pk=1 expects last ck in pk=1");
-
-            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastToken(), mapWalker.count - 1, "after last expects the last");
-        }
-    }
-
-    /**
-     * Functional interface for PrimaryKeyMap API methods that take a PrimaryKey and return a row ID.
-     */
-    @FunctionalInterface
-    private interface PrimaryKeyMapFunction
-    {
-        long apply(PrimaryKey pk);
-    }
-
-    /**
-     * Helper class for wide partition tests with clustering columns.
-     * Provides position generators and assertion methods for testing PrimaryKeyMap operations.
-     */
-    private class MapWalker
-    {
-        protected final long count;
         private final PrimaryKey pk11;
         private final PrimaryKey pk12;
         private final PrimaryKey pk13;
         private final PrimaryKey pk110;
-        private final PrimaryKeyMapFunction rowIdFromPKMethod;
-        private final PrimaryKey firstPk;
-        private final PrimaryKey lastPk;
-        private final long firstToken;
-        private final long lastToken;
         private long id11 = -1;
         private long id12 = -1;
         private long id13 = -1;
         private long id110 = -1;
 
-        MapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
+        WideMapWalker(PrimaryKeyMap map, PrimaryKeyMapFunction rowIdFromPKMethod)
         {
-            this.rowIdFromPKMethod = rowIdFromPKMethod;
-            this.count = map.count();
-            this.firstPk = map.primaryKeyFromRowId(0);
-            this.lastPk = map.primaryKeyFromRowId(count - 1);
-            this.firstToken = firstPk.token().getLongValue();
-            this.lastToken = lastPk.token().getLongValue();
-
+            super(map, rowIdFromPKMethod);
             // Pre-compute row IDs for clustering tests
             this.pk11 = buildPk(partitioner, 1, 1);
             this.pk12 = buildPk(partitioner, 1, 2);
             this.pk13 = buildPk(partitioner, 1, 3);
             this.pk110 = buildPk(partitioner, 1, 10);
-        }
-
-
-        private PrimaryKey buildPk(IPartitioner partitioner, int pk, int ck)
-        {
-            ByteBuffer pkBuf = Int32Type.instance.decompose(pk);
-            Token token = partitioner.getToken(pkBuf);
-            DecoratedKey key = new BufferDecoratedKey(token, pkBuf);
-            Clustering<ByteBuffer> clustering = Clustering.make(Int32Type.instance.decompose(ck));
-            return pkFactory.create(key, clustering);
         }
 
         PrimaryKey beforeFirst()
@@ -286,12 +143,6 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             return buildPk(partitioner, 1, Integer.MAX_VALUE);
         }
 
-        void assertResult(PrimaryKey pk, long expected, String expectationMessage)
-        {
-            long actual = rowIdFromPKMethod.apply(pk);
-            assertEquals(expectationMessage, expected, actual);
-        }
-
         public long getId11()
         {
             if (id11 == -1)
@@ -318,6 +169,57 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester
             if (id110 == -1)
                 id110 = rowIdFromPKMethod.apply(buildPk(partitioner, 1, 10));
             return id110;
+        }
+
+        @Override
+        protected void testExactRowIdOrInvertedCeiling()
+        {
+            assertResult(beforeFirst(), -1, "before first expects the inverted first");
+            assertResult(exactFirstRow(), 0, "exact first row");
+
+            assertResult(exactPk1Ck1(), getId11(), "exact pk=1, ck=1");
+            assertResult(exactPk1Ck2(), getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            assertResult(exactPk1Ck3(), getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            assertResult(exactPk1Ck10(), getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
+            assertResult(betweenPk1Ck3AndCk10(), -getId110() - 1, "between pk=1 ck=3 and ck=10 expects inverted ck=10");
+            assertResult(afterLastCkInPk1(), -(getId110() + 1) - 1, "after last ck in pk=1 expects inverted next partition first row");
+
+            assertResult(exactLastRow(), count - 1, "exact last row");
+            assertResult(afterLastToken(), Long.MIN_VALUE, "after last expects out of range");
+        }
+
+        @Override
+        protected void testCeiling()
+        {
+            assertResult(beforeFirst(), 0, "before first expects the first");
+            assertResult(exactFirstRow(), 0, "exact first row");
+
+            assertResult(exactPk1Ck1(), getId11(), "exact pk=1, ck=1");
+            assertResult(exactPk1Ck2(), getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            assertResult(exactPk1Ck3(), getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            assertResult(exactPk1Ck10(), getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
+            assertResult(betweenPk1Ck3AndCk10(), getId110(), "between pk=1 ck=3 and ck=10 expects ck=10");
+            assertResult(afterLastCkInPk1(), getId110() + 1, "after last ck in pk=1 expects next partition first row");
+
+            assertResult(exactLastRow(), count - 1, "exact last row");
+            assertResult(afterLastToken(), -1, "after last expects out of range");
+        }
+
+        @Override
+        protected void testFloor()
+        {
+            assertResult(beforeFirst(), -1, "before first expects out of range");
+            assertResult(exactFirstRow(), 0, "exact first row");
+
+            assertResult(exactPk1Ck1(), getId11(), "exact pk=1, ck=1");
+            assertResult(exactPk1Ck2(), getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            assertResult(exactPk1Ck3(), getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            assertResult(exactPk1Ck10(), getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
+            assertResult(betweenPk1Ck3AndCk10(), getId13(), "between pk=1 ck=3 and ck=10 expects ck=3");
+            assertResult(afterLastCkInPk1(), getId110(), "after last ck in pk=1 expects last ck in pk=1");
+
+            assertResult(exactLastRow(), count - 1, "exact last row");
+            assertResult(afterLastToken(), count - 1, "after last expects the last");
         }
     }
 }
