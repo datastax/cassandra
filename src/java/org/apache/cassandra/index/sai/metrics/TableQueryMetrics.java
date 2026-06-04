@@ -64,13 +64,9 @@ public class TableQueryMetrics
     /** Per query metrics for all kinds of queries (timers and histograms). */
     public final EnumMap<QueryKind, PerQuery> perQueryMetrics = new EnumMap<>(QueryKind.class);
 
-    /** Table-level BM25 counters that are not multiplexed by query kind. */
-    public final BM25PerTable bm25PerTable;
-
     public TableQueryMetrics(TableMetadata table)
     {
-        bm25PerTable = new BM25PerTable(table);
-        addMetrics(table, QueryKind.ALL, cmd -> true);
+        addMetrics(table, QueryKind.ALL, _ -> true);
         addMetrics(table, QueryKind.SP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition-queries that are filtering only
         addMetrics(table, QueryKind.MP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && !cmd.isSinglePartition()); // multi-partition queries that are filtering only
         addMetrics(table, QueryKind.SP_TOPK_ONLY, cmd -> cmd.isTopK() && !cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition queries that are top-k only
@@ -99,11 +95,19 @@ public class TableQueryMetrics
 
     private void addMetrics(TableMetadata table, QueryKind queryKind, Predicate<ReadCommand> filter)
     {
-        if (queryKind == QueryKind.ALL || CassandraRelevantProperties.SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED.getBoolean())
-            perTableMetrics.put(queryKind, new PerTable(table, queryKind, filter));
-
-        if (queryKind == QueryKind.ALL || CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.getBoolean())
+        if (queryKind == QueryKind.ALL)
+        {
+            perTableMetrics.put(queryKind, new PerTableAll(table, queryKind, filter));
             perQueryMetrics.put(queryKind, new PerQuery(table, queryKind, filter));
+        }
+        else
+        {
+            if (CassandraRelevantProperties.SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED.getBoolean())
+                perTableMetrics.put(queryKind, new PerTable(table, queryKind, filter));
+
+            if (CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.getBoolean())
+                perQueryMetrics.put(queryKind, new PerQuery(table, queryKind, filter));
+        }
     }
 
     /**
@@ -115,7 +119,6 @@ public class TableQueryMetrics
     public void record(QueryContext context, ReadCommand command)
     {
         QueryContext.Snapshot snapshot = context.snapshot();
-        bm25PerTable.record(snapshot, command);
         perTableMetrics.values().forEach(m -> m.record(snapshot, command));
         perQueryMetrics.values().forEach(m -> m.record(snapshot, command));
 
@@ -152,7 +155,6 @@ public class TableQueryMetrics
      */
     public void release()
     {
-        bm25PerTable.release();
         perTableMetrics.values().forEach(PerTable::release);
         perQueryMetrics.values().forEach(PerQuery::release);
     }
@@ -177,7 +179,7 @@ public class TableQueryMetrics
             this.filter = filter;
         }
 
-        public final void record(QueryContext.Snapshot snapshot, ReadCommand command)
+        public void record(QueryContext.Snapshot snapshot, ReadCommand command)
         {
             if (filter.test(command))
                 record(snapshot);
@@ -291,34 +293,29 @@ public class TableQueryMetrics
         }
     }
 
-    /**
-     * Table-level BM25 counters that are not multiplexed by query kind.
-     */
-    public static class BM25PerTable extends AbstractMetrics
+    public static class PerTableAll extends PerTable
     {
-        public static final String METRIC_TYPE = PerTable.METRIC_TYPE;
-
         public final Counter totalBM25QueriesCompleted;
-        public final Counter totalBM25QueryTimeouts;
 
-        public BM25PerTable(TableMetadata table)
+        public PerTableAll(TableMetadata table, QueryKind queryKind, Predicate<ReadCommand> filter)
         {
-            super(table.keyspace, table.name, METRIC_TYPE);
+            super(table, queryKind, filter);
             totalBM25QueriesCompleted = Metrics.counter(createMetricName("TotalBM25QueriesCompleted"));
-            totalBM25QueryTimeouts = Metrics.counter(createMetricName("TotalBM25QueryTimeouts"));
         }
 
-        public void record(QueryContext.Snapshot snapshot, ReadCommand command)
+        @Override
+        protected void record(QueryContext.Snapshot snapshot)
         {
-            if (!command.isBM25())
-                return;
+            super.record(snapshot);
+        }
 
-            totalBM25QueriesCompleted.inc();
-            if (snapshot.queryTimeouts > 0)
-            {
-                assert snapshot.queryTimeouts == 1;
-                totalBM25QueryTimeouts.inc();
-            }
+        @Override
+        public final void record(QueryContext.Snapshot snapshot, ReadCommand command)
+        {
+            super.record(snapshot, command);
+
+            if (command.isBM25())
+                totalBM25QueriesCompleted.inc();
         }
     }
 
@@ -408,7 +405,7 @@ public class TableQueryMetrics
         }
 
         @Override
-        public void record(QueryContext.Snapshot snapshot)
+        protected void record(QueryContext.Snapshot snapshot)
         {
             queryLatency.ifPresent(timer -> timer.update(snapshot.totalQueryTimeNs, TimeUnit.NANOSECONDS));
             sstablesHit.update(snapshot.sstablesHit);

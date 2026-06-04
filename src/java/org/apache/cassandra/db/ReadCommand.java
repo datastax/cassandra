@@ -257,18 +257,18 @@ public abstract class ReadCommand extends AbstractReadQuery
         return indexQueryPlan != null && indexQueryPlan.usesIndexFiltering();
     }
 
+    @Override
+    public boolean isTopK()
+    {
+        return indexQueryPlan != null && indexQueryPlan.isTopK();
+    }
+
     /**
      * @return {@code true} if this command is a BM25 request, {@code false} otherwise
      */
     public boolean isBM25()
     {
         return indexQueryPlan != null && indexQueryPlan.isBM25();
-    }
-
-    @Override
-    public boolean isTopK()
-    {
-        return indexQueryPlan != null && indexQueryPlan.isTopK();
     }
 
     /**

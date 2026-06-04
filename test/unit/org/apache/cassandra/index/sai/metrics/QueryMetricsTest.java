@@ -693,7 +693,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
         assertEquals(12, rows.size());
 
         waitForEquals(objectName("TotalBM25QueriesCompleted", TABLE_QUERY_METRIC_TYPE), 4);
-        waitForEquals(objectName("TotalBM25QueryTimeouts", TABLE_QUERY_METRIC_TYPE), 0);
         waitForEquals(objectName("TotalQueriesCompleted", TABLE_QUERY_METRIC_TYPE), 5);
         waitForEquals(objectName("TotalQueryTimeouts", TABLE_QUERY_METRIC_TYPE), 0);
     }
