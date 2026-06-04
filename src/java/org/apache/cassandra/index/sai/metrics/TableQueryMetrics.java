@@ -66,7 +66,7 @@ public class TableQueryMetrics
 
     public TableQueryMetrics(TableMetadata table)
     {
-        addMetrics(table, QueryKind.ALL, _ -> true);
+        addMetrics(table, QueryKind.ALL, cmd -> true);
         addMetrics(table, QueryKind.SP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition-queries that are filtering only
         addMetrics(table, QueryKind.MP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && !cmd.isSinglePartition()); // multi-partition queries that are filtering only
         addMetrics(table, QueryKind.SP_TOPK_ONLY, cmd -> cmd.isTopK() && !cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition queries that are top-k only
