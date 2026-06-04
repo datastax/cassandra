@@ -39,11 +39,7 @@ import org.apache.lucene.util.BytesRefBuilder;
 /**
  * Provides read access to an on-disk sequence of partition or clustering keys written by {@link KeyStoreWriter}.
  * <p>
- * Care has been taken to make this structure as efficient as possible.
- * Reading keys does not require allocating data heap buffers per each read operation.
- * Only one key at a time is loaded to memory.
- * Low complexity algorithms are used – a lookup of the key by point id is constant time,
- * and a lookup of the point id by the key is logarithmic.
+ * It's important that the implementation is performant.
  * <p>
  * Because the blocks are prefix compressed, random access applies only to the locating the whole block.
  * In order to jump to a concrete key inside the block, the block keys are iterated from the block beginning.
@@ -97,9 +93,9 @@ public class KeyLookup
 
     /**
      * This interface is introduced a workaround, when a cursor is open for partition with no data.
-     * Fot this an Empty Cursor is implemented
+     * For this an Empty Cursor is implemented
      * <p>
-     * Otherwise, the main goal is to allow reading the keys from a keys file,
+     * Otherwise, the main goal is to allow reading the keys from a keys file
      * and quickly seek to a random key by point id.
      * <p>
      * Its instances can be stateful and not thread-safe and
@@ -315,7 +311,7 @@ public class KeyLookup
         /**
          * Moves to a block and determines if the key is in the block.
          *
-         * @return -1 if key is before the block, 0 if key is in the block, 1 if key is after the block
+         * @return -1 if the key is before the block, 0 if the key is in the block, 1 if the key is after the block
          */
         private int moveToBlockAndCompareTo(long pointId, BytesRef key)
         {
@@ -324,7 +320,7 @@ public class KeyLookup
             if (compareKeys(key, currentKey) < 0)
                 return -1;
 
-            // If we are in the last block we will assume for now that the key is in the last block and defer
+            // If we are in the last block, we will assume for now that the key is in the last block and defer
             // the final decision to later (if we can't find it).
             if (currentBlockIndex == blockOffsets.length() - 1)
                 return 0;
