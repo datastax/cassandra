@@ -106,7 +106,7 @@ public class SaiDiskSizeTest extends SAITester
                                   default:
                                       return // A new version assumes the latest size by default
                                       Stream.of(
-                                      new Object[]{ v, 34767, 34689, "pk", 1 },
+                                      new Object[]{ v, 34901, 34689, "pk", 1 },
                                       new Object[]{ v, 39313, 39313, "pk, v_int", 2 },
                                       new Object[]{ v, 33549, 31315, "pk, v_int", 100 });
                               }
