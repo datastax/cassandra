@@ -91,8 +91,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
 
         ImmutableList.Builder<Object[]> params = ImmutableList.builder();
         params.add(new Object[] {"skiplist", 8});
-        if (!skipSharded)
-            params.add(new Object[] {"skiplist_sharded", 32});
+        params.add(new Object[] {skipSharded ? "skiplist" : "skiplist_sharded", 32});
         params.add(new Object[] {"trie_stage1", 8});
         params.add(new Object[] {"trie_stage2", 8});
         params.add(new Object[] {"trie_stage3", 8});
