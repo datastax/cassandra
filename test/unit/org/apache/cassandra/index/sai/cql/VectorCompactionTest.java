@@ -52,6 +52,7 @@ import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.*;
 
 @Ignore
@@ -410,7 +411,7 @@ abstract public class VectorCompactionTest extends VectorTester
                                 // With FA + fused PQ, PQ metadata is present and used by the graph, but there is no
                                 // standalone CompressedVectors instance to validate against.
                                 // TODO: further investigate what other checks are needed here
-                                assertEquals("Expected fused PQ path only for FA+", Version.FA, version);
+                                assertThat(version.onOrAfter(Version.FA)).as("Expected fused PQ path only for FA+").isTrue();
                                 assertNotNull("Expected PQ metadata for FA fused PQ", searcher.getPQ());
                             }
                         }
