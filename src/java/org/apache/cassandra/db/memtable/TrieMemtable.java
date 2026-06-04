@@ -967,6 +967,20 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
 
         @Override
+        @Deprecated
+        public void setShardCount(String shardCount)
+        {
+            setDefaultShardCount(shardCount);
+        }
+
+        @Override
+        @Deprecated
+        public String getShardCount()
+        {
+            return getDefaultShardCount();
+        }
+
+        @Override
         public void setLockFairness(String fairness)
         {
             SHARD_LOCK_FAIRNESS = Boolean.parseBoolean(fairness);
