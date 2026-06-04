@@ -22,7 +22,6 @@ import com.google.common.base.Strings;
 import org.junit.Test;
 
 import static java.lang.String.format;
-import static org.junit.Assert.assertNotNull;
 
 /**
  * Tests the guardrail for the number of secondary indexes in a table, {@link Guardrails#secondaryIndexesPerTable}.
@@ -46,13 +45,6 @@ public class GuardrailSecondaryIndexesPerTableTest extends ThresholdTester
     protected long currentValue()
     {
         return getCurrentColumnFamilyStore().indexManager.listIndexes().size();
-    }
-
-    @Test
-    public void testConfigValidation()
-    {
-        assertNotNull(guardrail);
-        testValidationOfThresholdProperties(guardrail.name + "_warn_threshold", guardrail.name + "_fail_threshold", true);
     }
 
     @Test

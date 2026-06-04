@@ -223,7 +223,7 @@ public class GuardrailsConfigDefaultsTest
         assertEquals("vector_dimensions_fail_threshold", 8192, guardrails.getVectorDimensionsFailThreshold());
         assertEquals("columns_per_table_fail_threshold", 50, guardrails.getColumnsPerTableFailThreshold());
         assertEquals("secondary_indexes_per_table_fail_threshold", 1, guardrails.getSecondaryIndexesPerTableFailThreshold());
-        assertEquals("sasi_indexes_per_table_fail_threshold", 0, guardrails.getSasiIndexesPerTableFailThreshold());
+        assertEquals("sasi_indexes_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getSasiIndexesPerTableFailThreshold());
         assertEquals("materialized_views_per_table_fail_threshold", 2, guardrails.getMaterializedViewsPerTableFailThreshold());
         assertEquals("tables_warn_threshold", 100, guardrails.getTablesWarnThreshold());
         assertEquals("tables_fail_threshold", 200, guardrails.getTablesFailThreshold());
@@ -283,9 +283,9 @@ public class GuardrailsConfigDefaultsTest
         assertEquals("vector_dimensions_warn_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getVectorDimensionsWarnThreshold());
         assertEquals("vector_dimensions_fail_threshold", 8192, guardrails.getVectorDimensionsFailThreshold());
         assertEquals("columns_per_table_fail_threshold", 200, guardrails.getColumnsPerTableFailThreshold());
-        assertEquals("secondary_indexes_per_table_fail_threshold", 0, guardrails.getSecondaryIndexesPerTableFailThreshold());
-        assertEquals("sasi_indexes_per_table_fail_threshold", 0, guardrails.getSasiIndexesPerTableFailThreshold());
-        assertEquals("materialized_views_per_table_fail_threshold", 0, guardrails.getMaterializedViewsPerTableFailThreshold());
+        assertEquals("secondary_indexes_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getSecondaryIndexesPerTableFailThreshold());
+        assertEquals("sasi_indexes_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getSasiIndexesPerTableFailThreshold());
+        assertEquals("materialized_views_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getMaterializedViewsPerTableFailThreshold());
         assertEquals("tables_warn_threshold", 100, guardrails.getTablesWarnThreshold());
         assertEquals("tables_fail_threshold", 200, guardrails.getTablesFailThreshold());
 
