@@ -411,7 +411,7 @@ abstract public class VectorCompactionTest extends VectorTester
                                 // With FA + fused PQ, PQ metadata is present and used by the graph, but there is no
                                 // standalone CompressedVectors instance to validate against.
                                 // TODO: further investigate what other checks are needed here
-                                assertThat(version.onOrAfter(Version.FA)).as("Expected fused PQ path only for FA+").isTrue();
+                                assertThat(version).as("Expected fused PQ path only for FA+").isGreaterThanOrEqualTo(Version.FA);
                                 assertNotNull("Expected PQ metadata for FA fused PQ", searcher.getPQ());
                             }
                         }
