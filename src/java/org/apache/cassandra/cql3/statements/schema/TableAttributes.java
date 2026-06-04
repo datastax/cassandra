@@ -202,8 +202,8 @@ public final class TableAttributes extends PropertyDefinitions
                         builder.memtable(MemtableParams.get("persistent_memory"));
                     else if ("TrieMemtable".equalsIgnoreCase(shortClassName))
                         builder.memtable(MemtableParams.get("trie"));
-                    else if ("TrieMemtableStage1".equalsIgnoreCase(shortClassName))
-                        builder.memtable(MemtableParams.get("trie"));
+                    else if (shortClassName.matches("TrieMemtableStage\\d"))
+                        builder.memtable(MemtableParams.get(shortClassName.replaceFirst("TrieMemtableStage", "trie_stage")));
                     else if ("ShardedSkipListMemtable".equalsIgnoreCase(shortClassName))
                         builder.memtable(MemtableParams.get("skiplist_sharded"));
                     else
