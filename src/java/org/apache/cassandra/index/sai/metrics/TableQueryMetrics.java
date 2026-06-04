@@ -237,7 +237,7 @@ public class TableQueryMetrics
         }
 
         @Override
-        protected void record(QueryContext.Snapshot snapshot)
+        public void record(QueryContext.Snapshot snapshot)
         {
             if (snapshot.queryTimeouts > 0)
             {
