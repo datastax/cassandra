@@ -304,7 +304,7 @@ public class TableQueryMetrics
         }
 
         @Override
-        protected void record(QueryContext.Snapshot snapshot)
+        public void record(QueryContext.Snapshot snapshot)
         {
             super.record(snapshot);
         }
@@ -405,7 +405,7 @@ public class TableQueryMetrics
         }
 
         @Override
-        protected void record(QueryContext.Snapshot snapshot)
+        public void record(QueryContext.Snapshot snapshot)
         {
             queryLatency.ifPresent(timer -> timer.update(snapshot.totalQueryTimeNs, TimeUnit.NANOSECONDS));
             sstablesHit.update(snapshot.sstablesHit);
