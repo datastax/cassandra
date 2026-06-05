@@ -59,7 +59,8 @@ public class TriePartitionUpdater
                                     this::applyExistingMarkerToIncomingRow,
                                     true,
                                     TrieMemtable.FORCE_COPY_PARTITION_BOUNDARY,
-                                    x -> { throw new AssertionError("Force copy should already be in effect for all range tries"); });
+                                    x -> { throw new AssertionError("Force copy should already be in effect for all range tries"); },
+                                    this::dropLevelMarker);
     }
 
     /// Merge the given update into the data trie.
@@ -89,6 +90,18 @@ public class TriePartitionUpdater
             throw new AssertionError("Unexpected update type: " + update.getClass());
     }
 
+    long dataSizeOfMarker(TrieTombstoneMarker marker)
+    {
+        if (!marker.isBoundary())
+            return 0;
+        // We will only count one of the sides.
+        TrieTombstoneMarker.Covering rightSide = marker.rightDeletion();
+        if (rightSide == null)
+            return 0;
+        else
+            return rightSide.dataSize();
+    }
+
     /// Merge an incoming tombstone with existing deletions.
     /// This will be called for all boundary tombstones in the update, but also for all existing boundaries that are
     /// covered by an incoming range.
@@ -98,6 +111,8 @@ public class TriePartitionUpdater
         {
             if (TriePartitionUpdate.startsRowDeletion(update))
                 currentPartition.markAddedTombstones(1);
+
+            dataSize += dataSizeOfMarker(update);
             return update;
         }
         else
@@ -109,6 +124,8 @@ public class TriePartitionUpdater
             int hadTombstone = existing.isBoundary() && TriePartitionUpdate.startsRowDeletion(existing) ? 1 : 0;
             int hasTombstone = merged != null && merged.isBoundary() && TriePartitionUpdate.startsRowDeletion(merged) ? 1 : 0;
             currentPartition.markAddedTombstones(hasTombstone - hadTombstone);
+            dataSize -= dataSizeOfMarker(existing);
+            dataSize += dataSizeOfMarker(update);
             return merged;
         }
     }
@@ -137,7 +154,7 @@ public class TriePartitionUpdater
     {
         if (!deletion.deletes(existingContent))
             return existingContent;
-        dataSize -= existingContent.valueSize();
+        dataSize -= existingContent.dataSizeWithoutPath();
         return null;
     }
 
@@ -148,13 +165,10 @@ public class TriePartitionUpdater
 
     LivenessInfo applyRowDeletion(LivenessInfo existing, DeletionTime deletion)
     {
-        if (deletion.deletes(existing))
+        if (existing != LivenessInfo.EMPTY && deletion.deletes(existing))
         {
+            dataSize -= existing.dataSize();
             return LivenessInfo.EMPTY;
-            // FIXME: Need trie code to signal dropped childless LivenessInfo.EMPTY for correct row count tracking
-            // TrieBackedPartition should also be updated.
-
-            // TODO: and also do currentPartition.markInsertedRows(-1) in that case?
             // TODO: Does strict row liveness apply here? How do we drop tail trie if it does?
         }
         return existing;
@@ -166,7 +180,10 @@ public class TriePartitionUpdater
         if (o == LivenessInfo.EMPTY)
             currentPartition.markInsertedRows(-1);
         if (o instanceof TrieTombstoneMarker && ((TrieTombstoneMarker) o).rightDeletion() != null)
+        {
             currentPartition.markAddedTombstones(-1);
+            dataSize -= dataSizeOfMarker((TrieTombstoneMarker) o);
+        }
     }
 
 
@@ -217,7 +234,7 @@ public class TriePartitionUpdater
     {
         if (existing == null)
         {
-            this.dataSize += update.valueSize();
+            this.dataSize += update.dataSizeWithoutPath();
             return update;
         }
         else
@@ -228,7 +245,7 @@ public class TriePartitionUpdater
                 long timeDelta = Math.abs(reconciled.timestamp() - existing.timestamp());
                 if (timeDelta < colUpdateTimeDelta)
                     colUpdateTimeDelta = timeDelta;
-                this.dataSize += reconciled.valueSize() - existing.valueSize();
+                this.dataSize += reconciled.dataSizeWithoutPath() - existing.dataSizeWithoutPath();
             }
             return reconciled;
         }

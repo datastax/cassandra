@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.IDataSize;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -163,6 +164,13 @@ public interface CellData<V, C extends CellData<?, ?>> extends IDataSize
     long unsharedHeapSize();
     long unsharedHeapSizeExcludingData();
 
+    default int dataSizeWithoutPath()
+    {
+        return TypeSizes.sizeof(timestamp())
+               + TypeSizes.sizeof(ttl())
+               + TypeSizes.sizeof(localDeletionTimeAsUnsignedInt())
+               + valueSize();
+    }
 
     C withUpdatedTimestampAndLocalDeletionTime(long newTimestamp, long newLocalDeletionTime);
 
