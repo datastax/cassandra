@@ -157,9 +157,9 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
         return table.partitioner.decorateKey(key);
     }
 
-    Clustering makeClustering(TableMetadata table, String...clusteringKeys)
+    Clustering<?> makeClustering(TableMetadata table, String...clusteringKeys)
     {
-        Clustering clustering;
+        Clustering<?> clustering;
         if (table.comparator.size() == 0)
             clustering = Clustering.EMPTY;
         else
