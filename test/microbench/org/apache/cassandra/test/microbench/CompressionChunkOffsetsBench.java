@@ -41,6 +41,7 @@ import org.openjdk.jmh.infra.Blackhole;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.compress.CompressionChunkOffsetsFactory;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.CompressionParams;
@@ -56,11 +57,8 @@ public class CompressionChunkOffsetsBench
     @State(Scope.Benchmark)
     public static class BenchmarkState
     {
-        // in-memory limit and on-disk cache in MB:
-        // 1. all in-memory
-        // 2. all on-disk with block cache
-        @Param({ "0", "256"})
-        public String memorySettingsInMb;
+        @Param({ "IN_MEMORY", "ON_DISK", "ON_DISK_WITH_CACHE", "MMAP" })
+        public String offsetsType;
 
         @Param({ "1000000"})
         public int chunkCount;
@@ -70,7 +68,7 @@ public class CompressionChunkOffsetsBench
         private static final int CHECKSUM_LEN = 4;
         private static final int OFFSETS_TO_READ = 1024 * 512;
 
-        private int onDiskCacheSizeInMb;
+        private CompressionChunkOffsetsFactory.Type type;
 
         private CompressionMetadata metadata;
         private File metadataFile;
@@ -80,11 +78,11 @@ public class CompressionChunkOffsetsBench
         @Setup(Level.Trial)
         public void setup() throws Exception
         {
-            String[] configs = memorySettingsInMb.split(",");
-            onDiskCacheSizeInMb = Integer.parseInt(configs[1].trim());
+            type = CompressionChunkOffsetsFactory.Type.parse(offsetsType);
 
             DatabaseDescriptor.toolInitialization();
-            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString(onDiskCacheSizeInMb + "MiB");
+            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(type.name());
+            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("256MiB");
 
             metadataFile = createMetadataFile();
             long compressedFileLength = computeCompressedFileLength();
@@ -99,14 +97,17 @@ public class CompressionChunkOffsetsBench
             if (metadata != null)
                 metadata.close();
 
+            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.reset();
             CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.reset();
+            if (metadataFile != null)
+                metadataFile.tryDelete();
         }
 
         @Setup(Level.Iteration)
         public void prewarmCache()
         {
-            // only prewarm if on-disk with cache
-            if (onDiskCacheSizeInMb <= 0)
+            // Prewarm page cache, mmap pages, and the block cache so measured iterations compare steady-state reads.
+            if (type == CompressionChunkOffsetsFactory.Type.IN_MEMORY)
                 return;
 
             for (long position : positions)
@@ -165,13 +166,6 @@ public class CompressionChunkOffsetsBench
     @Benchmark
     public void chunkForRandom(BenchmarkState state, Blackhole blackhole)
     {
-//        Benchmark                                    (chunkCount)              (mode)   Mode  Cnt    Score    Error   Units
-//        CompressionChunkOffsetsBench.chunkForRandom       1000000           IN_MEMORY  thrpt    6  201.053 ± 58.986  ops/us
-//        CompressionChunkOffsetsBench.chunkForRandom       1000000             ON_DISK  thrpt    6    1.091 ±  0.141  ops/us
-//        CompressionChunkOffsetsBench.chunkForRandom       1000000  ON_DISK_WITH_CACHE  thrpt    6    5.926 ±  1.009  ops/us
-//        CompressionChunkOffsetsBench.chunkForRandom       1000000           IN_MEMORY   avgt    6    0.020 ±  0.005   us/op
-//        CompressionChunkOffsetsBench.chunkForRandom       1000000             ON_DISK   avgt    6    3.767 ±  0.286   us/op
-//        CompressionChunkOffsetsBench.chunkForRandom       1000000  ON_DISK_WITH_CACHE   avgt    6    0.705 ±  0.183   us/op
         CompressionMetadata.Chunk chunk = state.metadata.chunkFor(state.nextPosition());
         blackhole.consume(chunk.offset);
         blackhole.consume(chunk.length);

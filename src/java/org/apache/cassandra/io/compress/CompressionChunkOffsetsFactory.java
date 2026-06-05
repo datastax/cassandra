@@ -21,10 +21,13 @@ package org.apache.cassandra.io.compress;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.Locale;
 
 import com.google.common.base.Preconditions;
 
+import io.netty.util.internal.PlatformDependent;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
@@ -37,32 +40,50 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_FACTORY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE;
 import static org.apache.cassandra.io.compress.CompressionMetadata.NATIVE_MEMORY_USAGE;
 
 /**
  * Factory for {@link CompressionChunkOffsets} implementations.
  * <p>
- * Compression chunk offsets selection is controlled by a single configuration property:
- * {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE}
- * </p>
- * <p>
- * When cache size is positive (default: 10% of max direct memory):
- * - Uses {@link BlockCacheChunkOffsets} that loads offsets in 64KB blocks on-demand
- * - Blocks are cached with LRU eviction, preventing OOM
- * - Recommended for production use
- * </p>
- * <p>
- * When cache size is zero or negative:
- * - Falls back to legacy {@link InMemoryCompressionChunkOffsets} implementation
- * - Loads all offsets into a single Memory.LongArray
- * - Kept for rollback purposes only in case of issues with block-cached implementation
+ * Compression chunk offsets selection is controlled by {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_TYPE}.
+ * If the type is unset, the cache size property preserves the historical behavior:
+ * positive {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE} uses
+ * {@link Type#ON_DISK_WITH_CACHE}, and non-positive size uses {@link Type#IN_MEMORY}.
  * </p>
  */
 public interface CompressionChunkOffsetsFactory
 {
     CompressionChunkOffsetsFactory instance = COMPRESSION_CHUNK_OFFSETS_FACTORY.isPresent()
-                                              ? FBUtilities.construct(COMPRESSION_CHUNK_OFFSETS_FACTORY.getString(), "Compression Chunk Offsets Factory")
+                                              ? FBUtilities.construct(COMPRESSION_CHUNK_OFFSETS_FACTORY.getString(),
+                                                                      "Compression Chunk Offsets Factory")
                                               : new CompressionChunkOffsetsFactory() {};
+
+    enum Type
+    {
+        IN_MEMORY,
+        ON_DISK,
+        ON_DISK_WITH_CACHE,
+        MMAP;
+
+        public static Type parse(String value)
+        {
+            String normalized = value.trim().toUpperCase(Locale.ROOT).replace('-', '_');
+            if ("BLOCK_CACHE".equals(normalized))
+                return ON_DISK_WITH_CACHE;
+            return Type.valueOf(normalized);
+        }
+    }
+
+    static Type configuredType()
+    {
+        if (COMPRESSION_CHUNK_OFFSETS_TYPE.isPresent())
+            return Type.parse(COMPRESSION_CHUNK_OFFSETS_TYPE.getString());
+
+        return CompressionChunkOffsetCache.getCacheSizeInBytes(PlatformDependent.maxDirectMemory()) > 0
+               ? Type.ON_DISK_WITH_CACHE
+               : Type.IN_MEMORY;
+    }
 
     /**
      * Create a {@link CompressionChunkOffsets} implementation from the provided compression metadata stream.
@@ -85,15 +106,8 @@ public interface CompressionChunkOffsetsFactory
         if (chunkCount == 0)
             return new CompressionChunkOffsets.Empty();
 
-        CompressionChunkOffsetCache cache = CompressionChunkOffsetCache.get();
-        
-        // If cache is enabled (size > 0), use block-cached implementation
-        if (cache != null && cache.capacity() > 0)
-            return new BlockCacheChunkOffsets(indexFilePath, offsetsStart, startIndex, endIndex - startIndex, 
-                                             endIndex, chunkCount, compressedFileLength, readerType, cache);
-        
-        // Otherwise fall back to legacy in-memory implementation
-        return createInMemoryOffsets(indexFilePath, input, startIndex, endIndex, chunkCount, compressedFileLength);
+        return createOffsets(configuredType(), indexFilePath, input, offsetsStart, startIndex, endIndex, chunkCount,
+                             compressedFileLength, readerType);
     }
 
     /**
@@ -116,9 +130,14 @@ public interface CompressionChunkOffsetsFactory
      * @param isCompressionInfoWritten whether the compression info file is fully written
      * @return a chunk offsets implementation for use in early-open or final SSTableReader
      */
-    default CompressionChunkOffsets getInstanceOnWriterComplete(File indexFilePath, Memory.LongArray memoryChunkOffsets,
-                                                                long offsetsStart, int startIndex, int endIndex, int chunkCount,
-                                                                long compressedFileLength, boolean isCompressionInfoWritten) throws IOException
+    default CompressionChunkOffsets getInstanceOnWriterComplete(File indexFilePath,
+                                                                Memory.LongArray memoryChunkOffsets,
+                                                                long offsetsStart,
+                                                                int startIndex,
+                                                                int endIndex,
+                                                                int chunkCount,
+                                                                long compressedFileLength,
+                                                                boolean isCompressionInfoWritten) throws IOException
     {
         if (chunkCount == 0)
             return new CompressionChunkOffsets.Empty();
@@ -134,22 +153,122 @@ public interface CompressionChunkOffsetsFactory
             return new CompressionChunkOffsetsFactory.InMemoryCompressionChunkOffsets(memoryChunkOffsets, compressedFileLength);
         }
 
-        CompressionChunkOffsetCache cache = CompressionChunkOffsetCache.get();
-        
-        // If cache is enabled (size > 0), use block-cached implementation
-        if (cache != null && cache.capacity() > 0)
+        Type type = configuredType();
+        if (type != Type.IN_MEMORY)
         {
-            // Release writer's in-memory offsets since we'll use block-cached implementation
-            memoryChunkOffsets.close();
-            return new BlockCacheChunkOffsets(indexFilePath, offsetsStart, startIndex, endIndex - startIndex,
-                                             endIndex, chunkCount, compressedFileLength, readerType, cache);
+            try
+            {
+                CompressionChunkOffsets offsets = createOffsetsFromDisk(type, indexFilePath, offsetsStart, startIndex,
+                                                                        endIndex, chunkCount, compressedFileLength,
+                                                                        readerType);
+                memoryChunkOffsets.close();
+                return offsets;
+            }
+            catch (UnsupportedOperationException e)
+            {
+                // Mmap is not supported for all FileChannel implementations, e.g. CNDB storage-service proxy channels.
+                // Keep the writer-owned offsets as a correctness-preserving fallback for those paths.
+                if (type != Type.MMAP)
+                    throw e;
+            }
         }
-        
-        // Otherwise use legacy in-memory implementation with writer's offsets
+
+        // Otherwise use legacy in-memory implementation with writer's offsets.
         NATIVE_MEMORY_USAGE.addAndGet(memoryChunkOffsets.memoryUsed());
         return new CompressionChunkOffsetsFactory.InMemoryCompressionChunkOffsets(memoryChunkOffsets, compressedFileLength);
     }
 
+
+    static CompressionChunkOffsets createOffsets(Type type,
+                                                 File indexFilePath,
+                                                 TrackedDataInputPlus input,
+                                                 long offsetsStart,
+                                                 int startIndex,
+                                                 int endIndex,
+                                                 int chunkCount,
+                                                 long compressedFileLength,
+                                                 CompressionMetadataReaderType readerType) throws IOException
+    {
+        try
+        {
+            return type == Type.IN_MEMORY
+                   ? createInMemoryOffsets(indexFilePath, input, startIndex, endIndex, chunkCount, compressedFileLength)
+                   : createOffsetsFromDisk(type, indexFilePath, offsetsStart, startIndex, endIndex, chunkCount,
+                                           compressedFileLength, readerType);
+        }
+        catch (UnsupportedOperationException e)
+        {
+            if (type != Type.MMAP)
+                throw e;
+
+            return createInMemoryOffsets(indexFilePath, input, startIndex, endIndex, chunkCount, compressedFileLength);
+        }
+    }
+
+    static CompressionChunkOffsets createOffsetsFromDisk(Type type,
+                                                         File indexFilePath,
+                                                         long offsetsStart,
+                                                         int startIndex,
+                                                         int endIndex,
+                                                         int chunkCount,
+                                                         long compressedFileLength,
+                                                         CompressionMetadataReaderType readerType) throws IOException
+    {
+        int size = endIndex - startIndex;
+        if (size == 0)
+            return new CompressionChunkOffsets.Empty();
+
+        switch (type)
+        {
+            case ON_DISK:
+                return new OnDiskChunkOffsets(indexFilePath, offsetsStart, startIndex, size, endIndex, chunkCount,
+                                              compressedFileLength, readerType);
+            case ON_DISK_WITH_CACHE:
+                CompressionChunkOffsetCache cache = CompressionChunkOffsetCache.get();
+                if (cache != null && cache.capacity() > 0)
+                    return new BlockCacheChunkOffsets(indexFilePath, offsetsStart, startIndex, size, endIndex,
+                                                     chunkCount, compressedFileLength, readerType, cache);
+                return new OnDiskChunkOffsets(indexFilePath, offsetsStart, startIndex, size, endIndex, chunkCount,
+                                              compressedFileLength, readerType);
+            case MMAP:
+                return new MmapChunkOffsets(indexFilePath, offsetsStart, startIndex, size, endIndex, chunkCount,
+                                            compressedFileLength, readerType);
+            case IN_MEMORY:
+            default:
+                throw new AssertionError("Unexpected on-disk compression offsets type: " + type);
+        }
+    }
+
+    static FileChannel openChannel(File indexFilePath, CompressionMetadataReaderType readerType) throws IOException
+    {
+        if (readerType == CompressionMetadataReaderType.WRITE_TIME)
+            return StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath);
+        return indexFilePath.newReadChannel();
+    }
+
+    static long readLong(File file, FileChannel fileChannel, ByteBuffer buffer, long position)
+    {
+        buffer.clear();
+        try
+        {
+            int read = 0;
+            while (read < Long.BYTES)
+            {
+                int n = fileChannel.read(buffer, position + read);
+                if (n < 0)
+                    throw new EOFException("EOF reading compression offsets from " + file);
+                if (n == 0)
+                    continue;
+                read += n;
+            }
+            buffer.flip();
+            return buffer.getLong();
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
 
 
     static CompressionChunkOffsets createInMemoryOffsets(File indexFilePath, TrackedDataInputPlus input,
@@ -247,6 +366,206 @@ public interface CompressionChunkOffsetsFactory
         }
     }
 
+    class OnDiskChunkOffsets implements CompressionChunkOffsets
+    {
+        private final File file;
+        private final FileChannel fileChannel;
+        private final long offsetsStart;
+        private final int baseChunkIndex;
+        private final int size;
+        private final int chunkCount;
+        private final long compressedFileLength;
+        private final ThreadLocal<ByteBuffer> scratchBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocate(Long.BYTES));
+
+        public OnDiskChunkOffsets(File file,
+                                  long offsetsStart,
+                                  int baseChunkIndex,
+                                  int size,
+                                  int endIndex,
+                                  int chunkCount,
+                                  long compressedFileLength,
+                                  CompressionMetadataReaderType readerType) throws IOException
+        {
+            this.file = file;
+            this.fileChannel = openChannel(file, readerType);
+            this.offsetsStart = offsetsStart;
+            this.baseChunkIndex = baseChunkIndex;
+            this.size = size;
+            this.chunkCount = chunkCount;
+            this.compressedFileLength = endIndex < chunkCount
+                                        ? getFromDisk(size) - getFromDisk(0)
+                                        : compressedFileLength;
+        }
+
+        @Override
+        public long get(int index)
+        {
+            if (index < 0 || index >= size)
+                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d",
+                                                                                 index, size)), file);
+
+            return getFromDisk(index);
+        }
+
+        private long getFromDisk(int index)
+        {
+            int absoluteIndex = baseChunkIndex + index;
+            if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
+                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d",
+                                                                                 absoluteIndex, chunkCount)), file);
+
+            long position = offsetsStart + (long) absoluteIndex * Long.BYTES;
+            return readLong(file, fileChannel, scratchBuffer.get(), position);
+        }
+
+        @Override
+        public int size()
+        {
+            return size;
+        }
+
+        @Override
+        public long offHeapMemoryUsed()
+        {
+            return 0;
+        }
+
+        @Override
+        public void addTo(Ref.IdentityCollection identities)
+        {
+        }
+
+        @Override
+        public long compressedFileLength()
+        {
+            return compressedFileLength;
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(fileChannel);
+        }
+    }
+
+    class MmapChunkOffsets implements CompressionChunkOffsets
+    {
+        private static final int MMAP_REGION_BYTES = 1 << 30;
+
+        private final File file;
+        private final FileChannel fileChannel;
+        private final int size;
+        private final long compressedFileLength;
+        private final MappedByteBuffer[] mappedOffsets;
+
+        public MmapChunkOffsets(File file,
+                                long offsetsStart,
+                                int baseChunkIndex,
+                                int size,
+                                int endIndex,
+                                int chunkCount,
+                                long compressedFileLength,
+                                CompressionMetadataReaderType readerType) throws IOException
+        {
+            this.file = file;
+            this.fileChannel = openChannel(file, readerType);
+            this.size = size;
+            try
+            {
+                int mappedOffsetCount = size + (endIndex < chunkCount ? 1 : 0);
+                this.mappedOffsets = mapOffsets(offsetsStart + (long) baseChunkIndex * Long.BYTES,
+                                                (long) mappedOffsetCount * Long.BYTES);
+                this.compressedFileLength = endIndex < chunkCount
+                                            ? getMappedOffset(size) - getMappedOffset(0)
+                                            : compressedFileLength;
+            }
+            catch (IOException | RuntimeException | Error t)
+            {
+                FileUtils.closeQuietly(fileChannel);
+                throw t;
+            }
+        }
+
+        private MappedByteBuffer[] mapOffsets(long position, long bytes) throws IOException
+        {
+            int regionCount = Math.toIntExact((bytes + MMAP_REGION_BYTES - 1) / MMAP_REGION_BYTES);
+            MappedByteBuffer[] regions = new MappedByteBuffer[regionCount];
+            try
+            {
+                long remaining = bytes;
+                long regionPosition = position;
+                for (int i = 0; i < regionCount; i++)
+                {
+                    long regionSize = Math.min(MMAP_REGION_BYTES, remaining);
+                    regions[i] = fileChannel.map(FileChannel.MapMode.READ_ONLY, regionPosition, regionSize);
+                    remaining -= regionSize;
+                    regionPosition += regionSize;
+                }
+                return regions;
+            }
+            catch (IOException | RuntimeException | Error t)
+            {
+                for (MappedByteBuffer region : regions)
+                {
+                    if (region != null)
+                        FileUtils.clean(region);
+                }
+                throw t;
+            }
+        }
+
+        @Override
+        public long get(int index)
+        {
+            if (index < 0 || index >= size)
+                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d",
+                                                                                 index, size)), file);
+
+            return getMappedOffset(index);
+        }
+
+        private long getMappedOffset(int index)
+        {
+            long byteOffset = (long) index * Long.BYTES;
+            int regionIndex = Math.toIntExact(byteOffset / MMAP_REGION_BYTES);
+            int offsetInRegion = Math.toIntExact(byteOffset % MMAP_REGION_BYTES);
+            return mappedOffsets[regionIndex].getLong(offsetInRegion);
+        }
+
+        @Override
+        public int size()
+        {
+            return size;
+        }
+
+        @Override
+        public long offHeapMemoryUsed()
+        {
+            // The mapping is file-backed and accounted by the JVM/OS mapped-buffer metrics, not by the chunk-offset cache.
+            return 0;
+        }
+
+        @Override
+        public void addTo(Ref.IdentityCollection identities)
+        {
+        }
+
+        @Override
+        public long compressedFileLength()
+        {
+            return compressedFileLength;
+        }
+
+        @Override
+        public void close()
+        {
+            for (MappedByteBuffer buffer : mappedOffsets)
+                FileUtils.clean(buffer);
+
+            FileUtils.closeQuietly(fileChannel);
+        }
+    }
+
     class BlockCacheChunkOffsets implements CompressionChunkOffsets
     {
         // Num of bytes per cache block. This value divides by 8 is the num of chunk offsets per cache block.
@@ -275,7 +594,7 @@ public interface CompressionChunkOffsetsFactory
                                       CompressionChunkOffsetCache cache) throws IOException
         {
             this.file = file;
-            this.fileChannel = openChannel(file, readerType);
+            this.fileChannel = CompressionChunkOffsetsFactory.openChannel(file, readerType);
             this.offsetsStart = offsetsStart;
             this.baseChunkIndex = baseChunkIndex;
             this.size = size;
@@ -284,40 +603,43 @@ public interface CompressionChunkOffsetsFactory
             // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
             // Obviously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
             // an empty chunk added to the end of the file thus we cannot rely on the file length.
-            long lastOffset = endIndex < chunkCount ? getFromDisk(endIndex - baseChunkIndex) - getFromDisk(0) : compressedFileLength;
+            long lastOffset = endIndex < chunkCount
+                              ? getFromDisk(endIndex - baseChunkIndex) - getFromDisk(0)
+                              : compressedFileLength;
             this.compressedFileLength = lastOffset;
             this.offsetsPerBlock = Math.max(1, DEFAULT_BLOCK_BYTES / Long.BYTES);
             this.cache = cache;
         }
 
-        private static FileChannel openChannel(File indexFilePath, CompressionMetadataReaderType readerType) throws IOException
-        {
-            if (readerType == CompressionMetadataReaderType.WRITE_TIME)
-                return StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath);
-            return indexFilePath.newReadChannel();
-        }
-
         @Override
         public long get(int index)
         {
+            if (index < 0 || index >= size)
+                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d",
+                                                                                 index, size)), file);
+
             int absoluteIndex = baseChunkIndex + index;
             int blockIndex = absoluteIndex / offsetsPerBlock;
             int offsetInBlock = absoluteIndex % offsetsPerBlock;
 
             if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
-                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", absoluteIndex, chunkCount)), file);
+                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d",
+                                                                                 absoluteIndex, chunkCount)), file);
 
             int retries = MAX_RETIRES;
             while (retries-- > 0)
             {
-                CompressionChunkOffsetCache.OffsetsBlock block = cache.getBlock(file, blockIndex, () -> loadBlock(blockIndex, offsetsPerBlock, offsetsStart, chunkCount));
+                CompressionChunkOffsetCache.OffsetsBlock block =
+                    cache.getBlock(file, blockIndex,
+                                   () -> loadBlock(blockIndex, offsetsPerBlock, offsetsStart, chunkCount));
                 if (block.ref())
                 {
                     try
                     {
                         int count = block.count();
                         if (offsetInBlock >= count)
-                            throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", offsetInBlock, count)), file);
+                            throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d",
+                                                                                             offsetInBlock, count)), file);
                         return block.getLongAtIndex(offsetInBlock);
                     }
                     finally
@@ -335,29 +657,12 @@ public interface CompressionChunkOffsetsFactory
         {
             int absoluteIndex = baseChunkIndex + index;
             if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
-                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", absoluteIndex, chunkCount)), file);
+                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d",
+                                                                                 absoluteIndex, chunkCount)), file);
 
-            ByteBuffer buffer = ByteBuffer.allocateDirect(Long.BYTES);
-            try
-            {
-                int read = 0;
-                long position = offsetsStart + (long) absoluteIndex * Long.BYTES;
-                while (read < Long.BYTES)
-                {
-                    int n = fileChannel.read(buffer, position + read);
-                    if (n < 0)
-                        throw new EOFException("EOF reading compression offsets from " + file);
-                    if (n == 0)
-                        continue;
-                    read += n;
-                }
-                buffer.flip();
-                return buffer.getLong();
-            }
-            catch (IOException e)
-            {
-                throw new RuntimeException(e);
-            }
+            ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
+            long position = offsetsStart + (long) absoluteIndex * Long.BYTES;
+            return readLong(file, fileChannel, buffer, position);
         }
 
         @Override

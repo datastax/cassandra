@@ -63,6 +63,7 @@ public class CompressionMetadataTest
     public void tearDown()
     {
         CompressionChunkOffsetCache.resetCache();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.reset();
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.reset();
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_FACTORY.reset();
     }
@@ -126,17 +127,37 @@ public class CompressionMetadataTest
         }
     }
 
+    private void setChunkOffsetsType(CompressionChunkOffsetsFactory.Type type)
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(type.name());
+    }
+
     @Test
     public void testLargeFileAccessInMemory() throws IOException
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("0B");
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.IN_MEMORY);
         testLargeFileAccess();
     }
 
     @Test
     public void testLargeFileAccessBlockCache() throws IOException
     {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.ON_DISK_WITH_CACHE);
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("100MiB");
+        testLargeFileAccess();
+    }
+
+    @Test
+    public void testLargeFileAccessOnDisk() throws IOException
+    {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.ON_DISK);
+        testLargeFileAccess();
+    }
+
+    @Test
+    public void testLargeFileAccessMmap() throws IOException
+    {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.MMAP);
         testLargeFileAccess();
     }
 
@@ -156,39 +177,24 @@ public class CompressionMetadataTest
         File largeFile = generateMetaDataFile((long) chunkCount * chunkLength, offsets);
         long compressedFileLimit = offset;
 
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("0B");
-        CompressionMetadata metadataWithInMemory = new CompressionMetadata(largeFile, compressedFileLimit, true);
-        checkMetadata(metadataWithInMemory, (long) chunkCount * chunkLength, compressedFileLimit, chunkCount * 8L);
-
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("100MiB");
-        CompressionMetadata metadataWithBlockCache = new CompressionMetadata(largeFile, compressedFileLimit, true);
-        checkMetadata(metadataWithBlockCache, (long) chunkCount * chunkLength, compressedFileLimit, 0);
-        try
+        try (CompressionMetadata metadata = new CompressionMetadata(largeFile, compressedFileLimit, true))
         {
             for (int i = 0; i < chunkCount; )
             {
                 long pos = (long) i * chunkLength;
-                Chunk chunkWithInMemory = metadataWithInMemory.chunkFor(pos);
-                assertThat(chunkWithInMemory.offset).isEqualTo((long) i * chunkLength);
-                assertThat(chunkWithInMemory.length).isEqualTo(chunkLength - checksumLength);
-
-                Chunk chunkWithBlockCache = metadataWithBlockCache.chunkFor(pos);
-                assertThat(chunkWithBlockCache.offset).isEqualTo((long) i * chunkLength);
-                assertThat(chunkWithBlockCache.length).isEqualTo(chunkLength - checksumLength);
+                Chunk chunk = metadata.chunkFor(pos);
+                assertThat(chunk.offset).isEqualTo((long) i * chunkLength);
+                assertThat(chunk.length).isEqualTo(chunkLength - checksumLength);
 
                 i += ThreadLocalRandom.current().nextInt(100) + 1;
             }
-        }
-        finally
-        {
-            metadataWithInMemory.close();
-            metadataWithBlockCache.close();
         }
     }
 
     @Test
     public void chunkForWithBlockCache() throws IOException
     {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.ON_DISK_WITH_CACHE);
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("100MiB");
         chunkFor();
 
@@ -199,7 +205,21 @@ public class CompressionMetadataTest
     @Test
     public void chunkForInMemory() throws IOException
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("0B");
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.IN_MEMORY);
+        chunkFor();
+    }
+
+    @Test
+    public void chunkForOnDisk() throws IOException
+    {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.ON_DISK);
+        chunkFor();
+    }
+
+    @Test
+    public void chunkForMmap() throws IOException
+    {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.MMAP);
         chunkFor();
     }
 
@@ -302,18 +322,33 @@ public class CompressionMetadataTest
     @Test
     public void testConcurrentAccessInMemory() throws Exception
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("0B");
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.IN_MEMORY);
         testConcurrentAccess();
     }
 
     @Test
     public void testConcurrentAccessBlockCache() throws Exception
     {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.ON_DISK_WITH_CACHE);
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("100MiB");
         testConcurrentAccess();
 
         // verify cache is invalidated on closing compression metadata
         assertThat(CompressionChunkOffsetCache.get().size()).isEqualTo(0);
+    }
+
+    @Test
+    public void testConcurrentAccessOnDisk() throws Exception
+    {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.ON_DISK);
+        testConcurrentAccess();
+    }
+
+    @Test
+    public void testConcurrentAccessMmap() throws Exception
+    {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.MMAP);
+        testConcurrentAccess();
     }
 
     private void testConcurrentAccess() throws Exception

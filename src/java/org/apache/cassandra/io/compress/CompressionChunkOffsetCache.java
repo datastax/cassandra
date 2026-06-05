@@ -53,6 +53,9 @@ public class CompressionChunkOffsetCache implements CacheSize
 
     public static CompressionChunkOffsetCache get()
     {
+        if (CompressionChunkOffsetsFactory.configuredType() != CompressionChunkOffsetsFactory.Type.ON_DISK_WITH_CACHE)
+            return null;
+
         // do not initialize the cache if cache size is non-positive
         long cacheSizeInBytes = getCacheSizeInBytes(PlatformDependent.maxDirectMemory());
         if (cacheSizeInBytes <= 0)

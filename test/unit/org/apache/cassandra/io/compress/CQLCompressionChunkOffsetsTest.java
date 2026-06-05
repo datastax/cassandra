@@ -44,13 +44,20 @@ public class CQLCompressionChunkOffsetsTest extends CQLTester
     @Before
     public void resetConfigs()
     {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.reset();
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.reset();
         CompressionChunkOffsetCache.resetCache();
+    }
+
+    private void setChunkOffsetsType(CompressionChunkOffsetsFactory.Type type)
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString(type.name());
     }
 
     @Test
     public void testNativeMemoryTrackingLifecycleWithInMemory() throws Throwable
     {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.IN_MEMORY);
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("0MiB");
 
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text) WITH compression = {'sstable_compression': 'LZ4Compressor', 'chunk_length_in_kb': '1'};");
@@ -92,6 +99,7 @@ public class CQLCompressionChunkOffsetsTest extends CQLTester
     @Test
     public void testNativeMemoryTrackingLifecycleWithBlockCache() throws Throwable
     {
+        setChunkOffsetsType(CompressionChunkOffsetsFactory.Type.ON_DISK_WITH_CACHE);
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("1000MiB");
 
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text) WITH compression = {'sstable_compression': 'LZ4Compressor', 'chunk_length_in_kb': '1'};");

@@ -781,13 +781,28 @@ public enum CassandraRelevantProperties
     SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf"),
 
     /**
+     * Compression chunk offset storage implementation. When unset, a positive
+     * {@link #COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE} selects the block-cache implementation and a non-positive
+     * value selects the legacy in-memory implementation.
+     *
+     * Supported values are:
+     * <ul>
+     *     <li>{@code IN_MEMORY}: load all chunk offsets into off-heap memory.</li>
+     *     <li>{@code ON_DISK}: read chunk offsets directly from {@code CompressionInfo.db} on demand.</li>
+     *     <li>{@code ON_DISK_WITH_CACHE}: read 64KB offset blocks on demand and cache them in a bounded block cache.</li>
+     *     <li>{@code MMAP}: memory-map the chunk offsets region of {@code CompressionInfo.db}.</li>
+     * </ul>
+     */
+    COMPRESSION_CHUNK_OFFSETS_TYPE("cassandra.compression_chunk_offsets_type"),
+    /**
      * Cache size for compression chunk offsets. By default, it uses 10% of max direct memory.
-     * 
-     * When positive: Uses block-cached implementation (BlockCacheChunkOffsets) that spills to disk
-     * with LRU eviction, preventing OOM. This is the recommended default.
-     * 
-     * When zero or negative: Falls back to legacy in-memory implementation (InMemoryCompressionChunkOffsets)
-     * that loads all offsets into a single Memory.LongArray. Use only for rollback if issues occur.
+     *
+     * When positive and {@link #COMPRESSION_CHUNK_OFFSETS_TYPE} is unset: Uses block-cached implementation
+     * ({@code ON_DISK_WITH_CACHE}) that spills to disk with LRU eviction, preventing OOM. This is the recommended
+     * default.
+     *
+     * When zero or negative and {@link #COMPRESSION_CHUNK_OFFSETS_TYPE} is unset: Falls back to legacy in-memory
+     * implementation ({@code IN_MEMORY}) that loads all offsets into a single Memory.LongArray.
      *
      * Alternatively, an absolute cache size can be configured, e.g. "10GiB".
      */
