@@ -264,6 +264,14 @@ public abstract class ReadCommand extends AbstractReadQuery
     }
 
     /**
+     * @return {@code true} if this command is a BM25 request, {@code false} otherwise
+     */
+    public boolean isBM25()
+    {
+        return indexQueryPlan != null && indexQueryPlan.isBM25();
+    }
+
+    /**
      * @return {@code true} if this command only queries a single partition, {@code false} otherwise.
      */
     public abstract boolean isSinglePartition();

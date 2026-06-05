@@ -95,11 +95,19 @@ public class TableQueryMetrics
 
     private void addMetrics(TableMetadata table, QueryKind queryKind, Predicate<ReadCommand> filter)
     {
-        if (queryKind == QueryKind.ALL || CassandraRelevantProperties.SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED.getBoolean())
-            perTableMetrics.put(queryKind, new PerTable(table, queryKind, filter));
-
-        if (queryKind == QueryKind.ALL || CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.getBoolean())
+        if (queryKind == QueryKind.ALL)
+        {
+            perTableMetrics.put(queryKind, new PerTableAll(table, queryKind, filter));
             perQueryMetrics.put(queryKind, new PerQuery(table, queryKind, filter));
+        }
+        else
+        {
+            if (CassandraRelevantProperties.SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED.getBoolean())
+                perTableMetrics.put(queryKind, new PerTable(table, queryKind, filter));
+
+            if (CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.getBoolean())
+                perQueryMetrics.put(queryKind, new PerQuery(table, queryKind, filter));
+        }
     }
 
     /**
@@ -171,7 +179,7 @@ public class TableQueryMetrics
             this.filter = filter;
         }
 
-        public final void record(QueryContext.Snapshot snapshot, ReadCommand command)
+        public void record(QueryContext.Snapshot snapshot, ReadCommand command)
         {
             if (filter.test(command))
                 record(snapshot);
@@ -282,6 +290,32 @@ public class TableQueryMetrics
                 sortThenFilterQueriesCompleted = Metrics.counter(createMetricName("SortThenFilterQueriesCompleted"));
                 filterThenSortQueriesCompleted = Metrics.counter(createMetricName("FilterThenSortQueriesCompleted"));
             }
+        }
+    }
+
+    public static class PerTableAll extends PerTable
+    {
+        public final Counter totalBM25QueriesCompleted;
+
+        public PerTableAll(TableMetadata table, QueryKind queryKind, Predicate<ReadCommand> filter)
+        {
+            super(table, queryKind, filter);
+            totalBM25QueriesCompleted = Metrics.counter(createMetricName("TotalBM25QueriesCompleted"));
+        }
+
+        @Override
+        public void record(QueryContext.Snapshot snapshot)
+        {
+            super.record(snapshot);
+        }
+
+        @Override
+        public final void record(QueryContext.Snapshot snapshot, ReadCommand command)
+        {
+            super.record(snapshot, command);
+
+            if (command.isBM25())
+                totalBM25QueriesCompleted.inc();
         }
     }
 

@@ -433,36 +433,40 @@ public class QueryMetricsTest extends AbstractMetricsTest
     @Test
     public void testQueryKindFlags()
     {
-        createTable("CREATE TABLE %s (k int, c int, n int, s text, v vector<float, 2>, PRIMARY KEY(k, c))");
+        createTable("CREATE TABLE %s (k int, c int, n int, s text, t text, v vector<float, 2>, PRIMARY KEY(k, c))");
 
         // test without indexes
-        assertQueryTypeFlags("SELECT * FROM %s", false, false);
-        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 ALLOW FILTERING", false, false);
+        assertQueryTypeFlags("SELECT * FROM %s", false, false, false);
+        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 ALLOW FILTERING", false, false, false);
 
         // test with legacy indexes
         String idx = createIndex("CREATE INDEX ON %s(n)");
-        assertQueryTypeFlags("SELECT * FROM %s", false, false);
-        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1", false, true);
-        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 AND s = 'a' ALLOW FILTERING", false, true);
-        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 OR s = 'a' ALLOW FILTERING", false, false);
+        assertQueryTypeFlags("SELECT * FROM %s", false, false, false);
+        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1", false, true, false);
+        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 AND s = 'a' ALLOW FILTERING", false, true, false);
+        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 OR s = 'a' ALLOW FILTERING", false, false, false);
 
         // test with SAI indexes
         dropIndex("DROP INDEX %s." + idx);
         createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        assertQueryTypeFlags("SELECT * FROM %s", false, false);
-        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1", false, true);
-        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 AND s = 'a' ALLOW FILTERING", false, true);
-        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 OR s = 'a' ALLOW FILTERING", false, false);
-        assertQueryTypeFlags("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10", true, false);
-        assertQueryTypeFlags("SELECT * FROM %s WHERE n=1 ORDER BY v ANN OF [1, 1] LIMIT 10", true, true);
+        createIndex("CREATE CUSTOM INDEX ON %s(t) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer': 'standard', 'query_analyzer': 'standard'}");
+        assertQueryTypeFlags("SELECT * FROM %s", false, false, false);
+        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1", false, true, false);
+        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 AND s = 'a' ALLOW FILTERING", false, true, false);
+        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 OR s = 'a' ALLOW FILTERING", false, false, false);
+        assertQueryTypeFlags("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10", true, false, false);
+        assertQueryTypeFlags("SELECT * FROM %s WHERE n=1 ORDER BY v ANN OF [1, 1] LIMIT 10", true, true, false);
+        assertQueryTypeFlags("SELECT * FROM %s ORDER BY t BM25 OF 'foo' LIMIT 10", true, false, true);
+        assertQueryTypeFlags("SELECT * FROM %s WHERE n = 1 ORDER BY t BM25 OF 'foo' LIMIT 10", true, true, true);
     }
 
-    private void assertQueryTypeFlags(String query, boolean expectedIsTopK, boolean expectedUsesIndexFiltering)
+    private void assertQueryTypeFlags(String query, boolean expectedIsTopK, boolean expectedUsesIndexFiltering, boolean expectedIsBM25)
     {
         ReadCommand command = parseReadCommand(query);
         Assert.assertEquals(expectedIsTopK, command.isTopK());
         Assert.assertEquals(expectedUsesIndexFiltering, command.usesIndexFiltering());
+        Assert.assertEquals(expectedIsBM25, command.isBM25());
     }
 
     /**
@@ -659,6 +663,38 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_TOPK_QUERY_METRIC_TYPE), 1);
         waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_SP_HYBRID_QUERY_METRIC_TYPE), 2);
         waitForHistogramCountEqualsIfExists(hasPerQueryKindMetrics, objectName(name, PER_MP_HYBRID_QUERY_METRIC_TYPE), 2);
+    }
+
+    @Test
+    public void testBM25Metrics()
+    {
+        createTable("CREATE TABLE %s (k int, c int, n int, s text, v vector<float, 2>, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer': 'standard', 'query_analyzer': 'standard'}");
+
+        for (int k = 0; k < 3; k++)
+            for (int c = 0; c < 4; c++)
+                execute("INSERT INTO %s (k, c, n, s, v) VALUES (?, ?, ?, ?, [1, 1])", k, c, 1, "foo bar baz");
+
+        UntypedResultSet rows = execute("SELECT k, c FROM %s ORDER BY s BM25 OF 'foo' LIMIT 100");
+        assertEquals(12, rows.size());
+
+        rows = execute("SELECT k, c FROM %s WHERE k = 0 ORDER BY s BM25 OF 'foo' LIMIT 100");
+        assertEquals(4, rows.size());
+
+        rows = execute("SELECT k, c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'foo' LIMIT 100");
+        assertEquals(12, rows.size());
+
+        rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 1 ORDER BY s BM25 OF 'foo' LIMIT 100");
+        assertEquals(4, rows.size());
+
+        rows = execute("SELECT k, c FROM %s ORDER BY v ANN OF [1, 1] LIMIT 100");
+        assertEquals(12, rows.size());
+
+        waitForEquals(objectName("TotalBM25QueriesCompleted", TABLE_QUERY_METRIC_TYPE), 4);
+        waitForEquals(objectName("TotalQueriesCompleted", TABLE_QUERY_METRIC_TYPE), 5);
+        waitForEquals(objectName("TotalQueryTimeouts", TABLE_QUERY_METRIC_TYPE), 0);
     }
 
     @Test
