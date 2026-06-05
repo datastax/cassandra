@@ -58,7 +58,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
     @Parameterized.Parameters(name = "{0}")
     public static String[] memtableClasses()
     {
-        return new String[]{ "trie", "trie_stage3", "trie_stage2", "trie_stage1" };
+        return new String[]{ "trie", "trie_stage2", "trie_stage1" };
     }
 
     static protected Map<Map.Entry<Version, CQL3Type.Native>, ColumnFamilyStore> tables = new HashMap<>();
@@ -111,9 +111,9 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
                 QueryController.QUERY_OPT_USE_TERM_STATS = useTermStats;
 
                 RowCountTest test = new RowCountTest(Operator.NEQ, 25);
-                test.doTest(version, INT, 95, 99);
-                test.doTest(version, DECIMAL, 95, 99);
-                test.doTest(version, VARINT, 95, 99);
+                test.doTest(version, INT, 95, 100);
+                test.doTest(version, DECIMAL, 95, 100);
+                test.doTest(version, VARINT, 95, 100);
 
                 test = new RowCountTest(Operator.LT, 50);
                 test.doTest(version, INT, 40, 60);

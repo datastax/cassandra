@@ -532,12 +532,6 @@ public class TrieMemtable extends AbstractShardedMemtable
         {
             return 0;
         }
-
-        public void clearStats()
-        {
-            buffer.putIntOrdered(inBufferPos + PARTITIONDATA_OFFSET_ROW_COUNT, 0);
-            buffer.putIntOrdered(inBufferPos + PARTITIONDATA_OFFSET_TOMBSTONE_COUNT, 0);
-        }
     }
 
     class KeySizeAndCountCollector extends TrieEntriesWalker<Object, Void>

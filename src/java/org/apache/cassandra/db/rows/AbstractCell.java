@@ -101,11 +101,7 @@ public abstract class AbstractCell<V> extends Cell<V>
     public int dataSize()
     {
         CellPath path = path();
-        return TypeSizes.sizeof(timestamp())
-               + TypeSizes.sizeof(ttl())
-               + TypeSizes.sizeof(localDeletionTime())
-               + valueSize()
-               + (path == null ? 0 : path.dataSize());
+        return dataSizeWithoutPath() + (path == null ? 0 : path.dataSize());
     }
 
     @Override
