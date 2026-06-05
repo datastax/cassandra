@@ -38,6 +38,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -268,15 +269,15 @@ public class TrieBackedRow extends AbstractRow
 
     private static class Accumulator implements DeletionAwareTrie.ValueConsumer<Object, TrieTombstoneMarker>
     {
-        final LongAccumulator<CellData<?, ?>> cellAccumulator;
-        final LongAccumulator<LivenessInfo> livenessAccumulator;
-        final LongAccumulator<DeletionTime> markerAccumulator;
+        final LongAccumulator<? super CellData<?, ?>> cellAccumulator;
+        final LongAccumulator<? super LivenessInfo> livenessAccumulator;
+        final LongAccumulator<? super DeletionTime> markerAccumulator;
         long value;
 
         Accumulator(long initialValue,
-                    LongAccumulator<CellData<?, ?>> cellAccumulator,
-                    LongAccumulator<LivenessInfo> livenessAccumulator,
-                    LongAccumulator<DeletionTime> markerAccumulator)
+                    LongAccumulator<? super CellData<?, ?>> cellAccumulator,
+                    LongAccumulator<? super LivenessInfo> livenessAccumulator,
+                    LongAccumulator<? super DeletionTime> markerAccumulator)
         {
             this.cellAccumulator = cellAccumulator;
             this.livenessAccumulator = livenessAccumulator;
@@ -314,9 +315,9 @@ public class TrieBackedRow extends AbstractRow
     /// Note: For efficiency, the cell accumulator is given cells without path. If the path is needed, use a different
     /// `accumulate` method.
     long accumulate(long initialValue,
-                    LongAccumulator<LivenessInfo> livenessAccumulator,
-                    LongAccumulator<CellData<?, ?>> cellAccumulator,
-                    LongAccumulator<DeletionTime> markerAccumulator)
+                    LongAccumulator<? super LivenessInfo> livenessAccumulator,
+                    LongAccumulator<? super CellData<?, ?>> cellAccumulator,
+                    LongAccumulator<? super DeletionTime> markerAccumulator)
     {
         Accumulator accumulator = new Accumulator(initialValue, cellAccumulator, livenessAccumulator, markerAccumulator);
         data.process(Direction.FORWARD, accumulator);
@@ -1011,11 +1012,13 @@ public class TrieBackedRow extends AbstractRow
     @Override
     public int dataSize()
     {
-        int dataSize = clustering.dataSize()
-                     + primaryKeyLivenessInfo().dataSize()
-                     + deletion().dataSize();
-
-        return Ints.checkedCast(accumulate((cd, v) -> v + cd.dataSize(), dataSize));
+        // TrieMemtable and its trie-backed elements only count data and deletions, ignoring key sizes as they are part
+        // of the trie (and very costly to measure on insert/delete).
+        LongAccumulator<IDataSize> accumulator = (o, v) -> v + o.dataSize();
+        return Ints.checkedCast(accumulate(0L,
+                                           accumulator,
+                                           accumulator,
+                                           accumulator));
     }
 
     @Override
@@ -1025,6 +1028,7 @@ public class TrieBackedRow extends AbstractRow
                        + primaryKeyLivenessInfo().dataSize()
                        + deletion().dataSize();
 
+        // liveDataSize is weird for complex columns; leaving ColumnData accumulator to be closer to BTreeRow
         return Ints.checkedCast(accumulate((cd, v) -> v + cd.liveDataSize(nowInSec), dataSize));
     }
 
@@ -1032,8 +1036,7 @@ public class TrieBackedRow extends AbstractRow
     public long unsharedHeapSize()
     {
         long heapSize = EMPTY_SIZE + clustering.unsharedHeapSizeExcludingData();
-        if (data instanceof InMemoryDeletionAwareTrie)
-            heapSize += ((InMemoryDeletionAwareTrie<?, ?>) data).usedSizeOnHeap();
+        // For this calculation we assume the source of the row trie is a memtable and don't count its on-heap size.
 
         return accumulate(heapSize,
                           (liveness, v) -> v + liveness.unsharedHeapSize(),

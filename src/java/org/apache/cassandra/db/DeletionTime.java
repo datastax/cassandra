@@ -37,7 +37,7 @@ import static java.lang.Math.min;
 /**
  * Information on deletion of a storage engine object.
  */
-public class DeletionTime implements Comparable<DeletionTime>, IMeasurableMemory
+public class DeletionTime implements Comparable<DeletionTime>, IMeasurableMemory, IDataSize
 {
     public static final long EMPTY_SIZE = ObjectSizes.measure(new DeletionTime(0, 0));
 
