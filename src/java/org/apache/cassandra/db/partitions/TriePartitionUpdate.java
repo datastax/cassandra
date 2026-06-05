@@ -143,14 +143,15 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     public static TriePartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, long nowInSec)
     {
         InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = newTrie();
-        putPartitionDeletionInTrie(trie, DeletionTime.build(timestamp, nowInSec));
+        DeletionTime deletionTime = DeletionTime.build(timestamp, nowInSec);
+        putPartitionDeletionInTrie(trie, deletionTime);
         return new TriePartitionUpdate(metadata,
                                        key,
                                        RegularAndStaticColumns.NONE,
                                        new EncodingStats(timestamp, nowInSec, LivenessInfo.NO_TTL),
                                        0,
                                        1,
-                                       0,
+                                       deletionTime.dataSize(),
                                        trie);
     }
 
@@ -626,13 +627,13 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 if (existingCell == null)
                 {
                     reconciled = updateCell;
-                    dataSize += reconciled.dataSize();
+                    dataSize += reconciled.dataSizeWithoutPath();
                 }
                 else
                 {
                     reconciled = Cells.reconcile(existingCell, updateCell);
                     if (reconciled != existingCell)
-                        dataSize += reconciled.dataSize() - existingCell.dataSize();
+                        dataSize += reconciled.dataSizeWithoutPath() - existingCell.dataSizeWithoutPath();
                 }
                 return reconciled;
             }
@@ -698,7 +699,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 if (!deletion.deletes(cell))
                     return o;
                 if (updateDataSize)
-                    dataSize -= cell.dataSize();
+                    dataSize -= cell.dataSizeWithoutPath();
                 return null;
             }
             else if (o == TrieBackedRow.COMPLEX_COLUMN_MARKER)

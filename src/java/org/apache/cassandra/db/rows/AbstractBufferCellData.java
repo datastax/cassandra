@@ -123,10 +123,7 @@ public abstract class AbstractBufferCellData implements CellData<ByteBuffer, Abs
     @Override
     public int dataSize()
     {
-        return TypeSizes.sizeof(timestamp())
-               + TypeSizes.sizeof(ttl())
-               + TypeSizes.sizeof(localDeletionTime())
-               + valueSize();
+        return dataSizeWithoutPath();
     }
 
 

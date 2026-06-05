@@ -164,6 +164,12 @@ public class CellWithSource<T> extends Cell<T>
     }
 
     @Override
+    public int dataSizeWithoutPath()
+    {
+        return cell.dataSizeWithoutPath();
+    }
+
+    @Override
     public int liveDataSize(long nowInSec)
     {
         return cell.liveDataSize(nowInSec);

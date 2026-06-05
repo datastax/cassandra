@@ -161,15 +161,6 @@ public abstract class TrieCellData extends AbstractBufferCellData
                : sz;
     }
 
-    @Override
-    public int dataSize()
-    {
-        return TypeSizes.LONG_SIZE
-               + TypeSizes.INT_SIZE
-               + TypeSizes.INT_SIZE
-               + valueSize();
-    }
-
     public static TrieCellData embedded(UnsafeBuffer buffer, int inBufferPos, int length)
     {
         return length <= OFFSET_TTL ? new Embedded(buffer, inBufferPos, length)
