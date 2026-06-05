@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -176,6 +177,13 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public <V> T compose(V value, ValueAccessor<V> accessor)
     {
         return getSerializer().deserialize(value, accessor);
+    }
+
+    @SuppressWarnings("unchecked")
+    @VisibleForTesting
+    public ByteBuffer decomposeUntyped(Object value)
+    {
+        return decompose((T) value);
     }
 
     public ByteBuffer decompose(T value)
