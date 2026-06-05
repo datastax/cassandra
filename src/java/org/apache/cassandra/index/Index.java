@@ -1232,6 +1232,14 @@ public interface Index
         }
 
         /**
+         * @return {@code true} if this plan is a BM25 request, {@code false} otherwise
+         */
+        default boolean isBM25()
+        {
+            return false;
+        }
+
+        /**
          * @return {@code true} if this plan uses index-based filtering, {@code false} otherwise
          */
         default boolean usesIndexFiltering()
