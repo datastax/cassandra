@@ -21,7 +21,6 @@ package org.apache.cassandra.db.memtable;
 import java.nio.ByteBuffer;
 
 import org.agrona.concurrent.UnsafeBuffer;
-import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.rows.AbstractBufferCellData;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
