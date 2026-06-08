@@ -32,6 +32,9 @@ import org.junit.Test;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.memtable.TrieMemtableStage1;
+import org.apache.cassandra.db.memtable.TrieMemtableStage2;
+import org.apache.cassandra.db.memtable.TrieMemtableStage3;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.cql3.Duration;
@@ -661,7 +664,9 @@ public class CreateTest extends CQLTester
             testMapMemtableConfigVersion4("SkipListMemtable", map("class", "SkipListMemtable"), MemtableParams.get("skiplist").factory(), SkipListMemtable.class);
             // Note: trie config in test/conf/cassandra.yaml has shards: 4 parameter
             testMapMemtableConfigVersion4("TrieMemtable", map("class", "TrieMemtable", "shards", "4"), MemtableParams.get("trie").factory(), TrieMemtable.class);
-            testMapMemtableConfigVersion4("TrieMemtableStage1", map("class", "TrieMemtable", "shards", "4"), MemtableParams.get("trie").factory(), TrieMemtable.class);
+            testMapMemtableConfigVersion4("TrieMemtableStage1", map("class", "TrieMemtableStage1"), MemtableParams.get("trie_stage1").factory(), TrieMemtableStage1.class);
+            testMapMemtableConfigVersion4("TrieMemtableStage2", map("class", "TrieMemtableStage2"), MemtableParams.get("trie_stage2").factory(), TrieMemtableStage2.class);
+            testMapMemtableConfigVersion4("TrieMemtableStage3", map("class", "TrieMemtableStage3"), MemtableParams.get("trie_stage3").factory(), TrieMemtableStage3.class);
             testMapMemtableConfigVersion4("PersistentMemoryMemtable", map("class", "PersistentMemoryMemtable"), MemtableParams.get("persistent_memory").factory(), PersistentMemoryMemtable.class);
         }
         else
