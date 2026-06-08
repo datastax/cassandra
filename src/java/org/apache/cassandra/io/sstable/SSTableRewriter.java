@@ -24,6 +24,9 @@ import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -54,6 +57,8 @@ import org.apache.cassandra.utils.concurrent.Transactional;
  */
 public class SSTableRewriter extends Transactional.AbstractTransactional implements Transactional
 {
+    private static final Logger logger = LoggerFactory.getLogger(SSTableRewriter.class);
+
     @VisibleForTesting
     public static boolean disableEarlyOpeningForTests = false;
 
@@ -192,9 +197,18 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             else
             {
                 writer.setMaxDataAge(maxAge).openEarly(reader -> {
-                    transaction.update(reader, false);
-                    currentlyOpenedEarlyAt = writer.getFilePointer();
-                    moveStarts(reader, reader.last);
+                    try
+                    {
+                        transaction.update(reader, false);
+                        currentlyOpenedEarlyAt = writer.getFilePointer();
+                        moveStarts(reader, reader.last);
+                    }
+                    catch (Throwable ex)
+                    {
+                        ex = transaction.abortCheckpoint(ex);
+                        logger.warn("Aborted early opening attempt due to error", ex);
+                        return;
+                    }
                     transaction.checkpoint();
                 });
             }
