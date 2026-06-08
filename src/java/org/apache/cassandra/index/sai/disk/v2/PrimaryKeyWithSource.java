@@ -184,10 +184,4 @@ class PrimaryKeyWithSource implements PrimaryKey
                Long.BYTES +
                primaryKey().ramBytesUsed();
     }
-
-    @Override
-    public boolean identifiesUniqueRow()
-    {
-        return primaryKey().identifiesUniqueRow();
-    }
 }

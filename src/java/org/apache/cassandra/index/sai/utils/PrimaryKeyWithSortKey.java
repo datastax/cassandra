@@ -161,10 +161,4 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
                3L * RamUsageEstimator.NUM_BYTES_OBJECT_REF +
                primaryKey.ramBytesUsed();
     }
-
-    @Override
-    public boolean identifiesUniqueRow()
-    {
-        return primaryKey.identifiesUniqueRow();
-    }
 }

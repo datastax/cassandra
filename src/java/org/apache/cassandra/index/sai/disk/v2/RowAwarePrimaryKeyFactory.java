@@ -89,12 +89,6 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
-        public boolean identifiesUniqueRow()
-        {
-            return clustering() != Clustering.STATIC_CLUSTERING;
-        }
-
-        @Override
         public Token token()
         {
             return token;

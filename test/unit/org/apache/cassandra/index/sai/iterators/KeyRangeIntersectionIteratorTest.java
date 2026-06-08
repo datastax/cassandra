@@ -408,7 +408,7 @@ public class KeyRangeIntersectionIteratorTest extends AbstractKeyRangeIteratorTe
             {
                 var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
                 for (int j = 0; j < iteratorCount; j++)
-                    inputs.add(randomPrimaryKeys(1 + testIteration / 10, 1 + testIteration / 10));
+                    inputs.add(randomPrimaryKeys(1 + testIteration / 10, 1 + testIteration / 10, 0.25, 0.25));
 
                 testMerge(inputs,
                           KeyRangeIntersectionIteratorTest::intersection,
@@ -424,16 +424,16 @@ public class KeyRangeIntersectionIteratorTest extends AbstractKeyRangeIteratorTe
         {
             for (int testIteration = 0; testIteration < 200; testIteration++)
             {
-                var avgPartitions = 1 + testIteration / 10;
-                var avgRowsPerPartition = 1 + testIteration / 10;
+                int avgPartitions = 1 + testIteration / 10;
+                int avgRowsPerPartition = 1 + testIteration / 10;
 
                 var inputs = new ArrayList<List<PrimaryKey>>(iteratorCount);
                 for (int j = 0; j < iteratorCount; j++)
-                    inputs.add(randomPrimaryKeys(avgPartitions, avgRowsPerPartition));
+                    inputs.add(randomPrimaryKeys(avgPartitions, avgRowsPerPartition, 0.25, 0.25));
 
                 // Generate random skip positions.
                 // Use a different data set so that some skip positions exist in the merged result and some do not.
-                var skips = randomSkips(randomPrimaryKeys(avgPartitions, avgRowsPerPartition));
+                var skips = randomSkips(randomPrimaryKeys(avgPartitions, avgRowsPerPartition, 0.25, 0.25));
 
                 testSkipping(inputs, skips, KeyRangeIntersectionIteratorTest::intersectionIterator);
             }
