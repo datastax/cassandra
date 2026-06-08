@@ -961,14 +961,14 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
 
         @Override
-        @Deprecated
+        @Deprecated(since="5.0")
         public void setShardCount(String shardCount)
         {
             setDefaultShardCount(shardCount);
         }
 
         @Override
-        @Deprecated
+        @Deprecated(since="5.0")
         public String getShardCount()
         {
             return getDefaultShardCount();
