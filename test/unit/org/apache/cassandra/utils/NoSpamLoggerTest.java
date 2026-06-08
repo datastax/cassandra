@@ -377,16 +377,12 @@ public class NoSpamLoggerTest
     }
 
     /**
-     * Test that NoSpamLogger instances can be evicted from the NoSpamLoggers cache.
-     * This test verifies the cache respects the configured expiration time by demonstrating
-     * that entries accessed long ago will be evicted when cleanup is triggered.
-     * <p>
-     * Note: The NoSpamLogStatements cache is static and initialized at class load time with the
-     * default 60-minute expiration. We cannot change this at runtime, so this test verifies
-     * the eviction mechanism works by creating entries, waiting, and forcing cleanup.
+     * Test that NoSpamLogger instances are cached and reused.
+     * This test verifies that getting the same logger returns the cached instance,
+     * and that clearing the cache creates new instances.
      */
     @Test
-    public void testNoSpamLoggerCacheTimeBasedEviction()
+    public void testNoSpamLoggerCaching()
     {
         NoSpamLogger.clearWrappedLoggersForTest();
         now = 0;
@@ -441,75 +437,21 @@ public class NoSpamLoggerTest
         assertTrue(nsl1.info("test{}", param));
         assertTrue(nsl2.info("test{}", param));
         assertEquals(2, logged.get(Level.INFO).size());
-        assertEquals(2, NoSpamLogger.getWrappedLoggersCount());
 
         // Verify that getting the same logger returns the cached instance
         NoSpamLogger nsl1Again = NoSpamLogger.getLogger(logger1, 5, TimeUnit.NANOSECONDS);
         assertSame("Should return cached instance", nsl1, nsl1Again);
-        assertEquals(2, NoSpamLogger.getWrappedLoggersCount());
 
-        // Forcefully clear all cached loggers (invalidateAll) (to simulate expiration)
+        // Forcefully clear all cached loggers
         NoSpamLogger.clearWrappedLoggersForTest();
-        assertEquals(0, NoSpamLogger.getWrappedLoggersCount());
 
         // Getting the logger again should create a new instance
         NoSpamLogger nsl1New = NoSpamLogger.getLogger(logger1, 5, TimeUnit.NANOSECONDS);
         assertNotSame("Should create new instance after cache clear", nsl1, nsl1New);
-        assertEquals(1, NoSpamLogger.getWrappedLoggersCount());
 
         // Verify the new instance works correctly
         assertTrue("New logger instance should log immediately", nsl1New.info("test{}", param));
         assertEquals(3, logged.get(Level.INFO).size());
-    }
-
-    /**
-     * Test that the {@link NoSpamLogger} cache can handle a large number of loggers.
-     * Since the wrappedLoggers cache uses Long.MAX_VALUE as the maximum size,
-     * this test verifies that we can add many loggers without hitting size limits.
-     */
-    @Test
-    public void testNoSpamLoggerCacheBounded()
-    {
-        NoSpamLogger.clearWrappedLoggersForTest();
-        now = 5;
-
-        int loggersToCreate = 100;
-
-        // Create many unique loggers to verify no size limit issues
-        for (int i = 0; i < loggersToCreate; i++)
-        {
-            Logger uniqueLogger = new SubstituteLogger("logger" + i, null, true)
-            {
-                @Override
-                public void info(String statement, Object... args)
-                {
-                    logged.get(Level.INFO).offer(Pair.create(statement, args));
-                }
-
-                @Override
-                public int hashCode()
-                {
-                    return System.identityHashCode(this);
-                }
-
-                @Override
-                public boolean equals(Object o)
-                {
-                    return this == o;
-                }
-            };
-
-            NoSpamLogger logger = NoSpamLogger.getLogger(uniqueLogger, 5, TimeUnit.NANOSECONDS);
-            assertTrue(logger.info("test{}", param));
-            now += 10;
-        }
-        
-        // All messages should have been logged
-        assertEquals(loggersToCreate, logged.get(Level.INFO).size());
-
-        // Verify all loggers are cached (no size-based eviction)
-        long cacheSize = NoSpamLogger.getWrappedLoggersCount();
-        assertEquals("All loggers should be cached without size-based eviction", loggersToCreate, cacheSize);
     }
 
     /**

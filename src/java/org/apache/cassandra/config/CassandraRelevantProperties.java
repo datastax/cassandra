@@ -292,16 +292,6 @@ public enum CassandraRelevantProperties
      */
     NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER("cassandra.nospam_logger.max_statements_per_logger", String.valueOf(Long.MAX_VALUE)),
 
-    /**
-     * Maximum number of NoSpamLogger instances cached globally.
-     */
-    NOSPAM_LOGGER_MAX_LOGGERS("cassandra.nospam_logger.max_loggers", String.valueOf(Long.MAX_VALUE)),
-
-    /**
-     * Time in minutes after which inactive NoSpamLogger instances are evicted from cache.
-     */
-    NOSPAM_LOGGER_LOGGERS_EXPIRE_MINUTES("cassandra.nospam_logger.loggers_expire_minutes", "60"),
-
     /** This property indicates if the code is running under the in-jvm dtest framework */
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),
 

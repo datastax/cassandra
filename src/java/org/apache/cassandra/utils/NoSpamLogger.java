@@ -21,6 +21,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 
 import com.github.benmanes.caffeine.cache.Cache;
@@ -161,34 +162,12 @@ public class NoSpamLogger
         }
     }
 
-    /**
-     * Cache of NoSpamLogger instances per Logger object.
-     * Bounded by size and time to prevent memory exhaustion.
-     * Uses Caffeine with W-TinyLFU eviction policy.
-     */
-    private static final Cache<Logger, NoSpamLogger> wrappedLoggers = Caffeine.newBuilder()
-            .maximumSize(NOSPAM_LOGGER_MAX_LOGGERS.getLong())
-            .expireAfterAccess(NOSPAM_LOGGER_LOGGERS_EXPIRE_MINUTES.getLong(), TimeUnit.MINUTES)
-            .executor(ForkJoinPool.commonPool())
-            .recordStats()
-            .build();
+    private static final NonBlockingHashMap<Logger, NoSpamLogger> wrappedLoggers = new NonBlockingHashMap<>();
 
     @VisibleForTesting
     static void clearWrappedLoggersForTest()
     {
-        wrappedLoggers.invalidateAll();
-    }
-
-    /**
-     * Returns the current size of the {@link NoSpamLogger} cache.
-     * This is useful for testing cache eviction behavior.
-     *
-     * @return the number of NoSpamLogger instances currently cached
-     */
-    @VisibleForTesting
-    static long getWrappedLoggersCount()
-    {
-        return wrappedLoggers.estimatedSize();
+        wrappedLoggers.clear();
     }
 
     /**
@@ -215,7 +194,15 @@ public class NoSpamLogger
 
     public static NoSpamLogger getLogger(Logger logger, long minInterval, TimeUnit unit)
     {
-        return wrappedLoggers.get(logger, key -> new NoSpamLogger(logger, minInterval, unit));
+        NoSpamLogger wrapped = wrappedLoggers.get(logger);
+        if (wrapped == null)
+        {
+            wrapped = new NoSpamLogger(logger, minInterval, unit);
+            NoSpamLogger temp = wrappedLoggers.putIfAbsent(logger, wrapped);
+            if (temp != null)
+                wrapped = temp;
+        }
+        return wrapped;
     }
 
     public static boolean log(Logger logger, Level level, long minInterval, TimeUnit unit, String message, Object... objects)
