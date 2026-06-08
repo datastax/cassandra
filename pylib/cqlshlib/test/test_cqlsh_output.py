@@ -687,7 +687,7 @@ class TestCqlshOutput(BaseTestCase):
                 AND cdc = false
                 AND comment = ''
                 AND compaction = {'class': 'org.apache.cassandra.db.compaction.UnifiedCompactionStrategy'}
-                AND compression = {'chunk_length_in_kb': '16', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+                AND compression = {'chunk_length_in_kb': '16', 'class': 'org.apache.cassandra.io.compress.AdaptiveCompressor'}
                 AND memtable = {}
                 AND crc_check_chance = 1.0
                 AND default_time_to_live = 0
