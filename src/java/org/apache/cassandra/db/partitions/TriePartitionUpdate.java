@@ -557,7 +557,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                                end, false,
                                                BYTE_COMPARABLE_VERSION,
                                                TrieTombstoneMarker.covering(deletionTime, TrieTombstoneMarker.Kind.RANGE)));
-                statsCollector.update(deletionTime);
             }
             catch (TrieSpaceExhaustedException e)
             {
@@ -730,6 +729,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
          */
         private TrieTombstoneMarker mergeTombstones(TrieTombstoneMarker existing, @NotNull TrieTombstoneMarker update)
         {
+            updateStats(update);
             if (existing == null)
             {
                 // We are adding a new tombstone. We are counting tombstones on the row level, so ones that introduce
@@ -747,6 +747,17 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 tombstoneCount += hasTombstone - hadTombstone;
                 return merged;
             }
+        }
+
+        private void updateStats(TrieTombstoneMarker update)
+        {
+            // Only process the right sides of a boundary as every newly-introduced deletion will appear in one.
+            if (!update.isBoundary())
+                return;
+
+            TrieTombstoneMarker.Covering rightSide = update.rightDeletion();
+            if (rightSide != null)
+                statsCollector.update(rightSide);
         }
 
         private void dropLevelMarker(Object o)

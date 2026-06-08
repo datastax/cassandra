@@ -849,7 +849,7 @@ public class SchemaCQLHelperTest extends CQLTester
         // Test parsing CC 4.0 format with TrieMemtableStage1 (legacy class)
         String tableName7 = createTable(keyspace, "CREATE TABLE %s (id int PRIMARY KEY, value text) WITH memtable = {'class': 'TrieMemtableStage1'}");
         ColumnFamilyStore cfs7 = Keyspace.open(keyspace).getColumnFamilyStore(tableName7);
-        Assertions.assertThat(cfs7.metadata().params.memtable.configurationKey()).isEqualTo("trie");
+        Assertions.assertThat(cfs7.metadata().params.memtable.configurationKey()).isEqualTo("trie_stage1");
 
         // Sharded memtables require Cassandra 5.0+, skip this test in compatibility mode
         if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
