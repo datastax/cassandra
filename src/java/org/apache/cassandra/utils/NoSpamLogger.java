@@ -28,8 +28,6 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Expiry;
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.MoreExecutors;
-import org.checkerframework.checker.index.qual.NonNegative;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 
@@ -264,14 +262,14 @@ public class NoSpamLogger
 
                                                                               @Override
                                                                               public long expireAfterUpdate(String key, NoSpamLogStatement value,
-                                                                                                            long currentTime, @NonNegative long currentDuration)
+                                                                                                            long currentTime, long currentDuration)
                                                                               {
                                                                                   return value.expiry();
                                                                               }
 
                                                                               @Override
                                                                               public long expireAfterRead(String key, NoSpamLogStatement value,
-                                                                                                          long currentTime, @NonNegative long currentDuration)
+                                                                                                          long currentTime, long currentDuration)
                                                                               {
                                                                                   return currentDuration;
                                                                               }
