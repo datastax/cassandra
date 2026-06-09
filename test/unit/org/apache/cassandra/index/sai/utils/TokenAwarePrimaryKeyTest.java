@@ -29,9 +29,9 @@ public class TokenAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
     {
         PrimaryKey.Factory factory = new PartitionAwarePrimaryKeyFactory();
 
-        PrimaryKey first = factory.createTokenOnly(makeKey(simplePartition, "1").getToken());
+        PrimaryKey first = factory.createTokenOnly(makeKey(simplePartition, 1).getToken());
         PrimaryKey firstToken = factory.createTokenOnly(first.token());
-        PrimaryKey second = factory.createTokenOnly(makeKey(simplePartition, "2").getToken());
+        PrimaryKey second = factory.createTokenOnly(makeKey(simplePartition, 2).getToken());
         PrimaryKey secondToken = factory.createTokenOnly(second.token());
 
         assertCompareToAndEquals(first, second, -1);
