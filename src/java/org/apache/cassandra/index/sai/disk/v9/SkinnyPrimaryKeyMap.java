@@ -76,6 +76,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class Factory implements PrimaryKeyMap.Factory
     {
+        // The class member is needed to avoid memory leaks and to be addressed by CNDB-17902
         private final IndexComponents.ForRead perSSTableComponents;
         protected final SSTableId<?> sstableId;
         protected final boolean hasStaticColumns;
