@@ -32,6 +32,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.marshal.Privacy;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.slf4j.Logger;
@@ -407,11 +408,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         updateIndexMetricsQueriesCount(plan);
 
         if (logger.isTraceEnabled())
-            logger.trace("Query execution plan:\n" + plan.toRedactedStringRecursive());
+            logger.trace("Query execution plan:\n" + plan.toStringRecursive(Privacy.REDACT));
 
         if (Tracing.isTracing())
         {
-            Tracing.trace("Query execution plan:\n" + plan.toUnredactedStringRecursive());
+            Tracing.trace("Query execution plan:\n" + plan.toStringRecursive(Privacy.NONE));
             List<Plan.IndexScan> origIndexScans = keysIterationPlan.nodesOfType(Plan.IndexScan.class);
             List<Plan.IndexScan> selectedIndexScans = plan.nodesOfType(Plan.IndexScan.class);
             Tracing.trace("Selecting {} {} of {} out of {} indexes",

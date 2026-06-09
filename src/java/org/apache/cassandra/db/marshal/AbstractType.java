@@ -222,6 +222,14 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
     public final String getString(ByteBuffer bytes)
     {
+        return getString(bytes, false);
+    }
+
+    public final String getString(ByteBuffer bytes, boolean redact)
+    {
+        if (redact)
+            return RedactionUtil.redact(bytes, isValueLengthFixed());
+
         return getString(bytes, ByteBufferAccessor.instance);
     }
 

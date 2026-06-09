@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Privacy;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
@@ -287,62 +288,46 @@ abstract public class Plan
     protected abstract double estimateSelectivity();
 
     /**
-     * Formats the whole plan as a pretty tree, not redacting the queried column values.
-     */
-    public final String toUnredactedStringRecursive()
-    {
-        return toStringRecursive(false, null);
-    }
-
-    /**
-     * Formats the whole plan as a pretty tree, redacting the queried column values.
-     */
-    public final String toRedactedStringRecursive()
-    {
-        return toRedactedStringRecursive(null);
-    }
-
-    /**
-     * Formats the whole plan as a pretty tree, redacting the queried column values, with indentation.
+     * Formats the whole plan as a pretty tree
      *
-     * @param indent a string used for indentation
+     * @param privacy whether to redact the queried column values.
      */
-    public final String toRedactedStringRecursive(String indent)
+    public String toStringRecursive(Privacy privacy)
     {
-        return toStringRecursive(true, indent);
+        return toStringRecursive(privacy, null);
     }
 
     /**
      * Formats the whole plan as a pretty tree, with indentation
      *
-     * @param redact whether to redact the queried column values.
+     * @param privacy whether to redact the queried column values.
      * @param indent a string used for indentation
      */
-    private String toStringRecursive(boolean redact, String indent)
+    public String toStringRecursive(Privacy privacy, String indent)
     {
-        TreeFormatter<Plan> formatter = new TreeFormatter<>(plan -> plan.toString(redact), Plan::subplans, indent);
+        TreeFormatter<Plan> formatter = new TreeFormatter<>(plan -> plan.toString(privacy), Plan::subplans, indent);
         return formatter.format(this);
     }
 
     /**
      * Returns the string representation of this node only, without redacting the queried column values.
-     * @see #toString(boolean)
+     * @see #toString(Privacy)
      */
     @Override
     public final String toString()
     {
-        return toString(false);
+        return toString(Privacy.NONE);
     }
 
     /**
      * Returns the string representation of this node only
      *
-     * @param redact whether to redact the queried column values.
+     * @param privacy whether to redact the queried column values.
      */
-    public final String toString(boolean redact)
+    public final String toString(Privacy privacy)
     {
-        String title = title(redact);
-        String description = description();
+        String title = title(privacy);
+        String description = description(privacy);
         return (title.isEmpty())
                ? String.format("%s (%s)\n%s", getClass().getSimpleName(), cost(), description).stripTrailing()
                : String.format("%s %s (%s)\n%s", getClass().getSimpleName(), title, cost(), description).stripTrailing();
@@ -353,7 +338,7 @@ abstract public class Plan
      * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
      * It is up to subclasses to implement it.
      */
-    protected String title(boolean redact)
+    protected String title(Privacy privacy)
     {
         return "";
     }
@@ -363,7 +348,7 @@ abstract public class Plan
      * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
      * It is up to subclasses to implement it.
      */
-    protected String description()
+    protected String description(Privacy privacy)
     {
         return "";
     }
@@ -398,7 +383,7 @@ abstract public class Plan
     protected Plan optimize()
     {
         if (logger.isTraceEnabled())
-            logger.trace("Optimizing plan:\n{}", toRedactedStringRecursive());
+            logger.trace("Optimizing plan:\n{}", toStringRecursive(Privacy.REDACT));
 
         Plan bestPlanSoFar = this;
         List<Leaf> leaves = nodesOfType(Leaf.class);
@@ -413,14 +398,14 @@ abstract public class Plan
 
             Plan candidate = bestPlanSoFar.removeRestriction(leaf.id);
             if (logger.isTraceEnabled())
-                logger.trace("Candidate query plan:\n{}", candidate.toRedactedStringRecursive());
+                logger.trace("Candidate query plan:\n{}", candidate.toStringRecursive(Privacy.REDACT));
 
             if (candidate.fullCost() <= bestPlanSoFar.fullCost())
                 bestPlanSoFar = candidate;
         }
 
         if (logger.isTraceEnabled())
-            logger.trace("Optimized plan:\n{}", bestPlanSoFar.toRedactedStringRecursive());
+            logger.trace("Optimized plan:\n{}", bestPlanSoFar.toStringRecursive(Privacy.REDACT));
         return bestPlanSoFar;
     }
 
@@ -923,26 +908,26 @@ abstract public class Plan
         }
 
         @Override
-        protected final String title(boolean redact)
+        protected final String title(Privacy privacy)
         {
             return String.format("of %s (sel: %.9f, step: %.1f)",
                                  getIndexName(), selectivity(), access.meanDistance());
         }
 
         @Override
-        protected String description()
+        protected String description(Privacy privacy)
         {
             StringBuilder sb = new StringBuilder();
             if (predicate != null)
             {
                 sb.append("predicate: ");
-                sb.append(predicate);
+                sb.append(predicate.toString(privacy == Privacy.REDACT));
                 sb.append('\n');
             }
             if (ordering != null)
             {
                 sb.append("ordering: ");
-                sb.append(ordering);
+                sb.append(ordering.toString(privacy));
                 sb.append('\n');
             }
             return sb.toString();
@@ -1532,9 +1517,9 @@ abstract public class Plan
         }
 
         @Override
-        protected String description()
+        protected String description(Privacy privacy)
         {
-            return ordering.toString();
+            return ordering.toString(privacy);
         }
     }
 
@@ -1622,9 +1607,9 @@ abstract public class Plan
         }
 
         @Override
-        protected String description()
+        protected String description(Privacy privacy)
         {
-            return ordering.toString();
+            return ordering.toString(privacy);
         }
     }
 
@@ -1665,6 +1650,12 @@ abstract public class Plan
         protected void visitIndexes(Consumer<IndexContext> consumer)
         {
             consumer.accept(ordering.context);
+        }
+
+        @Override
+        protected String description(Privacy privacy)
+        {
+            return ordering.toString(privacy);
         }
     }
 
@@ -1854,9 +1845,9 @@ abstract public class Plan
         }
 
         @Override
-        protected String title(boolean redact)
+        protected String title(Privacy privacy)
         {
-            return String.format("%s (sel: %.9f)", filter.toCQLString(redact), selectivity() / source.get().selectivity());
+            return String.format("%s (sel: %.9f)", filter.toCQLString(privacy == Privacy.REDACT), selectivity() / source.get().selectivity());
         }
     }
 
@@ -1922,7 +1913,7 @@ abstract public class Plan
         }
 
         @Override
-        protected String title(boolean redact)
+        protected String title(Privacy privacy)
         {
             return "" + limit;
         }

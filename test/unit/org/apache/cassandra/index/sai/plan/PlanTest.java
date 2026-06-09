@@ -36,7 +36,7 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.index.SecondaryIndexManager;
+import org.apache.cassandra.db.marshal.Privacy;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.LongIterator;
@@ -68,14 +68,15 @@ public class PlanTest
     {
         Orderer orderer = Mockito.mock(Orderer.class);
         Mockito.when(orderer.isANN()).thenReturn(true);
-        Mockito.when(orderer.toString()).thenReturn("ORDER BY v ANN OF [...]");
+        Mockito.when(orderer.toString(Privacy.REDACT)).thenReturn("ORDER BY v ANN OF ?");
+        Mockito.when(orderer.toString(Privacy.NONE)).thenReturn("ORDER BY v ANN OF X");
         return orderer;
     }
 
-    private static final RowFilter.Expression pred1 = filerPred("pred1", Operator.LT);
-    private static final RowFilter.Expression pred2 = filerPred("pred2", Operator.LT);
-    private static final RowFilter.Expression pred3 = filerPred("pred3", Operator.LT);
-    private static final RowFilter.Expression pred4 = filerPred("pred4", Operator.LT);
+    private static final RowFilter.Expression pred1 = filterPred("pred1", Operator.LT);
+    private static final RowFilter.Expression pred2 = filterPred("pred2", Operator.LT);
+    private static final RowFilter.Expression pred3 = filterPred("pred3", Operator.LT);
+    private static final RowFilter.Expression pred4 = filterPred("pred4", Operator.LT);
 
     private static final Expression saiPred1 = saiPred("pred1", Expression.Op.RANGE, false);
     private static final  Expression saiPred2 = saiPred("pred2", Expression.Op.RANGE, false);
@@ -100,14 +101,15 @@ public class PlanTest
     private static Expression saiPred(String column, Expression.Op operation, boolean isLiteral)
     {
         Expression pred = Mockito.mock(Expression.class);
-        Mockito.when(pred.toString()).thenReturn(operation.toString() + '(' + column + ')');
+        Mockito.when(pred.toString(false)).thenReturn(operation.toString() + '(' + column + ", X)");
+        Mockito.when(pred.toString(true)).thenReturn(operation.toString() + '(' + column + ", ?)");
         Mockito.when(pred.getIndexName()).thenReturn(column + "_idx");
         Mockito.when(pred.getOp()).thenReturn(operation);
         Mockito.when(pred.isLiteral()).thenReturn(isLiteral);
         return pred;
     }
 
-    private static RowFilter.Expression filerPred(String column, Operator operation)
+    private static RowFilter.Expression filterPred(String column, Operator operation)
     {
         RowFilter.Expression pred = Mockito.mock(RowFilter.Expression.class);
         Mockito.when(pred.toCQLString(false)).thenReturn(column + ' ' + operation + " X");
@@ -573,18 +575,18 @@ public class PlanTest
                               " └─ Filter pred1 < %s AND pred2 < %<s AND pred4 < %<s (sel: 1.000000000) (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
                               "     └─ Fetch (rows: 3.0, cost/row: 3895.8, cost: 44171.3..55858.7)\n" +
                               "         └─ KeysSort (keys: 3.0, cost/key: 3792.4, cost: 44171.3..55548.4)\n" +
-                              "            ORDER BY v ANN OF [...]\n" +
+                              "            ORDER BY v ANN OF %<s\n" +
                               "             └─ Union (keys: 1999.0, cost/key: 14.8, cost: 13500.0..43001.3)\n" +
                               "                 ├─ Intersection (keys: 1000.0, cost/key: 29.4, cost: 9000.0..38401.3)\n" +
                               "                 │   ├─ NumericIndexScan of pred2_idx (sel: 0.002000000, step: 1.0) (keys: 2000.0, cost/key: 0.1, cost: 4500.0..4700.0)\n" +
-                              "                 │   │  predicate: RANGE(pred2)\n" +
+                              "                 │   │  predicate: RANGE(pred2, %<s)\n" +
                               "                 │   └─ NumericIndexScan of pred1_idx (sel: 0.500000000, step: 250.0) (keys: 2000.0, cost/key: 14.6, cost: 4500.0..33701.3)\n" +
-                              "                 │      predicate: RANGE(pred1)\n" +
+                              "                 │      predicate: RANGE(pred1, %<s)\n" +
                               "                 └─ LiteralIndexScan of pred4_idx (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 0.1, cost: 4500.0..4600.0)\n" +
-                              "                    predicate: RANGE(pred4)\n";
+                              "                    predicate: RANGE(pred4, %<s)\n";
 
-        assertEquals(String.format(expectedPlan, 'X'), limit.toUnredactedStringRecursive());
-        assertEquals(String.format(expectedPlan, '?'), limit.toRedactedStringRecursive());
+        assertEquals(String.format(expectedPlan, 'X'), limit.toStringRecursive(Privacy.NONE));
+        assertEquals(String.format(expectedPlan, '?'), limit.toStringRecursive(Privacy.REDACT));
     }
 
     @Test
@@ -876,7 +878,7 @@ public class PlanTest
 
         Plan optimizedPlan = origPlan.optimize();
         List<Plan.IndexScan> resultIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
-        assertTrue("original:\n" + origPlan.toRedactedStringRecursive() + "optimized:\n" + optimizedPlan.toRedactedStringRecursive(),
+        assertTrue("original:\n" + origPlan.toStringRecursive(Privacy.REDACT) + "optimized:\n" + optimizedPlan.toStringRecursive(Privacy.REDACT),
                      expectedIndexScanCount.contains(resultIndexScans.size()));
     }
 
@@ -994,7 +996,7 @@ public class PlanTest
             Plan.KeysIteration indexScan = factory.indexScan(saiPred(column, operation, operation == Expression.Op.EQ),
                                                                     (long) (selectivities.get(i) * metrics.rows));
             indexScans.add(indexScan);
-            rowFilterBuilder.add(filerPred(column, operation == Expression.Op.RANGE ? Operator.LT : Operator.EQ));
+            rowFilterBuilder.add(filterPred(column, operation == Expression.Op.RANGE ? Operator.LT : Operator.EQ));
         }
 
         Plan.KeysIteration intersection = factory.intersection(indexScans);
@@ -1005,7 +1007,7 @@ public class PlanTest
 
         Plan optimizedPlan = origPlan.optimize();
         List<Plan.IndexScan> resultIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
-        assertTrue("original:\n" + origPlan.toRedactedStringRecursive() + "optimized:\n" + optimizedPlan.toRedactedStringRecursive(),
+        assertTrue("original:\n" + origPlan.toStringRecursive(Privacy.REDACT) + "optimized:\n" + optimizedPlan.toStringRecursive(Privacy.REDACT),
                      expectedIndexScanCount.contains(resultIndexScans.size()));
     }
 
