@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.disk.v9;
 
-import java.util.Arrays;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.db.Clustering;

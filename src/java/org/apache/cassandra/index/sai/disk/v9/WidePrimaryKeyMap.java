@@ -67,6 +67,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
     @ThreadSafe
     public static class Factory extends SkinnyPrimaryKeyMap.Factory
     {
+        // The class member is needed to avoid memory leaks and to be addressed by CNDB-17902
         private final IndexComponents.ForRead perSSTableComponents;
         private final ClusteringComparator clusteringComparator;
         private final KeyLookup clusteringKeyReader;
@@ -99,7 +100,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             }
             catch (Throwable t)
             {
-                throw Throwables.unchecked(Throwables.close(t, clusteringKeyBlockOffsetsFile, clustingingKeyBlocksFile));
+                throw Throwables.unchecked(Throwables.close(t, clusteringKeyBlockOffsetsFile, clustingingKeyBlocksFile, partitionToSizeFile));
             }
         }
 

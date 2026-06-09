@@ -41,7 +41,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
- * Updates SAI OnDiskFormat to include full PK -> offset mapping, and adds vector components.
+ * Updates SAI OnDiskFormat to separate partition key and clustering key components.
  */
 public class V9OnDiskFormat extends V8OnDiskFormat
 {
