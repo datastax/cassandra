@@ -49,6 +49,13 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
                                                                            .addClusteringColumn("ck1", UTF8Type.instance)
                                                                            .build();
 
+    static final TableMetadata simplePartitionStaticAndSingleClusteringAsc = TableMetadata.builder("test", "test")
+                                                                                          .partitioner(Murmur3Partitioner.instance)
+                                                                                          .addPartitionKeyColumn("pk1", Int32Type.instance)
+                                                                                          .addStaticColumn("sk1", Int32Type.instance)
+                                                                                          .addClusteringColumn("ck1", UTF8Type.instance)
+                                                                                          .build();
+
     static TableMetadata simplePartitionMultipleClusteringAsc = TableMetadata.builder("test", "test")
                                                                              .partitioner(Murmur3Partitioner.instance)
                                                                              .addPartitionKeyColumn("pk1", Int32Type.instance)
@@ -146,20 +153,20 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
         if (TypeUtil.isComposite(table.partitionKeyType))
             key = ((CompositeType)table.partitionKeyType).decompose(partitionKeys);
         else
-            key = table.partitionKeyType.fromString((String)partitionKeys[0]);
+            key = table.partitionKeyType.decomposeUntyped(partitionKeys[0]);
         return table.partitioner.decorateKey(key);
     }
 
-    Clustering makeClustering(TableMetadata table, String...clusteringKeys)
+    Clustering<?> makeClustering(TableMetadata table, String...clusteringKeys)
     {
-        Clustering clustering;
+        Clustering<?> clustering;
         if (table.comparator.size() == 0)
             clustering = Clustering.EMPTY;
         else
         {
             ByteBuffer[] values = new ByteBuffer[clusteringKeys.length];
             for (int index = 0; index < table.comparator.size(); index++)
-                values[index] = table.comparator.subtype(index).fromString(clusteringKeys[index]);
+                values[index] = table.comparator.subtype(index).decomposeUntyped(clusteringKeys[index]);
             clustering = Clustering.make(values);
         }
         return clustering;
