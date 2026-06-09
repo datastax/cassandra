@@ -38,7 +38,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -53,7 +53,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -78,7 +78,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -109,7 +109,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -134,7 +134,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -165,7 +165,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -190,7 +190,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -221,7 +221,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -246,7 +246,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -277,7 +277,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -308,7 +308,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -339,7 +339,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
         compareToAndEquals(factory, keys);
     }
 
@@ -370,7 +370,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
 
         Arrays.sort(keys);
 
-        compareTokenOnlyWithByteComparison(factory, keys);
+        verifyTokenOnlyByteComparableRepresentations(factory, keys);
     }
 
     private void compareToAndEquals(PrimaryKey.Factory factory, PrimaryKey... keys)
@@ -392,7 +392,7 @@ public class RowAwarePrimaryKeyFactoryTest extends AbstractPrimaryKeyTest
         }
     }
 
-    private void compareTokenOnlyWithByteComparison(PrimaryKey.Factory factory, PrimaryKey... keys)
+    private void verifyTokenOnlyByteComparableRepresentations(PrimaryKey.Factory factory, PrimaryKey... keys)
     {
         for (int index = 0; index < keys.length - 1; index++)
         {
