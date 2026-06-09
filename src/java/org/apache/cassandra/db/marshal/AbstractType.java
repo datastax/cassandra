@@ -32,6 +32,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Streams;
@@ -191,6 +192,8 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return getSerializer().deserialize(value, accessor);
     }
 
+    @SuppressWarnings("unchecked")
+    @VisibleForTesting
     public ByteBuffer decomposeUntyped(Object value)
     {
         return decompose((T) value);
