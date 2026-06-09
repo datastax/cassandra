@@ -125,25 +125,25 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester
         {
             MapWalker mapWalker = new MapWalker(map, map::exactRowIdOrInvertedCeiling);
 
-            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
-            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
+            mapWalker.assertRowIdForPK(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
+            mapWalker.assertRowIdForPK(mapWalker.exactFirstRow(), 0, "exact first row");
 
             // Test static row lookup
-            mapWalker.assertResult(mapWalker.exactPk1Static(), mapWalker.getIdPk1Static(), "exact pk=1 static row");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Static(), mapWalker.getIdPk1Static(), "exact pk=1 static row");
             
             // Test regular clustering rows
-            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getIdPk1Ck1(), "exact pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck1(), mapWalker.getIdPk1Ck1(), "exact pk=1, ck=1");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck2(), mapWalker.getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck3(), mapWalker.getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
             
             // Test between static and first clustering row
-            mapWalker.assertResult(mapWalker.betweenPk1StaticAndCk1(), -mapWalker.getIdPk1Ck1() - 1, "between static and ck=1 expects inverted ck=1");
+            mapWalker.assertRowIdForPK(mapWalker.betweenPk1StaticAndCk1(), -mapWalker.getIdPk1Ck1() - 1, "between static and ck=1 expects inverted ck=1");
             
             // Test after last clustering in partition
-            mapWalker.assertResult(mapWalker.afterPk1Ck3(), -(mapWalker.getIdPk1Ck3() + 1) - 1, "after pk=1 ck=3 expects inverted next partition first row");
+            mapWalker.assertRowIdForPK(mapWalker.afterPk1Ck3(), -(mapWalker.getIdPk1Ck3() + 1) - 1, "after pk=1 ck=3 expects inverted next partition first row");
 
-            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastToken(), Long.MIN_VALUE, "after last expects out of range");
+            mapWalker.assertRowIdForPK(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
+            mapWalker.assertRowIdForPK(mapWalker.afterLastToken(), Long.MIN_VALUE, "after last expects out of range");
         }
     }
 
@@ -155,25 +155,25 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester
         {
             MapWalker mapWalker = new MapWalker(map, map::ceiling);
 
-            mapWalker.assertResult(mapWalker.beforeFirst(), 0, "before first expects the first");
-            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
+            mapWalker.assertRowIdForPK(mapWalker.beforeFirst(), 0, "before first expects the first");
+            mapWalker.assertRowIdForPK(mapWalker.exactFirstRow(), 0, "exact first row");
 
             // Test static row lookup
-            mapWalker.assertResult(mapWalker.exactPk1Static(), mapWalker.getIdPk1Static(), "exact pk=1 static row");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Static(), mapWalker.getIdPk1Static(), "exact pk=1 static row");
             
             // Test regular clustering rows
-            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getIdPk1Ck1(), "exact pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck1(), mapWalker.getIdPk1Ck1(), "exact pk=1, ck=1");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck2(), mapWalker.getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck3(), mapWalker.getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
             
             // Test between static and first clustering - ceiling should return first clustering
-            mapWalker.assertResult(mapWalker.betweenPk1StaticAndCk1(), mapWalker.getIdPk1Ck1(), "between static and ck=1 expects ck=1 (ceiling)");
+            mapWalker.assertRowIdForPK(mapWalker.betweenPk1StaticAndCk1(), mapWalker.getIdPk1Ck1(), "between static and ck=1 expects ck=1 (ceiling)");
             
             // Test after last clustering in partition - should go to next partition first row
-            mapWalker.assertResult(mapWalker.afterPk1Ck3(), mapWalker.getIdPk1Ck3() + 1, "after pk=1 ck=3 expects next partition first row");
+            mapWalker.assertRowIdForPK(mapWalker.afterPk1Ck3(), mapWalker.getIdPk1Ck3() + 1, "after pk=1 ck=3 expects next partition first row");
 
-            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastToken(), -1, "after last expects out of range");
+            mapWalker.assertRowIdForPK(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
+            mapWalker.assertRowIdForPK(mapWalker.afterLastToken(), -1, "after last expects out of range");
         }
     }
 
@@ -185,28 +185,28 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester
         {
             MapWalker mapWalker = new MapWalker(map, map::floor);
 
-            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects out of range");
-            mapWalker.assertResult(mapWalker.exactFirstRow(), mapWalker.getIdPk1Static(), "exact first row means the last row in the first partition");
+            mapWalker.assertRowIdForPK(mapWalker.beforeFirst(), -1, "before first expects out of range");
+            mapWalker.assertRowIdForPK(mapWalker.exactFirstRow(), mapWalker.getIdPk1Static(), "exact first row means the last row in the first partition");
 
             // Test static row lookup
-            mapWalker.assertResult(mapWalker.exactPk1Static(), mapWalker.getIdPk1Static(), "exact pk=1 static row");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Static(), mapWalker.getIdPk1Static(), "exact pk=1 static row");
             
             // Test regular clustering rows
-            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getIdPk1Ck1(), "exact pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck1(), mapWalker.getIdPk1Ck1(), "exact pk=1, ck=1");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck2(), mapWalker.getIdPk1Ck1() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck3(), mapWalker.getIdPk1Ck2() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
             
             // Test between static and first clustering
             // ck=0 sorts after STATIC_CLUSTERING but before ck=1
             // floor(ck=0) should return the row at position 0
-            mapWalker.assertResult(mapWalker.betweenPk1StaticAndCk1(), 0, "between static and ck=1 expects row 0 (floor)");
+            mapWalker.assertRowIdForPK(mapWalker.betweenPk1StaticAndCk1(), 0, "between static and ck=1 expects row 0 (floor)");
             
             // Test after last clustering in partition - floor should return last clustering
-            mapWalker.assertResult(mapWalker.afterPk1Ck3(), mapWalker.getIdPk1Ck3(), "after pk=1 ck=3 expects ck=3 (floor)");
+            mapWalker.assertRowIdForPK(mapWalker.afterPk1Ck3(), mapWalker.getIdPk1Ck3(), "after pk=1 ck=3 expects ck=3 (floor)");
 
-            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastRow(), mapWalker.count - 1, "after last row in last partition expects the last row");
-            mapWalker.assertResult(mapWalker.afterLastToken(), mapWalker.count - 1, "after last expects the last row");
+            mapWalker.assertRowIdForPK(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
+            mapWalker.assertRowIdForPK(mapWalker.afterLastRow(), mapWalker.count - 1, "after last row in last partition expects the last row");
+            mapWalker.assertRowIdForPK(mapWalker.afterLastToken(), mapWalker.count - 1, "after last expects the last row");
         }
     }
 
@@ -336,7 +336,7 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester
              return buildPk(partitioner, 1, Integer.MAX_VALUE);
          }
 
-         void assertResult(PrimaryKey pk, long expected, String expectationMessage)
+         void assertRowIdForPK(PrimaryKey pk, long expected, String expectationMessage)
          {
              long actual = rowIdFromPKMethod.apply(pk);
              assertEquals(expectationMessage, expected, actual);

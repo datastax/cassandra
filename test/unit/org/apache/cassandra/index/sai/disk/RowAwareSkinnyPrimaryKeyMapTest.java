@@ -104,11 +104,11 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
         {
             MapWalker mapWalker = new MapWalker(map, map::exactRowIdOrInvertedCeiling);
 
-            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
-            mapWalker.assertResult(mapWalker.exactFirst(), 0, "exact first");
-            mapWalker.assertResult(mapWalker.betweenFirstAndSecond(), -2, "between first and second expects the inverted second");
-            mapWalker.assertResult(mapWalker.exactLast(), mapWalker.count - 1, "exact last");
-            mapWalker.assertResult(mapWalker.afterLast(), Long.MIN_VALUE, "after last expects out of range");
+            mapWalker.assertRowIdForPK(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
+            mapWalker.assertRowIdForPK(mapWalker.exactFirst(), 0, "exact first");
+            mapWalker.assertRowIdForPK(mapWalker.betweenFirstAndSecond(), -2, "between first and second expects the inverted second");
+            mapWalker.assertRowIdForPK(mapWalker.exactLast(), mapWalker.count - 1, "exact last");
+            mapWalker.assertRowIdForPK(mapWalker.afterLast(), Long.MIN_VALUE, "after last expects out of range");
         }
     }
 
@@ -120,11 +120,11 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
         {
             MapWalker mapWalker = new MapWalker(map, map::ceiling);
 
-            mapWalker.assertResult(mapWalker.beforeFirst(), 0, "before first expects the first");
-            mapWalker.assertResult(mapWalker.exactFirst(), 0, "exact first");
-            mapWalker.assertResult(mapWalker.betweenFirstAndSecond(), 1, "between first and second expects the second");
-            mapWalker.assertResult(mapWalker.exactLast(), mapWalker.count - 1, "exact last");
-            mapWalker.assertResult(mapWalker.afterLast(), -1, "after last expects out of range");
+            mapWalker.assertRowIdForPK(mapWalker.beforeFirst(), 0, "before first expects the first");
+            mapWalker.assertRowIdForPK(mapWalker.exactFirst(), 0, "exact first");
+            mapWalker.assertRowIdForPK(mapWalker.betweenFirstAndSecond(), 1, "between first and second expects the second");
+            mapWalker.assertRowIdForPK(mapWalker.exactLast(), mapWalker.count - 1, "exact last");
+            mapWalker.assertRowIdForPK(mapWalker.afterLast(), -1, "after last expects out of range");
         }
     }
 
@@ -136,11 +136,11 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
         {
             MapWalker mapWalker = new MapWalker(map, map::floor);
 
-            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects out of range");
-            mapWalker.assertResult(mapWalker.exactFirst(), 0, "exact first");
-            mapWalker.assertResult(mapWalker.betweenFirstAndSecond(), 0, "between first and second expects the first");
-            mapWalker.assertResult(mapWalker.exactLast(), mapWalker.count - 1, "exact last");
-            mapWalker.assertResult(mapWalker.afterLast(), mapWalker.count - 1, "after last expects the last");
+            mapWalker.assertRowIdForPK(mapWalker.beforeFirst(), -1, "before first expects out of range");
+            mapWalker.assertRowIdForPK(mapWalker.exactFirst(), 0, "exact first");
+            mapWalker.assertRowIdForPK(mapWalker.betweenFirstAndSecond(), 0, "between first and second expects the first");
+            mapWalker.assertRowIdForPK(mapWalker.exactLast(), mapWalker.count - 1, "exact last");
+            mapWalker.assertRowIdForPK(mapWalker.afterLast(), mapWalker.count - 1, "after last expects the last");
         }
     }
 
@@ -201,7 +201,7 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
             return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(lastToken + 1));
         }
 
-        void assertResult(PrimaryKey pk, long expected, String expectationMessage)
+        void assertRowIdForPK(PrimaryKey pk, long expected, String expectationMessage)
         {
             long actual = rowIdFromPKMethod.apply(pk);
             assertEquals(expectationMessage, expected, actual);
