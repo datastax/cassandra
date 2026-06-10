@@ -23,7 +23,6 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.index.sai.disk.v9.keystore.KeyStoreWriter;
 import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.metrics.TableMetrics;
