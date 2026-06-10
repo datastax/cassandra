@@ -19,12 +19,14 @@
 package org.apache.cassandra.db.memtable;
 
 import java.util.concurrent.atomic.AtomicReference;
-
 import javax.annotation.concurrent.NotThreadSafe;
+
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.CellSourceIdentifier;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -32,17 +34,18 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.UnfilteredSource;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
@@ -222,6 +225,9 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource, CellSo
      * Get the partition for the specified key. Returns null if no such partition is present.
      */
     Partition getPartition(DecoratedKey key);
+
+    /// Get a cell for the specified path directly.
+    Cell<?> getCellForKey(DecoratedKey partitionKey, Clustering<?> clustering, ColumnMetadata column);
 
     interface MemtableUnfilteredPartitionIterator extends UnfilteredPartitionIterator
     {

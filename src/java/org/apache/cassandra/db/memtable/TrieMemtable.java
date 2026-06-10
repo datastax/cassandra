@@ -81,6 +81,7 @@ import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.metrics.TrieMemtableMetricsView;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -92,6 +93,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
+import org.apache.cassandra.utils.memory.HeapCloner;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.apache.cassandra.utils.memory.MemtableBufferAllocator;
@@ -432,6 +434,26 @@ public class TrieMemtable extends AbstractShardedMemtable
                                           metadata,
                                           droppedColumnsSource,
                                           ensureOnHeap);
+    }
+
+
+    @Override
+    public Cell<?> getCellForKey(DecoratedKey partitionKey, Clustering<?> clustering, ColumnMetadata column)
+    {
+        TableMetadata metadata = metadata();
+        ByteComparable key = v -> ByteSource.concat(
+            partitionKey.asComparableBytes(v),
+            metadata.comparator.asByteComparable(clustering).asComparableBytes(v),
+            TrieBackedRow.columnKey(clustering == Clustering.STATIC_CLUSTERING ? metadata.staticColumns()
+                                                                               : metadata.regularColumns(),
+                                    column));
+
+        Object cell = mergedTrie.get(key);
+        if (!(cell instanceof CellData))
+            return null;
+        return ((CellData<?, ?>) cell).toCell(column, null)
+                                      .clone(HeapCloner.instance); // copy to heap to guard against modifications to the
+                                                                   // buffer after the opOrder is closed
     }
 
     @Override
