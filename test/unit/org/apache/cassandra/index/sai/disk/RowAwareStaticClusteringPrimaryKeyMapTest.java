@@ -38,7 +38,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
-import static org.junit.Assert.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Tests for {@link PrimaryKeyMap} with tables that have static columns,
@@ -120,31 +120,38 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
     {
         try (PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
-            MapWalker mapWalker = new MapWalker(map::exactRowIdOrInvertedCeiling);
-
-            mapWalker.assertRowIdForPK(beforeFirst(map), invert(0), "before first expects the inverted first");
-            mapWalker.assertRowIdForPK(exactFirstRow(map), 0, "exact first row");
+            assertThat(map.exactRowIdOrInvertedCeiling(beforeFirst(map))).as("before first expects the inverted first")
+                                                                         .isEqualTo(invert(0));
+            assertThat(map.exactRowIdOrInvertedCeiling(exactFirstRow(map))).as("exact first row")
+                                                                           .isEqualTo(0);
 
             // Test static row lookup
-            mapWalker.assertRowIdForPK(buildStaticPk(1), idPk1Static, "exact pk=1 static row");
+            assertThat(map.exactRowIdOrInvertedCeiling(buildStaticPk(1))).as("exact pk=1 static row")
+                                                                         .isEqualTo(idPk1Static);
             // Test between static and first clustering row
-            mapWalker.assertRowIdForPK(buildPk(1, 0), invert(idPk1Static + 1), "between static and ck=1 expects inverted ck=1");
+            assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 0))).as("between static and ck=1 expects inverted ck=1")
+                                                                      .isEqualTo(invert(idPk1Static + 1));
 
             // Test regular clustering rows
-            mapWalker.assertRowIdForPK(buildPk(1, 1), idPk1Static + 1, "exact pk=1, ck=1, which is next after the static row");
-            mapWalker.assertRowIdForPK(buildPk(1, 2), idPk1Static + 2, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertRowIdForPK(buildPk(1, 3), idPk1Static + 3, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 1))).as("exact pk=1, ck=1, which is next after the static row")
+                                                                      .isEqualTo(idPk1Static + 1);
+            assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 2))).as("pk=1, ck=2 expects next after pk=1, ck=1").isEqualTo(idPk1Static + 2);
+            assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 3))).as("exact pk=1, ck=3 expects next after pk=1, ck=2")
+                                                                      .isEqualTo(idPk1Static + 3);
 
             // Test after last clustering in partition
-            mapWalker.assertRowIdForPK(buildPk(1, Integer.MAX_VALUE),
-                                       idPk1Static < map.count() ? invert(idPk1Static + 4) : Long.MIN_VALUE,
-                                       "after pk=1 ck=3 expects inverted next partition first row or out of range if the last partition");
+            assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, Integer.MAX_VALUE))).as("after pk=1 ck=3 expects inverted next partition first row or out of range if the last partition")
+                                                                                      .isEqualTo(idPk1Static < map.count() ? invert(idPk1Static + 4) : Long.MIN_VALUE);
 
-            mapWalker.assertRowIdForPK(buildStaticPk(2), idPk2Static, "exact pk=2 static row");
-            mapWalker.assertRowIdForPK(buildPk(2, 1), idPk2Static + 1, "exact pk=2 ck=1");
+            assertThat(map.exactRowIdOrInvertedCeiling(buildStaticPk(2))).as("exact pk=2 static row").
+                                                                         isEqualTo(idPk2Static);
+            assertThat(map.exactRowIdOrInvertedCeiling(buildPk(2, 1))).as("exact pk=2 ck=1")
+                                                                      .isEqualTo(idPk2Static + 1);
 
-            mapWalker.assertRowIdForPK(exactLastRow(map), map.count() - 1, "exact last row");
-            mapWalker.assertRowIdForPK(afterLastToken(map), Long.MIN_VALUE, "after last expects out of range");
+            assertThat(map.exactRowIdOrInvertedCeiling(exactLastRow(map))).as("exact last row")
+                                                                          .isEqualTo(map.count() - 1);
+            assertThat(map.exactRowIdOrInvertedCeiling(afterLastToken(map))).as("after last expects out of range")
+                                                                            .isEqualTo(Long.MIN_VALUE);
         }
     }
 
@@ -153,29 +160,33 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
     {
         try (PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
-            MapWalker mapWalker = new MapWalker(map::ceiling);
-
-            mapWalker.assertRowIdForPK(beforeFirst(map), 0, "before first expects the first");
-            mapWalker.assertRowIdForPK(exactFirstRow(map), 0, "exact first row");
+            assertThat(map.ceiling(beforeFirst(map))).as("before first expects the first")
+                                                     .isEqualTo(0);
+            assertThat(map.ceiling(exactFirstRow(map))).as("exact first row").isEqualTo(0);
 
             // Test static row lookup
-            mapWalker.assertRowIdForPK(buildStaticPk(1), idPk1Static, "exact pk=1 static row");
+            assertThat(map.ceiling(buildStaticPk(1))).as("exact pk=1 static row")
+                                                     .isEqualTo(idPk1Static);
 
             // Test between static and first clustering - ceiling should return first clustering
-            mapWalker.assertRowIdForPK(buildPk(1, 0),  idPk1Static + 1, "between static and ck=1 expects ck=1 (ceiling)");
+            assertThat(map.ceiling(buildPk(1, 0))).as("between static and ck=1 expects ck=1 (ceiling)")
+                                                  .isEqualTo(idPk1Static + 1);
 
             // Test regular clustering rows
-            mapWalker.assertRowIdForPK(buildPk(1, 1), idPk1Static + 1, "exact pk=1, ck=1");
-            mapWalker.assertRowIdForPK(buildPk(1, 2), idPk1Static + 2, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertRowIdForPK(buildPk(1, 3), idPk1Static + 3, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            assertThat(map.ceiling(buildPk(1, 1))).as("exact pk=1, ck=1")
+                                                  .isEqualTo(idPk1Static + 1);
+            assertThat(map.ceiling(buildPk(1, 2))).as("pk=1, ck=2 expects next after pk=1, ck=1").isEqualTo(idPk1Static + 2);
+            assertThat(map.ceiling(buildPk(1, 3))).as("exact pk=1, ck=3 expects next after pk=1, ck=2")
+                                                  .isEqualTo(idPk1Static + 3);
 
             // Test after last clustering in partition - should go to next partition first row
-            mapWalker.assertRowIdForPK(buildPk(1, Integer.MAX_VALUE),
-                                       idPk1Static < map.count() ? idPk1Static + 4 : -1,
-                                       "after pk=1 ck=3 expects next partition first row or out of range if the last partition");
+            assertThat(map.ceiling(buildPk(1, Integer.MAX_VALUE))).as("after pk=1 ck=3 expects next partition first row or out of range if the last partition")
+                                                                  .isEqualTo(idPk1Static < map.count() ? idPk1Static + 4 : -1);
 
-            mapWalker.assertRowIdForPK(exactLastRow(map), map.count() - 1, "exact last row");
-            mapWalker.assertRowIdForPK(afterLastToken(map), -1, "after last expects out of range");
+            assertThat(map.ceiling(exactLastRow(map))).as("exact last row")
+                                                      .isEqualTo(map.count() - 1);
+            assertThat(map.ceiling(afterLastToken(map))).as("after last expects out of range")
+                                                        .isEqualTo(-1);
         }
     }
 
@@ -184,25 +195,31 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
     {
         try (PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
         {
-            MapWalker mapWalker = new MapWalker(map::floor);
-
-            mapWalker.assertRowIdForPK(beforeFirst(map), -1, "before first expects out of range");
-            mapWalker.assertRowIdForPK(buildPk(1, 0), idPk1Ck1 - 1, "before ck=1 expects row before the first in pk 1 (floor) or out of range if the first partition");
+            assertThat(map.floor(beforeFirst(map))).as("before first expects out of range")
+                                                   .isEqualTo(-1);
+            assertThat(map.floor(buildPk(1, 0))).as("before ck=1 expects row before the first in pk 1 (floor) or out of range if the first partition")
+                                                .isEqualTo(idPk1Ck1 - 1);
 
             // Test regular clustering rows
-            mapWalker.assertRowIdForPK(buildPk(1, 1), idPk1Ck1, "exact pk=1, ck=1");
-            mapWalker.assertRowIdForPK(buildPk(1, 2), idPk1Ck1 + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertRowIdForPK(buildPk(1, 3), idPk1Ck1 + 2, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            assertThat(map.floor(buildPk(1, 1))).as("exact pk=1, ck=1")
+                                                .isEqualTo(idPk1Ck1);
+            assertThat(map.floor(buildPk(1, 2))).as("pk=1, ck=2 expects next after pk=1, ck=1")
+                                                .isEqualTo(idPk1Ck1 + 1);
+            assertThat(map.floor(buildPk(1, 3))).as("exact pk=1, ck=3 expects next after pk=1, ck=2")
+                                                .isEqualTo(idPk1Ck1 + 2);
 
             // Test static row lookup
-            mapWalker.assertRowIdForPK(buildStaticPk(1), idPk1Ck1 + 2, "exact pk=1 static row");
-
+            assertThat(map.floor(buildStaticPk(1))).as("exact pk=1 static row")
+                                                   .isEqualTo(idPk1Ck1 + 2);
 
             // Test after last clustering in partition - floor should return last clustering
-            mapWalker.assertRowIdForPK(buildPk(1, Integer.MAX_VALUE), idPk1Ck1 + 2, "after pk=1 ck=3 expects ck=3 (floor)");
+            assertThat(map.floor(buildPk(1, Integer.MAX_VALUE))).as("after pk=1 ck=3 expects ck=3 (floor)")
+                                                                .isEqualTo(idPk1Ck1 + 2);
 
-            mapWalker.assertRowIdForPK(exactLastRow(map), map.count() - 1, "exact last row");
-            mapWalker.assertRowIdForPK(afterLastToken(map), map.count() - 1, "after last expects the last row");
+            assertThat(map.floor(exactLastRow(map))).as("exact last row")
+                                                    .isEqualTo(map.count() - 1);
+            assertThat(map.floor(afterLastToken(map))).as("after last expects the last row")
+                                                      .isEqualTo(map.count() - 1);
         }
     }
 
@@ -251,34 +268,4 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
     {
         return -rowId - 1;
     }
-
-    /**
-     * Functional interface for PrimaryKeyMap API methods that take a PrimaryKey and return a row ID.
-     */
-    @FunctionalInterface
-    private interface PrimaryKeyMapFunction
-    {
-        long apply(PrimaryKey pk);
-    }
-
-     /**
-      * Helper class for testing static clustering columns.
-      * Provides position generators and assertion methods for testing PrimaryKeyMap operations
-      * with static rows.
-      */
-     private static class MapWalker
-     {
-         private final PrimaryKeyMapFunction rowIdFromPKMethod;
-
-         MapWalker(PrimaryKeyMapFunction rowIdFromPKMethod)
-         {
-             this.rowIdFromPKMethod = rowIdFromPKMethod;
-         }
-
-         void assertRowIdForPK(PrimaryKey pk, long expected, String expectationMessage)
-         {
-             long actual = rowIdFromPKMethod.apply(pk);
-             assertEquals(expectationMessage, expected, actual);
-         }
-     }
 }
