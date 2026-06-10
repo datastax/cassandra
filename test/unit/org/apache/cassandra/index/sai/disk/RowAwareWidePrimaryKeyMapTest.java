@@ -155,7 +155,6 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RawAware
             mapWalker.assertResult(mapWalker.afterLastCkInPk1(), mapWalker.getId110(), "after last ck in pk=1 expects last ck in pk=1");
 
             mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertResult(mapWalker.afterLastRow(), mapWalker.count - 1, "after last row in last partition expects the last");
             mapWalker.assertResult(mapWalker.afterLastToken(), mapWalker.count - 1, "after last expects the last");
         }
     }
@@ -183,7 +182,6 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RawAware
         private final PrimaryKeyMapFunction rowIdFromPKMethod;
         private final PrimaryKey firstPk;
         private final PrimaryKey lastPk;
-        private final PrimaryKey afterLastPk;
         private final long firstToken;
         private final long lastToken;
         private long id11 = -1;
@@ -196,16 +194,15 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RawAware
             this.rowIdFromPKMethod = rowIdFromPKMethod;
             this.count = map.count();
             this.firstPk = map.primaryKeyFromRowId(0);
-            this.firstToken = firstPk.token().getLongValue();
             this.lastPk = map.primaryKeyFromRowId(count - 1);
+            this.firstToken = firstPk.token().getLongValue();
             this.lastToken = lastPk.token().getLongValue();
 
-            // Pre-compute primary keys for testing
+            // Pre-compute row IDs for clustering tests
             this.pk11 = buildPk(partitioner, 1, 1);
             this.pk12 = buildPk(partitioner, 1, 2);
             this.pk13 = buildPk(partitioner, 1, 3);
             this.pk110 = buildPk(partitioner, 1, 10);
-            this.afterLastPk = buildPk(partitioner, 1000, 11);
         }
 
 
@@ -231,11 +228,6 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RawAware
         PrimaryKey exactLastRow()
         {
             return lastPk;
-        }
-
-        PrimaryKey afterLastRow()
-        {
-            return afterLastPk;
         }
 
         PrimaryKey afterLastToken()

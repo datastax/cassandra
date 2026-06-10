@@ -148,10 +148,10 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester.Versioned.RawAwar
             this.rowIdFromPKMethod = rowIdFromPKMethod;
             this.count = map.count();
             this.firstPk = map.primaryKeyFromRowId(0);
-            this.firstToken = firstPk.token().getLongValue();
             PrimaryKey secondPk = map.primaryKeyFromRowId(1);
-            this.secondToken = secondPk.token().getLongValue();
             this.lastPk = map.primaryKeyFromRowId(count - 1);
+            this.firstToken = firstPk.token().getLongValue();
+            this.secondToken = secondPk.token().getLongValue();
             this.lastToken = lastPk.token().getLongValue();
         }
 
