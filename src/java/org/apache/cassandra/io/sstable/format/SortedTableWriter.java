@@ -28,6 +28,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionPurger;
@@ -42,7 +43,6 @@ import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
@@ -71,15 +71,9 @@ import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE;
-
 public abstract class SortedTableWriter extends SSTableWriter
 {
     protected static final Logger logger = LoggerFactory.getLogger(SortedTableWriter.class);
-
-    private static final ChecksumType checksumType = getChecksumType();
-    private static final Component digestComponent = getDigestComponent();
-
     protected final FileHandle.Builder dbuilder;
     protected final SequentialWriter dataFile;
     protected DataPosition dataMark;
@@ -113,29 +107,32 @@ public abstract class SortedTableWriter extends SSTableWriter
 
     private static ChecksumType getChecksumType()
     {
-        String checksumTypeProp = SSTABLE_CHECKSUM_TYPE.getString();
-        try
+        Config.SSTableDigestType ssTableDigestType = DatabaseDescriptor.getSSTableDigestType();
+        switch (ssTableDigestType)
         {
-            return ChecksumType.valueOf(SSTABLE_CHECKSUM_TYPE.getString().toUpperCase());
-        }
-        catch (IllegalArgumentException e)
-        {
-            throw new ConfigurationException(String.format("Invalid value for system property 'cassandra.sstable.checksum_type': %s", checksumTypeProp), e);
+            case CRC32:
+                return ChecksumType.CRC32;
+            case CRC32C:
+                return ChecksumType.CRC32C;
+            case CRC64NVME:
+                return ChecksumType.CRC64NVME;
+            default:
+                throw new IllegalStateException("Unexpected sstable digest type: " + ssTableDigestType);
         }
     }
 
-    private static Component getDigestComponent()
+    private static File getDigestFile(Descriptor descriptor, ChecksumType checksumType)
     {
         switch (checksumType)
         {
             case CRC32:
-                return Component.DIGEST;
+                return descriptor.fileFor(Component.DIGEST);
             case CRC32C:
-                return Component.DIGEST_CRC32C;
+                return descriptor.fileFor(Component.DIGEST_CRC32C);
             case CRC64NVME:
-                return Component.DIGEST_CRC64NVME;
+                return descriptor.fileFor(Component.DIGEST_CRC64NVME);
             default:
-                throw new IllegalStateException("Unexpected checksumType for digest file: " + checksumType);
+                throw new IllegalStateException("Unexpected checksum type for digest file: " + checksumType);
         }
     }
 
@@ -145,13 +142,14 @@ public abstract class SortedTableWriter extends SSTableWriter
                                                               LifecycleNewTracker lifecycleNewTracker,
                                                               SequentialWriterOption writerOption)
     {
+        ChecksumType checksumType = getChecksumType();
         if (metadata.getLocal().params.compression.isEnabled())
         {
             final CompressionParams compressionParams = compressionFor(lifecycleNewTracker.opType(), metadata);
 
             return new CompressedSequentialWriter(descriptor.fileFor(Component.DATA),
                                                   descriptor.fileFor(Component.COMPRESSION_INFO),
-                                                  descriptor.fileFor(digestComponent),
+                                                  getDigestFile(descriptor, checksumType),
                                                   checksumType,
                                                   writerOption,
                                                   compressionParams,
@@ -161,7 +159,7 @@ public abstract class SortedTableWriter extends SSTableWriter
         {
             return new ChecksummedSequentialWriter(descriptor.fileFor(Component.DATA),
                                                    descriptor.fileFor(Component.CRC),
-                                                   descriptor.fileFor(digestComponent),
+                                                   getDigestFile(descriptor, checksumType),
                                                    checksumType,
                                                    writerOption);
         }
