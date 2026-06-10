@@ -44,13 +44,13 @@ public class ClusteredRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactor
     @Override
     public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
     {
-        return new ClusteredRowAwarePrimaryKeyFactory.RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
+        return new RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
     }
 
     @Override
     public PrimaryKey create(DecoratedKey partitionKey, Clustering<?> clustering)
     {
-        return new ClusteredRowAwarePrimaryKeyFactory.RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
+        return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
     }
 
     private class RowAwarePrimaryKey extends RowAwarePrimaryKeyFactory.RowAwarePrimaryKey
