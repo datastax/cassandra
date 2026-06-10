@@ -98,18 +98,18 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RawAware
         {
             MapWalker mapWalker = new MapWalker(map, map::exactRowIdOrInvertedCeiling);
 
-            mapWalker.assertRowIdForPK(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
-            mapWalker.assertRowIdForPK(mapWalker.exactFirstRow(), 0, "exact first row");
+            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects the inverted first");
+            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
 
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck1(), mapWalker.getId11(), "exact pk=1, ck=1");
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck2(), mapWalker.getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck3(), mapWalker.getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck10(), mapWalker.getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
-            mapWalker.assertRowIdForPK(mapWalker.betweenPk1Ck3AndCk10(), -mapWalker.getId110() - 1, "between pk=1 ck=3 and ck=10 expects inverted ck=10");
-            mapWalker.assertRowIdForPK(mapWalker.afterLastCkInPk1(), -(mapWalker.getId110() + 1) - 1, "after last ck in pk=1 expects inverted next partition first row");
+            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getId11(), "exact pk=1, ck=1");
+            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            mapWalker.assertResult(mapWalker.exactPk1Ck10(), mapWalker.getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
+            mapWalker.assertResult(mapWalker.betweenPk1Ck3AndCk10(), -mapWalker.getId110() - 1, "between pk=1 ck=3 and ck=10 expects inverted ck=10");
+            mapWalker.assertResult(mapWalker.afterLastCkInPk1(), -(mapWalker.getId110() + 1) - 1, "after last ck in pk=1 expects inverted next partition first row");
 
-            mapWalker.assertRowIdForPK(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertRowIdForPK(mapWalker.afterLastToken(), Long.MIN_VALUE, "after last expects out of range");
+            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
+            mapWalker.assertResult(mapWalker.afterLastToken(), Long.MIN_VALUE, "after last expects out of range");
         }
     }
 
@@ -121,18 +121,18 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RawAware
         {
             MapWalker mapWalker = new MapWalker(map, map::ceiling);
 
-            mapWalker.assertRowIdForPK(mapWalker.beforeFirst(), 0, "before first expects the first");
-            mapWalker.assertRowIdForPK(mapWalker.exactFirstRow(), 0, "exact first row");
+            mapWalker.assertResult(mapWalker.beforeFirst(), 0, "before first expects the first");
+            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
 
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck1(), mapWalker.getId11(), "exact pk=1, ck=1");
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck2(), mapWalker.getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck3(), mapWalker.getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck10(), mapWalker.getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
-            mapWalker.assertRowIdForPK(mapWalker.betweenPk1Ck3AndCk10(), mapWalker.getId110(), "between pk=1 ck=3 and ck=10 expects ck=10");
-            mapWalker.assertRowIdForPK(mapWalker.afterLastCkInPk1(), mapWalker.getId110() + 1, "after last ck in pk=1 expects next partition first row");
+            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getId11(), "exact pk=1, ck=1");
+            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            mapWalker.assertResult(mapWalker.exactPk1Ck10(), mapWalker.getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
+            mapWalker.assertResult(mapWalker.betweenPk1Ck3AndCk10(), mapWalker.getId110(), "between pk=1 ck=3 and ck=10 expects ck=10");
+            mapWalker.assertResult(mapWalker.afterLastCkInPk1(), mapWalker.getId110() + 1, "after last ck in pk=1 expects next partition first row");
 
-            mapWalker.assertRowIdForPK(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertRowIdForPK(mapWalker.afterLastToken(), -1, "after last expects out of range");
+            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
+            mapWalker.assertResult(mapWalker.afterLastToken(), -1, "after last expects out of range");
         }
     }
 
@@ -144,19 +144,19 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RawAware
         {
             MapWalker mapWalker = new MapWalker(map, map::floor);
 
-            mapWalker.assertRowIdForPK(mapWalker.beforeFirst(), -1, "before first expects out of range");
-            mapWalker.assertRowIdForPK(mapWalker.exactFirstRow(), 0, "exact first row");
+            mapWalker.assertResult(mapWalker.beforeFirst(), -1, "before first expects out of range");
+            mapWalker.assertResult(mapWalker.exactFirstRow(), 0, "exact first row");
 
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck1(), mapWalker.getId11(), "exact pk=1, ck=1");
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck2(), mapWalker.getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck3(), mapWalker.getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
-            mapWalker.assertRowIdForPK(mapWalker.exactPk1Ck10(), mapWalker.getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
-            mapWalker.assertRowIdForPK(mapWalker.betweenPk1Ck3AndCk10(), mapWalker.getId13(), "between pk=1 ck=3 and ck=10 expects ck=3");
-            mapWalker.assertRowIdForPK(mapWalker.afterLastCkInPk1(), mapWalker.getId110(), "after last ck in pk=1 expects last ck in pk=1");
+            mapWalker.assertResult(mapWalker.exactPk1Ck1(), mapWalker.getId11(), "exact pk=1, ck=1");
+            mapWalker.assertResult(mapWalker.exactPk1Ck2(), mapWalker.getId11() + 1, "pk=1, ck=2 expects next after pk=1, ck=1");
+            mapWalker.assertResult(mapWalker.exactPk1Ck3(), mapWalker.getId12() + 1, "exact pk=1, ck=3 expects next after pk=1, ck=2");
+            mapWalker.assertResult(mapWalker.exactPk1Ck10(), mapWalker.getId13() + 1, "exact pk=1, ck=10 expects next after pk=1, ck=3");
+            mapWalker.assertResult(mapWalker.betweenPk1Ck3AndCk10(), mapWalker.getId13(), "between pk=1 ck=3 and ck=10 expects ck=3");
+            mapWalker.assertResult(mapWalker.afterLastCkInPk1(), mapWalker.getId110(), "after last ck in pk=1 expects last ck in pk=1");
 
-            mapWalker.assertRowIdForPK(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
-            mapWalker.assertRowIdForPK(mapWalker.afterLastRow(), mapWalker.count - 1, "after last row in last partition expects the last");
-            mapWalker.assertRowIdForPK(mapWalker.afterLastToken(), mapWalker.count - 1, "after last expects the last");
+            mapWalker.assertResult(mapWalker.exactLastRow(), mapWalker.count - 1, "exact last row");
+            mapWalker.assertResult(mapWalker.afterLastRow(), mapWalker.count - 1, "after last row in last partition expects the last");
+            mapWalker.assertResult(mapWalker.afterLastToken(), mapWalker.count - 1, "after last expects the last");
         }
     }
 
@@ -273,7 +273,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RawAware
             return buildPk(partitioner, 1, Integer.MAX_VALUE);
         }
 
-        void assertRowIdForPK(PrimaryKey pk, long expected, String expectationMessage)
+        void assertResult(PrimaryKey pk, long expected, String expectationMessage)
         {
             long actual = rowIdFromPKMethod.apply(pk);
             assertEquals(expectationMessage, expected, actual);
