@@ -100,56 +100,66 @@ public abstract class SortedTableWriter extends SSTableWriter
         super(descriptor, components, lifecycleNewTracker, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
         lifecycleNewTracker.trackNew(this); // must track before any files are created
 
-        dataFile = constructDataFileWriter(descriptor, metadata, metadataCollector, lifecycleNewTracker, writerOption);
+        dataFile = constructDataFileWriter(descriptor, metadata, metadataCollector, lifecycleNewTracker, writerOption, extractDigestComponent(components));
         dbuilder = SSTableReaderBuilder.defaultDataHandleBuilder(descriptor, ZeroCopyMetadata.EMPTY).compressed(compression);
         isInternalKeyspace = SchemaConstants.isInternalKeyspace(metadata.keyspace);
     }
 
-    private static ChecksumType getChecksumType()
+    protected static Component getDigestComponent()
     {
         Config.SSTableDigestType ssTableDigestType = DatabaseDescriptor.getSSTableDigestType();
         switch (ssTableDigestType)
         {
             case CRC32:
-                return ChecksumType.CRC32;
+                return Component.DIGEST;
             case CRC32C:
-                return ChecksumType.CRC32C;
+                return Component.DIGEST_CRC32C;
             case CRC64NVME:
-                return ChecksumType.CRC64NVME;
+                return Component.DIGEST_CRC64NVME;
             default:
                 throw new IllegalStateException("Unexpected sstable digest type: " + ssTableDigestType);
         }
     }
 
-    private static File getDigestFile(Descriptor descriptor, ChecksumType checksumType)
+    private static Component extractDigestComponent(Set<Component> components)
     {
-        switch (checksumType)
-        {
-            case CRC32:
-                return descriptor.fileFor(Component.DIGEST);
-            case CRC32C:
-                return descriptor.fileFor(Component.DIGEST_CRC32C);
-            case CRC64NVME:
-                return descriptor.fileFor(Component.DIGEST_CRC64NVME);
-            default:
-                throw new IllegalStateException("Unexpected checksum type for digest file: " + checksumType);
-        }
+        if (components.contains(Component.DIGEST))
+            return Component.DIGEST;
+        if (components.contains(Component.DIGEST_CRC32C))
+            return Component.DIGEST_CRC32C;
+        if (components.contains(Component.DIGEST_CRC64NVME))
+            return Component.DIGEST_CRC64NVME;
+        throw new IllegalStateException("Missing digest component for sstable: " + components);
+    }
+
+    private static ChecksumType getChecksumType(Component digestComponent)
+    {
+        if (digestComponent.equals(Component.DIGEST))
+            return ChecksumType.CRC32;
+        if (digestComponent.equals(Component.DIGEST_CRC32C))
+            return ChecksumType.CRC32C;
+        if (digestComponent.equals(Component.DIGEST_CRC64NVME))
+            return ChecksumType.CRC64NVME;
+        throw new IllegalStateException("Unexpected digest component: " + digestComponent);
     }
 
     protected static SequentialWriter constructDataFileWriter(Descriptor descriptor,
                                                               TableMetadataRef metadata,
                                                               MetadataCollector metadataCollector,
                                                               LifecycleNewTracker lifecycleNewTracker,
-                                                              SequentialWriterOption writerOption)
+                                                              SequentialWriterOption writerOption,
+                                                              Component digestComponent)
     {
-        ChecksumType checksumType = getChecksumType();
+        File dataFile = descriptor.fileFor(Component.DATA);
+        File digestFile = descriptor.fileFor(digestComponent);
+        ChecksumType checksumType = getChecksumType(digestComponent);
         if (metadata.getLocal().params.compression.isEnabled())
         {
             final CompressionParams compressionParams = compressionFor(lifecycleNewTracker.opType(), metadata);
 
-            return new CompressedSequentialWriter(descriptor.fileFor(Component.DATA),
+            return new CompressedSequentialWriter(dataFile,
                                                   descriptor.fileFor(Component.COMPRESSION_INFO),
-                                                  getDigestFile(descriptor, checksumType),
+                                                  digestFile,
                                                   checksumType,
                                                   writerOption,
                                                   compressionParams,
@@ -157,9 +167,9 @@ public abstract class SortedTableWriter extends SSTableWriter
         }
         else
         {
-            return new ChecksummedSequentialWriter(descriptor.fileFor(Component.DATA),
+            return new ChecksummedSequentialWriter(dataFile,
                                                    descriptor.fileFor(Component.CRC),
-                                                   getDigestFile(descriptor, checksumType),
+                                                   digestFile,
                                                    checksumType,
                                                    writerOption);
         }
