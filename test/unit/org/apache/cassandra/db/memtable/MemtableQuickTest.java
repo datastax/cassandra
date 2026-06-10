@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterators;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -36,10 +37,16 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.Refs;
 
@@ -157,6 +164,45 @@ public class MemtableQuickTest extends CQLTester
         assertRowCount(result, rowsPerPartition * (partitions - deletedPartitions) - deletedRows);
 
         Memtable memtable = cfs.getCurrentMemtable();
+
+        // Check individual partitions are properly returned by getPartition
+        for (i = 0; i < limit; ++i)
+        {
+            Partition p = memtable.getPartition(partitionKey(cfs, i));
+            int rowCount = rowsPerPartition;
+            if (i >= deletedRowsStart && i < deletedRowsEnd)
+                --rowCount;
+            if (i >= deletedPartitionsStart && i < deletedPartitionsEnd)
+                rowCount = 0;
+
+            // rowCount and rows include deleted rows. Filter explicitly to get only the live data.
+            Assert.assertEquals(rowCount, Iterators.size(UnfilteredRowIterators.filter(p.unfilteredIterator(), FBUtilities.nowInSeconds())));
+        }
+
+        // Check cells are properly returned by getCellByKey
+        ColumnMetadata column = cfs.metadata().regularColumns().getSimple(0);
+        for (i = 0; i < limit; ++i)
+        {
+            int start = 0;
+            if (i >= deletedRowsStart && i < deletedRowsEnd)
+                start = 1;
+            if (i >= deletedPartitionsStart && i < deletedPartitionsEnd)
+                start = rowsPerPartition;
+            DecoratedKey dk = partitionKey(cfs, i);
+
+            for (long j = -1; j <= rowsPerPartition; ++j)
+            {
+                var cell = memtable.getCellForKey(dk, cfs.getComparator().make(j), column);
+                if (j < start || j >= rowsPerPartition)
+                    Assert.assertNull(cell);
+                else
+                {
+                    Assert.assertNotNull(cell);
+                    Assert.assertEquals(i + j, LongType.instance.compose(cell.buffer()).longValue());
+                }
+            }
+        }
+
         Memtable.FlushablePartitionSet<?> flushSet = memtable.getFlushSet(null, null);
         Assert.assertEquals(partitions, flushSet.partitionCount());
         double expectedKeySize = partitions * 8;
@@ -196,5 +242,10 @@ public class MemtableQuickTest extends CQLTester
             }
             Assert.assertEquals((double) partitions, (double) totalPartitions, partitions * 0.1);
         }
+    }
+
+    private static DecoratedKey partitionKey(ColumnFamilyStore cfs, long i)
+    {
+        return cfs.getPartitioner().decorateKey(LongType.instance.decompose(i));
     }
 }

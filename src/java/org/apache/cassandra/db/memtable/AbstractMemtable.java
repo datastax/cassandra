@@ -28,10 +28,13 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -76,6 +79,18 @@ public abstract class AbstractMemtable implements Memtable
     }
 
     @Override
+    public Cell<?> getCellForKey(DecoratedKey partitionKey, Clustering<?> clustering, ColumnMetadata column)
+    {
+        var partition = getPartition(partitionKey);
+        if (partition == null)
+            return null;
+        var row = partition.getRow(clustering);
+        if (row == null)
+            return null;
+        return row.getCell(column);
+    }
+
+    @Override
     public long getLiveDataSize()
     {
         return liveDataSize.get();
@@ -110,18 +125,6 @@ public abstract class AbstractMemtable implements Memtable
         while (true)
         {
             long existing = minTracker.get();
-            if (existing <= newValue)
-                break;
-            if (minTracker.compareAndSet(existing, newValue))
-                break;
-        }
-    }
-
-    protected static void updateMin(AtomicInteger minTracker, int newValue)
-    {
-        while (true)
-        {
-            int existing = minTracker.get();
             if (existing <= newValue)
                 break;
             if (minTracker.compareAndSet(existing, newValue))
