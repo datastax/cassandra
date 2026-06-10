@@ -40,7 +40,7 @@ public class ComponentTest
         assertEquals(Component.Type.STATS, Component.Type.fromRepresentation("Statistics.db"));
         assertEquals(Component.Type.DIGEST, Component.Type.fromRepresentation("Digest.crc32"));
         assertEquals(Component.Type.DIGEST_CRC32C, Component.Type.fromRepresentation("Digest.crc32c"));
-        assertEquals(Component.Type.DIGEST_CRC64NMVE, Component.Type.fromRepresentation("Digest.crc64nvme"));
+        assertEquals(Component.Type.DIGEST_CRC64NVME, Component.Type.fromRepresentation("Digest.crc64nvme"));
         assertEquals(Component.Type.CRC, Component.Type.fromRepresentation("CRC.db"));
         assertEquals(Component.Type.SUMMARY, Component.Type.fromRepresentation("Summary.db"));
         assertEquals(Component.Type.TOC, Component.Type.fromRepresentation("TOC.txt"));
