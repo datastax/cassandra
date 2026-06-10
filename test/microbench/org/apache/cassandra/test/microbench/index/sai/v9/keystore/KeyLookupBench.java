@@ -30,7 +30,6 @@ import com.google.common.base.Stopwatch;
 import org.junit.Assert;
 
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.Clustering;
@@ -44,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v9.ClusteredRowAwarePrimaryKeyFactory;
+import org.apache.cassandra.index.sai.disk.v9.SSTableComponentsWriter;
 import org.apache.cassandra.index.sai.disk.v9.WidePrimaryKeyMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -129,8 +129,8 @@ public class KeyLookupBench
 
         indexDescriptor = IndexDescriptor.empty(descriptor, metadata.comparator);
 
-        CassandraRelevantProperties.SAI_KEY_STORE_PARTITION_BLOCK_SHIFT.setInt(partitionBlockShift);
-        CassandraRelevantProperties.SAI_KEY_STORE_CLUSTERING_BLOCK_SHIFT.setInt(clusteringBlockShift);
+        SSTableComponentsWriter.setPartitionBlockShift(partitionBlockShift);
+        SSTableComponentsWriter.setClusteringBlockShift(clusteringBlockShift);
         Assert.assertTrue("Version must be at least GA", Version.current(keyspaceName).onOrAfter(Version.GA));
         PerSSTableWriter writer = Version.current(keyspaceName).onDiskFormat().newPerSSTableWriter(indexDescriptor);
         ClusteredRowAwarePrimaryKeyFactory factory = new ClusteredRowAwarePrimaryKeyFactory(metadata.comparator);

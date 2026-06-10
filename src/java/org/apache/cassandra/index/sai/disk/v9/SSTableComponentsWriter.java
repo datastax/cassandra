@@ -20,11 +20,11 @@ package org.apache.cassandra.index.sai.disk.v9;
 
 import java.io.IOException;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -39,6 +39,32 @@ import org.apache.lucene.util.IOUtils;
 public class SSTableComponentsWriter implements PerSSTableWriter
 {
     protected static final Logger logger = LoggerFactory.getLogger(SSTableComponentsWriter.class);
+
+    /**
+     * Default block shift value for partition keys.
+     * Used to determine the block size and block mask for the partition key store writer.
+     * The blocks should not be too small and not be too large.
+     * See {@link KeyStoreWriter} for details on how this affects index size and performance.
+     */
+    private static final int DEFAULT_PARTITION_BLOCK_SHIFT = 4;
+
+    /**
+     * Default block shift value for clustering keys.
+     * Used to determine the block size and block mask for the clustering key store writer.
+     * The blocks should not be too small and not be too large.
+     * See {@link KeyStoreWriter} for details on how this affects index size and performance.
+     */
+    private static final int DEFAULT_CLUSTERING_BLOCK_SHIFT = 4;
+
+    /**
+     * Configurable partition block shift. Can be set for testing/benchmarking purposes.
+     */
+    private static volatile int partitionBlockShift = DEFAULT_PARTITION_BLOCK_SHIFT;
+
+    /**
+     * Configurable clustering block shift. Can be set for testing/benchmarking purposes.
+     */
+    private static volatile int clusteringBlockShift = DEFAULT_CLUSTERING_BLOCK_SHIFT;
 
     private final IndexComponents.ForWrite perSSTableComponents;
     private final MetadataWriter metadataWriter;
@@ -65,7 +91,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
         this.partitionKeysWriter = new KeyStoreWriter(perSSTableComponents.addOrGet(IndexComponentType.PARTITION_KEY_BLOCKS),
                                                       metadataWriter,
                                                       partitionKeyBlockOffsetWriter,
-                                                      CassandraRelevantProperties.SAI_KEY_STORE_PARTITION_BLOCK_SHIFT.getInt(),
+                                                      partitionBlockShift,
                                                       false);
         if (perSSTableComponents.hasClustering())
         {
@@ -73,13 +99,35 @@ public class SSTableComponentsWriter implements PerSSTableWriter
             this.clusteringKeysWriter = new KeyStoreWriter(perSSTableComponents.addOrGet(IndexComponentType.CLUSTERING_KEY_BLOCKS),
                                                            metadataWriter,
                                                            clusteringKeyBlockOffsetWriter,
-                                                           CassandraRelevantProperties.SAI_KEY_STORE_CLUSTERING_BLOCK_SHIFT.getInt(),
+                                                           clusteringBlockShift,
                                                            true);
         }
         else
         {
             this.clusteringKeysWriter = null;
         }
+    }
+
+    /**
+     * Sets the partition block shift value. Primarily for testing and benchmarking.
+     *
+     * @param shift the block shift value
+     */
+    @VisibleForTesting
+    public static void setPartitionBlockShift(int shift)
+    {
+        partitionBlockShift = shift;
+    }
+
+    /**
+     * Sets the clustering block shift value. Primarily for testing and benchmarking.
+     *
+     * @param shift the block shift value
+     */
+    @VisibleForTesting
+    public static void setClusteringBlockShift(int shift)
+    {
+        clusteringBlockShift = shift;
     }
 
     @Override
