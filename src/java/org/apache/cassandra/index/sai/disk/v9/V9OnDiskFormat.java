@@ -45,8 +45,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
  */
 public class V9OnDiskFormat extends V8OnDiskFormat
 {
-    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-
     @VisibleForTesting
     protected static final Set<IndexComponentType> SKINNY_PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
                                                                                               IndexComponentType.GROUP_META,
