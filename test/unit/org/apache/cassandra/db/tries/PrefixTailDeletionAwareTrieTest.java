@@ -22,16 +22,20 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.NavigableMap;
-
+import java.util.function.BiConsumer;
 import javax.annotation.Nonnull;
 
 import com.google.common.base.Predicates;
+import org.junit.Test;
 
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.checkerframework.checker.nullness.qual.NonNull;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
+import static org.apache.cassandra.db.tries.TrieUtil.directComparable;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
+import static org.junit.Assert.assertEquals;
 
 public class PrefixTailDeletionAwareTrieTest
 extends PrefixTailTestBase<InMemoryDeletionAwareTrie<Object, TestRangeState>,
@@ -183,5 +187,113 @@ extends PrefixTailTestBase<InMemoryDeletionAwareTrie<Object, TestRangeState>,
 
                                    return ByteBufferUtil.bytes(rs.rightSide);
                                });
+    }
+
+    @Test
+    public void testPrefixedBySeparatelyDeletionsAtRoot() throws TrieSpaceExhaustedException
+    {
+        for (var prefix : Arrays.asList("a", "testd", "", "aaaa"))
+            testPrefixedBySeparatelyCases("", prefix);
+    }
+
+
+    @Test
+    public void testPrefixedBySeparatelyDeletionsBelowRoot() throws TrieSpaceExhaustedException
+    {
+        for (var delPrefix : Arrays.asList("a", "testd", "b", "aaaa"))
+            for (var prefix : Arrays.asList("a", "testd", "b", "aaaa", ""))
+                testPrefixedBySeparatelyCases(delPrefix, prefix);
+    }
+
+    private void testPrefixedBySeparatelyCases(String delPrefix, String prefix) throws TrieSpaceExhaustedException
+    {
+        System.out.println("delPrefix " + delPrefix + " prefix " + prefix);
+        testPrefixedBySeparately("a", "b", "c", delPrefix, prefix);
+        testPrefixedBySeparately("b", "a", "c", delPrefix, prefix);
+
+        testPrefixedBySeparately("a", "ab", "ac", delPrefix, prefix);
+        testPrefixedBySeparately("ab", "a", "a", delPrefix, prefix);
+
+        testPrefixedBySeparately("testd", "testdelbegin", "testdelend", delPrefix, prefix);
+        testPrefixedBySeparately("testdata", "testd", "testd", delPrefix, prefix);
+    }
+
+    void testPrefixedBySeparately(String dataKey, String delStart, String delEnd, String delBranchRoot, String testPrefix) throws TrieSpaceExhaustedException
+    {
+        TestRangeState deletion = TestRangeState.covering(5);
+        Integer data = Integer.valueOf(55);
+        InMemoryDeletionAwareTrie<Object, TestRangeState> source = makeTestDATrie(dataKey,
+                                                                                  delBranchRoot,
+                                                                                  delStart,
+                                                                                  delEnd,
+                                                                                  deletion,
+                                                                                  data);
+
+        var prefixed = source.prefixedBySeparately(directComparable(testPrefix), delBranchRoot.isEmpty());
+        // quick sanity check first
+        assertEquals(data, prefixed.get(directComparable(testPrefix + dataKey)));
+        assertEquals(deletion, prefixed.applicableDeletion(directComparable(testPrefix + delBranchRoot + delStart)).succedingState(Direction.FORWARD));
+        assertEquals(deletion, prefixed.applicableDeletion(directComparable(testPrefix + delBranchRoot + delEnd)).succedingState(Direction.FORWARD));
+
+
+        InMemoryDeletionAwareTrie<Object, TestRangeState> expected = makeTestDATrie(testPrefix + dataKey,
+                                                                                    "",
+                                                                                    testPrefix + delBranchRoot + delStart,
+                                                                                    testPrefix + delBranchRoot + delEnd,
+                                                                                    deletion,
+                                                                                    data);
+//        System.out.println("Source\n" + source.dump());
+//        System.out.println("Expected\n" + expected.dump());
+//        System.out.println("Prefixed FORWARD\n" + prefixed.dump());
+//        System.out.println("Prefixed REVERSE\n" + prefixed.process(Direction.REVERSE, new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+
+        BiConsumer<DeletionAwareTrie<Object, TestRangeState>, DeletionAwareTrie<Object, TestRangeState>>
+            verifier = delBranchRoot.isEmpty() ? TrieUtil::assertTriesEqual : TrieUtil::assertTrieContentEqual;
+
+        verifier.accept(expected, prefixed);
+
+        for (var prefix : Arrays.asList(testPrefix, "", "a", "b", "test", dataKey, delBranchRoot, testPrefix + delBranchRoot))
+        {
+            Preencoded prefixKey = directComparable(prefix);
+            for (boolean includeCovering : Arrays.asList(false, true))
+                verifier.accept(expected.tailTrie(prefixKey, includeCovering), prefixed.tailTrie(prefixKey, includeCovering));
+            // Make sure prefixedBySeparately does not return the original source's deletion branch
+            // after taking tailCursor at some position below the root (tailTrie above does not check for deletion
+            // branches when it sees a covering one; use descendAlong to explicitly skip below the deletion branch at
+            // the root).
+            verifier.accept(descendAlongTail(expected, prefixKey), descendAlongTail(prefixed, prefixKey));
+        }
+
+    }
+
+    private <T, D extends RangeState<D>> DeletionAwareTrie<T, D> descendAlongTail(DeletionAwareTrie<T, D> trie, ByteComparable key)
+    {
+        DeletionAwareCursor<T, D> c = trie.cursor(Direction.FORWARD);
+        if (c.descendAlong(key.asComparableBytes(c.byteComparableVersion())))
+            return c::tailCursor;
+        else
+            return null;
+
+    }
+
+    private static @NonNull InMemoryDeletionAwareTrie<Object, TestRangeState> makeTestDATrie(String dataKey, String delBranchRoot, String delStart, String delEnd, TestRangeState deletion, Integer data) throws TrieSpaceExhaustedException
+    {
+        InMemoryDeletionAwareTrie<Object, TestRangeState> source = InMemoryDeletionAwareTrie.shortLived(VERSION);
+        var mutator = source.mutator((a, b) -> b,
+                                     TestRangeState::upsert,
+                                     (v, d) -> v,
+                                     (d, v) -> v,
+                                     true,
+                                     Predicates.alwaysFalse());
+
+        mutator.apply(DeletionAwareTrie.deletedRange(directComparable(delBranchRoot),
+                                                     directComparable(delStart),
+                                                     true,
+                                                     directComparable(delEnd),
+                                                     true,
+                                                     VERSION,
+                                                     deletion));
+        source.putRecursive(directComparable(dataKey), data, (a, b) -> b);
+        return source;
     }
 }

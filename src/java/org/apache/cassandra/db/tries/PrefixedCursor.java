@@ -247,11 +247,12 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
 
 
     static class DeletionAwareSeparately<T, D extends RangeState<D>>
-    extends DeletionAware<T, D>
+    extends PrefixedCursor<T, Cursor<T>>
+    implements DeletionAwareCursor<T, D>
     {
         final RangeCursor<D> deletionBranch;
 
-        DeletionAwareSeparately(ByteComparable prefix, DeletionAwareCursor<T, D> contentBranch, RangeCursor<D> deletionBranch)
+        DeletionAwareSeparately(ByteComparable prefix, Cursor<T> contentBranch, RangeCursor<D> deletionBranch)
         {
             super(prefix, contentBranch);
             this.deletionBranch = deletionBranch != null ? new PrefixedCursor.Range<>(prefix, deletionBranch) : null;
@@ -259,8 +260,14 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
 
         DeletionAwareSeparately(DeletionAwareSeparately<T, D> copyFrom, Direction direction)
         {
-            super(copyFrom, direction);
-            this.deletionBranch = copyFrom.deletionBranch; // no need to take tailCursor as we do that when we return it
+            super(copyFrom.nextPrefixByte,
+                  copyFrom.prefixDone() ? null
+                                        : copyFrom.duplicateSource(),
+                  copyFrom.source.tailCursor(direction));
+
+            this.deletionBranch = Cursor.isRootPosition(copyFrom.encodedPosition())
+                                  ? copyFrom.deletionBranch // no need to take tailCursor as we do that when we return it
+                                  : null;
         }
 
         @Override
@@ -274,10 +281,9 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         @Override
         public DeletionAwareCursor<T, D> tailCursor(Direction direction)
         {
-            if (Cursor.isRootPosition(encodedPosition()))
-                return new DeletionAwareSeparately<>(this, direction);
-            else
-                return super.tailCursor(direction);
+            // Always wrap, to promote live path to deletion-aware if it is not, and to make sure no deletion path is
+            // presented, if it already is.
+            return new DeletionAwareSeparately<>(this, direction);
         }
     }
 }
