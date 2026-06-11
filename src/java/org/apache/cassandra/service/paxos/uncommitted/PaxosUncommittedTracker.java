@@ -159,7 +159,7 @@ public class PaxosUncommittedTracker
             return;
 
         Map<TableId, UncommittedTableData.FlushWriter> flushWriters = new HashMap<>();
-        try (OpOrder.Group protectData = paxos.readOrdering().start();
+        try (OpOrder.Group protectData = paxos != null ? paxos.readOrdering().start() : null;
              CloseableIterator<PaxosKeyState> iterator = updateSupplier.flushIterator(paxos))
         {
             while (iterator.hasNext())
