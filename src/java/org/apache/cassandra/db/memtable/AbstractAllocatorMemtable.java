@@ -142,22 +142,6 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         return allocator;
     }
 
-    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
-    {
-        int total = 0;
-        for (var iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
-        {
-            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
-            {
-                Unfiltered uRow = it.next();
-                if (uRow.isRow())
-                    total++;
-            }
-        }
-
-        return total;
-    }
-
     @Override
     public long getEstimatedAverageRowSize()
     {
@@ -237,7 +221,16 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         liveDataSize.addAndGet(1024L * 1024 * 1024 * 1024 * 1024);
     }
 
-@Override
+    /**
+     * For testing only. Overwrite every buffer that this memtable releases on discard.
+     */
+    @VisibleForTesting
+    public void overwriteAllData()
+    {
+        allocator.overwriteAllData();
+    }
+
+    @Override
     public void addMemoryUsageTo(MemoryUsage stats)
     {
         stats.ownershipRatioOnHeap += getAllocator().onHeap().ownershipRatio();

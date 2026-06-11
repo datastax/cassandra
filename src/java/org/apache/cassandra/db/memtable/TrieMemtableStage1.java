@@ -280,22 +280,6 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         return shards.length;
     }
 
-    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
-    {
-        int total = 0;
-        for (MemtableUnfilteredPartitionIterator iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
-        {
-            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
-            {
-                Unfiltered uRow = it.next();
-                if (uRow.isRow())
-                    total++;
-            }
-        }
-
-        return total;
-    }
-
     @Override
     public UnfilteredRowIterator rowIterator(DecoratedKey key, Slices slices, ColumnFilter columnFilter, boolean reversed, SSTableReadsListener listener)
     {
