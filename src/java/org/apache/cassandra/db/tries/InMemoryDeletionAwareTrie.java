@@ -407,36 +407,37 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
             // propagate up.
             // We need to walk both the deletion-aware/data trie, as well as the deletion branch being built, so that
             // the existing deletion branch mappings can be removed.
+            // The process must be atomic to make sure readers can't lose a deletion branch that has already been added,
+            // thus we force all modifications to `state` to be done with force-copying, which will also result in
+            // copying the leading node if anything was modified, ensuring the original is still available regardless
+            // how the caller sets their force-copy depth.
             InMemoryRangeTrie.ApplyState<D> deletionState = deletionMutator.state;
             deletionState.start(NONE);
-            int initialDepth = state.currentDepth;
-
-            int depth = state.currentDepth;
+            final int initialDepth = state.currentDepth;
+            final int targetForcedCopyDepth = Integer.MAX_VALUE; // never force-copy in the new branch, these are completely new nodes
+            final int sourceForcedCopyDepth = initialDepth; // always force-copy in the source so that hoisting can be atomic
             while (true)
             {
-                if (depth < forcedCopyDepth)
-                    forcedCopyDepth = needsForcedCopy.test(this) ? depth : Integer.MAX_VALUE;
-
                 int existingAlternateBranch = state.alternateBranch();
                 if (existingAlternateBranch != NONE)
                 {
-                    deletionState.attachBranchAndMoveToParentState(existingAlternateBranch, forcedCopyDepth);
+                    deletionState.attachBranchAndMoveToParentState(existingAlternateBranch, targetForcedCopyDepth);
                     // Drop the existing alternate branch from the main state and ascend.
                     // The normal applyContent() method uses alternate branch value of NONE.
-                    state.attachAndMoveToParentState(forcedCopyDepth);
+                    state.attachAndMoveToParentState(sourceForcedCopyDepth);
                 }
 
-                if (!state.advanceToNextExisting(forcedCopyDepth, initialDepth))
+                if (!state.advanceToNextExisting(sourceForcedCopyDepth, initialDepth))
                     break;
-                depth = state.currentDepth;
-                deletionState.advanceTo(depth - initialDepth, state.incomingTransition(), forcedCopyDepth - initialDepth);
+                int depth = state.currentDepth;
+                deletionState.advanceTo(depth - initialDepth, state.incomingTransition(), targetForcedCopyDepth);
             }
             if (deletionState.currentDepth > 0)
-                deletionState.advanceTo(-1, -1, forcedCopyDepth - initialDepth);
+                deletionState.advanceTo(-1, -1, targetForcedCopyDepth);
 
             // Make sure the walks over the data branch that follow use the updated branch.
             state.prepareToWalkBranchAgain();
-            return deletionState.applyContent(forcedCopyDepth >= initialDepth);
+            return deletionState.applyContent(false);
         }
 
         /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
