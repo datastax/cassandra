@@ -28,7 +28,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,6 +40,8 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -203,45 +204,75 @@ public class MemtableQuickTest extends CQLTester
             }
         }
 
-        Memtable.FlushablePartitionSet<?> flushSet = memtable.getFlushSet(null, null);
-        Assert.assertEquals(partitions, flushSet.partitionCount());
-        double expectedKeySize = partitions * 8;
-        // expected key size must be within 5% of actual
-        Assert.assertEquals(expectedKeySize, flushSet.partitionKeysSize(), expectedKeySize * 0.05);
-
-        Util.flush(cfs);
-
-        logger.info("Selecting *");
-        result = execute("SELECT * FROM " + table);
-        assertRowCount(result, rowsPerPartition * (partitions - deletedPartitions) - deletedRows);
-
-        try (Refs<SSTableReader> refs = new Refs())
+        Cell<?> cell, cellAfterFlush;
+        Row row, rowAfterFlush;
+        // Make sure flush can succeed while someone holds read order
+        try (var protectData = cfs.readOrdering.start())
         {
-            Collection<SSTableReader> sstables = cfs.getLiveSSTables();
-            if (sstables.isEmpty()) // persistent memtables won't flush
+            cell = memtable.getCellForKey(partitionKey(cfs, 3L), cfs.getComparator().make(2L), column);
+            Assert.assertEquals(5, LongType.instance.compose(cell.buffer()).longValue());
+            row = memtable.getPartition(partitionKey(cfs, 9L)).getRow(cfs.getComparator().make(0L));
+            Assert.assertEquals(9, LongType.instance.compose(row.getCell(column).buffer()).longValue());
+
+            Memtable.FlushablePartitionSet<?> flushSet = memtable.getFlushSet(null, null);
+            Assert.assertEquals(partitions, flushSet.partitionCount());
+            double expectedKeySize = partitions * 8;
+            // expected key size must be within 5% of actual
+            Assert.assertEquals(expectedKeySize, flushSet.partitionKeysSize(), expectedKeySize * 0.05);
+
+            Util.flush(cfs);
+
+            logger.info("Selecting *");
+            result = execute("SELECT * FROM " + table);
+            assertRowCount(result, rowsPerPartition * (partitions - deletedPartitions) - deletedRows);
+
+            try (Refs<SSTableReader> refs = new Refs())
             {
-                assert cfs.streamFromMemtable();
-                cfs.writeAndAddMemtableRanges(null,
-                                              () -> ImmutableList.of(new Range(Util.testPartitioner().getMinimumToken().minKeyBound(),
-                                                                               Util.testPartitioner().getMinimumToken().minKeyBound())),
-                                              refs);
-                sstables = refs;
-                Assert.assertTrue(cfs.getLiveSSTables().isEmpty());
+                Collection<SSTableReader> sstables = cfs.getLiveSSTables();
+                if (sstables.isEmpty()) // persistent memtables won't flush
+                {
+                    assert cfs.streamFromMemtable();
+                    cfs.writeAndAddMemtableRanges(null,
+                                                  () -> ImmutableList.of(new Range(Util.testPartitioner().getMinimumToken().minKeyBound(),
+                                                                                   Util.testPartitioner().getMinimumToken().minKeyBound())),
+                                                  refs);
+                    sstables = refs;
+                    Assert.assertTrue(cfs.getLiveSSTables().isEmpty());
+                }
+
+                // make sure the row counts are correct in both the metadata as well as the cardinality estimator
+                // (see CASSANDRA-18123)
+                long totalPartitions = 0;
+                for (SSTableReader sstable : sstables)
+                {
+                    long sstableKeys = sstable.estimatedKeys();
+                    long cardinality = SSTableReader.getApproximateKeyCount(ImmutableList.of(sstable));
+                    // should be within 10% of each other
+                    Assert.assertEquals((double) sstableKeys, (double) cardinality, sstableKeys * 0.1);
+                    totalPartitions += sstableKeys;
+                }
+                Assert.assertEquals((double) partitions, (double) totalPartitions, partitions * 0.1);
             }
 
-            // make sure the row counts are correct in both the metadata as well as the cardinality estimator
-            // (see CASSANDRA-18123)
-            long totalPartitions = 0;
-            for (SSTableReader sstable : sstables)
-            {
-                long sstableKeys = sstable.estimatedKeys();
-                long cardinality = SSTableReader.getApproximateKeyCount(ImmutableList.of(sstable));
-                // should be within 10% of each other
-                Assert.assertEquals((double) sstableKeys, (double) cardinality, sstableKeys * 0.1);
-                totalPartitions += sstableKeys;
-            }
-            Assert.assertEquals((double) partitions, (double) totalPartitions, partitions * 0.1);
+            // Make sure cell value survived the flush.
+            Assert.assertEquals(5, LongType.instance.compose(cell.buffer()).longValue());
+            Assert.assertEquals(9, LongType.instance.compose(row.getCell(column).buffer()).longValue());
+
+            cellAfterFlush = memtable.getCellForKey(partitionKey(cfs, 7L), cfs.getComparator().make(1L), column);
+            Assert.assertEquals(8, LongType.instance.compose(cellAfterFlush.buffer()).longValue());
+            rowAfterFlush = memtable.getPartition(partitionKey(cfs, 1L)).getRow(cfs.getComparator().make(3L));
+            Assert.assertEquals(4, LongType.instance.compose(rowAfterFlush.getCell(column).buffer()).longValue());
+
+            // Overwrite all data. Do this before we drop the opOrder to avoid races with normal cleanup.
+            ((AbstractAllocatorMemtable) memtable).overwriteAllData();
         }
+
+        // Make sure cell values are not overwritten when we dropped the oporder.
+        Assert.assertEquals(5, LongType.instance.compose(cell.buffer()).longValue());
+        Assert.assertEquals(8, LongType.instance.compose(cellAfterFlush.buffer()).longValue());
+
+        Assert.assertEquals(9, LongType.instance.compose(row.getCell(column).buffer()).longValue());
+        Assert.assertEquals(4, LongType.instance.compose(rowAfterFlush.getCell(column).buffer()).longValue());
     }
 
     private static DecoratedKey partitionKey(ColumnFamilyStore cfs, long i)
