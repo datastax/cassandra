@@ -1312,6 +1312,15 @@ public abstract class InMemoryReadTrie<T>
             currentNode = node;
             return nextPosition;
         }
+
+        /// Used for debugging, dumps a string representation of the current node.
+        String dumpCurrentNode()
+        {
+            if (currentFullNode == currentNode || isNull(currentNode))
+                return trie.dumpNode(currentFullNode);
+            else
+                return trie.dumpNode(currentFullNode) + "\n" + trie.dumpNode(currentNode);
+        }
     }
 
     static boolean isChainNode(int node)
