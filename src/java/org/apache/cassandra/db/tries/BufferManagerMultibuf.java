@@ -26,6 +26,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.db.tries.InMemoryReadTrie.CELL_SIZE;
@@ -272,6 +273,17 @@ public class BufferManagerMultibuf implements BufferManager
         {
             if (b != null)
                 FileUtils.clean(b.byteBuffer());
+        }
+    }
+
+    @Override
+    public void overwriteAllBuffers()
+    {
+        // also overwrite on-heap buffers to simulate overwrite by reuse
+        for (UnsafeBuffer b : buffers)
+        {
+            if (b != null)
+                ByteBufferUtil.overwriteWithRandomBytes(b.byteBuffer());
         }
     }
 

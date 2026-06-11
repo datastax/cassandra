@@ -58,7 +58,7 @@ import org.apache.cassandra.db.tries.TrieTailsIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
-import org.apache.cassandra.utils.memory.EnsureOnHeap;
+import org.apache.cassandra.utils.memory.HeapCloner;
 
 /// In-memory partition backed by a deletion-aware trie. The rows of the partition are values in the leaves of the trie,
 /// where the key to the row is only stored as the path to reach that leaf; static rows are also treated as a row with
@@ -172,11 +172,11 @@ public class TrieBackedPartition implements Partition
                                              DeletionAwareTrie<Object, TrieTombstoneMarker> trie,
                                              TableMetadata metadata,
                                              TableMetadata droppedColumnsSource,
-                                             EnsureOnHeap ensureOnHeap)
+                                             boolean copyToHeap)
     {
-        return ensureOnHeap == EnsureOnHeap.NOOP
-               ? new WithDroppedColumnsSource(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata, droppedColumnsSource)
-               : new WithEnsureOnHeap(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata, droppedColumnsSource, ensureOnHeap);
+        return copyToHeap
+               ? new WithCopyingToHeap(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata, droppedColumnsSource)
+               : new WithDroppedColumnsSource(partitionKey, columnMetadata, encodingStats, rowCountIncludingStatic, tombstoneCount, trie, metadata, droppedColumnsSource);
     }
 
     /// Implementation of an iterator over rows. Note that because the legacy containers store deleted rows as [Row]s
@@ -207,7 +207,7 @@ public class TrieBackedPartition implements Partition
         return new RowIterator(trie, direction);
     }
 
-    /// Conversion from row branch to [Row]. [WithEnsureOnHeap] overrides this to do the necessary copying
+    /// Conversion from row branch to [Row]. [WithCopyingToHeap] overrides this to do the necessary copying
     /// (hence the non-static method).
     Row toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> rowContent, Clustering<?> clustering)
     {
@@ -612,31 +612,27 @@ public class TrieBackedPartition implements Partition
     }
 
     /// A snapshot of the current [TrieBackedPartition] data, copied on heap when retrieved.
-    private static final class WithEnsureOnHeap extends WithDroppedColumnsSource
+    private static final class WithCopyingToHeap extends WithDroppedColumnsSource
     {
-        EnsureOnHeap ensureOnHeap;
-
-        public WithEnsureOnHeap(DecoratedKey partitionKey,
-                                RegularAndStaticColumns columns,
-                                EncodingStats stats,
-                                int rowCountIncludingStatic,
-                                int tombstoneCount,
-                                DeletionAwareTrie<Object, TrieTombstoneMarker> trie,
-                                TableMetadata metadata,
-                                TableMetadata droppedColumnsSource,
-                                EnsureOnHeap ensureOnHeap)
+        public WithCopyingToHeap(DecoratedKey partitionKey,
+                                 RegularAndStaticColumns columns,
+                                 EncodingStats stats,
+                                 int rowCountIncludingStatic,
+                                 int tombstoneCount,
+                                 DeletionAwareTrie<Object, TrieTombstoneMarker> trie,
+                                 TableMetadata metadata,
+                                 TableMetadata droppedColumnsSource)
         {
             super(partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata, droppedColumnsSource);
-            this.ensureOnHeap = ensureOnHeap;
         }
 
         @Override
         public Row toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> data, Clustering<?> clustering)
         {
             Row row = super.toRow(data, clustering);
-            if (row == null)
-                return null;
-            return ensureOnHeap.applyToRow(row);
+            if (row == null || row == Rows.EMPTY_STATIC_ROW)
+                return row;
+            return row.clone(HeapCloner.instance);
         }
     }
 

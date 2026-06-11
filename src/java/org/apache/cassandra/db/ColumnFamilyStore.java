@@ -2905,43 +2905,46 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         if (current.isClean())
             return null;
 
-        List<Memtable.FlushablePartitionSet<?>> dataSets = new ArrayList<>(ranges.size());
-        IntervalSet.Builder<CommitLogPosition> commitLogIntervals = new IntervalSet.Builder();
-        long keys = 0;
-        for (Range<PartitionPosition> range : ranges)
+        try (OpOrder.Group protectData = readOrdering.start())
         {
-            Memtable.FlushablePartitionSet<?> dataSet = current.getFlushSet(range.left, range.right);
-            dataSets.add(dataSet);
-            commitLogIntervals.add(dataSet.commitLogLowerBound(), dataSet.commitLogUpperBound());
-            keys += dataSet.partitionCount();
-        }
-        if (keys == 0)
-            return null;
+            List<Memtable.FlushablePartitionSet<?>> dataSets = new ArrayList<>(ranges.size());
+            IntervalSet.Builder<CommitLogPosition> commitLogIntervals = new IntervalSet.Builder();
+            long keys = 0;
+            for (Range<PartitionPosition> range : ranges)
+            {
+                Memtable.FlushablePartitionSet<?> dataSet = current.getFlushSet(range.left, range.right);
+                dataSets.add(dataSet);
+                commitLogIntervals.add(dataSet.commitLogLowerBound(), dataSet.commitLogUpperBound());
+                keys += dataSet.partitionCount();
+            }
+            if (keys == 0)
+                return null;
 
-        // TODO: Can we write directly to stream, skipping disk?
-        Memtable.FlushablePartitionSet<?> firstDataSet = dataSets.get(0);
-        SSTableMultiWriter writer = createSSTableMultiWriter(newSSTableDescriptor(directories.getDirectoryForNewSSTables()),
-                                                             keys,
-                                                             0,
-                                                             repairSessionID,
-                                                             false,
-                                                             commitLogIntervals.build(),
-                                                             new SerializationHeader(true,
-                                                                                     firstDataSet.metadata(),
-                                                                                     firstDataSet.columns(),
-                                                                                     firstDataSet.encodingStats()),
-                                                             DO_NOT_TRACK);
-        try
-        {
-            for (Memtable.FlushablePartitionSet<?> dataSet : dataSets)
-                new Flushing.FlushRunnable(dataSet, writer, metric, false).call();  // executes on this thread
+            // TODO: Can we write directly to stream, skipping disk?
+            Memtable.FlushablePartitionSet<?> firstDataSet = dataSets.get(0);
+            SSTableMultiWriter writer = createSSTableMultiWriter(newSSTableDescriptor(directories.getDirectoryForNewSSTables()),
+                                                                 keys,
+                                                                 0,
+                                                                 repairSessionID,
+                                                                 false,
+                                                                 commitLogIntervals.build(),
+                                                                 new SerializationHeader(true,
+                                                                                         firstDataSet.metadata(),
+                                                                                         firstDataSet.columns(),
+                                                                                         firstDataSet.encodingStats()),
+                                                                 DO_NOT_TRACK);
+            try
+            {
+                for (Memtable.FlushablePartitionSet<?> dataSet : dataSets)
+                    new Flushing.FlushRunnable(dataSet, writer, metric, false).call();  // executes on this thread
 
-            return writer;
-        }
-        catch (Error | RuntimeException t)
-        {
-            writer.abort(t);
-            throw t;
+                return writer;
+            }
+            catch (Error | RuntimeException t)
+            {
+                writer.abort(t);
+                throw t;
+            }
         }
     }
 
