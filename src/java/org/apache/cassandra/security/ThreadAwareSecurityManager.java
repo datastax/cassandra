@@ -83,10 +83,39 @@ public final class ThreadAwareSecurityManager extends SecurityManager
 
     private static volatile boolean installed;
 
+    private static int getJavaVersion()
+    {
+        String version = System.getProperty("java.version");
+        if (version.startsWith("1."))
+        {
+            version = version.substring(2, 3);
+        }
+        else
+        {
+            int dot = version.indexOf(".");
+            if (dot != -1)
+            {
+                version = version.substring(0, dot);
+            }
+        }
+        return Integer.parseInt(version);
+    }
+
+
     public static void install()
     {
         if (installed)
             return;
+
+        // Skip SecurityManager installation on JDK 22+ as it's terminally deprecated
+        // and causes ClassCircularityError in some classloader scenarios (e.g., Jetty 12 + JDK 22)
+        int javaVersion = getJavaVersion();
+        if (javaVersion >= 22)
+        {
+            logger.warn("Skipping ThreadAwareSecurityManager installation on JDK {}. SecurityManager is deprecated and removed in future JDK releases.", javaVersion);
+            installed = true; // Mark as installed to prevent re-entry
+            return;
+        }
 
         // this line is needed - we need to make sure AccessControlException is loaded before we install this SM
         // otherwise we may get into stackoverflow when javax.security is not allowed package, and ACE is tried to be
