@@ -21,8 +21,6 @@ package org.apache.cassandra.db.memtable;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -216,6 +214,12 @@ extends SkipListMemtable        // to test framework
     public void markExtraOffHeapUsed(long additionalSpace, OpOrder.Group opGroup)
     {
         // we don't track this
+    }
+
+    @Override
+    public void overwriteAllData()
+    {
+        // we don't support this as we don't flush
     }
 
     public static Factory factory(Map<String, String> furtherOptions)
