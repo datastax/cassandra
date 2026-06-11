@@ -192,7 +192,7 @@ public class GuardrailsOptions implements GuardrailsConfig
         enforceDefault("sasi_indexes_per_table_fail_threshold", v -> config.sasi_indexes_per_table_fail_threshold = v, NO_LIMIT, NO_LIMIT, NO_LIMIT);
 
         // For materialized views: use node-level flag to control feature blocking
-        enforceDefault("materialized_views_enabled", v -> config.materialized_views_enabled = v, false, false, false);
+        enforceDefault("materialized_views_enabled", v -> config.materialized_views_enabled = v, true, true, false);
         enforceDefault("materialized_views_per_table_fail_threshold", v -> config.materialized_views_per_table_fail_threshold = v, NO_LIMIT, 2, NO_LIMIT);
         enforceDefault("tables_warn_threshold", v -> config.tables_warn_threshold = v, -1, 100, 100);
         enforceDefault("tables_fail_threshold", v -> config.tables_fail_threshold = v, -1, 200, 200);

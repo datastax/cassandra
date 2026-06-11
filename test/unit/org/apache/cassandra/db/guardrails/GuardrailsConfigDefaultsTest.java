@@ -103,6 +103,7 @@ public class GuardrailsConfigDefaultsTest
 
             // Verify the defaults based on the profile
             verifyDefaultsForProfile(guardrails, profileType);
+            verifyFeatureDefaults(config, profileType);
         }
         finally
         {
@@ -126,6 +127,13 @@ public class GuardrailsConfigDefaultsTest
                 verifyHcdDefaults(guardrails);
                 break;
         }
+    }
+
+    private void verifyFeatureDefaults(Config config, ProfileType profileType)
+    {
+        assertEquals("secondary_indexes_enabled", profileType != ProfileType.HCD, config.secondary_indexes_enabled);
+        assertEquals("sasi_indexes_enabled", false, config.sasi_indexes_enabled);
+        assertEquals("materialized_views_enabled", profileType != ProfileType.HCD, config.materialized_views_enabled);
     }
 
     private void verifyNoProfileDefaults(GuardrailsOptions guardrails)
