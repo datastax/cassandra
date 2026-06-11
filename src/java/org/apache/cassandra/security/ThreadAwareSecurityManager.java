@@ -34,10 +34,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
-
-import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.JavaUtils;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.JAVA_VERSION;
 
 /**
  * Custom {@link SecurityManager} and {@link Policy} implementation that only performs access checks
@@ -83,25 +84,6 @@ public final class ThreadAwareSecurityManager extends SecurityManager
 
     private static volatile boolean installed;
 
-    private static int getJavaVersion()
-    {
-        String version = System.getProperty("java.version");
-        if (version.startsWith("1."))
-        {
-            version = version.substring(2, 3);
-        }
-        else
-        {
-            int dot = version.indexOf(".");
-            if (dot != -1)
-            {
-                version = version.substring(0, dot);
-            }
-        }
-        return Integer.parseInt(version);
-    }
-
-
     public static void install()
     {
         if (installed)
@@ -109,10 +91,13 @@ public final class ThreadAwareSecurityManager extends SecurityManager
 
         // Skip SecurityManager installation on JDK 22+ as it's terminally deprecated
         // and causes ClassCircularityError in some classloader scenarios (e.g., Jetty 12 + JDK 22)
-        int javaVersion = getJavaVersion();
-        if (javaVersion >= 22)
+        String javaVersion = JAVA_VERSION.getString();
+        if (!JavaUtils.supportsSecurityManager(javaVersion))
         {
-            logger.warn("Skipping ThreadAwareSecurityManager installation on JDK {}. SecurityManager is deprecated and removed in future JDK releases.", javaVersion);
+            logger.warn("Skipping ThreadAwareSecurityManager installation on Java {}. " +
+                       "SecurityManager is permanently disabled in JDK 22+ and will be removed in a future release. " +
+                       "User-defined functions (UDFs) cannot be sandboxed on this JDK version.",
+                       javaVersion);
             installed = true; // Mark as installed to prevent re-entry
             return;
         }

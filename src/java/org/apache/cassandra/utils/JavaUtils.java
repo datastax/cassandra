@@ -55,6 +55,26 @@ public final class JavaUtils
     }
 
     /**
+     * Checks if the specified JRE version supports the SecurityManager.
+     * SecurityManager is deprecated for removal in JDK 17 and permanently disabled in JDK 22+.
+     * @param jreVersion the JRE version
+     * @return {@code true} if the JRE version supports SecurityManager (< 22), {@code false} otherwise.
+     *         Returns {@code true} if the version cannot be determined (fail-safe behavior).
+     */
+    public static boolean supportsSecurityManager(String jreVersion)
+    {
+        try
+        {
+            return parseJavaVersion(jreVersion) < 22;
+        }
+        catch (Exception e)
+        {
+            logger.error("Some JRE information could not be retrieved for the JRE version: " + jreVersion, e);
+            return true;
+        }
+    }
+
+    /**
      * Parses an Oracle JRE Version to extract the java version number.
      * <p> The parsing rules are based on the following
      * <a href='http://www.oracle.com/technetwork/java/javase/versioning-naming-139433.html'>String Naming Convention</a> and
