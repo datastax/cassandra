@@ -92,7 +92,6 @@ import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.HeapCloner;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
@@ -237,6 +236,17 @@ public class TrieMemtable extends AbstractShardedMemtable
         {
             shard.allocator.setDiscarded();
             shard.data.discardBuffers();
+        }
+    }
+
+    @Override
+    public void overwriteAllData()
+    {
+        super.overwriteAllData();
+        for (MemtableShard shard : shards)
+        {
+            shard.allocator.overwriteAllData();
+            shard.data.overwriteAllBuffers();
         }
     }
 
@@ -393,7 +403,8 @@ public class TrieMemtable extends AbstractShardedMemtable
 
         return new MemtableUnfilteredPartitionIterator(actualMetadata,
                                                        metadata.get(),
-                                                       allocator.ensureOnHeap(),
+                                                       true, // even if our data is on-heap, we can recycle
+                                                             // cells as soon as the opOrder is closed
                                                        subMap,
                                                        columnFilter,
                                                        dataRange,
@@ -412,10 +423,11 @@ public class TrieMemtable extends AbstractShardedMemtable
     {
         int shardIndex = boundaries.getShardForKey(key);
         DeletionAwareTrie<Object, TrieTombstoneMarker> trie = shards[shardIndex].data.tailTrie(key);
-        return createPartition(metadata(), metadata.get(), allocator.ensureOnHeap(), key, trie);
+        // Always copy to heap. Even if our data is on-heap, we can recycle cells as soon as the opOrder is closed.
+        return createPartition(metadata(), metadata.get(), true, key, trie);
     }
 
-    private static TrieBackedPartition createPartition(TableMetadata metadata, TableMetadata droppedColumnsSource, EnsureOnHeap ensureOnHeap, DecoratedKey key, DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    private static TrieBackedPartition createPartition(TableMetadata metadata, TableMetadata droppedColumnsSource, boolean copyToHeap, DecoratedKey key, DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
         if (trie == null)
             return null;
@@ -433,7 +445,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                                           trie,
                                           metadata,
                                           droppedColumnsSource,
-                                          ensureOnHeap);
+                                          copyToHeap);
     }
 
 
@@ -614,7 +626,7 @@ public class TrieMemtable extends AbstractShardedMemtable
 
             public Iterator<TrieBackedPartition> iterator()
             {
-                return new PartitionIterator(toFlush, actualMetadata, metadata.get(), EnsureOnHeap.NOOP);
+                return new PartitionIterator(toFlush, actualMetadata, metadata.get(), false);
             }
 
             public long partitionKeysSize()
@@ -859,14 +871,14 @@ public class TrieMemtable extends AbstractShardedMemtable
     {
         final TableMetadata metadata;
         final TableMetadata droppedColumnsSource;
-        final EnsureOnHeap ensureOnHeap;
+        final boolean copyToHeap;
 
-        PartitionIterator(DeletionAwareTrie<Object, TrieTombstoneMarker> source, TableMetadata metadata, TableMetadata droppedColumnsSource, EnsureOnHeap ensureOnHeap)
+        PartitionIterator(DeletionAwareTrie<Object, TrieTombstoneMarker> source, TableMetadata metadata, TableMetadata droppedColumnsSource, boolean copyToHeap)
         {
             super(source, Direction.FORWARD, TrieBackedPartition.IS_PARTITION_BOUNDARY);
             this.metadata = metadata;
             this.droppedColumnsSource = droppedColumnsSource;
-            this.ensureOnHeap = ensureOnHeap;
+            this.copyToHeap = copyToHeap;
         }
 
         @Override
@@ -884,7 +896,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                                               tailTrie,
                                               metadata,
                                               droppedColumnsSource,
-                                              ensureOnHeap);
+                                              copyToHeap);
         }
     }
 
@@ -901,13 +913,13 @@ public class TrieMemtable extends AbstractShardedMemtable
 
         public MemtableUnfilteredPartitionIterator(TableMetadata metadata,
                                                    TableMetadata droppedColumnsSource,
-                                                   EnsureOnHeap ensureOnHeap,
+                                                   boolean copyToHeap,
                                                    DeletionAwareTrie<Object, TrieTombstoneMarker> source,
                                                    ColumnFilter columnFilter,
                                                    DataRange dataRange,
                                                    long minLocalDeletionTime)
         {
-            this.iter = new PartitionIterator(source, metadata, droppedColumnsSource, ensureOnHeap);
+            this.iter = new PartitionIterator(source, metadata, droppedColumnsSource, copyToHeap);
             this.metadata = metadata;
             this.columnFilter = columnFilter;
             this.dataRange = dataRange;

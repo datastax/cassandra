@@ -161,21 +161,6 @@ public class ShardedSkipListMemtable extends AbstractShardedMemtable
         return total;
     }
 
-    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
-    {
-        int total = 0;
-        for (var iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
-        {
-            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
-            {
-                Unfiltered uRow = it.next();
-                if (uRow.isRow())
-                    total++;
-            }
-        }
-        return total;
-    }
-
     /**
      * Returns the minTS if one available, otherwise NO_MIN_TIMESTAMP.
      *
