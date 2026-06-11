@@ -1761,6 +1761,16 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         contentManager.releaseReferencesUnsafe();
     }
 
+    /**
+     * For testing only. Overwrite every buffer that this trie releases on discard.
+     */
+    @VisibleForTesting
+    public void overwriteAllBuffers()
+    {
+        bufferManager.overwriteAllBuffers();
+    }
+
+
     /// Returns the number of values in the trie
     public int valuesCount()
     {

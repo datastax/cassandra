@@ -54,4 +54,10 @@ public interface BufferManager extends MemoryManager, BufferAccessor
     void discardBuffers();
 
     BufferType bufferType();
+
+    /**
+     * For testing only. Overwrite every buffer that this trie releases on discard.
+     */
+    @VisibleForTesting
+    void overwriteAllBuffers();
 }

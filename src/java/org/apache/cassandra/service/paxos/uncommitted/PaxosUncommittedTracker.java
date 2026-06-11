@@ -48,6 +48,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.cleanup.PaxosRepairState;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.AUTO_REPAIR_FREQUENCY_SECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLE_PAXOS_AUTO_REPAIRS;
@@ -158,7 +159,8 @@ public class PaxosUncommittedTracker
             return;
 
         Map<TableId, UncommittedTableData.FlushWriter> flushWriters = new HashMap<>();
-        try (CloseableIterator<PaxosKeyState> iterator = updateSupplier.flushIterator(paxos))
+        try (OpOrder.Group protectData = paxos.readOrdering().start();
+             CloseableIterator<PaxosKeyState> iterator = updateSupplier.flushIterator(paxos))
         {
             while (iterator.hasNext())
             {
