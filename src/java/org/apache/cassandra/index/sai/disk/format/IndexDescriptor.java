@@ -259,7 +259,7 @@ public class IndexDescriptor
         Preconditions.checkArgument(sstable.getDescriptor().equals(this.descriptor));
         SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable);
         for (var context : indices)
-            perIndexes.computeIfAbsent(context, _ -> initializeGroup(context, discovered.perIndexBuild(context.getIndexName())));
+            perIndexes.computeIfAbsent(context, k -> initializeGroup(context, discovered.perIndexBuild(context.getIndexName())));
         return this;
     }
 
