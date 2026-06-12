@@ -631,32 +631,34 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     {
         DeletionAwareCursor<T, D> c = cursor(Direction.FORWARD);
         ByteSource bytes = prefix.asComparableBytes(c.byteComparableVersion());
+        long currPosition = c.encodedPosition();
         while (true)
         {
-            RangeCursor<D> deletionBranch = c.deletionBranchCursor(Direction.FORWARD);
-            if (deletionBranch != null)
-                return tailTrieSeparately(ByteSource.duplicatable(bytes), c, deletionBranch, includeCoveringDeletions);
-
             int next = bytes.next();
-            long position = c.encodedPosition();
             if (next == ByteSource.END_OF_STREAM)
                 return c::tailCursor;
-            long nextPosition = Cursor.positionForDescentWithByte(position, next);
-            if (Cursor.compare(c.skipTo(nextPosition), nextPosition) != 0)
+
+            RangeCursor<D> deletionBranch = c.deletionBranchCursor(Direction.FORWARD);
+            if (deletionBranch != null)
+                return tailTrieSeparately(next, ByteSource.duplicatable(bytes), c, deletionBranch, includeCoveringDeletions);
+
+            long nextPosition = Cursor.positionForDescentWithByte(currPosition, next);
+            currPosition = c.skipTo(nextPosition);
+            if (Cursor.compare(currPosition, nextPosition) != 0)
                 return null;
         }
     }
 
     private static <T, D extends RangeState<D>> DeletionAwareTrie<T, D>
-    tailTrieSeparately(ByteSource.Duplicatable bytes, DeletionAwareCursor<T, D> c, RangeCursor<D> deletionBranch, boolean includeCoveringDeletions)
+    tailTrieSeparately(int next, ByteSource.Duplicatable bytes, DeletionAwareCursor<T, D> c, RangeCursor<D> deletionBranch, boolean includeCoveringDeletions)
     {
         ByteSource.Duplicatable bytesDeletion = bytes.duplicate();
-        if (!deletionBranch.descendAlong(bytesDeletion))
+        if (!deletionBranch.descendAlong(next, bytesDeletion))
             deletionBranch = includeCoveringDeletions ? deletionBranch.precedingStateCursor(Direction.FORWARD) : null;
         else if (!includeCoveringDeletions)
             deletionBranch = DeletionAwareCursor.dropCoveringDeletions(deletionBranch);
 
-        if (!c.descendAlong(bytes))
+        if (!c.descendAlong(next, bytes))
             c = null;
 
         return DeletionAwareCursor.combineTails(c, deletionBranch);
