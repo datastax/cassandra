@@ -61,11 +61,11 @@ public interface CellData<V, C extends CellData<?, ?>> extends IDataSize
 
         if (DatabaseDescriptor.getStorageCompatibilityMode().disabled())
             // The whole cluster is 2016, we're out of the 2038/2106 mixed cluster scenario. Shortcut to avoid the 'minClusterVersion' volatile read
-            return Cell.MAX_DELETION_TIME;
+            return CellData.MAX_DELETION_TIME;
         else
             return MessagingService.Version.supportsExtendedDeletionTime(MessagingService.instance().versions.minClusterVersion)
-                   ? Cell.MAX_DELETION_TIME
-                   : Cell.MAX_DELETION_TIME_2038_LEGACY_CAP;
+                   ? CellData.MAX_DELETION_TIME
+                   : CellData.MAX_DELETION_TIME_2038_LEGACY_CAP;
     }
 
     /**
@@ -156,9 +156,7 @@ public interface CellData<V, C extends CellData<?, ?>> extends IDataSize
 
     default boolean hasInvalidDeletions()
     {
-        if (ttl() < 0 || localDeletionTime() < 0 || (isExpiring() && localDeletionTimeAsUnsignedInt() == NO_DELETION_TIME_UNSIGNED_INTEGER))
-            return true;
-        return false;
+        return ttl() < 0 || localDeletionTime() < 0 || (isExpiring() && localDeletionTimeAsUnsignedInt() == NO_DELETION_TIME_UNSIGNED_INTEGER);
     }
 
     long unsharedHeapSize();

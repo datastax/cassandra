@@ -32,7 +32,7 @@ import org.apache.cassandra.utils.LongAccumulator;
  */
 public abstract class ComplexColumnData extends ColumnData implements Iterable<Cell<?>>
 {
-    public ComplexColumnData(ColumnMetadata column)
+    protected ComplexColumnData(ColumnMetadata column)
     {
         super(column);
         assert column.isComplex();
