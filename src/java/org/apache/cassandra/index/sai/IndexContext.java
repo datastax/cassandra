@@ -90,6 +90,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_INDEX_READS_DISABLED;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_INDEX_METRICS_ENABLED;
 import static org.apache.cassandra.config.CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
+import static org.apache.cassandra.index.sai.plan.QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25;
 
 /**
  * Manage metadata for each column index.
@@ -853,20 +854,25 @@ public class IndexContext
 
     public void validate(RowFilter rowFilter)
     {
-        // Only vector indexes have requirements to validate right now.
-        if (!isVector())
-            return;
-        // Only iterate over the top level expressions because that is where the ANN expression is located.
+        // Only iterate over the top level expressions because that is where the ANN and BM25 expressions are located.
         for (RowFilter.Expression expression : rowFilter.root.expressions())
-            if (expression.operator() == Operator.ANN && expression.column().equals(column))
-            {
-                float[] value = TypeUtil.decomposeVector(getValidator(), expression.getIndexValue());
-                VectorValidation.validateIndexable(value, vectorSimilarityFunction);
-                // There is only one ANN expression per query.
-                return;
-            }
-    }
+        {
+            if (!expression.column().equals(column))
+                continue;
 
+            switch (expression.operator())
+            {
+                case ANN:
+                    float[] value = TypeUtil.decomposeVector(getValidator(), expression.getIndexValue());
+                    VectorValidation.validateIndexable(value, vectorSimilarityFunction);
+                    return;
+                case BM25:
+                    if (version().onOrAfter(Version.BM25_EARLIEST))
+                        return;
+                    throw new InvalidRequestException(String.format(INDEX_VERSION_DOES_NOT_SUPPORT_BM25, getIndexName()));
+            }
+        }
+    }
 
     public boolean equals(Object obj)
     {
