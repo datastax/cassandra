@@ -176,6 +176,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable, ByteCom
      * @param version the {@link ByteComparable.Version} to use for the implementation
      * @return the {@code ByteSource} byte comparable.
      */
+    @Override
     ByteSource asComparableBytes(ByteComparable.Version version);
 
     /**
