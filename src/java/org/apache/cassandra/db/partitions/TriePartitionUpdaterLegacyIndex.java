@@ -51,12 +51,21 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
     private UpdateTransaction indexer;
     private TableMetadata metadata;
     /// When a tombstone boundary opens a range, we store the position here to report a range tombstone when it closes.
+    ///
+    /// Cleared to null when the range is closed. Since all ranges must be closed, this cannot retain a reference at the
+    /// end of a mutation.
     private ClusteringBound<byte[]> rangeTombstoneOpenPosition;
     /// The depth at which we saw the root of the current partition. Used to obtain clustering keys of modified rows.
     private int currentPartitionDepth;
     /// The depth at which we saw the root of the current row. Used to obtain cell columns and paths.
+    ///
+    /// Set when we pass through a row marker ([LivenessInfo] or [TrieTombstoneMarker.LevelMarker.ROW]), which always
+    /// happens before seeing any of the columns and cells of the update.
     private int currentRowDepth;
     /// The column set for the current row (differs for static rows)
+    ///
+    /// Set when we pass through a row marker ([LivenessInfo] or [TrieTombstoneMarker.LevelMarker.ROW]), which always
+    /// happens before seeing any of the columns and cells of the update.
     private Columns currentColumns;
 
     public TriePartitionUpdaterLegacyIndex(TrieMemtable.MemtableShard owner,
@@ -80,7 +89,7 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
     {
         TrieTombstoneMarker merged = super.mergeMarkers(existing, update);
         if (merged == null)
-            return merged;
+            return null; // Note: Row markers always survive deletions and this path will never be reached for them.
 
         if (merged.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW))
             processRowDeletionUpdate(existing != null ? existing.applicableToPointForward() : null, merged.applicableToPointForward());
@@ -177,7 +186,8 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
     Object applyIncomingMarker(Object existingContent, TrieTombstoneMarker updateMarker)
     {
         // We override this to make sure we mark the row start when we start deleting from it, so that we can report
-        // all removed cells.
+        // all removed cells. Note that if any cells are deleted this will always be called with `LevelMarker.ROW`,
+        // possibly with null `applicableToPointForward`.
         if (existingContent instanceof LivenessInfo)
             return applyRowDeletion((LivenessInfo) existingContent, updateMarker.applicableToPointForward());
         else

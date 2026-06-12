@@ -117,7 +117,6 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     /// branches below the top content-bearing node.
     default void forEachEntrySkippingBranches(Direction direction, Predicate<? super T> acceptancePredicate, BiConsumer<ByteComparable.Preencoded, ? super T> consumer)
     {
-        // TODO: test
         Cursor<T> cursor = cursor(direction);
         cursor.processSkippingBranches(acceptancePredicate, new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be

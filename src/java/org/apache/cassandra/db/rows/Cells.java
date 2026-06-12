@@ -21,12 +21,12 @@ import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.Iterator;
 
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ValueAccessor;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
+import org.apache.cassandra.schema.ColumnMetadata;
 
 /**
  * Static methods to work on cells.
@@ -86,8 +86,8 @@ public abstract class Cells
         long leftLocalDeletionTime = left.localDeletionTime();
         long rightLocalDeletionTime = right.localDeletionTime();
 
-        boolean leftIsExpiringOrTombstone = leftLocalDeletionTime != Cell.NO_DELETION_TIME;
-        boolean rightIsExpiringOrTombstone = rightLocalDeletionTime != Cell.NO_DELETION_TIME;
+        boolean leftIsExpiringOrTombstone = leftLocalDeletionTime != CellData.NO_DELETION_TIME;
+        boolean rightIsExpiringOrTombstone = rightLocalDeletionTime != CellData.NO_DELETION_TIME;
 
         if (leftIsExpiringOrTombstone | rightIsExpiringOrTombstone)
         {
@@ -168,7 +168,7 @@ public abstract class Cells
         else if (merged == rightValue && timestamp == rightTimestamp)
             return right;
         else // merge clocks and timestamps.
-            return left.withNewData(timestamp, Cell.NO_DELETION_TIME, Cell.NO_TTL, merged);
+            return left.withNewData(timestamp, CellData.NO_DELETION_TIME, CellData.NO_TTL, merged);
     }
 
     /**

@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Iterators;
@@ -929,7 +930,7 @@ public class TrieBackedRow extends AbstractRow
 
 
     @Override
-    public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> livenessInfoFunction,
+    public Row transformAndFilter(UnaryOperator<LivenessInfo> livenessInfoFunction,
                                   CellTransformer cellFunction)
     {
         return new TrieBackedRow(columns, columnIds, clustering, livenessInfoFunction.apply(livenessInfo), deletion, data.mapValues(

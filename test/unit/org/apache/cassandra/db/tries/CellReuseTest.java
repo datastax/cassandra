@@ -212,7 +212,7 @@ public class CellReuseTest
             System.out.println(trie.dump(Object::toString));
         BitSet set = new BitSet();
         BitSet objs = new BitSet();
-        mark(trie, trie.root, set, objs);
+        markChild(trie, trie.root, set, objs);
         return Pair.create(set, objs);
     }
 

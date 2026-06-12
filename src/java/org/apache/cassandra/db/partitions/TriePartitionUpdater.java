@@ -71,7 +71,14 @@ public class TriePartitionUpdater
         this.dataSize = 0;
         this.colUpdateTimeDelta = Long.MAX_VALUE;
 
-        mutator.apply(update);
+        try
+        {
+            mutator.apply(update);
+        }
+        finally
+        {
+            this.currentPartition = null; // clear the reference to avoid holding on to data
+        }
     }
 
     /// Merge incoming live data (cell, liveness info or various level markers) with existing content.
