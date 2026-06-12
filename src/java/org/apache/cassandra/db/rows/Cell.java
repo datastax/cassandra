@@ -84,9 +84,7 @@ public abstract class Cell<V> extends ColumnData implements CellData<V, Cell<?>>
     public abstract Cell<?> updateAllTimestamp(long newTimestamp);
 
     /**
-     * Used to apply the same optimization as in {@link Cell.Serializer#deserialize} when
-     * the column is not queried but eventhough it's used for digest calculation.
-     * @return a cell with an empty buffer as value
+     * @inheritDoc Redeclared here to clarify the return type.
      */
     public abstract Cell<?> withSkippedValue();
 

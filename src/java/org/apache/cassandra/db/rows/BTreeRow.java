@@ -28,6 +28,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 
 import com.google.common.collect.Collections2;
 import com.google.common.primitives.Ints;
@@ -515,13 +516,13 @@ public class BTreeRow extends AbstractRow
         return BTreeRow.create(clustering, info, deletion, newTree, minDeletionTime);
     }
 
-    public Row transformAndFilterColumns(LivenessInfo info, Deletion deletion, Function<ColumnData, ColumnData> function)
+    public Row transformAndFilterColumns(LivenessInfo info, Deletion deletion, UnaryOperator<ColumnData> function)
     {
         return update(info, deletion, BTree.transformAndFilter(btree, function));
     }
 
     @Override
-    public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> infoFunction, CellTransformer cellFunction)
+    public Row transformAndFilter(UnaryOperator<LivenessInfo> infoFunction, CellTransformer cellFunction)
     {
         return update(infoFunction.apply(primaryKeyLivenessInfo), deletion, BTree.<ColumnData, ColumnData>transformAndFilter(
             btree,

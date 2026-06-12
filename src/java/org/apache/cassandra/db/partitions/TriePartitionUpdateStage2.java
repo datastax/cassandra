@@ -98,6 +98,11 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
                && Iterators.elementsEqual(rowIterator(), that.rowIterator());
     }
 
+    @Override
+    public int hashCode()
+    {
+        throw new UnsupportedOperationException();
+    }
 
     private static InMemoryTrie<Object> newTrie(DeletionInfo deletion)
     {
