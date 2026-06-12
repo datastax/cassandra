@@ -402,14 +402,26 @@ interface Cursor<T>
     /// order.
     default boolean descendAlong(ByteSource bytes)
     {
-        int next = bytes.next();
+        return descendAlong(bytes.next(), bytes);
+    }
+
+
+    /// Descend into the cursor with the given path.
+    ///
+    /// @param next The first byte of the path.
+    /// @param rest The rest of the bytes of the path as a [ByteSource].
+    /// @return True if the descent is positioned at the end of the given path, false if the trie did not have a path
+    /// for it. In the latter case the cursor is positioned at the first node that follows the given key in iteration
+    /// order.
+    default boolean descendAlong(int next, ByteSource rest)
+    {
         long position = encodedPosition();
         while (next != ByteSource.END_OF_STREAM)
         {
             long nextPosition = positionForDescentWithByte(position, next);
             if (compare(skipTo(nextPosition), nextPosition) != 0)
                 return false;
-            next = bytes.next();
+            next = rest.next();
             position = nextPosition;
         }
         return true;
