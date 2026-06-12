@@ -128,7 +128,7 @@ public class IndexBuildDeciderTest extends SAITester
         assertTrue(sstableContext.contains(secondSSTable));
 
         // SAI#canFlushFromMemtableIndex should be true
-        StorageAttachedIndex sai = (StorageAttachedIndex) group.getIndexes().iterator().next();
+        StorageAttachedIndex sai = group.getIndexes().iterator().next();
         assertTrue(sai.canFlushFromMemtableIndex());
 
         // flush another memtable: it should be flushed with MemtableIndexWriter

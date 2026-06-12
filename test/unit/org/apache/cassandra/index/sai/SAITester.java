@@ -359,9 +359,7 @@ public class SAITester extends CQLTester
     protected void simulateNodeRestart(boolean wait)
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        cfs.indexManager.listIndexes().forEach(index -> {
-            ((StorageAttachedIndexGroup)cfs.indexManager.getIndexGroup(index)).reset();
-        });
+        cfs.indexManager.listIndexes().forEach(index -> ((StorageAttachedIndexGroup)cfs.indexManager.getIndexGroup(index)).reset());
         cfs.indexManager.listIndexes().forEach(cfs.indexManager::buildIndex);
         cfs.indexManager.executePreJoinTasksBlocking(true);
         if (wait)

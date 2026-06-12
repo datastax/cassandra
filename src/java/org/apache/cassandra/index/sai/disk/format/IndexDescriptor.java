@@ -259,7 +259,7 @@ public class IndexDescriptor
         Preconditions.checkArgument(sstable.getDescriptor().equals(this.descriptor));
         SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable);
         for (var context : indices)
-            perIndexes.computeIfAbsent(context, k -> initializeGroup(context, discovered.perIndexBuild(context.getIndexName())));
+            perIndexes.computeIfAbsent(context, _ -> initializeGroup(context, discovered.perIndexBuild(context.getIndexName())));
         return this;
     }
 
@@ -540,7 +540,7 @@ public class IndexDescriptor
         }
 
         @Override
-        public File tmpFileFor(String componentName) throws IOException
+        public File tmpFileFor(String componentName)
         {
             String name = context != null ? String.format("%s_%s_%s", buildId, context.getColumnName(), componentName)
                                           :  String.format("%s_%s", buildId, componentName);
