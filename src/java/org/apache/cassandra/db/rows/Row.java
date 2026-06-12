@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.Clustering;
@@ -233,7 +233,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
      *   2) doesn't include any {@code null} results of {@code cellFunction}
      *   3) has its {@code LivenessInfo} mapped through the given {@code infoFunction}
      */
-    public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> infoFunction, CellTransformer cellFunction);
+    public Row transformAndFilter(UnaryOperator<LivenessInfo> infoFunction, CellTransformer cellFunction);
 
     public Row clone(Cloner cloner);
 

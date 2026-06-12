@@ -22,7 +22,7 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
@@ -209,7 +209,7 @@ public class RowWithSource implements Row
     }
 
     @Override
-    public Row transformAndFilter(Function<LivenessInfo, LivenessInfo> infoFunction, CellTransformer function)
+    public Row transformAndFilter(UnaryOperator<LivenessInfo> infoFunction, CellTransformer function)
     {
         return maybeWrapRow(row.transformAndFilter(infoFunction, function));
     }

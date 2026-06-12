@@ -339,16 +339,17 @@ public class TrieBackedPartitionMemtableAccountingTest
                                                    new TrieMemtable.TrieSerializer(cellDataBufferManager, null));
             TriePartitionUpdater updater = new TriePartitionUpdater(null, trie);
             trie.putRecursive(ByteComparable.EMPTY, new TrieMemtable.PartitionData(null), (x, y) -> y);
-            TrieBackedPartition partition = new TrieBackedPartition(partitionKey,
-                                                                    metadata.regularAndStaticColumns(),
-                                                                    new EncodingStats(LivenessInfo.NO_TIMESTAMP, LivenessInfo.NO_EXPIRATION_TIME, 0),
-                                                                    1, // to avoid isEmpty true
-                                                                    0,
-                                                                    trie,
-                                                                    metadata);
 
             // For each update, apply it and verify the allocator is positive
             long unreleasable = updates.stream().mapToLong(updateUntyped -> {
+                TrieBackedPartition partition = new TrieBackedPartition(partitionKey,
+                                                                        metadata.regularAndStaticColumns(),
+                                                                        new EncodingStats(LivenessInfo.NO_TIMESTAMP, LivenessInfo.NO_EXPIRATION_TIME, 0),
+                                                                        1, // to avoid isEmpty true
+                                                                        0,
+                                                                        trie,
+                                                                        metadata);
+
                 TriePartitionUpdate update = TriePartitionUpdate.asTrieUpdate(updateUntyped);
                 DeletionTime exsDeletion = partition.partitionLevelDeletion();
                 DeletionTime updDeletion = update.partitionLevelDeletion();
@@ -372,6 +373,13 @@ public class TrieBackedPartitionMemtableAccountingTest
                 return updateUnreleasable;
             }).sum();
             CellReuseTest.verifyFreeCellsMatchUnreachable(trie);
+            TrieBackedPartition partition = new TrieBackedPartition(partitionKey,
+                                                                    metadata.regularAndStaticColumns(),
+                                                                    new EncodingStats(LivenessInfo.NO_TIMESTAMP, LivenessInfo.NO_EXPIRATION_TIME, 0),
+                                                                    1, // to avoid isEmpty true
+                                                                    0,
+                                                                    trie,
+                                                                    metadata);
 
             // Now recreate the partition to see if there's a leak in the accounting
 
