@@ -69,7 +69,7 @@ public interface LongArray extends Closeable
     {
         private final Supplier<LongArray> supplier;
         private LongArray longArray;
-        private volatile boolean opened = false;
+        private boolean opened = false;
 
         public DeferredLongArray(Supplier<LongArray> supplier)
         {
