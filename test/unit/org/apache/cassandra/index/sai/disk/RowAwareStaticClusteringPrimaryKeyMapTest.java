@@ -45,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * using the row-aware on-disk format. Static columns create special rows
  * with STATIC_CLUSTERING that need to be handled correctly.
  */
-public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Versioned.RawAware
+public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Versioned.RowAware
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);

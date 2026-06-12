@@ -38,7 +38,7 @@ import static org.junit.Assert.assertEquals;
  * Skinny-table tests (no clustering columns) for
  * {@link PrimaryKeyMap} using the row-aware on-disk format.
  */
-public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester.Versioned.RawAware
+public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester.Versioned.RowAware
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);

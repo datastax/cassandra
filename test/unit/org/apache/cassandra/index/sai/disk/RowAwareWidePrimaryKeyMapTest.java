@@ -43,7 +43,7 @@ import static org.junit.Assert.assertEquals;
  * Wide-table tests (with clustering columns) for
  * {@link PrimaryKeyMap} using the row-aware on-disk format.
  */
-public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RawAware
+public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RowAware
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
