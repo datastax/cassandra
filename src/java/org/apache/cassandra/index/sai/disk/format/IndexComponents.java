@@ -232,7 +232,7 @@ public interface IndexComponents
          */
         default boolean isValid(boolean validateChecksum)
         {
-            return isValid(validateChecksum, _ -> {});
+            return isValid(validateChecksum, c -> {});
         }
 
         /**
