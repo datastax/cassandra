@@ -35,10 +35,7 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.utils.JavaUtils;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
-
-import static org.apache.cassandra.config.CassandraRelevantProperties.JAVA_VERSION;
 
 /**
  * Custom {@link SecurityManager} and {@link Policy} implementation that only performs access checks
@@ -88,19 +85,6 @@ public final class ThreadAwareSecurityManager extends SecurityManager
     {
         if (installed)
             return;
-
-        // Skip SecurityManager installation on JDK 22+ as it's terminally deprecated
-        // and causes ClassCircularityError in some classloader scenarios (e.g., Jetty 12 + JDK 22)
-        String javaVersion = JAVA_VERSION.getString();
-        if (!JavaUtils.supportsSecurityManager(javaVersion))
-        {
-            logger.warn("Skipping ThreadAwareSecurityManager installation on Java {}. " +
-                       "SecurityManager is permanently disabled in JDK 22+ and will be removed in a future release. " +
-                       "User-defined functions (UDFs) cannot be sandboxed on this JDK version.",
-                       javaVersion);
-            installed = true; // Mark as installed to prevent re-entry
-            return;
-        }
 
         // this line is needed - we need to make sure AccessControlException is loaded before we install this SM
         // otherwise we may get into stackoverflow when javax.security is not allowed package, and ACE is tried to be

@@ -42,6 +42,7 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -434,6 +435,10 @@ public abstract class UDFunction extends UserFunction implements ScalarFunction
 
     public static void assertUdfsEnabled(String language)
     {
+        if (CassandraRelevantProperties.DISABLE_USER_DEFINED_FUNCTIONS.getBoolean())
+            throw new InvalidRequestException("User-defined functions are disabled. " +
+                                              "The system property cassandra.disable_user_defined_functions is set to true.");
+
         if (!DatabaseDescriptor.enableUserDefinedFunctions())
             throw new InvalidRequestException("User-defined functions are disabled in cassandra.yaml - set enable_user_defined_functions=true to enable");
         if (!"java".equalsIgnoreCase(language))

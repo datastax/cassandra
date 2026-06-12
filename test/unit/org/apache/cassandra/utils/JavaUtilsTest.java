@@ -49,37 +49,4 @@ public class JavaUtilsTest
         assertTrue(JavaUtils.supportExitOnOutOfMemory("9.1.2")); // Minor #1 (GA)
         assertTrue(JavaUtils.supportExitOnOutOfMemory("9.0.1")); // Security #1 (GA)
     }
-
-    @Test
-    public void testSupportsSecurityManager()
-    {
-        // JDK 8 and earlier support SecurityManager
-        assertTrue(JavaUtils.supportsSecurityManager("1.8.0"));
-        assertTrue(JavaUtils.supportsSecurityManager("1.8.0_92"));
-        assertTrue(JavaUtils.supportsSecurityManager("1.8.0_401"));
-
-        // JDK 11, 17, 21 support SecurityManager (though deprecated in 17)
-        assertTrue(JavaUtils.supportsSecurityManager("11"));
-        assertTrue(JavaUtils.supportsSecurityManager("11.0.1"));
-        assertTrue(JavaUtils.supportsSecurityManager("11.0.21"));
-        assertTrue(JavaUtils.supportsSecurityManager("17"));
-        assertTrue(JavaUtils.supportsSecurityManager("17.0.1"));
-        assertTrue(JavaUtils.supportsSecurityManager("17.0.9"));
-        assertTrue(JavaUtils.supportsSecurityManager("21"));
-        assertTrue(JavaUtils.supportsSecurityManager("21.0.1"));
-        assertTrue(JavaUtils.supportsSecurityManager("21.0.2"));
-
-        // JDK 22+ does NOT support SecurityManager (permanently disabled)
-        assertFalse(JavaUtils.supportsSecurityManager("22"));
-        assertFalse(JavaUtils.supportsSecurityManager("22.0.1"));
-        assertFalse(JavaUtils.supportsSecurityManager("22-ea"));
-        assertFalse(JavaUtils.supportsSecurityManager("23"));
-        assertFalse(JavaUtils.supportsSecurityManager("23.0.1"));
-        assertFalse(JavaUtils.supportsSecurityManager("24"));
-        assertFalse(JavaUtils.supportsSecurityManager("25"));
-
-        // Edge cases - should return true (fail-safe) for unparseable versions
-        assertTrue(JavaUtils.supportsSecurityManager("invalid"));
-        assertTrue(JavaUtils.supportsSecurityManager(""));
-    }
 }
