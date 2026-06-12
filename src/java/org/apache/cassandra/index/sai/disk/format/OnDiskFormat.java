@@ -79,7 +79,6 @@ public interface OnDiskFormat
     /**
      * Returns the {@link PrimaryKey.Factory} for the on-disk format
      *
-     * @param comparator
      * @return the primary key factory
      */
     PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator);
@@ -91,7 +90,6 @@ public interface OnDiskFormat
      * @param primaryKeyFactory The {@link PrimaryKey.Factory} corresponding to the provided {@code perSSTableComponents}.
      * @param sstable The {@link SSTableReader} associated with the per-sstable components
      * @return a {@link PrimaryKeyMap.Factory} for the SSTable
-     * @throws IOException
      */
     PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException;
 
@@ -116,7 +114,6 @@ public interface OnDiskFormat
      *
      * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
      * @return The {@link PerSSTableWriter} to write the per-SSTable on-disk components
-     * @throws IOException
      */
     PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException;
 
