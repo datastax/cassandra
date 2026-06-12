@@ -243,8 +243,7 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
     private PrimaryKey buildPk(int partitionKey, int clusteringKey)
     {
         ByteBuffer pkBuf = Int32Type.instance.decompose(partitionKey);
-        Token token = partitioner.getToken(pkBuf);
-        DecoratedKey key = new BufferDecoratedKey(token, pkBuf);
+        DecoratedKey key = partitioner.decorateKey(pkBuf);
         Clustering<ByteBuffer> clustering = Clustering.make(Int32Type.instance.decompose(clusteringKey));
         return pkFactory.create(key, clustering);
     }
@@ -252,8 +251,7 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
     private PrimaryKey buildStaticPk(int partitionKey)
     {
         ByteBuffer pkBuf = Int32Type.instance.decompose(partitionKey);
-        Token token = partitioner.getToken(pkBuf);
-        DecoratedKey key = new BufferDecoratedKey(token, pkBuf);
+        DecoratedKey key = partitioner.decorateKey(pkBuf);
         return pkFactory.create(key, Clustering.STATIC_CLUSTERING);
     }
 
