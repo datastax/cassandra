@@ -40,8 +40,11 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.*;
  * result in the original time being used. No warning is provided if there is a mismatch.
  *
  * If the statement is cached and used to log directly then only a volatile read will be required in the common case.
- * If the Logger is cached then there is a single concurrent hash map lookup + the volatile read.
- * If neither the logger nor the statement is cached then it is two concurrent hash map lookups + the volatile read.
+ * If the Logger is cached then there is a single Caffeine cache lookup + the volatile read.
+ * If neither the logger nor the statement is cached then it is a NonBlockingHashMap lookup + a Caffeine cache lookup + the volatile read.
+ *
+ * The implementation uses Caffeine cache with time-based expiration to automatically evict log statements
+ * after their minimum interval has passed, preventing unbounded memory growth from dynamic log messages.
  *
  */
 public class NoSpamLogger
@@ -232,7 +235,7 @@ public class NoSpamLogger
     private final long minIntervalNanos;
     
     /**
-     * Cache of NoSpamLog statements per NoSpamLogger instance.
+     * Cache of NoSpamLogStatement instances per NoSpamLogger instance.
      * Bounded by size and time to prevent memory exhaustion from dynamic log messages.
      * Uses Caffeine with W-TinyLFU eviction policy.
      * Uses custom per-entry expiry based on each statement's minIntervalNanos.
