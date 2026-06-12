@@ -25,6 +25,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLE_USER_DEFINED_FUNCTIONS;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -144,6 +145,37 @@ public class UDFunctionDisableTest extends CQLTester
             {
                 assertFalse("Error should not be about system property for value: " + value, e.getMessage().contains(DISABLE_USER_DEFINED_FUNCTIONS.getKey()));
             }
+        }
+    }
+
+    @Test
+    public void testSecurityManagerNotInstalledWhenUDFsDisabled()
+    {
+        // Save current SecurityManager state
+        SecurityManager originalSecurityManager = System.getSecurityManager();
+
+        try
+        {
+            // Clear any existing SecurityManager
+            System.setSecurityManager(null);
+
+            // Enable UDF disable flag
+            DISABLE_USER_DEFINED_FUNCTIONS.setBoolean(true);
+
+            // Reset the installed flag for testing
+            org.apache.cassandra.security.ThreadAwareSecurityManager.resetInstalledFlagForTests();
+
+            // Attempt to install SecurityManager - should be skipped
+            org.apache.cassandra.security.ThreadAwareSecurityManager.install();
+
+            // Verify SecurityManager was NOT installed
+            assertNull("SecurityManager should not be installed when UDFs are disabled",
+                       System.getSecurityManager());
+        }
+        finally
+        {
+            // Restore original SecurityManager
+            System.setSecurityManager(originalSecurityManager);
         }
     }
 }
