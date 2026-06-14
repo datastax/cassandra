@@ -212,7 +212,10 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RowAware
         assertThat(map.floor(exactLastRow(map))).as("exact last row")
                                                 .isEqualTo(map.count() - 1);
 
-        assertThat(map.floor(afterLastToken(map))).as("after last expects the last")
+        assertThat(map.floor(buildPk(1000, 11))).as("after last row in last partition expects the last")
+                                                .isEqualTo(map.count() - 1);
+
+        assertThat(map.floor(afterLastToken(map))).as("after last token expects the last")
                                                   .isEqualTo(map.count() - 1);
     }
 
