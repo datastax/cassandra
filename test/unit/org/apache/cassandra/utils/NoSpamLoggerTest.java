@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.NoSpamLogger.Level;
 import org.apache.cassandra.utils.NoSpamLogger.NoSpamLogStatement;
 import org.junit.Before;
@@ -317,7 +318,7 @@ public class NoSpamLoggerTest
     public void testNoSpamLogStatementCacheBounded()
     {
         int maxStatementsPerLogger = 10;
-        System.setProperty("cassandra.nospam_logger.max_statements_per_logger", String.valueOf(maxStatementsPerLogger));
+        CassandraRelevantProperties.NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.setLong(maxStatementsPerLogger);
         try
         {
             NoSpamLogger.clearWrappedLoggersForTest();
