@@ -1284,5 +1284,21 @@ public class SAITester extends CQLTester
         {
             SAIUtil.setCurrentVersion(version);
         }
+
+        /**
+         * {@link CQLTester} parameterized for {@link Version#ALL}, which are row-aware.
+         */
+        public abstract static class RowAware extends Versioned
+        {
+            @Parameterized.Parameters(name = "{0}")
+            public static Collection<Object[]> data()
+            {
+                // See Version file for explanation of changes associated with each version
+                return Version.ALL.stream()
+                                  .filter(v -> v.onDiskFormat().indexFeatureSet().isRowAware())
+                                  .map(v -> new Object[]{ v })
+                                  .collect(Collectors.toList());
+            }
+        }
     }
 }
