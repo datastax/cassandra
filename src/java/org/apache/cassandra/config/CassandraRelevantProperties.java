@@ -633,6 +633,12 @@ public enum CassandraRelevantProperties
     NON_GRACEFUL_CLOSE("cassandra.messagingService.nonGracefulClose"),
     NON_GRACEFUL_SHUTDOWN("cassandra.test.messagingService.nonGracefulShutdown"),
     /**
+     * Maximum number of log statements cached per NoSpamLogger instance.
+     * This prevents unbounded memory growth when log messages contain dynamic content.
+     * Defaults to MAX_VALUE as a default behavior since we rely on the cache time-based expiration.
+     */
+    NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER("cassandra.nospam_logger.max_statements_per_logger", String.valueOf(Long.MAX_VALUE)),
+    /**
      * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
      * {@link OperationContext} instances.
      */
@@ -1046,7 +1052,7 @@ public enum CassandraRelevantProperties
      *
      * This is a dev/CI only property. Do not use otherwise.
      */
-    TEST_STORAGE_COMPATIBILITY_MODE("cassandra.test.storage_compatibility_mode", StorageCompatibilityMode.HCD_1.toString()),
+    TEST_STORAGE_COMPATIBILITY_MODE("cassandra.test.storage_compatibility_mode", "HCD_1"),
     TEST_STRICT_LCS_CHECKS("cassandra.test.strict_lcs_checks"),
     /** Turns some warnings into exceptions for testing. */
     TEST_STRICT_RUNTIME_CHECKS("cassandra.strict.runtime.checks"),
