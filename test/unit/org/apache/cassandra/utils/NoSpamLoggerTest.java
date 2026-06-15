@@ -82,7 +82,7 @@ public class NoSpamLoggerTest
     public static void setUpClass() throws Exception
     {
         NoSpamLogger.unsafeSetClock(() -> now);
-        NoSpamLogger.TICKER = () -> tickerTime;
+        NoSpamLogger.unsafeSetTicker(() -> tickerTime);
     }
 
     @Before

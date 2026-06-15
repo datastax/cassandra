@@ -73,8 +73,13 @@ public class NoSpamLogger
         CLOCK = clock;
     }
 
+    private static Ticker TICKER = Ticker.systemTicker();
+
     @VisibleForTesting
-    static Ticker TICKER = Ticker.systemTicker();
+    public static void unsafeSetTicker(Ticker ticker)
+    {
+        TICKER = ticker;
+    }
 
     public class NoSpamLogStatement extends AtomicLong
     {
