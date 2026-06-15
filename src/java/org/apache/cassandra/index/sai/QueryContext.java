@@ -46,7 +46,9 @@ public class QueryContext
 
     private final long queryStartTimeNanos;
 
-    public final long executionQuotaNano;
+    private final long executionQuotaNano;
+
+    private long queryTimeouts = 0;
 
     private long sstablesHit = 0;
     private long segmentsHit = 0;
@@ -76,20 +78,15 @@ public class QueryContext
     private long rowTombstonesFetched = 0;
 
     private long trieSegmentsHit = 0;
-
-    private long bkdPostingListsHit = 0;
-    private long bkdSegmentsHit = 0;
-
-    private long bkdPostingsSkips = 0;
-    private long bkdPostingsDecodes = 0;
-
     private long triePostingsSkips = 0;
     private long triePostingsDecodes = 0;
 
-    private long queryTimeouts = 0;
+    private long bkdSegmentsHit = 0;
+    private long bkdPostingListsHit = 0;
+    private long bkdPostingsSkips = 0;
+    private long bkdPostingsDecodes = 0;
 
     private long annGraphSearchLatency = 0;
-
     private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
     private PlanInfo queryPlanInfo;
@@ -110,6 +107,12 @@ public class QueryContext
     {
         checkThreadOwnership();
         return MonotonicClock.approxTime.now() - queryStartTimeNanos;
+    }
+
+    public void addQueryTimeouts(long val)
+    {
+        checkThreadOwnership();
+        queryTimeouts += val;
     }
 
     // setters
@@ -173,30 +176,6 @@ public class QueryContext
         trieSegmentsHit += val;
     }
 
-    public void addBkdPostingListsHit(long val)
-    {
-        checkThreadOwnership();
-        bkdPostingListsHit += val;
-    }
-
-    public void addBkdSegmentsHit(long val)
-    {
-        checkThreadOwnership();
-        bkdSegmentsHit += val;
-    }
-
-    public void addBkdPostingsSkips(long val)
-    {
-        checkThreadOwnership();
-        bkdPostingsSkips += val;
-    }
-
-    public void addBkdPostingsDecodes(long val)
-    {
-        checkThreadOwnership();
-        bkdPostingsDecodes += val;
-    }
-
     public void addTriePostingsSkips(long val)
     {
         checkThreadOwnership();
@@ -209,10 +188,28 @@ public class QueryContext
         triePostingsDecodes += val;
     }
 
-    public void addQueryTimeouts(long val)
+    public void addBkdSegmentsHit(long val)
     {
         checkThreadOwnership();
-        queryTimeouts += val;
+        bkdSegmentsHit += val;
+    }
+
+    public void addBkdPostingListsHit(long val)
+    {
+        checkThreadOwnership();
+        bkdPostingListsHit += val;
+    }
+
+    public void addBkdPostingsSkips(long val)
+    {
+        checkThreadOwnership();
+        bkdPostingsSkips += val;
+    }
+
+    public void addBkdPostingsDecodes(long val)
+    {
+        checkThreadOwnership();
+        bkdPostingsDecodes += val;
     }
 
     public void addAnnGraphSearchLatency(long val)
@@ -292,12 +289,12 @@ public class QueryContext
         public final long rowsReturned;
         public final long rowTombstonesFetched;
         public final long trieSegmentsHit;
-        public final long bkdPostingListsHit;
-        public final long bkdSegmentsHit;
-        public final long bkdPostingsSkips;
-        public final long bkdPostingsDecodes;
         public final long triePostingsSkips;
         public final long triePostingsDecodes;
+        public final long bkdSegmentsHit;
+        public final long bkdPostingListsHit;
+        public final long bkdPostingsSkips;
+        public final long bkdPostingsDecodes;
         public final long queryTimeouts;
         public final long annGraphSearchLatency;
 
@@ -322,12 +319,12 @@ public class QueryContext
             rowsReturned = context.rowsReturned;
             rowTombstonesFetched = context.rowTombstonesFetched;
             trieSegmentsHit = context.trieSegmentsHit;
-            bkdPostingListsHit = context.bkdPostingListsHit;
-            bkdSegmentsHit = context.bkdSegmentsHit;
-            bkdPostingsSkips = context.bkdPostingsSkips;
-            bkdPostingsDecodes = context.bkdPostingsDecodes;
             triePostingsSkips = context.triePostingsSkips;
             triePostingsDecodes = context.triePostingsDecodes;
+            bkdSegmentsHit = context.bkdSegmentsHit;
+            bkdPostingListsHit = context.bkdPostingListsHit;
+            bkdPostingsSkips = context.bkdPostingsSkips;
+            bkdPostingsDecodes = context.bkdPostingsDecodes;
             queryTimeouts = context.queryTimeouts;
             annGraphSearchLatency = context.annGraphSearchLatency;
             queryPlanInfo = context.queryPlanInfo;

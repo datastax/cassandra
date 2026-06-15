@@ -346,17 +346,18 @@ public class TableQueryMetrics
          * BKD index metrics.
          */
         public final Histogram kdTreePostingsNumPostings;
-        /**
-         * BKD index posting lists metrics.
-         */
-        public final Histogram kdTreePostingsSkips;
-        public final Histogram kdTreePostingsDecodes;
 
-        /**
+        /*
          * Trie index posting lists metrics.
          */
         public final Histogram postingsSkips;
         public final Histogram postingsDecodes;
+
+        /*
+         * BKD index posting lists metrics.
+         */
+        public final Histogram kdTreePostingsSkips;
+        public final Histogram kdTreePostingsDecodes;
 
         /**
          * Cumulative time spent searching ANN graph.
@@ -389,12 +390,12 @@ public class TableQueryMetrics
             rowsReturned = Metrics.histogram(createMetricName("RowsReturned"), false);
             rowTombstonesFetched = Metrics.histogram(createMetricName("RowTombstonesFetched"), false);
 
+            postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
+            postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
+
             kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), true);
             kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
             kdTreePostingsDecodes = Metrics.histogram(createMetricName("KDTreePostingsDecodes"), false);
-
-            postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
-            postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
 
             // Key vector metrics that translate to performance
             annGraphSearchLatency = Metrics.timer(createMetricName("ANNGraphSearchLatency"));
