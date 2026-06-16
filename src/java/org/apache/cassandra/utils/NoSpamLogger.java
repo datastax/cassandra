@@ -266,6 +266,34 @@ public class NoSpamLogger
 
     private final Logger wrapped;
     private final long minIntervalNanos;
+
+    /**
+     * Custom expiry policy for NoSpamLogStatement cache entries.
+     * Each entry expires based on its own minIntervalNanos value.
+     */
+    private static class StatementExpiry implements Expiry<String, NoSpamLogStatement>
+    {
+        @Override
+        public long expireAfterCreate(String key, NoSpamLogStatement value, long currentTime)
+        {
+            return value.expiry();
+        }
+
+        @Override
+        public long expireAfterUpdate(String key, NoSpamLogStatement value,
+                                      long currentTime, long currentDuration)
+        {
+            return value.expiry();
+        }
+
+        @Override
+        public long expireAfterRead(String key, NoSpamLogStatement value,
+                                    long currentTime, long currentDuration)
+        {
+            return currentDuration;
+        }
+    }
+
     /**
      * Cache of NoSpamLogStatement instances per NoSpamLogger instance.
      * Bounded by size and time to prevent memory exhaustion from dynamic log messages.
@@ -274,28 +302,7 @@ public class NoSpamLogger
      */
     private final Cache<String, NoSpamLogStatement> lastMessage = Caffeine.newBuilder()
                                                                           .maximumSize(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong())
-                                                                          .expireAfter(new Expiry<String, NoSpamLogStatement>()
-                                                                          {
-                                                                              @Override
-                                                                              public long expireAfterCreate(String key, NoSpamLogStatement value, long currentTime)
-                                                                              {
-                                                                                  return value.expiry();
-                                                                              }
-
-                                                                              @Override
-                                                                              public long expireAfterUpdate(String key, NoSpamLogStatement value,
-                                                                                                            long currentTime, long currentDuration)
-                                                                              {
-                                                                                  return value.expiry();
-                                                                              }
-
-                                                                              @Override
-                                                                              public long expireAfterRead(String key, NoSpamLogStatement value,
-                                                                                                          long currentTime, long currentDuration)
-                                                                              {
-                                                                                  return currentDuration;
-                                                                              }
-                                                                          })
+                                                                          .expireAfter(new StatementExpiry())
                                                                           .ticker(TICKER)
                                                                           .executor(ForkJoinPool.commonPool())
                                                                           .recordStats()
