@@ -195,8 +195,9 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             return rowId;
 
         // Now search within the partition for the clustering key
+        long nextPartitionStart = jumpToNextPartitionStart(rowId);
         long clusteringRowId = clusteringKeyCursor.clusteredSeekToKey(
-        clusteringComparator.asByteComparable(key.clustering()), rowId, startOfNextPartition(rowId));
+        clusteringComparator.asByteComparable(key.clustering()), rowId, nextPartitionStart);
 
         // clusteredSeekToKey returns the ceiling (next greater or equal key) or -1 if not found
         if (clusteringRowId < 0)
@@ -312,10 +313,24 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         return clustering;
     }
 
-    // Returns the rowId of the next partition or the number of rows if supplied rowId is in the last partition
+    // Returns the rowId of the next partition or the number of rows if supplied rowId is in the last partition.
+    // Requires that given row id is the first row in the current partition
+    private long jumpToNextPartitionStart(long partitionStartRowId)
+    {
+        long partitionSize = partitionIdToSizeArray.get(rowIdToPartitionIdArray.get(partitionStartRowId));
+        return partitionSize == -1 ? rowIdToPartitionIdArray.length() : partitionStartRowId + partitionSize;
+    }
+
+    // Returns the first rowId of the next partition or the number of rows if supplied rowId is in the last partition
     private long startOfNextPartition(long rowId)
     {
-        long partitionSize = partitionIdToSizeArray.get(rowIdToPartitionIdArray.get(rowId));
-        return partitionSize == -1 ? rowIdToPartitionIdArray.length() : rowId + partitionSize;
+        long partitionId = rowIdToPartitionIdArray.get(rowId);
+        long partitionSize = partitionIdToSizeArray.get(partitionId);
+        if (partitionSize == -1)
+            return rowIdToPartitionIdArray.length();
+
+        // Find the first row of this partition, then add partition size
+        long firstRowOfPartition = rowIdToPartitionIdArray.ceilingRowId(partitionId);
+        return firstRowOfPartition + partitionSize;
     }
 }
