@@ -204,6 +204,11 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             return Long.MIN_VALUE;
         assert clusteringRowId < rowIdToTokenArray.length() : "Row ID should not be after the last row";
 
+        // If clusteringRowId points to the next partition, it means the search key is greater
+        // than all keys in the current partition. Return the inverted ceiling.
+        if (clusteringRowId >= nextPartitionStart)
+            return -clusteringRowId - 1;
+
         Clustering<?> foundClustering = readClusteringKey(clusteringRowId);
         // If STATIC CLUSTERING, then no clustering key is present.
         if (foundClustering.isEmpty())
