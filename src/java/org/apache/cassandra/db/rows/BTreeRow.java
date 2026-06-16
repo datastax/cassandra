@@ -82,7 +82,7 @@ public class BTreeRow extends AbstractRow
     // but that doesn't work for expiring columns. So instead we keep the deletion time for the first thing in the row to be deleted. This allow at any given
     // time to know if we have any deleted information or not. If we any "true" tombstone (i.e. not an expiring cell), this value will be forced to
     // Long.MIN_VALUE, but if we don't and have expiring cells, this will the time at which the first expiring cell expires. If we have no tombstones and
-    // no expiring cells, this will be Cell.MAX_DELETION_TIME;
+    // no expiring cells, this will be CellData.MAX_DELETION_TIME;
     private final long minLocalDeletionTime;
 
     private BTreeRow(Clustering<?> clustering,
