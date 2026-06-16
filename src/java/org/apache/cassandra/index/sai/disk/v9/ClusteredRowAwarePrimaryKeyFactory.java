@@ -65,21 +65,5 @@ public class ClusteredRowAwarePrimaryKeyFactory extends RowAwarePrimaryKeyFactor
         {
             return ByteSource.withTerminator(terminator, buildComparableSources(version, isPrefix, false));
         }
-
-        @Override
-        public int compareTo(PrimaryKey o)
-        {
-            if (o.isTokenOnly())
-                return token().compareTo(o.token());
-
-            // Compare the partition keys. If they are not equal or
-            // this is a single row partition key or there are no
-            // clusterings, then return the result of this without
-            // needing to compare the clusterings.
-            int cmp = partitionKey().compareTo(o.partitionKey());
-            if (cmp != 0 || !hasClustering() || !o.hasClustering())
-                return cmp;
-            return clusteringComparator.compare(clustering(), o.clustering());
-        }
     }
 }
