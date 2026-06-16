@@ -37,7 +37,7 @@ import static org.mockito.Mockito.when;
 public class WideRowPrimaryKeyTest extends AbstractPrimaryKeyTest
 {
     @Test
-    public void randomTest() throws Throwable
+    public void testRandomly() throws Throwable
     {
         IndexDescriptor indexDescriptor = newClusteringIndexDescriptor(compositePartitionMultipleClusteringAsc);
         IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
