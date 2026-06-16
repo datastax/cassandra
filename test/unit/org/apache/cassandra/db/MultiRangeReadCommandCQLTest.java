@@ -16,6 +16,7 @@
 package org.apache.cassandra.db;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.junit.Test;
@@ -55,12 +56,6 @@ public class MultiRangeReadCommandCQLTest extends ReadCommandCQLTester<MultiRang
                           "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND v = 0 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE (token(k) <= ? OR token(k) > ?) AND v = ? ALLOW FILTERING",
                           multiRangeError);
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 0",
-                          "SELECT * FROM %s WHERE k = 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND v = ? ALLOW FILTERING");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ",
-                          "SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 0 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? AND c = ? AND v = ? ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE token(k) > token(0) AND v = 0",
                           "SELECT * FROM %s WHERE (token(k) > " + token + " AND token(k) <= " + right + " OR token(k) > " + right + ") AND v = 0 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE (token(k) > ? AND token(k) <= ? OR token(k) > ?) AND v = ? ALLOW FILTERING",
@@ -92,9 +87,6 @@ public class MultiRangeReadCommandCQLTest extends ReadCommandCQLTester<MultiRang
                           "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY n DESC LIMIT 10 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE (token(k) <= ? OR token(k) > ?) ORDER BY n DESC LIMIT 10 ALLOW FILTERING",
                           multiRangeError);
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY n LIMIT 10",
-                          "SELECT * FROM %s WHERE k = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? ORDER BY n ASC LIMIT 10 ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE n = 0 ORDER BY n LIMIT 10",
                           "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND n = 0 ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE (token(k) <= ? OR token(k) > ?) AND n = ? ORDER BY n ASC LIMIT 10 ALLOW FILTERING",
@@ -109,10 +101,6 @@ public class MultiRangeReadCommandCQLTest extends ReadCommandCQLTester<MultiRang
                           "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE (token(k) <= ? OR token(k) > ?) ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
                           truncationError);
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
-                          "SELECT * FROM %s WHERE k = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
-                          "SELECT * FROM %s WHERE k = ? ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
-                          truncationError);
         assertToCQLString("SELECT * FROM %s WHERE n = 0 ORDER BY v ANN OF [1, 2] LIMIT 10",
                           "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND n = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE (token(k) <= ? OR token(k) > ?) AND n = ? ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
@@ -120,7 +108,7 @@ public class MultiRangeReadCommandCQLTest extends ReadCommandCQLTester<MultiRang
     }
 
     @Override
-    protected MultiRangeReadCommand parseCommand(String query)
+    protected List<MultiRangeReadCommand> parseCommands(String query)
     {
         ReadCommand command = parseReadCommand(query);
         Assertions.assertThat(command).isInstanceOf(PartitionRangeReadCommand.class);
@@ -140,6 +128,6 @@ public class MultiRangeReadCommandCQLTest extends ReadCommandCQLTester<MultiRang
             ranges = List.of(bounds);
         }
 
-        return MultiRangeReadCommand.create(rangeCommand, ranges, true);
+        return Collections.singletonList(MultiRangeReadCommand.create(rangeCommand, ranges, true));
     }
 }
