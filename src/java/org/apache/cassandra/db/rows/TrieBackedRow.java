@@ -93,7 +93,7 @@ public class TrieBackedRow extends AbstractRow
                                                                                                         LivenessInfo.EMPTY);
     static final Object2IntHashMap<ColumnIdentifier> EMPTY_COLUMN_IDS = makeColumnIdsMap(Columns.NONE);
 
-    private static final long EMPTY_SIZE = ObjectSizes.measure(new TrieBackedRow(Columns.NONE, EMPTY_COLUMN_IDS, Clustering.EMPTY, LivenessInfo.EMPTY, Row.Deletion.LIVE, EMPTY_ROW));
+    private static final long EMPTY_SIZE = ObjectSizes.measure(new TrieBackedRow(Columns.NONE, EMPTY_COLUMN_IDS, Clustering.EMPTY, LivenessInfo.EMPTY, Row.Deletion.LIVE, 0, EMPTY_ROW));
 
     static final int COLUMN_NOT_PRESENT = -1;
 
@@ -118,10 +118,9 @@ public class TrieBackedRow extends AbstractRow
     // we want to speed up that case by not having to iterate/copy the row in this case. We could keep a single boolean telling us if we have tombstones,
     // but that doesn't work for expiring columns. So instead we keep the deletion time for the first thing in the row to be deleted. This allow at any given
     // time to know if we have any deleted information or not. If we any "true" tombstone (i.e. not an expiring cell), this value will be forced to
-    // Integer.MIN_VALUE, but if we don't and have expiring cells, this will the time at which the first expiring cell expires. If we have no tombstones and
-    // no expiring cells, this will be Integer.MAX_VALUE;
-    private int minLocalDeletionTime;
-    boolean minLocalDeletionTimeSet = false;
+    // Long.MIN_VALUE, but if we don't and have expiring cells, this will the time at which the first expiring cell expires. If we have no tombstones and
+    // no expiring cells, this will be CellData.MAX_DELETION_TIME;
+    private final long minLocalDeletionTime;
 
     ///  Data trie contains:
     ///  - LivenessInfo header at the root
@@ -162,30 +161,48 @@ public class TrieBackedRow extends AbstractRow
 
     public static TrieBackedRow create(TableMetadata tableMetadata, Clustering<?> clustering, DeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
-        return new TrieBackedRow(tableMetadata, clustering, data);
+        return create(tableMetadata.regularAndStaticColumns().columns(clustering == Clustering.STATIC_CLUSTERING), clustering, data);
     }
 
-    TrieBackedRow(TableMetadata tableMetadata, Clustering<?> clustering, DeletionAwareTrie<Object, TrieTombstoneMarker> data)
+    static TrieBackedRow create(Columns columns, Clustering<?> clustering, DeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
-        this(tableMetadata.regularAndStaticColumns().columns(clustering == Clustering.STATIC_CLUSTERING), clustering, data);
+        return create(columns,
+                      columnsMapCache.computeIfAbsent(columns, TrieBackedRow::makeColumnIdsMap),
+                      clustering,
+                      data);
     }
 
-    TrieBackedRow(Columns columns, Clustering<?> clustering, DeletionAwareTrie<Object, TrieTombstoneMarker> data)
+    static TrieBackedRow create(Columns columns,
+                                Object2IntHashMap<ColumnIdentifier> columnIds,
+                                Clustering<?> clustering,
+                                DeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
-        this(columns,
-             columnsMapCache.computeIfAbsent(columns, TrieBackedRow::makeColumnIdsMap),
-             clustering,
-             data);
-    }
+        TrieTombstoneMarker deletionRoot = data.applicableDeletion(ByteComparable.EMPTY);
+        Deletion deletion = Deletion.LIVE;
+        long minLocalDeletionTime = CellData.MAX_DELETION_TIME;
+        if (deletionRoot != null)
+        {
+            TrieTombstoneMarker.Covering rowDeletionTime = deletionRoot.applicableToPointForward();
+            if (rowDeletionTime != null)
+                deletion = Deletion.regular(rowDeletionTime);
+            if (data instanceof InMemoryDeletionAwareTrie || rowDeletionTime != null)
+            {
+                // We only have a deletion row marker if we have a real deletion.
+                minLocalDeletionTime = Long.MIN_VALUE;
+            }
+            else
+                minLocalDeletionTime = accumulate(minLocalDeletionTime, TrieBackedRow::mergeMinLocalDeletionTime, TrieBackedRow::mergeMinLocalDeletionTime, TrieBackedRow::mergeMinLocalDeletionTime, data);
+        }
+        else
+            minLocalDeletionTime = accumulate(minLocalDeletionTime, TrieBackedRow::mergeMinLocalDeletionTime, TrieBackedRow::mergeMinLocalDeletionTime, data.contentOnlyTrie());
 
-    TrieBackedRow(Columns columns, Object2IntHashMap<ColumnIdentifier> columnIds, Clustering<?> clustering, DeletionAwareTrie<Object, TrieTombstoneMarker> data)
-    {
-        this(columns,
-             columnIds,
-             clustering,
-             getLivenessInfo(data),
-             getDeletion(data),
-             data);
+        return new TrieBackedRow(columns,
+                                 columnIds,
+                                 clustering,
+                                 getLivenessInfo(data),
+                                 deletion,
+                                 minLocalDeletionTime,
+                                 data);
     }
 
     private TrieBackedRow(Columns columns,
@@ -193,10 +210,12 @@ public class TrieBackedRow extends AbstractRow
                           Clustering<?> clustering,
                           LivenessInfo livenessInfo,
                           Deletion deletion,
+                          long minLocalDeletionTime,
                           DeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
         this.deletion = deletion;
         this.livenessInfo = livenessInfo;
+        this.minLocalDeletionTime = minLocalDeletionTime;
         assert data != null;
         this.columns = columns;
         this.columnIds = columnIds;
@@ -228,7 +247,7 @@ public class TrieBackedRow extends AbstractRow
     {
         assert !deletion.isLive();
         RangeTrie<TrieTombstoneMarker> deletionTrie = rowDeletionTrie(deletion);
-        return new TrieBackedRow(Columns.NONE, EMPTY_COLUMN_IDS, clustering, LivenessInfo.EMPTY, Deletion.regular(deletion),
+        return new TrieBackedRow(Columns.NONE, EMPTY_COLUMN_IDS, clustering, LivenessInfo.EMPTY, Deletion.regular(deletion), Long.MIN_VALUE,
                                  DeletionAwareTrie.deletionBranch(ByteComparable.EMPTY, BYTE_COMPARABLE_VERSION, deletionTrie));
     }
 
@@ -311,6 +330,30 @@ public class TrieBackedRow extends AbstractRow
         }
     }
 
+    private static long accumulate(long initialValue,
+                                   LongAccumulator<? super LivenessInfo> livenessAccumulator,
+                                   LongAccumulator<? super CellData<?, ?>> cellAccumulator,
+                                   Trie<Object> data)
+    {
+        Accumulator accumulator = new Accumulator(initialValue, cellAccumulator, livenessAccumulator,
+                                                  (d, l) -> {
+                                                      throw new AssertionError();
+                                                  });
+        data.process(Direction.FORWARD, accumulator);
+        return accumulator.value;
+    }
+
+    private static long accumulate(long initialValue,
+                                   LongAccumulator<? super LivenessInfo> livenessAccumulator,
+                                   LongAccumulator<? super CellData<?, ?>> cellAccumulator,
+                                   LongAccumulator<? super DeletionTime> markerAccumulator,
+                                   DeletionAwareTrie<Object, TrieTombstoneMarker> data)
+    {
+        Accumulator accumulator = new Accumulator(initialValue, cellAccumulator, livenessAccumulator, markerAccumulator);
+        data.process(Direction.FORWARD, accumulator);
+        return accumulator.value;
+    }
+
     /// Accumulate a long value, using the given cell-level functions.
     ///
     /// Note: For efficiency, the cell accumulator is given cells without path. If the path is needed, use a different
@@ -320,9 +363,7 @@ public class TrieBackedRow extends AbstractRow
                     LongAccumulator<? super CellData<?, ?>> cellAccumulator,
                     LongAccumulator<? super DeletionTime> markerAccumulator)
     {
-        Accumulator accumulator = new Accumulator(initialValue, cellAccumulator, livenessAccumulator, markerAccumulator);
-        data.process(Direction.FORWARD, accumulator);
-        return accumulator.value;
+        return accumulate(initialValue, livenessAccumulator, cellAccumulator, markerAccumulator, data);
     }
 
     @Override
@@ -727,6 +768,7 @@ public class TrieBackedRow extends AbstractRow
                                      clustering,
                                      activeDeletion.deletes(livenessInfo) ? LivenessInfo.EMPTY : livenessInfo,
                                      Deletion.regular(activeDeletion),
+                                     Long.MIN_VALUE,
                                      applyAndSetActiveDeletion(data, activeDeletion));
         }
 
@@ -752,7 +794,7 @@ public class TrieBackedRow extends AbstractRow
                 return null;
 
             // TODO: Should we use `fetched` for `columns`? Note the ids cannot change.
-            return new TrieBackedRow(columns, columnIds, clustering, filteredData);
+            return TrieBackedRow.create(columns, columnIds, clustering, filteredData);
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -817,7 +859,7 @@ public class TrieBackedRow extends AbstractRow
         try
         {
             TrieColumnFilter tcf = new TrieColumnFilter(columns, columnIds, queried);
-            return new TrieBackedRow(columns, columnIds, clustering, livenessInfo, deletion, tcf.apply(data));
+            return create(columns, columnIds, clustering, tcf.apply(data));
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -848,7 +890,7 @@ public class TrieBackedRow extends AbstractRow
     @Override
     public boolean hasDeletion(long nowInSec)
     {
-        return nowInSec >= getMinLocalDeletionTime();
+        return nowInSec >= minLocalDeletionTime;
     }
 
     @Override
@@ -887,7 +929,7 @@ public class TrieBackedRow extends AbstractRow
                                                                                         TrieBackedRow::deleteData,
                                                                                         TrieTombstoneMarker::mergeUpdate,
                                                                                         true);
-        return new TrieBackedRow(columns, columnIds, clustering, getLivenessInfo(newData), getDeletion(newData), newData);
+        return new TrieBackedRow(columns, columnIds, clustering, getLivenessInfo(newData), getDeletion(newData), Long.MIN_VALUE, newData);
     }
 
     @Override
@@ -933,7 +975,7 @@ public class TrieBackedRow extends AbstractRow
     public Row transformAndFilter(UnaryOperator<LivenessInfo> livenessInfoFunction,
                                   CellTransformer cellFunction)
     {
-        return new TrieBackedRow(columns, columnIds, clustering, livenessInfoFunction.apply(livenessInfo), deletion, data.mapValues(
+        return create(columns, columnIds, clustering, data.mapValues(
             (Object x) ->
             {
                 if (x instanceof LivenessInfo)
@@ -972,19 +1014,10 @@ public class TrieBackedRow extends AbstractRow
         if (isEmpty(mappedData))
             return null;
 
-        Deletion newDeletion = deletion;
-        if (!deletion.isLive())
-        {
-            DeletionTime newDeletionTime = markerFunction.apply(deletion.time());
-            if (newDeletionTime != deletion.time())
-                newDeletion = newDeletionTime != null ? Deletion.regular(newDeletionTime) : Deletion.LIVE;
-        }
-        return new TrieBackedRow(columns,
-                                 columnIds,
-                                 clustering,
-                                 livenessInfoFunction.apply(livenessInfo),
-                                 newDeletion,
-                                 mappedData);
+        return create(columns,
+                      columnIds,
+                      clustering,
+                      mappedData);
     }
 
     @Override
@@ -1005,7 +1038,7 @@ public class TrieBackedRow extends AbstractRow
         {
             throw new AssertionError(e);
         }
-        return new TrieBackedRow(columns, columnIds, cloner.clone(clustering), livenessInfo, deletion, newTrie);
+        return new TrieBackedRow(columns, columnIds, cloner.clone(clustering), livenessInfo, deletion, minLocalDeletionTime, newTrie);
     }
 
     // TODO: Redo size collection to be more direct.
@@ -1125,12 +1158,10 @@ public class TrieBackedRow extends AbstractRow
                                            TrieBackedRow::deleteData,
                                            true
                 ));
-            return new TrieBackedRow(this.columns,
-                                     this.columnIds,
-                                     this.clustering,
-                                     getLivenessInfo(mergedData),
-                                     getDeletion(mergedData),
-                                     mergedData);
+            return create(this.columns,
+                          this.columnIds,
+                          this.clustering,
+                          mergedData);
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -1138,33 +1169,19 @@ public class TrieBackedRow extends AbstractRow
         }
     }
 
-    private static long minLocalDeletionTime(CellData<?, ?> cell)
+    private static long mergeMinLocalDeletionTime(CellData<?, ?> cell, long prev)
     {
-        return cell.isTombstone() ? Long.MIN_VALUE : cell.localDeletionTime();
+        return cell.isTombstone() ? Long.MIN_VALUE : Math.min(prev, cell.localDeletionTime());
     }
 
-    private static long minLocalDeletionTime(LivenessInfo info)
+    private static long mergeMinLocalDeletionTime(LivenessInfo info, long prev)
     {
-        return info.isExpiring() ? info.localExpirationTime() : Long.MAX_VALUE;
+        return info.isExpiring() ? Math.min(info.localExpirationTime(), prev) : prev;
     }
 
-    private static long minLocalDeletionTime(DeletionTime dt)
+    private static long mergeMinLocalDeletionTime(DeletionTime dt, long prev)
     {
-        return dt.isLive() ? Long.MAX_VALUE : Long.MIN_VALUE;
-    }
-
-    public int getMinLocalDeletionTime()
-    {
-        if (!minLocalDeletionTimeSet)
-        {
-            long accumulated = accumulate(Integer.MAX_VALUE,
-                                         (livenessInfo, mldt) -> Math.min(mldt, minLocalDeletionTime(livenessInfo)),
-                                         (cell, mldt) -> Math.min(mldt, minLocalDeletionTime(cell)),
-                                         (marker, mldt) -> Math.min(mldt, minLocalDeletionTime(marker)));
-            minLocalDeletionTime = (int) accumulated;
-            minLocalDeletionTimeSet = true;
-        }
-        return minLocalDeletionTime;
+        return Long.MIN_VALUE; // we only have a marker when its non-live
     }
 
     class CellsWithPath extends TrieEntriesIterator.WithNullFiltering<Object, Cell<?>>
@@ -1350,12 +1367,10 @@ public class TrieBackedRow extends AbstractRow
         @Override
         public TrieBackedRow build()
         {
-            TrieBackedRow row = new TrieBackedRow(regularAndStaticColumns.columns(clustering == Clustering.STATIC_CLUSTERING),
-                                                  columnIds,
-                                                  clustering,
-                                                  getLivenessInfo(data),
-                                                  getDeletion(data),
-                                                  data);
+            TrieBackedRow row = create(regularAndStaticColumns.columns(clustering == Clustering.STATIC_CLUSTERING),
+                                       columnIds,
+                                       clustering,
+                                       data);
             reset();
             return row;
         }
