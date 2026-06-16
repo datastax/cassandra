@@ -257,4 +257,35 @@ public class GenericOrderByTest extends SAITester
                 .isInstanceOf(InvalidRequestException.class)
                 .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
     }
+
+    @Test
+    public void testWidePartitionWithPkPredicate() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        // write two partitions, one with increasing values and the other with decreasing values
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 3)");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 2, 2)");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 3, 1)");
+        execute("INSERT INTO %s (k, c, v) VALUES (1, 1, 1)");
+        execute("INSERT INTO %s (k, c, v) VALUES (1, 2, 2)");
+        execute("INSERT INTO %s (k, c, v) VALUES (1, 3, 3)");
+
+        String query = "SELECT c FROM %s WHERE k = ? ORDER BY v LIMIT ?";
+        beforeAndAfterFlush(() ->
+        {
+            // query first partition with different limits
+            assertRows(execute(query, 0, 100), row(3), row(2), row(1));
+            assertRows(execute(query, 0, 3), row(3), row(2), row(1));
+            assertRows(execute(query, 0, 2), row(3), row(2));
+            assertRows(execute(query, 0, 1), row(3));
+
+            // query second partition with different limits
+            assertRows(execute(query, 1, 100), row(1), row(2), row(3));
+            assertRows(execute(query, 1, 3), row(1), row(2), row(3));
+            assertRows(execute(query, 1, 2), row(1), row(2));
+            assertRows(execute(query, 1, 1), row(1));
+        });
+    }
 }
