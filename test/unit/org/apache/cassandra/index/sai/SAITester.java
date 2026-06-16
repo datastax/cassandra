@@ -744,7 +744,8 @@ public class SAITester extends CQLTester
     {
         Set<File> indexFiles = indexFiles();
 
-        for (IndexComponentType indexComponentType : Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes(false))
+        for (IndexComponentType indexComponentType : Version.current(KEYSPACE).onDiskFormat()
+                                                            .perSSTableComponentTypes(currentTableMetadata().hasClustering()))
         {
             String name = Version.current(KEYSPACE).fileNameFormatter().format(indexComponentType, (String)null, 0);
             Component component = new Component(Component.Type.CUSTOM, name);
