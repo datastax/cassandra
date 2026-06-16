@@ -48,7 +48,7 @@ public class QueryContext
 
     private final long executionQuotaNano;
 
-    private long queryTimeouts = 0;
+    private boolean queryTimedOut = false;
 
     private long sstablesHit = 0;
     private long segmentsHit = 0;
@@ -107,12 +107,6 @@ public class QueryContext
     {
         checkThreadOwnership();
         return MonotonicClock.approxTime.now() - queryStartTimeNanos;
-    }
-
-    public void addQueryTimeouts(long val)
-    {
-        checkThreadOwnership();
-        queryTimeouts += val;
     }
 
     // setters
@@ -224,7 +218,7 @@ public class QueryContext
 
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
         {
-            addQueryTimeouts(1);
+            queryTimedOut = true;
             throw new AbortedOperationException();
         }
     }
@@ -295,7 +289,7 @@ public class QueryContext
         public final long bkdPostingListsHit;
         public final long bkdPostingsSkips;
         public final long bkdPostingsDecodes;
-        public final long queryTimeouts;
+        public final boolean queryTimedOut;
         public final long annGraphSearchLatency;
 
         @Nullable
@@ -325,7 +319,7 @@ public class QueryContext
             bkdPostingListsHit = context.bkdPostingListsHit;
             bkdPostingsSkips = context.bkdPostingsSkips;
             bkdPostingsDecodes = context.bkdPostingsDecodes;
-            queryTimeouts = context.queryTimeouts;
+            queryTimedOut = context.queryTimedOut;
             annGraphSearchLatency = context.annGraphSearchLatency;
             queryPlanInfo = context.queryPlanInfo;
         }

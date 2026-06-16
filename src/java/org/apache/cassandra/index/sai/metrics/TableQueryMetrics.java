@@ -239,9 +239,8 @@ public class TableQueryMetrics
         @Override
         public void record(QueryContext.Snapshot snapshot)
         {
-            if (snapshot.queryTimeouts > 0)
+            if (snapshot.queryTimedOut)
             {
-                assert snapshot.queryTimeouts == 1;
                 totalQueryTimeouts.inc();
             }
 
