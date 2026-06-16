@@ -1250,7 +1250,8 @@ public class NativeIndexDDLTest extends SAITester
         IndexContext numericIndexContext = getIndexContext(numericIndexName);
         IndexContext stringIndexContext = getIndexContext(stringIndexName);
 
-        for (IndexComponentType component : Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes(false))
+        for (IndexComponentType component : Version.current(KEYSPACE).onDiskFormat()
+                                                   .perSSTableComponentTypes(currentTableMetadata().hasClustering()))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, null, corruptionType, true, true, rebuild);
 
         for (IndexComponentType component : Version.current(KEYSPACE).onDiskFormat().perIndexComponentTypes(numericIndexContext))
