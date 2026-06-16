@@ -345,7 +345,6 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         metric.rangeRequests.inc();
     }
 
-    @VisibleForTesting
     public UnfilteredPartitionIterator queryStorage(final ColumnFamilyStore cfs, ReadExecutionController controller)
     {
         ColumnFamilyStore.ViewFragment view = cfs.select(View.selectLive(dataRange().keyRange()));

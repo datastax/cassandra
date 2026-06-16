@@ -118,7 +118,7 @@ public class ReadCommandExecutionInfoBench extends CQLTester
         int randomKey = RANDOM.nextInt(NUM_PARTITIONS);
         int randomValue = RANDOM.nextInt(NUM_VALUES);
         String query = String.format(QUERY, randomKey, randomValue);
-        ReadCommand command = parseReadCommandGroup(query).get(0);
+        ReadCommand command = parseReadCommandGroup(query).queries.get(0);
         try (UnfilteredPartitionIterator partitions = command.executeLocally(command.executionController(false)))
         {
             while (partitions.hasNext())
