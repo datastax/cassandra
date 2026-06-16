@@ -89,9 +89,7 @@ public class WideRowPrimaryKeyTest extends AbstractPrimaryKeyTest
         {
             for (int key = 0; key < rows; key++)
             {
-                PrimaryKey test = keys[key];
-
-                test = factory.create(test.partitionKey(),
+                PrimaryKey test = factory.create(keys[key].partitionKey(),
                                       makeClustering(compositePartitionMultipleClusteringAsc,
                                                      randomSimpleString(10, 100),
                                                      randomSimpleString(10, 100)));
