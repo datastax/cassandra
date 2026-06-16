@@ -98,7 +98,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
             try
             {
                 this.perSSTableComponents = perSSTableComponents;
-                metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
+                this.metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
 
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.ROW_TO_TOKEN)));
                 this.rowToTokenFile = perSSTableComponents.get(IndexComponentType.ROW_TO_TOKEN).createFileHandle();
