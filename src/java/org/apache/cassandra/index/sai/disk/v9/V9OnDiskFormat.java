@@ -19,15 +19,11 @@
 package org.apache.cassandra.index.sai.disk.v9;
 
 import java.io.IOException;
-import java.lang.invoke.MethodHandles;
 import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -97,12 +93,9 @@ public class V9OnDiskFormat extends V8OnDiskFormat
     @Override
     public int openFilesPerSSTable(boolean hasClustering)
     {
-        // For the V9 format the number of open files depends on whether the table has clustering. For wide tables
-        // the number of open files will be 8 per SSTable - token values, partition sizes index, partition key blocks,
-        // partition key block offsets, clustering key blocks, clustering key block offsets, group meta & group completion marker
-        // and for skinny tables the number of files will be 6 per SSTable - token values, partition key sizes,
-        // partition key blocks, partition key block offsets, group meta & group completion marker.
-        return hasClustering ? 8 : 6;
+        // For the V9 format the number of open files depends on whether the table has clustering.
+        // The number of open files correspond to the number of components except {@link IndexComponentType.GROUP_COMPLETION_MARKER}.
+        return (hasClustering ? SKINNY_PER_SSTABLE_COMPONENTS.size() : WIDE_PER_SSTABLE_COMPONENTS.size()) - 1;
     }
 
     @Override
