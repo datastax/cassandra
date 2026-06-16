@@ -29,6 +29,7 @@ import java.util.function.LongPredicate;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.function.Supplier;
+
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -42,6 +43,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.db.transform.BasePartitions;
@@ -77,6 +79,7 @@ import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -93,6 +96,7 @@ import org.apache.cassandra.schema.SchemaProvider;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.read.TrackingRowIterator;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CassandraUInt;
 import org.apache.cassandra.transport.Dispatcher;
@@ -402,7 +406,8 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     protected abstract ReadCommand copyAsDigestQuery();
 
-    protected abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
+    @VisibleForTesting
+    public abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
     /**
      * Whether the underlying {@code ClusteringIndexFilter} is reversed or not.
@@ -465,12 +470,6 @@ public abstract class ReadCommand extends AbstractReadQuery
         return cfs.indexManager.getBestIndexQueryPlanFor(rowFilter);
     }
 
-    /**
-     * If the index manager for the CFS determines that there's an applicable
-     * 2i that can be used to execute this command, call its (optional)
-     * validation method to check that nothing in this command's parameters
-     * violates the implementation specific validation rules.
-     */
     @Override
     public void maybeValidateIndexes()
     {
@@ -478,6 +477,12 @@ public abstract class ReadCommand extends AbstractReadQuery
         {
             indexQueryPlan.validate(this);
         }
+    }
+
+    @Override
+    public void validateSelectOptions(SelectOptions selectOptions, ClientState state)
+    {
+        selectOptions.validate(state, metadata(), limits().count(), IndexRegistry.obtain(metadata()), indexQueryPlan);
     }
 
     /**

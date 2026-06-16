@@ -23,9 +23,6 @@ package org.apache.cassandra.index.internal;
 import java.nio.ByteBuffer;
 import java.util.SortedSet;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.db.BufferClusteringBound;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBound;
@@ -55,7 +52,6 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 
 public abstract class CassandraIndexSearcher implements Index.Searcher
 {
-    private static final Logger logger = LoggerFactory.getLogger(CassandraIndexSearcher.class);
 
     private final RowFilter.Expression expression;
     protected final CassandraIndex index;

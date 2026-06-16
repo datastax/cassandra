@@ -504,24 +504,16 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                               int userOffset,
                               AggregationSpecification aggregationSpec)
     {
-        boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
-
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         RowFilter rowFilter = getRowFilter(options, state, indexRegistry);
-        DataLimits limit = getDataLimits(state, userLimit, perPartitionLimit, userOffset, aggregationSpec);
+        DataLimits dataLimits = getDataLimits(state, userLimit, perPartitionLimit, userOffset, aggregationSpec);
 
-        ReadQuery query;
-        if (isPartitionRangeQuery)
-        {
-            if (restrictions.isKeyRange() && restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
-                Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
+        if (restrictions.isKeyRange() && restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
+            Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
 
-            query = getRangeCommand(options, state, columnFilter, rowFilter, limit, nowInSec, indexRegistry);
-        }
-        else
-        {
-            query = getSliceCommands(options, state, columnFilter, rowFilter, limit, nowInSec, indexRegistry);
-        }
+        ReadQuery query = restrictions.isKeyRange()
+                        ? getRangeCommand(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry)
+                        : getSliceCommands(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry);
 
         // Handle additional validation for topK queries
         if (query.isTopK())
@@ -548,8 +540,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // We don't support aggregation for top-k queries because we don't support paging.
             checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
         }
-
-        selectOptions.validate(state, table, userLimit, indexRegistry, query.indexQueryPlan());
 
         // If there's a secondary index that the command can use, have it validate the request parameters.
         query.maybeValidateIndexes();
