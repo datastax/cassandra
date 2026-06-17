@@ -242,11 +242,12 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
             this.supportsExtendedDeletionTime = extendedDeletionTime;
         }
 
+        @VisibleForTesting
         public static List<Version> supportedVersions()
         {
             List<Version> versions = Lists.newArrayList();
             for (Version version : values())
-                if (minimum_version <= version.value)
+                if (minimum_version <= version.value && version.value <= current_version)
                     versions.add(version);
 
             return Collections.unmodifiableList(versions);
@@ -289,12 +290,15 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         if (DatabaseDescriptor.isClientInitialized())
         {
             accept_messaging = new AcceptVersions(minimum_version, maximum_version);
-            accept_streaming = new AcceptVersions(minimum_version, maximum_version);
+            accept_streaming = new AcceptVersions(Math.min(VERSION_40, maximum_version), maximum_version);
         }
         else
         {
             accept_messaging = new AcceptVersions(minimum_version, current_version);
-            accept_streaming = new AcceptVersions(minimum_version, current_version);
+            // Streaming negotiates any common version in [VERSION_40, current_version]; this is only safe because every
+            // streaming serializer (stream headers, control/file messages, compressed payloads) is wire-compatible across
+            // that range.
+            accept_streaming = new AcceptVersions(Math.min(VERSION_40, current_version), current_version);
         }
     }
     static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, Enum::ordinal));
