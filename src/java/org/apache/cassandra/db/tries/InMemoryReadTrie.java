@@ -1486,7 +1486,7 @@ public abstract class InMemoryReadTrie<T>
         if (isNull(node))
             return "NONE";
         String contentAsText = contentManager.dumpContentId(node);
-        int cell = contentManager.cellUsedIfAny(node);
+        int cell = contentManager.cellOrObjectSlotUsed(node);
         return cell < 0 ? contentAsText : "[@" + Integer.toString(cell, 16) + "] " + contentAsText;
     }
 

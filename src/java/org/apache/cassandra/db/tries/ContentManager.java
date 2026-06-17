@@ -64,8 +64,8 @@ public interface ContentManager<T> extends MemoryManager
     String dumpContentId(int id);
 
     /// If the content manager uses trie cells, this must return the cell corresponding to the given id. If not, it
-    /// should return a negative value.
-    int cellUsedIfAny(int id);
+    /// should return ~idx where idx is the index of the object slot used to store the object.
+    int cellOrObjectSlotUsed(int id);
 
     /// Release all recycled content references, including the ones waiting in still incomplete recycling lists.
     /// This is a test method and can cause null pointer exceptions if used on a live trie.

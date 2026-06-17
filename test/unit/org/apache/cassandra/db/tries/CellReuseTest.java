@@ -105,7 +105,8 @@ public class CellReuseTest
     public static void verifyFreeCellsMatchUnreachable(InMemoryBaseTrie<?> trieLong)
     {
         // dump some information first
-        System.out.println(String.format(" LongLived ON_HEAP sizes %10s %10s",
+        System.out.println(String.format(" LongLived %s sizes %10s %10s",
+                                         trieLong.bufferManager.bufferType(),
                                          FBUtilities.prettyPrintMemory(trieLong.usedSizeOnHeap()),
                                          FBUtilities.prettyPrintMemory(trieLong.usedSizeOffHeap())));
 
@@ -121,23 +122,36 @@ public class CellReuseTest
         ));
 
         BufferManagerMultibuf mgr = ((BufferManagerMultibuf) trieLong.bufferManager);
-        IntArrayList availableList = (mgr.cellAllocator).indexesInPipeline();
+        verifyReachability(trieLong, reachable, (mgr.cellAllocator).indexesInPipeline(), mgr.getAllocatedPos(), 5, "cells");
+
+        ContentManager<?> contentManager = trieLong.contentManager;
+        if (contentManager instanceof ContentManagerPojo)
+        {
+            ContentManagerPojo<?> pojo = (ContentManagerPojo<?>) contentManager;
+            verifyReachability(trieLong, longReachable.right, pojo.objectAllocator.indexesInPipeline(), pojo.getAllocatedPos(), 0, "objects");
+            IntArrayList filtered = pojo.collectReleasedUnclearedContentIndexes();
+            Assert.assertTrue(filtered.size() + " indexes released but not cleared " + filtered, filtered.isEmpty());
+        }
+    }
+
+    private static void verifyReachability(InMemoryBaseTrie<?> trieLong, BitSet reachable, IntArrayList availableList, int allocatedMax, int shift, String name)
+    {
         BitSet available = new BitSet(reachable.size());
         for (int v : availableList)
-            available.set(v >> 5);
+            available.set(v >> shift);
 
         // Check no reachable cell is marked for reuse
         BitSet intersection = new BitSet(available.size());
         intersection.or(available);
         intersection.and(reachable);
-        assertCellSetEmpty(intersection, trieLong, " reachable cells marked as available");
+        assertCellSetEmpty(intersection, trieLong, " reachable " + name + " marked as available");
 
         // Check all unreachable cells are marked for reuse
         BitSet unreachable = new BitSet(reachable.size());
         unreachable.or(reachable);
-        unreachable.flip(0, mgr.getAllocatedPos() >> 5);
+        unreachable.flip(0, allocatedMax >> shift);
         unreachable.andNot(available);
-        assertCellSetEmpty(unreachable, trieLong, " unreachable cells not marked as available");
+        assertCellSetEmpty(unreachable, trieLong, " unreachable " + name + " not marked as available");
     }
 
     static class TestException extends RuntimeException
@@ -276,7 +290,7 @@ public class CellReuseTest
 
         if (InMemoryTrie.isLeaf(child))
         {
-            int cell = trie.contentManager.cellUsedIfAny(child);
+            int cell = trie.contentManager.cellOrObjectSlotUsed(child);
             if (cell < 0)
                 objs.set(~cell);
             else
