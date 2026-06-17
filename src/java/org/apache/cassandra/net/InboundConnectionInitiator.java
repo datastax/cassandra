@@ -356,7 +356,7 @@ public class InboundConnectionInitiator
             else
             {
                 if (initiate.type.isStreaming())
-                    setupStreamingPipeline(initiate.from, ctx);
+                    setupStreamingPipeline(initiate.from, useMessagingVersion, ctx);
                 else
                     setupMessagingPipeline(initiate.from, useMessagingVersion, initiate.acceptVersions.max, ctx.pipeline());
             }
@@ -428,7 +428,7 @@ public class InboundConnectionInitiator
             }
         }
 
-        private void setupStreamingPipeline(InetAddressAndPort from, ChannelHandlerContext ctx)
+        private void setupStreamingPipeline(InetAddressAndPort from, int streamingVersion, ChannelHandlerContext ctx)
         {
             handshakeTimeout.cancel(true);
             assert initiate.framing == Framing.UNPROTECTED;
@@ -447,10 +447,11 @@ public class InboundConnectionInitiator
             // we can't infer the type of streaming connection at this point,
             // so we use CONTROL unconditionally; it's ugly but does what we want
             // (establishes an AsyncStreamingInputPlus)
+            channel.attr(NettyStreamingChannel.STREAMING_VERSION_ATTR).set(streamingVersion);
             NettyStreamingChannel streamingChannel = new NettyStreamingChannel(channel, StreamingChannel.Kind.CONTROL);
             pipeline.replace(this, "streamInbound", streamingChannel);
             executorFactory().startThread(String.format("Stream-Deserializer-%s-%s", from, channel.id()),
-                                          new StreamDeserializingTask(null, streamingChannel, current_version));
+                                          new StreamDeserializingTask(null, streamingChannel, streamingVersion));
 
             logger.info("{} streaming connection established, version = {}, framing = {}, encryption = {}",
                         SocketFactory.channelId(from,
@@ -459,7 +460,7 @@ public class InboundConnectionInitiator
                                                 (InetSocketAddress) channel.localAddress(),
                                                 ConnectionType.STREAMING,
                                                 channel.id().asShortText()),
-                        current_version,
+                        streamingVersion,
                         initiate.framing,
                         SocketFactory.encryptionConnectionSummary(pipeline.channel()));
         }

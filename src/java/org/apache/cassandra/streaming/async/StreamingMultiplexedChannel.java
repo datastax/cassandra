@@ -170,7 +170,7 @@ public class StreamingMultiplexedChannel
 
         StreamingChannel channel = factory.create(to, messagingVersion, StreamingChannel.Kind.CONTROL);
         executorFactory().startThread(String.format("Stream-Deserializer-%s-%s", to.toString(), channel.id()),
-                                      new StreamDeserializingTask(session, channel, messagingVersion));
+                                      new StreamDeserializingTask(session, channel, streamingVersion(channel)));
 
         session.attachInbound(channel);
         session.attachOutbound(channel);
@@ -227,7 +227,8 @@ public class StreamingMultiplexedChannel
         {
             Future<?> promise = channel.send(outSupplier -> {
                 // we anticipate that the control messages are rather small, so allocating a ByteBuf shouldn't  blow out of memory.
-                long messageSize = serializedSize(message, messagingVersion);
+                int channelStreamingVersion = streamingVersion(channel);
+                long messageSize = serializedSize(message, channelStreamingVersion);
                 if (messageSize > 1 << 30)
                 {
                     throw new IllegalStateException(format("%s something is seriously wrong with the calculated stream control message's size: %d bytes, type is %s",
@@ -235,7 +236,7 @@ public class StreamingMultiplexedChannel
                 }
                 try (StreamingDataOutputPlus out = outSupplier.apply((int) messageSize))
                 {
-                    StreamMessage.serialize(message, out, messagingVersion, session);
+                    StreamMessage.serialize(message, out, channelStreamingVersion, session);
                 }
             });
             promise.addListener(future -> onMessageComplete(future, message));
@@ -317,7 +318,7 @@ public class StreamingMultiplexedChannel
                 // close the DataOutputStreamPlus as we're done with it - but don't close the channel
                 try (StreamingDataOutputPlus out = channel.acquireOut())
                 {
-                    serialize(msg, out, messagingVersion, session);
+                    serialize(msg, out, streamingVersion(channel), session);
                 }
             }
             catch (Exception e)
@@ -497,6 +498,13 @@ public class StreamingMultiplexedChannel
     int semaphoreAvailablePermits()
     {
         return fileTransferSemaphore.permits();
+    }
+
+    private int streamingVersion(StreamingChannel channel)
+    {
+        return channel instanceof NettyStreamingChannel
+               ? ((NettyStreamingChannel) channel).streamingVersion(messagingVersion)
+               : messagingVersion;
     }
 
     public boolean connected()

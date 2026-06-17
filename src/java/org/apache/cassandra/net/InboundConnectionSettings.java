@@ -120,7 +120,7 @@ public class InboundConnectionSettings
                                              acceptMessaging, acceptStreaming, socketFactory, handlers);
     }
 
-    public InboundConnectionSettings withAcceptStreaming(AcceptVersions acceptMessaging)
+    public InboundConnectionSettings withAcceptStreaming(AcceptVersions acceptStreaming)
     {
         return new InboundConnectionSettings(authenticator, bindAddress, encryption,
                                              socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
