@@ -30,6 +30,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.StreamingSuccess;
 import org.apache.cassandra.net.OutboundConnectionSettings;
+import org.apache.cassandra.streaming.async.NettyStreamingMessageSender;
 
 import static org.apache.cassandra.net.OutboundConnectionInitiator.initiateStreaming;
 
@@ -49,7 +50,11 @@ public class DefaultConnectionFactory implements StreamConnectionFactory
             Future<Result<StreamingSuccess>> result = initiateStreaming(eventLoop, template.withDefaults(ConnectionCategory.STREAMING), messagingVersion);
             result.awaitUninterruptibly(); // initiate has its own timeout, so this is "guaranteed" to return relatively promptly
             if (result.isSuccess())
-                return result.getNow().success().channel;
+            {
+                StreamingSuccess success = result.getNow().success();
+                success.channel.attr(NettyStreamingMessageSender.STREAMING_VERSION_ATTR).set(success.messagingVersion);
+                return success.channel;
+            }
 
             if (++attempts == MAX_CONNECT_ATTEMPTS)
                 throw new IOException("failed to connect to " + template.to + " for streaming data", result.cause());

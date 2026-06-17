@@ -79,6 +79,11 @@ public class CassandraStreamWriter
      */
     public void write(DataOutputStreamPlus output) throws IOException
     {
+        write(output, current_version);
+    }
+
+    public void write(DataOutputStreamPlus output, int version) throws IOException
+    {
         long totalSize = totalSize();
         logger.debug("[Stream #{}] Start streaming file {} to {}, repairedAt = {}, totalSize = {}", session.planId(),
                      sstable.getFilename(), session.peer, sstable.getSSTableMetadata().repairedAt, totalSize);
@@ -110,7 +115,7 @@ public class CassandraStreamWriter
                 while (bytesRead < length)
                 {
                     int toTransfer = (int) Math.min(bufferSize, length - bytesRead);
-                    long lastBytesRead = write(proxy, validator, out, start, transferOffset, toTransfer, bufferSize);
+                    long lastBytesRead = write(proxy, validator, out, start, transferOffset, toTransfer, bufferSize, version);
                     start += lastBytesRead;
                     bytesRead += lastBytesRead;
                     progress += (lastBytesRead - transferOffset);
@@ -144,7 +149,7 @@ public class CassandraStreamWriter
      *
      * @throws java.io.IOException on any I/O error
      */
-    protected long write(ChannelProxy proxy, ChecksumValidator validator, AsyncStreamingOutputPlus output, long start, int transferOffset, int toTransfer, int bufferSize) throws IOException
+    protected long write(ChannelProxy proxy, ChecksumValidator validator, AsyncStreamingOutputPlus output, long start, int transferOffset, int toTransfer, int bufferSize, int version) throws IOException
     {
         // the count of bytes to read off disk
         int minReadable = (int) Math.min(bufferSize, proxy.size() - (start - sstable.getDataFileSliceDescriptor().sliceStart));
@@ -166,7 +171,7 @@ public class CassandraStreamWriter
 
             buffer.position(transferOffset);
             buffer.limit(transferOffset + (toTransfer - transferOffset));
-            output.writeToChannel(StreamCompressionSerializer.serialize(compressor, buffer, current_version), limiter);
+            output.writeToChannel(StreamCompressionSerializer.serialize(compressor, buffer, version), limiter);
         }
         finally
         {
