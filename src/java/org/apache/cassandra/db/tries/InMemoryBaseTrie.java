@@ -91,18 +91,19 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         getBuffer(pos).putByte(inBufferOffset(pos), value);
     }
 
+    /// See [BufferManager#allocateCell].
     private int allocateCell() throws TrieSpaceExhaustedException
     {
         return bufferManager.allocateCell();
     }
 
+    /// See [BufferManager#recycleCell].
     protected void recycleCell(int cell)
     {
         bufferManager.recycleCell(cell);
     }
 
-    /// Creates a copy of a given cell and marks the original for recycling. Used when a mutation needs to force-copy
-    /// paths to ensure earlier states are still available for concurrent readers.
+    /// See [BufferManager#copyCell].
     protected int copyCell(int cell) throws TrieSpaceExhaustedException
     {
         return bufferManager.copyCell(cell);
@@ -481,7 +482,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// as a copying operation as we can't safely shift entries in a sparse node.
     private int removeSparseChild(int node, int index) throws TrieSpaceExhaustedException
     {
+        // Mark the cell for recycling. Note that we can still use the cell's data as input as it will not be actually
+        // released and cannot be modified before the mutation completes.
         recycleCell(node);
+
         int order = getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET);
         if (index <= 1 && order == 6)
         {
@@ -692,7 +696,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     private boolean isExpandableChain(int newChild)
     {
         int newOffset = offset(newChild);
-        return newChild > 0 && newChild - 1 > NONE && newOffset > CHAIN_MIN_OFFSET && newOffset <= CHAIN_MAX_OFFSET;
+        // child must be a prefix node with at least one position character free, and must not become NONE when expanded.
+        // newChild - 1 > NONE checks both that it is not a leaf/NONE and doesn't become NONE when expanded, except
+        // for Long.MIN_VALUE, but the latter fails newOffset > CHAIN_MIN_OFFSET.
+        return newChild - 1 > NONE && newOffset > CHAIN_MIN_OFFSET && newOffset <= CHAIN_MAX_OFFSET;
     }
 
     /// Create a sparse node with two children.

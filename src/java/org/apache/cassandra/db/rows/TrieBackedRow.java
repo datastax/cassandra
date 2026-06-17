@@ -23,16 +23,18 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.MapMaker;
 import com.google.common.primitives.Ints;
 
+import net.openhft.chronicle.values.NotNull;
 import org.agrona.collections.Object2IntHashMap;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.Clustering;
@@ -111,7 +113,7 @@ public class TrieBackedRow extends AbstractRow
     private final Columns columns;
 
     /// Pre-computed column maps for each `Columns` instance.
-    private static final Map<Columns, Object2IntHashMap<ColumnIdentifier>> columnsMapCache = new ConcurrentHashMap<>();
+    private static final Map<Columns, Object2IntHashMap<ColumnIdentifier>> columnsMapCache = new MapMaker().weakKeys().makeMap();
 
     // We need to filter the tombstones of a row on every read (twice in fact: first to remove purgeable tombstone, and then after reconciliation to remove
     // all tombstone since we don't return them to the client) as well as on compaction. But it's likely that many rows won't have any tombstone at all, so
@@ -378,6 +380,9 @@ public class TrieBackedRow extends AbstractRow
     @Override
     public long minTimestamp()
     {
+        if (!deletion.isLive())
+            return deletion.time().markedForDeleteAt(); // no live data can have a lower timestamp
+
         return accumulate(Long.MAX_VALUE,
                           (livenessInfo, minTimestamp) -> Math.min(minTimestamp, livenessInfo.timestamp()),
                           (cell, minTimestamp) -> Math.min(minTimestamp, cell.timestamp()),
@@ -488,7 +493,8 @@ public class TrieBackedRow extends AbstractRow
         return columnIds.getValue(column.name);
     }
 
-    /// Return a cell key (i.e. path in the trie) for the given column and cell path.
+    /// Return a cell key (i.e. path in the trie) for the given (simple or complex) column and cell path (which must be
+    /// non-null if the column is complex).
     private static ByteComparable cellKey(Object2IntHashMap<ColumnIdentifier> columnIds, ColumnMetadata column, CellPath path)
     {
         int id = columnId(columnIds, column);
@@ -513,11 +519,11 @@ public class TrieBackedRow extends AbstractRow
             return ByteSource.variableLengthUnsignedInteger(columnId);
     }
 
-    /// Return a cell key (i.e. path in the trie) for the given column index and cell path.
+    /// Return a cell key (i.e. path in the trie) for a complex cell with the given column index and cell path.
     ///
     /// Note: this method is also used by [TrieBackedComplexColumn] where the column index is in the path leading to the
     /// complex column trie. To support this, a `columnId` of -1 is used to skip the column index.
-    static ByteComparable cellKey(int columnId, ColumnMetadata column, CellPath path)
+    static ByteComparable cellKey(int columnId, ColumnMetadata column, @NotNull CellPath path)
     {
         if (path == CellPath.BOTTOM)
             return v -> ByteSource.concat(columnIdPrefix(columnId),
@@ -1222,8 +1228,6 @@ public class TrieBackedRow extends AbstractRow
         private InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> data;
         private InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>.Mutator<Object, TrieTombstoneMarker> mutator;
 
-        // For complex column at index i of 'columns', we store at complexDeletions[i] its complex deletion.
-
         protected Builder(RegularAndStaticColumns regularAndStaticColumns)
         {
             this.regularAndStaticColumns = regularAndStaticColumns;
@@ -1246,7 +1250,7 @@ public class TrieBackedRow extends AbstractRow
             }
             catch (TrieSpaceExhaustedException e)
             {
-                throw new RuntimeException(e);
+                throw new AssertionError(e); // cannot happen
             }
         }
 
@@ -1296,7 +1300,7 @@ public class TrieBackedRow extends AbstractRow
             }
             catch (TrieSpaceExhaustedException e)
             {
-                throw new RuntimeException(e);
+                throw new AssertionError(e);
             }
         }
 
@@ -1312,8 +1316,13 @@ public class TrieBackedRow extends AbstractRow
             }
             catch (TrieSpaceExhaustedException e)
             {
-                throw new RuntimeException(e);
+                throw new AssertionError(e);
             }
+        }
+
+        private static Object addIfNotPresent(Object existing, Object update)
+        {
+            return existing != null ? existing : update;
         }
 
         @Override
@@ -1322,28 +1331,29 @@ public class TrieBackedRow extends AbstractRow
             assert cell.column().isStatic() == (clustering == Clustering.STATIC_CLUSTERING) : "Column is " + cell.column() + ", clustering = " + clustering;
             CellPath path = cell.path();
             ByteComparable key = cellKey(columnIds, cell.column, path);
-
-            // TODO: Use apply to take care of this?
-            DeletionTime cellDeletion = TrieTombstoneMarker.applicableDeletion(data, key);
-            if (cellDeletion != null && cellDeletion.deletes(cell))
-                return;
+            Preconditions.checkArgument(key != MISSING_COLUMN_KEY, "Column {} not present in row columns set.", cell.column);
 
             try
             {
                 if (path == null || path.dataSize() <= MAX_RECURSIVE_LENGTH)
+                {
+                    DeletionTime cellDeletion = TrieTombstoneMarker.applicableDeletion(data, key);
+                    if (cellDeletion != null && cellDeletion.deletes(cell))
+                        return;
+
                     data.putRecursive(key, cell, (x, y) -> Cells.reconcile((Cell<?>) x, y));
-                else // long path, avoid stack overflow by using the apply path
+                }
+                else // long path, avoid stack overflow by using the apply path; this will also take into account any existing deletion
                     mutator.apply(DeletionAwareTrie.singleton(key, BYTE_COMPARABLE_VERSION, cell));
 
                 if (path != null)
-                    data.putRecursive(columnKey(columnIds, cell.column), COMPLEX_COLUMN_MARKER, (x, y) -> y);
+                    data.putRecursive(columnKey(columnIds, cell.column), COMPLEX_COLUMN_MARKER, Builder::addIfNotPresent);
 
-                if (data.get(ByteComparable.EMPTY) == null)
-                    data.putRecursive(ByteComparable.EMPTY, LivenessInfo.EMPTY, (x, y) -> y);
+                data.putRecursive(ByteComparable.EMPTY, LivenessInfo.EMPTY, Builder::addIfNotPresent);
             }
             catch (TrieSpaceExhaustedException e)
             {
-                throw new RuntimeException(e);
+                throw new AssertionError(e);
             }
         }
 
@@ -1360,7 +1370,7 @@ public class TrieBackedRow extends AbstractRow
             }
             catch (TrieSpaceExhaustedException e)
             {
-                throw new RuntimeException(e);
+                throw new AssertionError(e);
             }
         }
 

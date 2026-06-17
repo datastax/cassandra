@@ -163,20 +163,17 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
 
     static class ApplyState<T, D extends RangeState<D>> extends InMemoryBaseTrie.ApplyState<T>
     {
-        int alternateBranchToAttach = NONE;
+        int alternateBranchToAttach;
 
         ApplyState(InMemoryDeletionAwareTrie<T, D> trie)
         {
             super(trie);
         }
 
-        ApplyState<T, D> start()
+        @Override
+        ApplyState<T, D> start(int root, Consumer<? super T> droppedContentCallback)
         {
-            return start(trie.root);
-        }
-
-        ApplyState<T, D> start(int root)
-        {
+            alternateBranchToAttach = NONE;
             return (ApplyState<T, D>) super.start(root, droppedContentCallback);
         }
 
