@@ -492,9 +492,7 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
         {
             Covering newLeft = leftDeletion != null ? leftDeletion.withUpdatedTimestamp(newTimestamp) : null;
             Covering newRight = rightDeletion != null ? rightDeletion.withUpdatedTimestamp(newTimestamp) : null;
-            if (Objects.equals(newLeft, newRight))
-                return newLeft;
-            return new Boundary(newLeft, newRight, levelMarkerIfPresent);
+            return make(newLeft, newRight, levelMarkerIfPresent);
         }
 
         @Override
@@ -502,9 +500,7 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
         {
             Covering newLeft = leftDeletion != null ? leftDeletion.map(mapper) : null;
             Covering newRight = rightDeletion != null ? rightDeletion.map(mapper) : null;
-            if (Objects.equals(newLeft, newRight))
-                return newLeft;
-            return new Boundary(newLeft, newRight, levelMarkerIfPresent);
+            return make(newLeft, newRight, levelMarkerIfPresent);
         }
 
         @Override
@@ -661,7 +657,7 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
             if (existing == null)
                 return this;
 
-            if (existing == LevelMarker.ROW)
+            if (existing.hasLevelMarker(LevelMarker.ROW))
                 throw new AssertionError("Point deletion on a row marker is invalid");
 
             TrieTombstoneMarker existingMarker = existing;
@@ -719,7 +715,7 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
                 return null; // point is subsumed by range deletion, and the boundary turns to covering which is not reported
 
             Covering left = leftDeletion != null ? new Covering(newTimestamp, leftDeletion.localDeletionTime(), leftDeletion.deletionKind) : null;
-            Covering right = rightDeletion != null ? new Covering(newTimestamp, rightDeletion.localDeletionTime(), leftDeletion.deletionKind) : null;
+            Covering right = rightDeletion != null ? new Covering(newTimestamp, rightDeletion.localDeletionTime(), rightDeletion.deletionKind) : null;
             return new Point(new Covering(newTimestamp, pointDeletion.localDeletionTime(), pointDeletion.deletionKind), left, right);
         }
 

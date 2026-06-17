@@ -20,6 +20,7 @@ package org.apache.cassandra.db.rows;
 import java.util.Iterator;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Predicates;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 
@@ -27,9 +28,11 @@ import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.Direction;
+import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieEntriesIterator;
 import org.apache.cassandra.db.tries.TrieEntriesWalker;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.BiLongAccumulator;
 import org.apache.cassandra.utils.LongAccumulator;
@@ -37,12 +40,17 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.memory.Cloner;
 
+import static org.apache.cassandra.db.partitions.TrieBackedPartition.mergeTombstoneRanges;
+import static org.apache.cassandra.db.partitions.TrieBackedPartition.noExistingSelfDeletion;
+import static org.apache.cassandra.db.partitions.TrieBackedPartition.noIncomingSelfDeletion;
+
 /**
  * The data for a complex column, that is its cells and potential complex deletion time.
  */
 public class TrieBackedComplexColumn extends ComplexColumnData
 {
     private final DeletionAwareTrie<Object, TrieTombstoneMarker> data;
+    private volatile int cellCount = -1;
 
     TrieBackedComplexColumn(ColumnMetadata column, DeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
@@ -53,28 +61,35 @@ public class TrieBackedComplexColumn extends ComplexColumnData
 
     @Override
     public boolean hasCells() {
-        return data.contentOnlyTrie().filteredValuesIterator(Direction.FORWARD, CellData.class).hasNext();
+        return cellsCount() > 0;
     }
 
     @Override
     public int cellsCount()
     {
-        return Iterators.size(data.contentOnlyTrie().filteredValuesIterator(Direction.FORWARD, CellData.class));
+        // If this class is used by multiple threads (which would be quite rare), the code below can race but the race
+        // is benign -- at worst we can walk the trie multiple times.
+        if (cellCount < 0)
+            cellCount = Iterators.size(data.contentOnlyTrie().filteredValuesIterator(Direction.FORWARD, CellData.class));
+        return cellCount;
     }
 
     @Override
     public Cell<?> getCell(CellPath path)
     {
-        Object cell = data.contentOnlyTrie().get(TrieBackedRow.cellKey(-1, column, path));
+        Object cell = data.get(TrieBackedRow.cellKey(-1, column, path));
         if (cell == null || cell instanceof Cell)
             return (Cell<?>) cell;
         return ((CellData<?, ?>) cell).toCell(column, path);
     }
 
+    /// @inheritDoc The implementation is O(idx) as it has to walk the trie to find the value. Use sparingly.
     @Override
     public Cell<?> getCellByIndex(int idx)
     {
         var entry = Iterators.get(data.contentOnlyTrie().filteredEntryIterator(Direction.FORWARD, CellData.class), idx, null);
+        if (entry == null)
+            throw new IndexOutOfBoundsException();
         return cellDataToCell(entry.getValue(), entry.getKey());
     }
 
@@ -203,31 +218,61 @@ public class TrieBackedComplexColumn extends ComplexColumnData
     @Override
     public long unsharedHeapSizeExcludingData()
     {
-        throw new AssertionError("Should be collected by TrieBackedRow");
+        return accumulate((cell, v) -> v + cell.unsharedHeapSizeExcludingData(), 
+                          complexDeletion().unsharedHeapSize());
     }
 
     @Override
     public long unsharedHeapSize()
     {
-        throw new AssertionError("Should be collected by TrieBackedRow");
+        return accumulate((cell, v) -> v + cell.unsharedHeapSize(), 
+                          complexDeletion().unsharedHeapSize());
     }
 
     @Override
     public void validate()
     {
-        throw new AssertionError("Should be done by TrieBackedRow");
+        DeletionTime complexDel = complexDeletion();
+        if (!complexDel.validate())
+            throw new AssertionError("Invalid complex deletion: " + complexDel);
+        
+        for (Cell<?> cell : this)
+            cell.validate();
     }
 
     @Override
     public boolean hasInvalidDeletions()
     {
-        throw new AssertionError("Should be collected by TrieBackedRow");
+        DeletionTime complexDel = complexDeletion();
+        if (!complexDel.validate())
+            return true;
+        
+        for (Cell<?> cell : this)
+            if (cell.hasInvalidDeletions())
+                return true;
+        
+        return false;
     }
 
     @Override
     public TrieBackedComplexColumn markCounterLocalToBeCleared()
     {
-        throw new AssertionError("Should be done by TrieBackedRow");
+        if (!column.isCounterColumn())
+            return this;
+        
+        DeletionAwareTrie<Object, TrieTombstoneMarker> mappedData = data.mapValues(
+            (Object x) ->
+            {
+                if (x instanceof CellData)
+                {
+                    CellData<?, ?> c = (CellData<?, ?>) x;
+                    return c.markCounterLocalToBeCleared();
+                }
+                else
+                    return x;   // complex column marker
+            });
+        
+        return new TrieBackedComplexColumn(column, mappedData);
     }
 
     @Override
@@ -246,38 +291,83 @@ public class TrieBackedComplexColumn extends ComplexColumnData
             },
             t -> t.map(deletion -> purger.shouldPurge(deletion) ? null : deletion));
 
-
         return new TrieBackedComplexColumn(column, mappedData);
     }
 
     @Override
-    public TrieBackedComplexColumn purgeDataOlderThan(long nowInSec)
+    public TrieBackedComplexColumn purgeDataOlderThan(long timestamp)
     {
-        throw new AssertionError("Should be done by TrieBackedRow");
+        DeletionAwareTrie<Object, TrieTombstoneMarker> mappedData = data.mapValuesAndDeletions(
+            (Object x) ->
+            {
+                if (x instanceof CellData)
+                {
+                    CellData<?, ?> c = (CellData<?, ?>) x;
+                    return c.purgeDataOlderThan(timestamp);
+                }
+                else
+                    return x;   // complex column marker
+            },
+            t -> t.map(deletion -> deletion.markedForDeleteAt() < timestamp ? null : deletion));
+        
+        return new TrieBackedComplexColumn(column, mappedData);
     }
 
     @Override
     public ColumnData clone(Cloner cloner)
     {
-        throw new AssertionError("Should be done by TrieBackedRow");
+        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> newTrie = TrieBackedRow.newTrie();
+        try
+        {
+            newTrie.mutator(((ex, toClone) -> toClone instanceof CellData ? ((CellData<?, ?>) toClone).clone(cloner) : toClone),
+                            mergeTombstoneRanges(),
+                            noIncomingSelfDeletion(),
+                            noExistingSelfDeletion(),
+                            true,
+                            Predicates.alwaysFalse())
+                   .apply(data);
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            throw new AssertionError(e);
+        }
+
+        return new TrieBackedComplexColumn(column, newTrie);
     }
 
     @Override
     public TrieBackedComplexColumn updateAllTimestamp(long newTimestamp)
     {
-        throw new AssertionError("Should be done by TrieBackedRow");
+        DeletionAwareTrie<Object, TrieTombstoneMarker> mappedData = data.mapValuesAndDeletions(
+            (Object x) ->
+            {
+                if (x instanceof CellData)
+                {
+                    CellData<?, ?> c = (CellData<?, ?>) x;
+                    return c.updateAllTimestamp(newTimestamp);
+                }
+                else
+                    return x;   // complex column marker
+            },
+            t -> t.map(deletion -> deletion.isLive() ? deletion : DeletionTime.build(newTimestamp - 1, deletion.localDeletionTime())));
+        
+        return new TrieBackedComplexColumn(column, mappedData);
     }
 
     @Override
     public long maxTimestamp()
     {
-        throw new AssertionError("Should be collected by TrieBackedRow");
+        long maxTs = complexDeletion().markedForDeleteAt();
+        return accumulate((cell, v) -> Math.max(v, cell.timestamp()), maxTs);
     }
 
     @Override
     public long minTimestamp()
     {
-        throw new AssertionError("Should be collected by TrieBackedRow");
+        DeletionTime complexDeletion = complexDeletion();
+        if (!complexDeletion.isLive())
+            return complexDeletion.markedForDeleteAt(); // No live cell could have a lower timestamp.
+        return accumulate((cell, v) -> Math.min(v, cell.timestamp()), Long.MAX_VALUE);
     }
 
     @Override
@@ -291,13 +381,14 @@ public class TrieBackedComplexColumn extends ComplexColumnData
 
         ComplexColumnData that = (ComplexColumnData)other;
         return this.column().equals(that.column())
+               && this.complexDeletion().equals(that.complexDeletion())
                && Iterables.elementsEqual(this, that);
     }
 
     @Override
     public int hashCode()
     {
-        throw new AssertionError("Should not be used");
+        throw new UnsupportedOperationException();
     }
 
     @Override
