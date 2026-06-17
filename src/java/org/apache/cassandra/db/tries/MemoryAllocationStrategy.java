@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.util.function.IntConsumer;
+
 import com.google.common.annotations.VisibleForTesting;
 
 import org.agrona.collections.IntArrayList;
@@ -61,6 +63,13 @@ public interface MemoryAllocationStrategy
     /// Used to test available and unreachable indexes are the same thing.
     @VisibleForTesting
     IntArrayList indexesInPipeline();
+
+    /// If the strategy supports reference clearing, force clearing of all in-flight references.
+    @VisibleForTesting
+    default void forceReferenceClearing()
+    {
+        // nothing in base class
+    }
 
     interface Allocator
     {
@@ -191,14 +200,7 @@ public interface MemoryAllocationStrategy
                 if (awaitingBarrierHead != null &&
                     (awaitingBarrierHead.barrier == null || awaitingBarrierHead.barrier.allPriorOpsAreFinished()))
                 {
-                    // A block is ready for reuse. Switch to it.
-                    free = awaitingBarrierHead;
-                    // Index blocks only enter these lists when the justReleased block is filled. Sanity check that
-                    // the block is still full.
-                    assert free.count == free.indexes.length;
-                    // We could recycle/pool the IndexBlockList object that free was pointing to before this.
-                    // As the trie will create and drop many times more objects to end up filling one of these, the
-                    // potential impact does not appear to justify the extra complexity.
+                    advanceFreeTo(awaitingBarrierHead);
                 }
                 else
                 {
@@ -209,6 +211,18 @@ public interface MemoryAllocationStrategy
             }
 
             return free.indexes[--free.count];
+        }
+
+        void advanceFreeTo(IndexBlockList awaitingBarrierHead)
+        {
+            // A block is ready for reuse. Switch to it.
+            free = awaitingBarrierHead;
+            // Index blocks only enter these lists when the justReleased block is filled. Sanity check that
+            // the block is still full.
+            assert free.count == free.indexes.length;
+            // We could recycle/pool the IndexBlockList object that free was pointing to before this.
+            // As the trie will create and drop many times more objects to end up filling one of these, the
+            // potential impact does not appear to justify the extra complexity.
         }
 
         @Override
@@ -248,9 +262,14 @@ public interface MemoryAllocationStrategy
                 last = current;
             }
 
+            attachToAwaitingBarrierTail(toProcess, last);
+        }
+
+        void attachToAwaitingBarrierTail(IndexBlockList firstBlock, IndexBlockList lastBlock)
+        {
             assert awaitingBarrierTail.nextList == null;
-            awaitingBarrierTail.nextList = toProcess;
-            awaitingBarrierTail = last;
+            awaitingBarrierTail.nextList = firstBlock;
+            awaitingBarrierTail = lastBlock;
         }
 
         @Override
@@ -285,6 +304,73 @@ public interface MemoryAllocationStrategy
             for (IndexBlockList list = free; list != null; list = list.nextList) // includes awaiting barrier
                 res.addAll(new IntArrayList(list.indexes, list.count, -1));
             return res;
+        }
+    }
+
+    static class OpOrderReuseWithClearingStrategy extends OpOrderReuseStrategy
+    {
+        IndexBlockList clearedTail;
+        final IntConsumer availableIdClearer;
+
+        public OpOrderReuseWithClearingStrategy(Allocator allocator, IntConsumer availableIdClearer, OpOrder opOrder)
+        {
+            super(allocator, opOrder);
+            this.availableIdClearer = availableIdClearer;
+            this.clearedTail = null;
+        }
+
+        @Override
+        void attachToAwaitingBarrierTail(IndexBlockList firstBlock, IndexBlockList lastBlock)
+        {
+            super.attachToAwaitingBarrierTail(firstBlock, lastBlock);
+            if (clearedTail == null)
+                clearedTail = firstBlock;
+            clearIndexBlocksAndAdvanceTail();
+        }
+
+        @Override
+        void advanceFreeTo(IndexBlockList newFreeBlock)
+        {
+            // Ensure that the block we move to has been cleared. While we are at it, also clear other ones that are ready.
+            clearIndexBlocksAndAdvanceTail();
+            super.advanceFreeTo(newFreeBlock);
+        }
+
+        private void clearIndexBlocksAndAdvanceTail()
+        {
+            while (clearedTail != null && (clearedTail.barrier == null || clearedTail.barrier.allPriorOpsAreFinished()))
+            {
+                int[] indexes = clearedTail.indexes;
+                clearedTail = clearedTail.nextList;
+                for (int i : indexes)
+                    availableIdClearer.accept(i);
+            }
+        }
+
+        @Override
+        @VisibleForTesting
+        public void forceReferenceClearing()
+        {
+            // This also tests clearing content references.
+            try
+            {
+                // Releasing a full block of new indexes should force all existing ones to move to awaiting barrier.
+                for (int i = 0; i < MemoryAllocationStrategy.REUSE_BLOCK_SIZE; ++i)
+                    recycle(allocate());
+                completeMutation();
+
+                // Make sure that barrier has passed.
+                OpOrder.Barrier barrier = opOrder.newBarrier();
+                barrier.issue();
+                barrier.await();
+
+                // Clearing now should have them all set to null.
+                clearIndexBlocksAndAdvanceTail();
+            }
+            catch (TrieSpaceExhaustedException e)
+            {
+                throw new AssertionError(e);
+            }
         }
     }
 
