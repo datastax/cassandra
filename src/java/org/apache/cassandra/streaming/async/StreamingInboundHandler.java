@@ -88,6 +88,7 @@ public class StreamingInboundHandler extends ChannelInboundHandlerAdapter
     public void handlerAdded(ChannelHandlerContext ctx)
     {
         buffers = new AsyncStreamingInputPlus(ctx.channel());
+        ctx.channel().attr(NettyStreamingMessageSender.STREAMING_VERSION_ATTR).set(protocolVersion);
         Thread blockingIOThread = new FastThreadLocalThread(new StreamDeserializingTask(session, ctx.channel()),
                                                             String.format("Stream-Deserializer-%s-%s", remoteAddress.toString(), ctx.channel().id()));
         blockingIOThread.setDaemon(true);

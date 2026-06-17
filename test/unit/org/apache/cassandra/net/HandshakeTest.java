@@ -40,11 +40,13 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.MessagingSuccess;
+import org.apache.cassandra.net.OutboundConnectionInitiator.Result.StreamingSuccess;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_12;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.MessagingService.minimum_version;
 import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
@@ -101,6 +103,41 @@ public class HandshakeTest
         {
             inbound.close().await(1L, TimeUnit.SECONDS);
         }
+    }
+
+    private Result streamingHandshake(int req, int outMin, int outMax, int inMin, int inMax) throws ExecutionException, InterruptedException
+    {
+        InboundSockets inbound = new InboundSockets(new InboundConnectionSettings().withAcceptStreaming(new AcceptVersions(inMin, inMax)));
+        try
+        {
+            inbound.open();
+            InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
+            EventLoop eventLoop = factory.defaultGroup().next();
+            Future<Result<StreamingSuccess>> future =
+            initiateStreaming(eventLoop,
+                              new OutboundConnectionSettings(endpoint)
+                                                    .withAcceptVersions(new AcceptVersions(outMin, outMax))
+                                                    .withDefaults(ConnectionCategory.STREAMING),
+                              req);
+            return future.get(20, TimeUnit.SECONDS);
+        }
+        catch (TimeoutException e)
+        {
+            throw new RuntimeException(e);
+        }
+        finally
+        {
+            inbound.close().await(1L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    public void testStreamingNegotiatesCommonVersion() throws InterruptedException, ExecutionException
+    {
+        Result result = streamingHandshake(VERSION_DS_12, VERSION_40, VERSION_DS_12, VERSION_40, VERSION_DS_11);
+        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(VERSION_DS_11, result.success().messagingVersion);
+        result.success().channel.close();
     }
 
     @Test

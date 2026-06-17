@@ -123,6 +123,8 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
     @VisibleForTesting
     static final AttributeKey<Boolean> TRANSFERRING_FILE_ATTR = AttributeKey.valueOf("transferringFile");
 
+    public static final AttributeKey<Integer> STREAMING_VERSION_ATTR = AttributeKey.valueOf("streamingVersion");
+
     public NettyStreamingMessageSender(StreamSession session, OutboundConnectionSettings template, StreamConnectionFactory factory, int streamingVersion, boolean isPreview)
     {
         this.session = session;
@@ -161,6 +163,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
     {
         this.controlMessageChannel = channel;
         channel.attr(TRANSFERRING_FILE_ATTR).set(Boolean.FALSE);
+        channel.attr(STREAMING_VERSION_ATTR).compareAndSet(null, streamingVersion);
         scheduleKeepAliveTask(channel);
     }
 
@@ -197,6 +200,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
     private Channel createChannel(boolean isInboundHandlerNeeded, OutboundConnectionSettings templateWithConnectTo) throws IOException
     {
         Channel channel = factory.createConnection(templateWithConnectTo, streamingVersion);
+        channel.attr(STREAMING_VERSION_ATTR).compareAndSet(null, streamingVersion);
         session.attachOutbound(channel);
 
         if (isInboundHandlerNeeded)
@@ -261,7 +265,8 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
             logger.debug("{} Sending {}", createLogTag(session, channel), message);
 
         // we anticipate that the control messages are rather small, so allocating a ByteBuf shouldn't  blow out of memory.
-        long messageSize = StreamMessage.serializedSize(message, streamingVersion);
+        int channelStreamingVersion = streamingVersion(channel);
+        long messageSize = StreamMessage.serializedSize(message, channelStreamingVersion);
         if (messageSize > 1 << 30)
         {
             throw new IllegalStateException(String.format("%s something is seriously wrong with the calculated stream control message's size: %d bytes, type is %s",
@@ -273,7 +278,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
         ByteBuffer nioBuf = buf.nioBuffer(0, (int) messageSize);
         @SuppressWarnings("resource")
         DataOutputBufferFixed out = new DataOutputBufferFixed(nioBuf);
-        StreamMessage.serialize(message, out, streamingVersion, session);
+        StreamMessage.serialize(message, out, channelStreamingVersion, session);
         assert nioBuf.position() == nioBuf.limit();
         buf.writerIndex(nioBuf.position());
 
@@ -351,7 +356,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
                 // close the DataOutputStreamPlus as we're done with it - but don't close the channel
                 try (DataOutputStreamPlus outPlus = new AsyncStreamingOutputPlus(channel))
                 {
-                    StreamMessage.serialize(msg, outPlus, streamingVersion, session);
+                    StreamMessage.serialize(msg, outPlus, streamingVersion(channel), session);
                 }
                 finally
                 {
@@ -541,6 +546,12 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
     int semaphoreAvailablePermits()
     {
         return fileTransferSemaphore.availablePermits();
+    }
+
+    private int streamingVersion(Channel channel)
+    {
+        Integer channelStreamingVersion = channel.attr(STREAMING_VERSION_ATTR).get();
+        return channelStreamingVersion == null ? streamingVersion : channelStreamingVersion;
     }
 
     @Override

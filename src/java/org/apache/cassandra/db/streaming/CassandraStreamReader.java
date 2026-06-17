@@ -79,8 +79,14 @@ public class CassandraStreamReader implements IStreamReader
     protected final int sstableLevel;
     protected final SerializationHeader.Component header;
     protected final int fileSeqNum;
+    protected final int protocolVersion;
 
     public CassandraStreamReader(StreamMessageHeader header, CassandraStreamHeader streamHeader, StreamSession session)
+    {
+        this(header, streamHeader, session, current_version);
+    }
+
+    public CassandraStreamReader(StreamMessageHeader header, CassandraStreamHeader streamHeader, StreamSession session, int protocolVersion)
     {
         if (session.getPendingRepair() != null)
         {
@@ -99,6 +105,7 @@ public class CassandraStreamReader implements IStreamReader
         this.sstableLevel = streamHeader.sstableLevel;
         this.header = streamHeader.serializationHeader;
         this.fileSeqNum = header.sequenceNumber;
+        this.protocolVersion = protocolVersion;
     }
 
     /**
@@ -125,7 +132,7 @@ public class CassandraStreamReader implements IStreamReader
 
         StreamDeserializer deserializer = null;
         SSTableMultiWriter writer = null;
-        try (StreamCompressionInputStream streamCompressionInputStream = new StreamCompressionInputStream(inputPlus, current_version))
+        try (StreamCompressionInputStream streamCompressionInputStream = new StreamCompressionInputStream(inputPlus, protocolVersion))
         {
             TrackedDataInputPlus in = new TrackedDataInputPlus(streamCompressionInputStream);
             deserializer = new StreamDeserializer(cfs.metadata(), in, inputVersion, getHeader(cfs.metadata()));

@@ -226,7 +226,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
     public static final int VERSION_DSE_68 = 168;
 
     static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version, SUPPORTED_DSE_VERSION);
-    static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
+    static AcceptVersions accept_streaming = new AcceptVersions(Math.min(VERSION_40, current_version), current_version);
     static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, Enum::ordinal));
 
     @Deprecated // remove when cndb no longer supports bdp/6.8-cndb
