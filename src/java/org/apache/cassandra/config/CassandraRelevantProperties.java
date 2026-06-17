@@ -41,6 +41,8 @@ import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIter
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
+import static org.apache.cassandra.utils.NoSpamLogger.NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER_PROPERTY;
+
 // checkstyle: suppress below 'blockSystemPropertyUsage'
 
 /** A class that extracts system properties for the cassandra node it runs within. */
@@ -643,7 +645,7 @@ public enum CassandraRelevantProperties
      *
      * @see org.apache.cassandra.utils.NoSpamLogger
      */
-    NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER("cassandra.nospam_logger.max_statements_per_logger", convertToString(Long.MAX_VALUE)),
+    NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER_PROPERTY, convertToString(Long.MAX_VALUE)),
     /**
      * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
      * {@link OperationContext} instances.

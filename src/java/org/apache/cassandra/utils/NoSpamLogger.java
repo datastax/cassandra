@@ -99,9 +99,11 @@ public class NoSpamLogger
         noSpamLoggerMaxStatementsPerLogger = getOrDefaultNoSpamLoggerMaxStatementsPerLogger();
     }
 
+    public static final String NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER_PROPERTY = "cassandra.nospam_logger.max_statements_per_logger";
+
     private static long getOrDefaultNoSpamLoggerMaxStatementsPerLogger()
     {
-        return Long.getLong("cassandra.nospam_logger.max_statements_per_logger", Long.MAX_VALUE);
+        return Long.getLong(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER_PROPERTY, Long.MAX_VALUE);
     }
 
     public class NoSpamLogStatement extends AtomicLong
