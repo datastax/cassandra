@@ -31,7 +31,6 @@ import com.github.benmanes.caffeine.cache.Expiry;
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.google.common.annotations.VisibleForTesting;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 import static org.apache.cassandra.utils.Clock.Global;
 
 /**
@@ -79,6 +78,30 @@ public class NoSpamLogger
     public static void unsafeSetTicker(Ticker ticker)
     {
         TICKER = ticker;
+    }
+
+    /**
+     * Maximum number of log statements cached per NoSpamLogger instance.
+     * This prevents unbounded memory growth when log messages contain dynamic content.
+     * Defaults to MAX_VALUE as a default behavior since we rely on the cache time-based expiration.
+     */
+    private static long noSpamLoggerMaxStatementsPerLogger = getOrDefaultNoSpamLoggerMaxStatementsPerLogger();
+
+    @VisibleForTesting
+    public static void setNospamLoggerMaxStatementsPerLoggerUnsafe(long maxStatementsPerLogger)
+    {
+        noSpamLoggerMaxStatementsPerLogger = maxStatementsPerLogger;
+    }
+
+    @VisibleForTesting
+    public static void resetNospamLoggerMaxStatementsPerLoggerUnsafe()
+    {
+        noSpamLoggerMaxStatementsPerLogger = getOrDefaultNoSpamLoggerMaxStatementsPerLogger();
+    }
+
+    private static long getOrDefaultNoSpamLoggerMaxStatementsPerLogger()
+    {
+        return Long.getLong("cassandra.nospam_logger.max_statements_per_logger", Long.MAX_VALUE);
     }
 
     public class NoSpamLogStatement extends AtomicLong
@@ -301,7 +324,7 @@ public class NoSpamLogger
      * Uses custom per-entry expiry based on each statement's minIntervalNanos.
      */
     private final Cache<String, NoSpamLogStatement> lastMessage = Caffeine.newBuilder()
-                                                                          .maximumSize(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER.getLong())
+                                                                          .maximumSize(noSpamLoggerMaxStatementsPerLogger)
                                                                           .expireAfter(new StatementExpiry())
                                                                           .ticker(TICKER)
                                                                           .executor(ForkJoinPool.commonPool())
