@@ -218,6 +218,12 @@ extends ConsistencyTestBase<ConsistencyTestBase.TestStateMetadata,
                           trie.usedSizeOffHeap());
     }
 
+    @Override
+    void verifyTrie(InMemoryDeletionAwareTrie<TestStateMetadata, TestRangeState> trie)
+    {
+        CellReuseTest.verifyFreeCellsMatchUnreachable(trie);
+    }
+
     // TestStateMetadata hierarchy for deletion-aware consistency testing
     abstract static class Content
     {

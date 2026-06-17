@@ -152,6 +152,12 @@ public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTri
                           trie.usedSizeOffHeap());
     }
 
+    @Override
+    void verifyTrie(InMemoryTrie<Content> trie)
+    {
+        CellReuseTest.verifyFreeCellsMatchUnreachable(trie);
+    }
+
     abstract static class Content
     {
         final String pk;

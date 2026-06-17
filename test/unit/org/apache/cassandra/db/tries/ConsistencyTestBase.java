@@ -142,6 +142,7 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
 
 
     abstract void printStats(R trie, Predicate<InMemoryBaseTrie.NodeFeatures<C>> forcedCopyChecker);
+    abstract void verifyTrie(R trie);
 
     @Test
     public void testConsistentUpdates() throws Exception
@@ -407,6 +408,8 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
 
                     writeProgress.set(COUNT);
                     printStats(trie, forcedCopyChecker);
+                    verifyTrie(trie);
+
                     Thread.sleep(100); // Let the threads check the completed state too.
 
                     // Make sure we can read everything we have inserted from this thread (if this fails, the problem
@@ -486,6 +489,7 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
             t.join();
 
         printStats(trie, forcedCopyChecker);
+        verifyTrie(trie);
 
         Assert.assertEquals("Writer did not complete", 0, writeProgress.get());
 

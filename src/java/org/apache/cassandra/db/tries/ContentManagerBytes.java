@@ -180,7 +180,7 @@ class ContentManagerBytes<T> implements ContentManager<T>
     }
 
     @Override
-    public int cellUsedIfAny(int id)
+    public int cellOrObjectSlotUsed(int id)
     {
         return offset(id) == OFFSET_SPECIAL ? -1 : (id & MASK_ID_TO_CELL);
     }
