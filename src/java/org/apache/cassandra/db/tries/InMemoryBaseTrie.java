@@ -92,7 +92,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     }
 
     /// See [BufferManager#allocateCell].
-    private int allocateCell() throws TrieSpaceExhaustedException
+    @VisibleForTesting
+    int allocateCell() throws TrieSpaceExhaustedException
     {
         return bufferManager.allocateCell();
     }
@@ -149,7 +150,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         bufferManager.discardBuffers();
     }
 
-    private int copyIfOriginal(int node, int originalNode) throws TrieSpaceExhaustedException
+    @VisibleForTesting
+    int copyIfOriginal(int node, int originalNode) throws TrieSpaceExhaustedException
     {
         return (node == originalNode)
                ? copyCell(originalNode)
@@ -590,7 +592,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     ///   - `insertOrderWord(120, 3, 1, ptr)` must return 1230 (decimal 8*36 + 3*6 + 0)
     ///   - `insertOrderWord(120, 3, 2, ptr)` must return 1320 (decimal 1*216 + 3*36 + 12)
     ///   - `insertOrderWord(120, 3, 3, ptr)` must return 3120 (decimal 3*216 + 48)
-    private static int insertInOrderWord(int order, int newIndex, int smallerCount)
+    @VisibleForTesting
+    static int insertInOrderWord(int order, int newIndex, int smallerCount)
     {
         int r = 1;
         for (int i = 0; i < smallerCount; ++i)
@@ -693,13 +696,16 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         return createSparseNode(existingByte, existingChild, transitionByte, newChild);
     }
 
-    private boolean isExpandableChain(int newChild)
+    @VisibleForTesting
+    boolean isExpandableChain(int newChild)
     {
-        int newOffset = offset(newChild);
         // child must be a prefix node with at least one position character free, and must not become NONE when expanded.
-        // newChild - 1 > NONE checks both that it is not a leaf/NONE and doesn't become NONE when expanded, except
-        // for Long.MIN_VALUE, but the latter fails newOffset > CHAIN_MIN_OFFSET.
-        return newChild - 1 > NONE && newOffset > CHAIN_MIN_OFFSET && newOffset <= CHAIN_MAX_OFFSET;
+        // newChild > NONE + 1 checks both that it is not a leaf/NONE and doesn't become NONE when expanded.
+        if (newChild <= NONE + 1)
+            return false;
+
+        int newOffset = offset(newChild);
+        return newOffset > CHAIN_MIN_OFFSET && newOffset <= CHAIN_MAX_OFFSET;
     }
 
     /// Create a sparse node with two children.
