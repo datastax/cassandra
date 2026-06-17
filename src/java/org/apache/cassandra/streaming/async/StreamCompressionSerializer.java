@@ -29,8 +29,6 @@ import net.jpountz.lz4.LZ4SafeDecompressor;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.streaming.StreamingDataOutputPlus;
 
-import static org.apache.cassandra.net.MessagingService.current_version;
-
 /**
  * A serialiazer for stream compressed files (see package-level documentation). Much like a typical compressed
  * output stream, this class operates on buffers or chunks of the data at a a time. The format for each compressed
@@ -56,7 +54,6 @@ public class StreamCompressionSerializer
 
     public static StreamingDataOutputPlus.Write serialize(LZ4Compressor compressor, ByteBuffer in, int version)
     {
-        assert version == current_version;
         return bufferSupplier -> {
             int uncompressedLength = in.remaining();
             int maxLength = compressor.maxCompressedLength(uncompressedLength);
