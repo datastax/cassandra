@@ -23,6 +23,7 @@ import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.db.tries.InMemoryBaseTrie.REFERENCE_ARRAY_ON_HEAP_SIZE;
@@ -70,7 +71,7 @@ public class ContentManagerPojo<T> implements ContentManager<T>
                 objectAllocator = new MemoryAllocationStrategy.NoReuseStrategy(this::allocateNewObject);
                 break;
             case LONG:
-                objectAllocator = new MemoryAllocationStrategy.OpOrderReuseStrategy(this::allocateNewObject, opOrder);
+                objectAllocator = new MemoryAllocationStrategy.OpOrderReuseWithClearingStrategy(this::allocateNewObject, this::clearIndex, opOrder);
                 break;
             default:
                 throw new AssertionError();
@@ -108,9 +109,9 @@ public class ContentManagerPojo<T> implements ContentManager<T>
     }
 
     @Override
-    public int cellUsedIfAny(int id)
+    public int cellOrObjectSlotUsed(int id)
     {
-        return -1;
+        return ~(id & CONTENT_INDEX_MASK);
     }
 
     /// Allocate a new position in the object array. Used by the memory allocation strategy to allocate a content spot
@@ -128,6 +129,13 @@ public class ContentManagerPojo<T> implements ContentManager<T>
         return index;
     }
 
+    private void clearIndex(int index)
+    {
+        int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+        int ofs = inBufferOffset(index, leadBit, CONTENTS_START_SIZE);
+        AtomicReferenceArray<T> array = contentArrays[leadBit];
+        array.lazySet(ofs, null);
+    }
 
     @Override
     public int addContent(T value, boolean contentAfterBranch) throws TrieSpaceExhaustedException
@@ -149,7 +157,7 @@ public class ContentManagerPojo<T> implements ContentManager<T>
     }
 
     @Override
-    public int setContent(int id, T value) throws TrieSpaceExhaustedException // descendants may throw
+    public int setContent(int id, T value)
     {
         int leadBit = getBufferIdx(id & CONTENT_INDEX_MASK, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
         int ofs = inBufferOffset(id & CONTENT_INDEX_MASK, leadBit, CONTENTS_START_SIZE);
@@ -217,20 +225,34 @@ public class ContentManagerPojo<T> implements ContentManager<T>
     @VisibleForTesting
     public void releaseReferencesUnsafe()
     {
-        try
-        {
-            for (int idx : objectAllocator.indexesInPipeline())
-                setContent(formContentId(idx, false), null);
-        }
-        catch (TrieSpaceExhaustedException e)
-        {
-            throw new RuntimeException(e);
-        }
+        for (int idx : objectAllocator.indexesInPipeline())
+            setContent(formContentId(idx, false), null);
     }
 
     @Override
     public int valuesCount()
     {
         return valuesCount;
+    }
+
+    @VisibleForTesting
+    IntArrayList collectReleasedUnclearedContentIndexes()
+    {
+        objectAllocator.forceReferenceClearing();
+
+        IntArrayList list = objectAllocator.indexesInPipeline();
+        IntArrayList result = new IntArrayList();
+        for (int idx : list)
+        {
+            if (getContent(formContentId(idx, false)) != null)
+                result.addInt(idx);
+        }
+        return result;
+    }
+
+    @VisibleForTesting
+    int getAllocatedPos()
+    {
+        return reservedCount;
     }
 }

@@ -192,6 +192,12 @@ extends ConsistencyTestBase<InMemoryDeletionAwareTrieConsistencyTest.Content,
                           trie.usedSizeOffHeap());
     }
 
+    @Override
+    void verifyTrie(InMemoryDeletionAwareTrie<Content, TestRangeState> trie)
+    {
+        CellReuseTest.verifyFreeCellsMatchUnreachable(trie);
+    }
+
     // Content hierarchy for deletion-aware consistency testing
     abstract static class Content
     {
