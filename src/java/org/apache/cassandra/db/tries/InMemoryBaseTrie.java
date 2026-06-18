@@ -484,6 +484,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// as a copying operation as we can't safely shift entries in a sparse node.
     private int removeSparseChild(int node, int index) throws TrieSpaceExhaustedException
     {
+        // Note: one may be tempted to allow removal of the last added child, but this is not a good idea as it opens
+        // us up to ABA problems. See InMemoryTrie.md.
+
         // Mark the cell for recycling. Note that we can still use the cell's data as input as it will not be actually
         // released and cannot be modified before the mutation completes.
         recycleCell(node);
