@@ -127,4 +127,27 @@ public class VectorSegmentationTest extends VectorTester
 
         return vectors;
     }
+
+    /**
+     * See DSP-25161 and <a href="https://github.com/datastax/cassandra/pull/1189">this PR</a>.
+     */
+    @Test
+    public void testCompactionWithLowRowCountEstimate()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        for (int k = 0; k < 2000; k++)
+        {
+            execute("INSERT INTO %s (k, v) VALUES (?, ?)", k, randomVectorBoxed(2));
+        }
+        flush();
+
+        execute("DELETE FROM %s WHERE k = 0");
+        flush();
+
+        compact();
+
+        assertThat(areAllTableIndexesQueryable()).isTrue();
+    }
 }
