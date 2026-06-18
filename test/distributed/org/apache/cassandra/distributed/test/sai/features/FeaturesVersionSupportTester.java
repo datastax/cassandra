@@ -32,6 +32,7 @@ import org.apache.cassandra.distributed.test.sai.SAIUtil;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
@@ -170,7 +171,8 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
         coordinator.execute("INSERT INTO " + keyspace + ".bm25 (k, v) VALUES (4, 'kiwi')", ALL);
         cluster.forEach(node -> node.flush(keyspace));
 
-        cluster.schemaChange("CREATE CUSTOM INDEX bm25_idx ON " + keyspace + ".bm25(v) " +
+        String index = "bm25_idx";
+        cluster.schemaChange("CREATE CUSTOM INDEX " + index + " ON " + keyspace + ".bm25(v) " +
                              "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                              "WITH OPTIONS = {" +
                              "'index_analyzer': '{" +
@@ -189,6 +191,21 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
             Assertions.assertThatThrownBy(() -> coordinator.execute(query, ALL))
                       .hasMessageContaining(RequestFailureReason.FEATURE_NEEDS_INDEX_REBUILD.name());
         }
+
+        // Test with the coordinator also using the tested version.
+        // In this case the query will fail with a meaningful error message, instead of generic per-node error codes.
+        String versionString = version.toString();
+        cluster.get(1).runOnInstance(() -> org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion(Version.parse(versionString), VERSIONS_PER_KEYSPACE));
+        if (version.onOrAfter(Version.BM25_EARLIEST))
+        {
+            Assertions.assertThat(coordinator.execute(query, ALL)).hasNumberOfRows(1);
+        }
+        else
+        {
+            Assertions.assertThatThrownBy(() -> coordinator.execute(query, ALL))
+                      .hasMessageContaining(String.format(QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25, index));
+        }
+        cluster.get(1).runOnInstance(() -> org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion(Version.LATEST));
     }
 
     /**
