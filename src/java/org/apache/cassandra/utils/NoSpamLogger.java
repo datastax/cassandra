@@ -103,6 +103,7 @@ public class NoSpamLogger
 
     private static long getOrDefaultNoSpamLoggerMaxStatementsPerLogger()
     {
+        // checkstyle: suppress below 'blockSystemPropertyUsage'
         return Long.getLong(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER_PROPERTY, Long.MAX_VALUE);
     }
 

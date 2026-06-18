@@ -22,5 +22,4 @@
 
 <suppressions>
   <suppress checks="RegexpSinglelineJava" files="Semaphore\.java"/>
-  <suppress checks="RegexpSinglelineJava" id="blockSystemPropertyUsage" files="NoSpamLogger\.java"/>
 </suppressions>
