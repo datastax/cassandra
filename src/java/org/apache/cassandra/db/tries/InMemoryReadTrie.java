@@ -752,7 +752,7 @@ public abstract class InMemoryReadTrie<T>
         public long skipTo(long encodedSkipPosition)
         {
             int skipDepth = Cursor.depth(encodedSkipPosition);
-            int skipTransition = Cursor.incomingTransition(encodedSkipPosition);
+            int skipTransition = Cursor.incomingTransitionWithOverflow(encodedSkipPosition);
             boolean onReturnPath = Cursor.isOnReturnPath(encodedSkipPosition);
             if (skipDepth > depth)
             {

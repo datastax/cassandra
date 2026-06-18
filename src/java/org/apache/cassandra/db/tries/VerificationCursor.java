@@ -163,13 +163,16 @@ interface VerificationCursor
                               Cursor.toString(returnedPosition),
                               Cursor.toString(encodedSkipPosition),
                               this);
-            int skipTransition = undecodedTransition(encodedSkipPosition);
+            int skipTransition = Cursor.incomingTransitionWithOverflow(encodedSkipPosition);
             if (skipDepth <= currDepth && skipDepth > 0)
-                assert ((getByte(skipDepth) ^ direction.select(0x00, 0xFF)) << 1) < skipTransition :
-                    String.format("Skip goes backwards to %s where it already visited byte %s\n%s",
+            {
+                int visitedByte = getByte(skipDepth);
+                assert direction.gt(skipTransition, visitedByte) || skipTransition == visitedByte && Cursor.isOnReturnPath(encodedSkipPosition) :
+                    String.format("Skip goes backwards to %s where it already visited byte %2x\n%s",
                                   Cursor.toString(encodedSkipPosition),
-                                  getByte(skipDepth),
+                                  visitedByte,
                                   this);
+            }
 
         }
 

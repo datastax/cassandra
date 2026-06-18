@@ -293,6 +293,7 @@ public class CursorTest
                     assertEquals(transition + direction.increase, Cursor.incomingTransition(newPos));
                 else
                     assertEquals(0x200, VerificationCursor.undecodedTransition(newPos));
+                assertEquals(transition + direction.increase, Cursor.incomingTransitionWithOverflow(newPos));
                 assertEquals(direction, Cursor.direction(newPos));
             });
     }
