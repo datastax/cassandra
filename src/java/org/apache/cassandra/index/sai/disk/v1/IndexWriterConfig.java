@@ -56,7 +56,10 @@ public class IndexWriterConfig
 
     public static final int DEFAULT_MAXIMUM_NODE_CONNECTIONS = 16;
     public static final int DEFAULT_CONSTRUCTION_BEAM_WIDTH = 100;
-    public static final boolean DEFAULT_ENABLE_HIERARCHY = true;
+    
+    // Not final to allow testing of default value changes
+    @VisibleForTesting
+    public static boolean DEFAULT_ENABLE_HIERARCHY = true;
 
     public static final int MAX_TOP_K = SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
 
