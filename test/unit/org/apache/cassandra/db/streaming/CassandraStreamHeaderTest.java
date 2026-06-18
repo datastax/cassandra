@@ -40,8 +40,10 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -99,7 +101,7 @@ public class CassandraStreamHeaderTest
         header.compressionInfo.chunks();
         assertEquals(transferedSize, header.calculateSize());
 
-        SerializationUtils.assertSerializationCycle(header, CassandraStreamHeader.serializer);
+        assertSerializationCycleForStreamingVersions(header, CassandraStreamHeader.serializer);
     }
 
     @Test
@@ -115,7 +117,7 @@ public class CassandraStreamHeaderTest
         header.compressionInfo.chunks();
         assertEquals(transferedSize, header.calculateSize());
 
-        SerializationUtils.assertSerializationCycle(header, CassandraStreamHeader.serializer);
+        assertSerializationCycleForStreamingVersions(header, CassandraStreamHeader.serializer);
     }
 
     @Test
@@ -128,7 +130,7 @@ public class CassandraStreamHeaderTest
         assertEquals(sstable.uncompressedLength(), transferedSize);
         assertEquals(transferedSize, header.calculateSize());
 
-        SerializationUtils.assertSerializationCycle(header, CassandraStreamHeader.serializer);
+        assertSerializationCycleForStreamingVersions(header, CassandraStreamHeader.serializer);
     }
 
     private CassandraStreamHeader header(boolean entireSSTable, boolean compressed)
@@ -175,7 +177,7 @@ public class CassandraStreamHeaderTest
                                  .withTableId(metadata.id)
                                  .build();
 
-        SerializationUtils.assertSerializationCycle(header, CassandraStreamHeader.serializer);
+        assertSerializationCycleForStreamingVersions(header, CassandraStreamHeader.serializer);
     }
 
     @Test
@@ -200,7 +202,16 @@ public class CassandraStreamHeaderTest
                                  .withTableId(metadata.id)
                                  .build();
 
-        SerializationUtils.assertSerializationCycle(header, new TestableCassandraStreamHeaderSerializer());
+        assertSerializationCycleForStreamingVersions(header, new TestableCassandraStreamHeaderSerializer());
+    }
+
+    private static void assertSerializationCycleForStreamingVersions(CassandraStreamHeader header, IVersionedSerializer<CassandraStreamHeader> serializer)
+    {
+        for (MessagingService.Version version : MessagingService.Version.supportedVersions())
+        {
+            if (version.value >= MessagingService.VERSION_40 && version.value <= MessagingService.current_version)
+                SerializationUtils.assertSerializationCycle(header, serializer, version.value);
+        }
     }
 
     private static class TestableCassandraStreamHeaderSerializer extends CassandraStreamHeaderSerializer

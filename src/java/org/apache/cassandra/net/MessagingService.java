@@ -20,6 +20,7 @@ package org.apache.cassandra.net;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -277,6 +278,17 @@ public class MessagingService extends MessagingServiceMBeanImpl
         Version(int value)
         {
             this.value = value;
+        }
+
+        public static List<Version> supportedVersions()
+        {
+            List<Version> versions = new ArrayList<>();
+            for (Version version : values())
+            {
+                if (minimum_version <= version.value)
+                    versions.add(version);
+            }
+            return Collections.unmodifiableList(versions);
         }
     }
 

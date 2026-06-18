@@ -43,7 +43,6 @@ public class StreamRequestTest
 {
     private static InetAddressAndPort local;
     private final String ks = "keyspace";
-    private final int version = MessagingService.current_version;
 
     @BeforeClass
     public static void setUp() throws Throwable
@@ -62,19 +61,25 @@ public class StreamRequestTest
                                                           Arrays.asList(range(5, 6), range(7, 8))),
                                                Arrays.asList("a", "b", "c"));
 
-        int expectedSize = (int) StreamRequest.serializer.serializedSize(orig, version);
-        try (DataOutputBuffer out = new DataOutputBuffer(expectedSize))
+        for (MessagingService.Version version : MessagingService.Version.supportedVersions())
         {
-            StreamRequest.serializer.serialize(orig, out, version);
-            Assert.assertEquals(expectedSize, out.buffer().limit());
-            try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
-            {
-                StreamRequest decoded = StreamRequest.serializer.deserialize(in, version);
+            if (version.value < MessagingService.VERSION_40 || version.value > MessagingService.current_version)
+                continue;
 
-                Assert.assertEquals(orig.keyspace, decoded.keyspace);
-                Util.assertRCEquals(orig.full, decoded.full);
-                Util.assertRCEquals(orig.transientReplicas, decoded.transientReplicas);
-                Assert.assertEquals(orig.columnFamilies, decoded.columnFamilies);
+            int expectedSize = (int) StreamRequest.serializer.serializedSize(orig, version.value);
+            try (DataOutputBuffer out = new DataOutputBuffer(expectedSize))
+            {
+                StreamRequest.serializer.serialize(orig, out, version.value);
+                Assert.assertEquals(expectedSize, out.buffer().limit());
+                try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
+                {
+                    StreamRequest decoded = StreamRequest.serializer.deserialize(in, version.value);
+
+                    Assert.assertEquals(orig.keyspace, decoded.keyspace);
+                    Util.assertRCEquals(orig.full, decoded.full);
+                    Util.assertRCEquals(orig.transientReplicas, decoded.transientReplicas);
+                    Assert.assertEquals(orig.columnFamilies, decoded.columnFamilies);
+                }
             }
         }
     }
