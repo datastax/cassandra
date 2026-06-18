@@ -524,7 +524,7 @@ public class TrieUtil
                 public long skipTo(long encodedSkipPosition)
                 {
                     int depth = Cursor.depth(encodedSkipPosition);
-                    int transition = Cursor.incomingTransition(encodedSkipPosition);
+                    int transition = Cursor.incomingTransitionWithOverflow(encodedSkipPosition);
 
                     if (Cursor.isOnReturnPath(encodedSkipPosition) && !presentContentOnReturnPath)
                         transition += direction.increase;
@@ -857,7 +857,7 @@ public class TrieUtil
         public long skipTo(long encodedSkipPosition)
         {
             int skipDepth = Cursor.depth(encodedSkipPosition);
-            int skipTransition = Cursor.incomingTransition(encodedSkipPosition);
+            int skipTransition = Cursor.incomingTransitionWithOverflow(encodedSkipPosition);
             if (Cursor.isOnReturnPath(encodedSkipPosition))
                 skipTransition += direction.increase;
             int depth = Cursor.depth(position);
