@@ -343,9 +343,9 @@ public class RowFilter
         return root.toString();
     }
 
-    public String toCQLString(boolean redact)
+    public String toCQLString(Redaction redaction)
     {
-        return root.toCQLString(redact);
+        return root.toCQLString(redaction);
     }
 
     public static Builder builder()
@@ -747,10 +747,10 @@ public class RowFilter
         @Override
         public String toString()
         {
-            return toCQLString(false);
+            return toCQLString(Redaction.NONE);
         }
 
-        public String toCQLString(boolean redact)
+        public String toCQLString(Redaction redaction)
         {
             StringBuilder sb = new StringBuilder();
             for (Expression expression : expressions)
@@ -759,14 +759,14 @@ public class RowFilter
                     continue;
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
-                sb.append(expression.toCQLString(redact));
+                sb.append(expression.toCQLString(redaction));
             }
             for (FilterElement child : children)
             {
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
                 sb.append('(');
-                sb.append(child.toCQLString(redact));
+                sb.append(child.toCQLString(redaction));
                 sb.append(')');
             }
             for (Expression expression : expressions)
@@ -775,7 +775,7 @@ public class RowFilter
                     continue;
                 if (sb.length() > 0)
                     sb.append(' ');
-                sb.append(expression.toCQLString(redact));
+                sb.append(expression.toCQLString(redaction));
             }
             return sb.toString();
         }
@@ -1061,10 +1061,10 @@ public class RowFilter
         @Override
         public String toString()
         {
-            return toCQLString(false);
+            return toCQLString(Redaction.NONE);
         }
 
-        public String toCQLString(boolean redact)
+        public String toCQLString(Redaction redaction)
         {
             return "";
         }
@@ -1374,7 +1374,7 @@ public class RowFilter
         }
 
         @Override
-        public String toCQLString(boolean redact)
+        public String toCQLString(Redaction redaction)
         {
             AbstractType<?> type = column.type;
             switch (operator)
@@ -1399,24 +1399,24 @@ public class RowFilter
                     // These don't have a value, so we return here to prevent an error calling type.getString(value)
                     return String.format("ORDER BY %s %s", column.name.toCQLString(), operator);
                 case ANN:
-                    return String.format("ORDER BY %s ANN OF %s", column.name.toCQLString(), truncateValue(type.toCQLString(value, redact)));
+                    return String.format("ORDER BY %s ANN OF %s", column.name.toCQLString(), truncateValue(type.toCQLString(value, redaction)));
                 case LIKE_PREFIX:
-                    return likeToCQLString("'%s%%'", type, redact);
+                    return likeToCQLString("'%s%%'", type, redaction);
                 case LIKE_SUFFIX:
-                    return likeToCQLString("'%%%s'", type, redact);
+                    return likeToCQLString("'%%%s'", type, redaction);
                 case LIKE_CONTAINS:
-                    return likeToCQLString("'%%%s%%'", type, redact);
+                    return likeToCQLString("'%%%s%%'", type, redaction);
                 case LIKE_MATCHES:
-                    return likeToCQLString("'%s'", type, redact);
+                    return likeToCQLString("'%s'", type, redaction);
                 default:
                     break;
             }
-            return String.format("%s %s %s", column.name.toCQLString(), operator, truncateValue(type.toCQLString(value, redact)));
+            return String.format("%s %s %s", column.name.toCQLString(), operator, truncateValue(type.toCQLString(value, redaction)));
         }
 
-        private String likeToCQLString(String pattern, AbstractType<?> type, boolean redact)
+        private String likeToCQLString(String pattern, AbstractType<?> type, Redaction redaction)
         {
-            if (redact)
+            if (redaction == Redaction.REDACT)
                 return String.format("%s LIKE ?", column.name.toCQLString());
 
             String stringValue = String.format(pattern, type.getString(value));
@@ -1537,14 +1537,14 @@ public class RowFilter
         }
 
         @Override
-        public String toCQLString(boolean redact)
+        public String toCQLString(Redaction redaction)
         {
             MapType<?, ?> mt = (MapType<?, ?>) column.type;
             return String.format("%s[%s] %s %s",
                                  column.name.toCQLString(),
-                                 mt.nameComparator().toCQLString(key, redact),
+                                 mt.nameComparator().toCQLString(key, redaction),
                                  operator,
-                                 mt.valueComparator().toCQLString(value, redact));
+                                 mt.valueComparator().toCQLString(value, redaction));
         }
 
         @Override
@@ -1711,13 +1711,13 @@ public class RowFilter
         }
 
         @Override
-        public String toCQLString(boolean redact)
+        public String toCQLString(Redaction redaction)
         {
             return String.format("GEO_DISTANCE(%s, %s) %s %s",
                                  column.name.toCQLString(),
-                                 column.type.toCQLString(value, redact),
+                                 column.type.toCQLString(value, redaction),
                                  distanceOperator,
-                                 FloatType.instance.toCQLString(distance, redact));
+                                 FloatType.instance.toCQLString(distance, redaction));
         }
 
         @Override
@@ -1791,7 +1791,7 @@ public class RowFilter
         }
 
         @Override
-        public String toCQLString(boolean redact)
+        public String toCQLString(Redaction redaction)
         {
             return String.format("expr(%s, %s)",
                                  targetIndex.name,

@@ -36,7 +36,7 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.marshal.Privacy;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.LongIterator;
@@ -68,8 +68,8 @@ public class PlanTest
     {
         Orderer orderer = Mockito.mock(Orderer.class);
         Mockito.when(orderer.isANN()).thenReturn(true);
-        Mockito.when(orderer.toString(Privacy.REDACT)).thenReturn("ORDER BY v ANN OF ?");
-        Mockito.when(orderer.toString(Privacy.NONE)).thenReturn("ORDER BY v ANN OF X");
+        Mockito.when(orderer.toString(Redaction.REDACT)).thenReturn("ORDER BY v ANN OF ?");
+        Mockito.when(orderer.toString(Redaction.NONE)).thenReturn("ORDER BY v ANN OF X");
         return orderer;
     }
 
@@ -112,8 +112,8 @@ public class PlanTest
     private static RowFilter.Expression filterPred(String column, Operator operation)
     {
         RowFilter.Expression pred = Mockito.mock(RowFilter.Expression.class);
-        Mockito.when(pred.toCQLString(false)).thenReturn(column + ' ' + operation + " X");
-        Mockito.when(pred.toCQLString(true)).thenReturn(column + ' ' + operation + " ?");
+        Mockito.when(pred.toCQLString(Redaction.NONE)).thenReturn(column + ' ' + operation + " X");
+        Mockito.when(pred.toCQLString(Redaction.REDACT)).thenReturn(column + ' ' + operation + " ?");
         Mockito.when(pred.operator()).thenReturn(operation);
         return pred;
     }
@@ -585,8 +585,8 @@ public class PlanTest
                               "                 └─ LiteralIndexScan of pred4_idx (sel: 0.001000000, step: 1.0) (keys: 1000.0, cost/key: 0.1, cost: 4500.0..4600.0)\n" +
                               "                    predicate: RANGE(pred4, %<s)\n";
 
-        assertEquals(String.format(expectedPlan, 'X'), limit.toStringRecursive(Privacy.NONE));
-        assertEquals(String.format(expectedPlan, '?'), limit.toStringRecursive(Privacy.REDACT));
+        assertEquals(String.format(expectedPlan, 'X'), limit.toStringRecursive(Redaction.NONE));
+        assertEquals(String.format(expectedPlan, '?'), limit.toStringRecursive(Redaction.REDACT));
     }
 
     @Test
@@ -878,7 +878,7 @@ public class PlanTest
 
         Plan optimizedPlan = origPlan.optimize();
         List<Plan.IndexScan> resultIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
-        assertTrue("original:\n" + origPlan.toStringRecursive(Privacy.REDACT) + "optimized:\n" + optimizedPlan.toStringRecursive(Privacy.REDACT),
+        assertTrue("original:\n" + origPlan.toStringRecursive(Redaction.REDACT) + "optimized:\n" + optimizedPlan.toStringRecursive(Redaction.REDACT),
                      expectedIndexScanCount.contains(resultIndexScans.size()));
     }
 
@@ -1007,7 +1007,7 @@ public class PlanTest
 
         Plan optimizedPlan = origPlan.optimize();
         List<Plan.IndexScan> resultIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
-        assertTrue("original:\n" + origPlan.toStringRecursive(Privacy.REDACT) + "optimized:\n" + optimizedPlan.toStringRecursive(Privacy.REDACT),
+        assertTrue("original:\n" + origPlan.toStringRecursive(Redaction.REDACT) + "optimized:\n" + optimizedPlan.toStringRecursive(Redaction.REDACT),
                      expectedIndexScanCount.contains(resultIndexScans.size()));
     }
 

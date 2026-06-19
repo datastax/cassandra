@@ -90,6 +90,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.partitions.FilteredPartition;
@@ -421,7 +422,7 @@ public class Util
             {
                 try (UnfilteredRowIterator partition = iterator.next())
                 {
-                    throw new AssertionError("Expected no results for query " + command.toUnredactedCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
+                    throw new AssertionError("Expected no results for query " + command.toCQLString(Redaction.NONE) + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
                 }
             }
         }
@@ -436,7 +437,7 @@ public class Util
             {
                 try (RowIterator partition = iterator.next())
                 {
-                    throw new AssertionError("Expected no results for query " + command.toUnredactedCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
+                    throw new AssertionError("Expected no results for query " + command.toCQLString(Redaction.NONE) + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
                 }
             }
         }

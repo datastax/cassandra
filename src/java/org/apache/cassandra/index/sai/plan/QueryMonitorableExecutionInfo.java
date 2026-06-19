@@ -19,7 +19,7 @@ package org.apache.cassandra.index.sai.plan;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.db.marshal.Privacy;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.index.sai.QueryContext;
 
@@ -94,7 +94,7 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
 
     private static String toLogString(Plan plan)
     {
-        String s = plan.toStringRecursive(Privacy.REDACT, DOUBLE_INDENT);
+        String s = plan.toStringRecursive(Redaction.REDACT, DOUBLE_INDENT);
         return s.endsWith("\n") ? s.substring(0, s.length() - 1) : s;
     }
 

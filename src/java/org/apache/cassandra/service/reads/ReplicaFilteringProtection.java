@@ -45,6 +45,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -203,8 +204,8 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
                 // of cached rows we have had during the query.
                 if (!hitFailureThreshold && maxRowsCached > cachedRowsWarnThreshold)
                 {
-                    String unredactedMessage = cachedRowsWarnMessage(false);
-                    String redactedMessage = cachedRowsWarnMessage(true);
+                    String unredactedMessage = cachedRowsWarnMessage(Redaction.NONE);
+                    String redactedMessage = cachedRowsWarnMessage(Redaction.REDACT);
 
                     ClientWarn.instance.warn(unredactedMessage);
                     oneMinuteLogger.warn(redactedMessage);
@@ -212,11 +213,11 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
                 }
             }
 
-            private String cachedRowsWarnMessage(boolean redact)
+            private String cachedRowsWarnMessage(Redaction redaction)
             {
                 return String.format(CACHED_ROWS_WARN_MESSAGE,
                                      maxRowsCached,
-                                     redact ? command.toRedactedCQLString() : command.toUnredactedCQLString(),
+                                     command.toCQLString(redaction),
                                      cachedRowsWarnThreshold);
             }
 
@@ -299,8 +300,8 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
         if (currentRowsCached == cachedRowsFailThreshold + 1)
         {
             hitFailureThreshold = true;
-            String unredactedMessage = cachedRowsFailMessage(false);
-            String redactedMessage = cachedRowsFailMessage(true);
+            String unredactedMessage = cachedRowsFailMessage(Redaction.NONE);
+            String redactedMessage = cachedRowsFailMessage(Redaction.REDACT);
 
             logger.error(redactedMessage);
             Tracing.trace(unredactedMessage);
@@ -308,11 +309,11 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
         }
     }
 
-    private String cachedRowsFailMessage(boolean redact)
+    private String cachedRowsFailMessage(Redaction redaction)
     {
         return String.format(CACHED_ROWS_FAIL_MESSAGE,
                              currentRowsCached,
-                             redact ? command.toRedactedCQLString() : command.toUnredactedCQLString(),
+                             command.toCQLString(redaction),
                              cachedRowsFailThreshold);
     }
 

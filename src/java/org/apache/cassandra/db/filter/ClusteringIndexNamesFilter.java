@@ -22,6 +22,7 @@ import java.util.*;
 
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
@@ -163,10 +164,10 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
     }
 
     @Override
-    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
     {
         if (metadata.clusteringColumns().isEmpty() || clusterings.isEmpty())
-            return rowFilter.toCQLString(redact);
+            return rowFilter.toCQLString(redaction);
 
         boolean isSingleColumn = metadata.clusteringColumns().size() == 1;
         boolean isSingleClustering = clusterings.size() == 1;
@@ -183,7 +184,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         {
             builder.append(i++ == 0 ? "" : ", ")
               .append(isSingleColumn ? "" : '(')
-              .append(clustering.toCQLString(metadata, redact))
+              .append(clustering.toCQLString(metadata, redaction))
               .append(isSingleColumn ? "" : ')');
 
             maxClusteringSize = Math.max(maxClusteringSize, clustering.size());
@@ -198,7 +199,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         for (i = 0; i < clusterings.first().size(); i++)
             rowFilter = rowFilter.withoutFirstLevelExpression(metadata.clusteringColumns().get(i));
 
-        builder.append(rowFilter, true, redact);
+        builder.append(rowFilter, true, redaction);
         appendOrderByToCQLString(metadata, builder);
         return builder.toString();
     }

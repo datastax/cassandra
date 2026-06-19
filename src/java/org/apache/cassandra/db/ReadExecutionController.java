@@ -24,6 +24,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import com.codahale.metrics.Histogram;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.schema.TableMetadata;
@@ -265,7 +266,7 @@ public class ReadExecutionController implements AutoCloseable
 
     private void addSample()
     {
-        String cql = command.toRedactedCQLString();
+        String cql = command.toCQLString(Redaction.REDACT);
         int timeMicros = (int) Math.min(TimeUnit.NANOSECONDS.toMicros(clock.now() - createdAtNanos), Integer.MAX_VALUE);
         ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(baseMetadata.id);
         if (cfs != null)

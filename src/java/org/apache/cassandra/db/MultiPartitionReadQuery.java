@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 import java.util.List;
 
 import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -28,18 +29,18 @@ public interface MultiPartitionReadQuery extends ReadQuery
 {
     List<DataRange> ranges();
 
-    default void appendCQLWhereClause(CqlBuilder builder, boolean redact)
+    default void appendCQLWhereClause(CqlBuilder builder, Redaction redaction)
     {
         // Append the data ranges.
         TableMetadata metadata = metadata();
-        boolean hasRanges = appendRanges(builder, redact);
+        boolean hasRanges = appendRanges(builder, redaction);
 
         // Append the clustering index filter and the row filter.
-        String filter = ranges().get(0).clusteringIndexFilter.toCQLString(metadata, rowFilter(), redact);
+        String filter = ranges().get(0).clusteringIndexFilter.toCQLString(metadata, rowFilter(), redaction);
         builder.appendRestrictions(filter, hasRanges);
     }
 
-    private boolean appendRanges(CqlBuilder builder, boolean redact)
+    private boolean appendRanges(CqlBuilder builder, Redaction redaction)
     {
         List<DataRange> ranges = ranges();
         if (ranges.size() == 1)
@@ -48,7 +49,7 @@ public interface MultiPartitionReadQuery extends ReadQuery
             if (range.isUnrestricted())
                 return false;
 
-            String rangeString = range.toCQLString(metadata(), redact);
+            String rangeString = range.toCQLString(metadata(), redaction);
             if (!rangeString.isEmpty())
             {
                 builder.append(" WHERE ").append(rangeString);
@@ -62,7 +63,7 @@ public interface MultiPartitionReadQuery extends ReadQuery
             {
                 if (i > 0)
                     builder.append(" OR ");
-                builder.append(ranges.get(i).toCQLString(metadata(), redact));
+                builder.append(ranges.get(i).toCQLString(metadata(), redaction));
             }
             builder.append(')');
             return true;

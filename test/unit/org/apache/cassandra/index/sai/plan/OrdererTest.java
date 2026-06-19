@@ -21,7 +21,7 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.marshal.FloatType;
-import org.apache.cassandra.db.marshal.Privacy;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -54,9 +54,9 @@ public class OrdererTest extends VectorTester
 
     private static void assertToString(Orderer orderer, String expectedRedacted, String expectedUnredacted)
     {
-        Assertions.assertThat(orderer.toString(Privacy.REDACT))
+        Assertions.assertThat(orderer.toString(Redaction.REDACT))
                   .isEqualTo(expectedRedacted);
-        Assertions.assertThat(orderer.toString(Privacy.NONE))
+        Assertions.assertThat(orderer.toString(Redaction.NONE))
                   .isEqualTo(expectedUnredacted);
     }
 }

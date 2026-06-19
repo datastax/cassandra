@@ -35,7 +35,7 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.marshal.Privacy;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.RedactionUtil;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -173,23 +173,23 @@ public class Orderer
     @Override
     public String toString()
     {
-        return toString(Privacy.NONE);
+        return toString(Redaction.NONE);
     }
 
-    public String toString(Privacy privacy)
+    public String toString(Redaction redaction)
     {
         String direction = isAscending() ? "ASC" : "DESC";
         String annOptionsString = annOptions != null ? annOptions.toCQLString() : "";
         if (isANN())
-            return context.getColumnName() + " ANN OF " + getVectorTermAsString(privacy) + ' ' + direction + annOptionsString;
+            return context.getColumnName() + " ANN OF " + getVectorTermAsString(redaction) + ' ' + direction + annOptionsString;
         if (isBM25())
-            return context.getColumnName() + " BM25 OF " + context.getValidator().toCQLString(term, privacy == Privacy.REDACT) + ' ' + direction;
+            return context.getColumnName() + " BM25 OF " + context.getValidator().toCQLString(term, redaction) + ' ' + direction;
         return context.getColumnName() + ' ' + direction;
     }
 
-    public String getVectorTermAsString(Privacy privacy)
+    public String getVectorTermAsString(Redaction redaction)
     {
-        return privacy == Privacy.REDACT
+        return redaction == Redaction.REDACT
                ? RedactionUtil.redact(0)
                : Arrays.toString(getRawVectorTerm());
     }

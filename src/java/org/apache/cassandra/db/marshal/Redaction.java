@@ -17,12 +17,13 @@
 package org.apache.cassandra.db.marshal;
 
 /**
- * Named boolan to express whether some sensistive data should be presented in clear or redacted.
+ * Named boolan to express whether sensitive data should be presented in clear or redacted.
  * This is generally applied to column values, or things containing column values.
+ * </p>
  * Column values should be redacted when printed in logs.
  * They shouldn't be redacted when used in user-facing error messages or query tracing.
  */
-public enum Privacy
+public enum Redaction
 {
     NONE, REDACT
 }

@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.assertj.core.api.Assertions;
 
 public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTester
@@ -66,11 +67,11 @@ public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTes
         {
             T command = commands.get(i);
 
-            String actualUnredactedCQL = command.toUnredactedCQLString();
+            String actualUnredactedCQL = command.toCQLString(Redaction.NONE);
             Assertions.assertThat(actualUnredactedCQL)
                       .isEqualTo(formatQuery(expectedUnredactedCQL.get(i)));
 
-            String actualRedactedCQL = command.toRedactedCQLString();
+            String actualRedactedCQL = command.toCQLString(Redaction.REDACT);
             Assertions.assertThat(actualRedactedCQL)
                       .isEqualTo(formatQuery(expectedRedactedCQL.get(i)));
 
