@@ -103,7 +103,14 @@ class ContentManagerBytes<T> implements ContentManager<T>
         ++valuesCount;
         int idIfSpecial = serializer.idIfSpecial(value, contentAfterBranch);
         if (idIfSpecial >= 0)
-            return specialToContent(idIfSpecial); // special value
+        {
+            int contentId = specialToContent(idIfSpecial);
+            // Because we encode specials using a cell offset, it is possible to exhaust the possible number of special
+            // ids encoded. Verify this is not the case.
+            if (contentToSpecial(contentId) != idIfSpecial)
+                throw new TrieSpaceExhaustedException();
+            return contentId; // special value
+        }
 
         int cell = bufferManager.allocateCell();
         int offset = serializer.serialize(value, contentAfterBranch, bufferManager.getBuffer(cell), bufferManager.inBufferOffset(cell));

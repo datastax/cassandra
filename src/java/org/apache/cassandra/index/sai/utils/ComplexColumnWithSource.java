@@ -89,9 +89,9 @@ public class ComplexColumnWithSource extends ComplexColumnData
     }
 
     @Override
-    public ColumnData clone(Cloner cloner)
+    public ComplexColumnData clone(Cloner cloner)
     {
-        return null;
+        return wrapIfNew(wrapped.clone(cloner));
     }
 
     @Override
