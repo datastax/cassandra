@@ -105,31 +105,46 @@ public class StreamingTest extends TestBaseImpl
     @Test
     public void testMixedMessagingVersionStreamingDs11ToDs12() throws Throwable
     {
-        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_11, MessagingService.VERSION_DS_12);
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_11, MessagingService.VERSION_DS_12, false);
     }
 
     @Test
     public void testMixedMessagingVersionStreamingDs12ToDs11() throws Throwable
     {
-        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_12, MessagingService.VERSION_DS_11);
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_12, MessagingService.VERSION_DS_11, false);
     }
 
-    private void testMixedMessagingVersionStreaming(int sourceVersion, int targetVersion) throws Throwable
+    @Test
+    public void testMixedMessagingVersionUncompressedStreamingDs11ToDs12() throws Throwable
+    {
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_11, MessagingService.VERSION_DS_12, true);
+    }
+
+    @Test
+    public void testMixedMessagingVersionUncompressedStreamingDs12ToDs11() throws Throwable
+    {
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_12, MessagingService.VERSION_DS_11, true);
+    }
+
+    private void testMixedMessagingVersionStreaming(int sourceVersion, int targetVersion, boolean uncompressed) throws Throwable
     {
         int rowCount = 1000;
-        String keyspace = KEYSPACE + '_' + sourceVersion + '_' + targetVersion;
+        String keyspace = KEYSPACE + '_' + sourceVersion + '_' + targetVersion + (uncompressed ? "_uncompressed" : "");
         try (Cluster cluster = builder().withNodes(2)
                                        .withDataDirCount(1)
-                                       .withConfig(config -> config.with(NETWORK))
+                                       // disable entire sstable streaming so the per-section CassandraStreamReader/Writer path is used
+                                       .withConfig(config -> config.with(NETWORK).set("stream_entire_sstables", !uncompressed))
                                        .withInstanceInitializer((classLoader, node) -> initializeMessagingVersion(classLoader, node == 1 ? sourceVersion : targetVersion))
                                        .start())
         {
             Assert.assertEquals(sourceVersion, (int) cluster.get(1).callOnInstance(() -> MessagingService.current_version));
             Assert.assertEquals(targetVersion, (int) cluster.get(2).callOnInstance(() -> MessagingService.current_version));
 
+            // disable sstable compression so the uncompressed stream path is exercised
+            String compression = uncompressed ? " AND compression = {'enabled': 'false'}" : "";
             int schemaCoordinator = sourceVersion <= targetVersion ? 1 : 2;
             cluster.schemaChange("CREATE KEYSPACE " + keyspace + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2};", false, cluster.get(schemaCoordinator));
-            cluster.schemaChange(String.format("CREATE TABLE %s.cf (k text, c1 text, c2 text, PRIMARY KEY (k)) WITH compaction = {'class': 'LeveledCompactionStrategy', 'enabled': 'true'}", keyspace), false, cluster.get(schemaCoordinator));
+            cluster.schemaChange(String.format("CREATE TABLE %s.cf (k text, c1 text, c2 text, PRIMARY KEY (k)) WITH compaction = {'class': 'LeveledCompactionStrategy', 'enabled': 'true'}%s", keyspace, compression), false, cluster.get(schemaCoordinator));
 
             for (int i = 0 ; i < rowCount ; ++i)
                 cluster.get(1).executeInternal(String.format("INSERT INTO %s.cf (k, c1, c2) VALUES (?, 'value1', 'value2');", keyspace), Integer.toString(i));
