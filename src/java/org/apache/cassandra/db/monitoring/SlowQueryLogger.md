@@ -250,11 +250,11 @@ This example is showing a single-partition query. We know this because the table
 The number of fetched and returned partitions is 1, as one would expect from a single-partition query.
 There are no tombstones, so that's not likely a problem.
 
-The number of fetched rows, 222053, is much higher than the number or fetched partitions, 1.
+The number of fetched rows, 222053, is much higher than the number of fetched partitions, 1.
 This means that the query has found a probably too large partitions, which contributes to performance issues.
 If queries are unacceptably slow, we should probably try to remodel to use smaller partitions. 
 
-The number or fetched rows, 222053, is also much higher than the number of returned rows, 2.
+The number of fetched rows, 222053, is also much higher than the number of returned rows, 2.
 This means that a lot of filtering is being done in that partition, and that's likely a cause of the query slowness.
 If we look at the query plan, we see that only an index on the restriction on `v2` non-primary key column is used.
 There is however another query restriction on `v1` non-primary key column. 
