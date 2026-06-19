@@ -67,12 +67,6 @@ implements RangeCursor<Q>
     }
 
     @Override
-    public Q state()
-    {
-        return currentState;
-    }
-
-    @Override
     public long advance()
     {
         switch(state)
@@ -265,6 +259,12 @@ implements RangeCursor<Q>
         }
 
         @Override
+        public S state()
+        {
+            return currentState;
+        }
+
+        @Override
         protected boolean precedingIncludedBySet()
         {
             return set.precedingIncluded();
@@ -278,7 +278,7 @@ implements RangeCursor<Q>
 
         protected S restrict(S srcState, TrieSetCursor.RangeState setState)
         {
-            if (srcState == null)
+            if (srcState == null || setState == null)
                 return null;
             if (srcState.isBoundary())
                 return srcState.restrict(setState.applicableBefore, setState.applicableAfter);
@@ -327,7 +327,16 @@ implements RangeCursor<Q>
 
         protected TrieSetCursor.RangeState restrict(TrieSetCursor.RangeState srcState, TrieSetCursor.RangeState setState)
         {
+            if (srcState == null || setState == null)
+                return RangeState.NOT_CONTAINED;
+
             return srcState.intersect(setState);
+        }
+
+        @Override
+        public RangeState nonNullState()
+        {
+            return currentState;
         }
 
         @Override
@@ -364,6 +373,12 @@ implements RangeCursor<Q>
             this.includedBySource = includedBySource;
             this.resolver = resolver;
             setInitialState();
+        }
+
+        @Override
+        public Q state()
+        {
+            return currentState;
         }
 
         @Override

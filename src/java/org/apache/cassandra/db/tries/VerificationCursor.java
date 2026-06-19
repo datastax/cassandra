@@ -22,7 +22,6 @@ import java.util.Arrays;
 import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 
 import org.agrona.DirectBuffer;
 import org.apache.cassandra.utils.Hex;
@@ -385,24 +384,28 @@ interface VerificationCursor
         {
             if (Cursor.isExhausted(position))
                 verifyEndState();
-            else
-            {
-                S precedingState = source.precedingState();
-                boolean equal = agree(currentPrecedingState, precedingState);
-                assert equal : String.format("Unexpected change to covering state: %s -> %s\n%s",
-                                             currentPrecedingState, precedingState, this);
-                currentPrecedingState = precedingState;
 
-                S content = source.content();
-                if (content != null)
-                {
-                    assert agree(currentPrecedingState, content.precedingState(direction)) :
-                    String.format("Range end %s does not close covering state %s\n%s",
-                                  content.precedingState(direction), currentPrecedingState, this);
-                    verifyBoundaryStateProperties(content);
-                    nextPrecedingState = content.succedingState(direction);
-                }
+            S precedingState = source.precedingState();
+            boolean equal = agree(currentPrecedingState, precedingState);
+            assert equal : String.format("Unexpected change to covering state: %s -> %s\n%s",
+                                         currentPrecedingState, precedingState, this);
+            currentPrecedingState = precedingState;
+
+            S content = Cursor.isExhausted(position) ? null : source.content();
+            S fullState = source.state();
+            if (content != null)
+            {
+                assert agree(fullState, content) : String.format("State %s not equal to content %s\n%s",
+                                                            fullState, content, this);
+                assert agree(currentPrecedingState, content.precedingState(direction)) :
+                String.format("Range end %s does not close covering state %s\n%s",
+                              content.precedingState(direction), currentPrecedingState, this);
+                verifyBoundaryStateProperties(content);
+                nextPrecedingState = content.succedingState(direction);
             }
+            else
+                assert fullState == precedingState : String.format("State %s not equal to precedingState %s\n%s",
+                                                                   fullState, precedingState, this);
 
             return position;
         }
@@ -472,23 +475,19 @@ interface VerificationCursor
         Range(RangeCursor<S> source)
         {
             super(source);
-            assert currentPrecedingState == null :
-                String.format("Initial preceding state %s should be null for range cursor\n%s",
-                              currentPrecedingState, this);
-        }
-
-        @Override
-        void verifyEndState()
-        {
-            assert currentPrecedingState == null :
-                String.format("End state %s should be null for range cursor\n%s",
-                              currentPrecedingState, this);
         }
 
         @Override
         public Range<S> tailCursor(Direction direction)
         {
             return new Range<>(source.tailCursor(direction));
+        }
+
+        @Override
+        public RangeCursor<S> precedingStateCursor(Direction direction)
+        {
+            RangeCursor<S> cursor = source.precedingStateCursor(direction);
+            return cursor != null ? new Range<>(cursor) : null;
         }
     }
 
@@ -497,19 +496,27 @@ interface VerificationCursor
         TrieSet(TrieSetCursor source)
         {
             super(source);
-            // start and end state can be non-null for sets
         }
 
         @Override
-        public TrieSetCursor.RangeState state()
+        public RangeState nonNullState()
         {
-            return Preconditions.checkNotNull(source.state());
+            RangeState rangeState = source.nonNullState();
+            assert rangeState != null : String.format("Null nonNullState()\n%s", this);
+            return rangeState;
         }
 
         @Override
         public TrieSet tailCursor(Direction direction)
         {
             return new TrieSet(source.tailCursor(direction));
+        }
+
+        @Override
+        public TrieSetCursor precedingStateCursor(Direction direction)
+        {
+            TrieSetCursor cursor = source.precedingStateCursor(direction);
+            return cursor != null ? new TrieSet(cursor) : null;
         }
     }
 

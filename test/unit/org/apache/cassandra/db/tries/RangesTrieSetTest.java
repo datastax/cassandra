@@ -99,13 +99,13 @@ public class RangesTrieSetTest
 
                     public TrieSetCursor.RangeState content()
                     {
-                        return cursor.state();
+                        return cursor.nonNullState();
                     }
 
                     @Override
                     public TrieSetCursor.RangeState state()
                     {
-                        return cursor.state();
+                        return cursor.nonNullState();
                     }
 
                     public long encodedPosition()
@@ -735,11 +735,23 @@ public class RangesTrieSetTest
         }
 
         @Override
-        public RangeState state()
+        public RangeState nonNullState()
         {
             RangeState state = source.state();
             return state != null ? state
                                  : RangeState.NOT_CONTAINED;
+        }
+
+        @Override
+        public RangeState state()
+        {
+            return source.state();
+        }
+
+        @Override
+        public RangeState precedingState()
+        {
+            return source.precedingState();
         }
 
         @Override

@@ -175,21 +175,34 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         }
     }
 
-    /// The range state of the trie cursor at this point.
-    RangeState state();
+    /// The set state of the trie cursor at this point. This fulfils the same role as [RangeCursor#state], but always
+    /// non-null (NOT_CONTAINED corresponds to null), which simplifies some decisions.
+    RangeState nonNullState();
+
 
     /// Returns whether the set includes the positions before the current in iteration order, but after any earlier
     /// position of this cursor, including any position requested by a [#skipTo] call, where this cursor advanced beyond
     /// that position.
     default boolean precedingIncluded()
     {
-        return state().precedingIncluded(direction());
+        return nonNullState().precedingIncluded(direction());
     }
 
     @Override
     default RangeState content()
     {
-        return state().toContent();
+        return nonNullState().toContent();
+    }
+
+    @Override
+    default RangeState state()
+    {
+        return dropNotContained(nonNullState());
+    }
+
+    static RangeState dropNotContained(RangeState state)
+    {
+        return state == RangeState.NOT_CONTAINED ? null : state;
     }
 
     @Override
@@ -212,7 +225,7 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
 
     /// Negation of trie set cursors.
     ///
-    /// Achieved by simply inverting the [#state()] values, but it must also correct the root state, including by
+    /// Achieved by simply inverting the [#nonNullState()] values, but it must also correct the root state, including by
     /// adding or dropping a return path to the root state.
     class Negated implements TrieSetCursor
     {
@@ -254,12 +267,12 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         }
 
         @Override
-        public RangeState state()
+        public RangeState nonNullState()
         {
             switch (overriding)
             {
                 case ROOT:
-                    if (!source.state().succeedingIncluded(direction()))
+                    if (!source.nonNullState().succeedingIncluded(direction()))
                         return direction().select(RangeState.START, RangeState.END);
                     else
                         return RangeState.NOT_CONTAINED;
@@ -269,7 +282,7 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
                     return RangeState.NOT_CONTAINED;
                 case NONE:
                 default:
-                    return source.state().negation();
+                    return source.nonNullState().negation();
             }
         }
 
