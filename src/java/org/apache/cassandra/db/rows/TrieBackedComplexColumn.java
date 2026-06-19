@@ -314,7 +314,7 @@ public class TrieBackedComplexColumn extends ComplexColumnData
     }
 
     @Override
-    public ColumnData clone(Cloner cloner)
+    public ComplexColumnData clone(Cloner cloner)
     {
         InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> newTrie = TrieBackedRow.newTrie();
         try

@@ -55,8 +55,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     {
         this(byteComparableVersion,
              presentContentOnDescentPath,
-             new BufferManagerMultibuf(bufferType, lifetime, opOrder),  // last one is 1G for a total of ~2G bytes
-             new ContentManagerPojo<>(shouldPreserveWithoutChildren, lifetime, opOrder));  // takes at least 4 bytes to write pointer to one content -> 4 times smaller than buffers
+             new BufferManagerMultibuf(bufferType, lifetime, opOrder),
+             new ContentManagerPojo<>(shouldPreserveWithoutChildren, lifetime, opOrder));
     }
 
     InMemoryBaseTrie(ByteComparable.Version byteComparableVersion, boolean presentContentOnDescentPath, BufferManager bufferManager, ContentManager<T> contentManager)
