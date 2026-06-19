@@ -34,9 +34,11 @@ import com.google.common.annotations.VisibleForTesting;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.streaming.messages.StreamMessage;
@@ -82,7 +84,7 @@ public class StreamingTest extends TestBaseImpl
             cluster.get(nodes).runOnInstance(() -> StorageService.instance.rebuild(null, KEYSPACE, null, null));
             {
                 Object[][] results = cluster.get(nodes).executeInternal(String.format("SELECT k, c1, c2 FROM %s.cf;", KEYSPACE));
-                Assert.assertEquals(1000, results.length);
+                Assert.assertEquals(rowCount, results.length);
                 Arrays.sort(results, Comparator.comparingInt(a -> Integer.parseInt((String) a[0])));
                 for (int i = 0 ; i < results.length ; ++i)
                 {
@@ -98,6 +100,78 @@ public class StreamingTest extends TestBaseImpl
     public void test() throws Throwable
     {
         testStreaming(2, 2, 1000, "LeveledCompactionStrategy");
+    }
+
+    @Test
+    public void testMixedMessagingVersionStreamingDs11ToDs12() throws Throwable
+    {
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_11, MessagingService.VERSION_DS_12);
+    }
+
+    @Test
+    public void testMixedMessagingVersionStreamingDs12ToDs11() throws Throwable
+    {
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_12, MessagingService.VERSION_DS_11);
+    }
+
+    private void testMixedMessagingVersionStreaming(int sourceVersion, int targetVersion) throws Throwable
+    {
+        int rowCount = 1000;
+        String keyspace = KEYSPACE + '_' + sourceVersion + '_' + targetVersion;
+        try (Cluster cluster = builder().withNodes(2)
+                                       .withDataDirCount(1)
+                                       .withConfig(config -> config.with(NETWORK))
+                                       .withInstanceInitializer((classLoader, node) -> initializeMessagingVersion(classLoader, node == 1 ? sourceVersion : targetVersion))
+                                       .start())
+        {
+            Assert.assertEquals(sourceVersion, (int) cluster.get(1).callOnInstance(() -> MessagingService.current_version));
+            Assert.assertEquals(targetVersion, (int) cluster.get(2).callOnInstance(() -> MessagingService.current_version));
+
+            int schemaCoordinator = sourceVersion <= targetVersion ? 1 : 2;
+            cluster.schemaChange("CREATE KEYSPACE " + keyspace + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2};", false, cluster.get(schemaCoordinator));
+            cluster.schemaChange(String.format("CREATE TABLE %s.cf (k text, c1 text, c2 text, PRIMARY KEY (k)) WITH compaction = {'class': 'LeveledCompactionStrategy', 'enabled': 'true'}", keyspace), false, cluster.get(schemaCoordinator));
+
+            for (int i = 0 ; i < rowCount ; ++i)
+                cluster.get(1).executeInternal(String.format("INSERT INTO %s.cf (k, c1, c2) VALUES (?, 'value1', 'value2');", keyspace), Integer.toString(i));
+
+            cluster.get(2).executeInternal("TRUNCATE system.available_ranges;");
+            Assert.assertEquals(0, cluster.get(2).executeInternal(String.format("SELECT k, c1, c2 FROM %s.cf;", keyspace)).length);
+
+            registerSink(cluster, 2);
+            cluster.get(2).runOnInstance(() -> StorageService.instance.rebuild(null, keyspace, null, null));
+
+            Object[][] results = cluster.get(2).executeInternal(String.format("SELECT k, c1, c2 FROM %s.cf;", keyspace));
+            Assert.assertEquals(rowCount, results.length);
+            Arrays.sort(results, Comparator.comparingInt(a -> Integer.parseInt((String) a[0])));
+            for (int i = 0 ; i < results.length ; ++i)
+            {
+                Assert.assertEquals(Integer.toString(i), results[i][0]);
+                Assert.assertEquals("value1", results[i][1]);
+                Assert.assertEquals("value2", results[i][2]);
+            }
+        }
+    }
+
+    private static void initializeMessagingVersion(ClassLoader classLoader, int version)
+    {
+        String key = CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getKey();
+        String previous = System.getProperty(key);
+        try
+        {
+            System.setProperty(key, Integer.toString(version));
+            Class.forName(MessagingService.class.getName(), true, classLoader).getField("current_version").getInt(null);
+        }
+        catch (ReflectiveOperationException e)
+        {
+            throw new RuntimeException(e);
+        }
+        finally
+        {
+            if (previous == null)
+                System.clearProperty(key);
+            else
+                System.setProperty(key, previous);
+        }
     }
 
     public static void registerSink(Cluster cluster, int initiatorNodeId)
