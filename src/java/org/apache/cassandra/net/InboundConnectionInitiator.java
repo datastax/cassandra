@@ -347,6 +347,7 @@ public class InboundConnectionInitiator
                     {
                         logger.warn("Received stream using protocol version {} (my version {}). Terminating connection", version, settings.acceptStreaming.max);
                         failHandshake(ctx);
+                        return;
                     }
                     setupStreamingPipeline(initiate.from, version, ctx);
                 }

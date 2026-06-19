@@ -141,6 +141,24 @@ public class HandshakeTest
     }
 
     @Test
+    public void testStreamingNegotiatesCommonVersionReversed() throws InterruptedException, ExecutionException
+    {
+        // lower initiator (max DS_11) to higher follower (max DS_12) still negotiates the common DS_11
+        Result result = streamingHandshake(VERSION_DS_11, VERSION_40, VERSION_DS_11, VERSION_40, VERSION_DS_12);
+        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(VERSION_DS_11, result.success().messagingVersion);
+        result.success().channel.close();
+    }
+
+    @Test
+    public void testStreamingIncompatibleVersions() throws InterruptedException, ExecutionException
+    {
+        // initiator only supports DS_12, follower only supports up to DS_11: no common version
+        Result result = streamingHandshake(VERSION_DS_12, VERSION_DS_12, VERSION_DS_12, VERSION_40, VERSION_DS_11);
+        Assert.assertEquals(Result.Outcome.INCOMPATIBLE, result.outcome);
+    }
+
+    @Test
     public void testBothCurrentVersion() throws InterruptedException, ExecutionException
     {
         Result result = handshake(current_version, minimum_version, current_version);
