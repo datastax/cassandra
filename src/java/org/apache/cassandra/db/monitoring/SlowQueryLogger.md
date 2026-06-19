@@ -30,7 +30,7 @@ The logged reports include some metrics about the queries to help operators iden
 ## Configuration
 
 Queries are considered slow if their running time exceeds the `slow_query_log_timeout_in_ms` config property,
-defined in `cassandra.yaml`. It defaults to 500 milliseconds. It can be changed dynamically.
+defined in `cassandra.yaml`. It defaults to 500 milliseconds. It can not be changed dynamically.
 
 Also, there are the following JVM properties:
 * `-Dcassandra.monitoring_report_interval_ms`: The interval for reporting any operations that have timed out. 
@@ -38,7 +38,7 @@ Also, there are the following JVM properties:
   It can not be changed dynamically.
 * `-Dcassandra.monitoring_max_operations`: 
   The maximum number of slowest unique queries that will be tracked and reported in each log report. 
-  There are separate counts for slow but successful and aborted queries.  
+  There are separate counters for slow but successful and aborted queries.  
   A query hit multiple times during the interval between reports will only produce an entry in the log report. 
   Due to value redaction, queries of the same form but with different values will produce a single entry.
   This single entry will show the number of times the query has been slow and the metrics for the slowest execution.
@@ -47,14 +47,14 @@ Also, there are the following JVM properties:
 * `-Dcassandra.monitoring_execution_info_enabled`: 
   Whether to log detailed execution info when logging slow or aborted non-SAI queries. 
   If this is `false`, only a CQL approximate representation of the query, 
-  the number of hits and metrics about the running time will be printed, taken less space in logs. 
+  the number of hits and metrics about the running time will be printed, taking less space in logs. 
   If the property is `true`, the reports will also include metrics about the number of fetched and returned partitions, 
   rows and tombstones, taking more space in logs. Defaults to true.
   It can be changed dynamically.
 * `-Dcassandra.sai.monitoring_execution_info_enabled`: 
   Whether to log detailed execution info when logging slow or aborted SAI queries. 
   If this is `false`, only a CQL approximate representation of the query, 
-  the number of hits and metrics about the running time will be printed, taken less space in logs. 
+  the number of hits and metrics about the running time will be printed, taking less space in logs. 
   If the property is `true`, the reports will also include internal index metrics, taking more space in logs.
   Those metrics include the number of fetched and returned index keys partitions, rows and tombstones, 
   index segments hits, ANN latency, the index query plan, planner metrics, etc.
@@ -66,8 +66,8 @@ The slow query logger monitors the replica-side internal commands in which a use
 Once identified, it prints a CQL representation of those internal commands.
 Unfortunately, it's not always possible to produce a CQL translation of the commands 
 that is identical to the user-provided CQL query that produced those commands.
-There are some caveats with the reverse translation that should be taken into account when trying to figure out what
-user CQL query produced a slow query logger entry:
+There are some caveats with the reverse translation that should be taken into account when trying to figure out 
+what user CQL query produced a slow query logger entry when allow filtering or paging are used.
 
 ### Allow filtering
 
@@ -96,7 +96,7 @@ we would see versions of the same query with and without primary key restriction
 
 The log reports for non-SAI `SELECT` queries include execution info details
 when `-Dcassandra.monitoring_execution_info_enabled` is `true`.
-The execution details can be used to try to help diagnose why the query is slow.
+The execution details can be used to help diagnose why the query is slow.
 
 Enabling slow query execution details will produce larger log entries because of the addition information provided.
 The log messages for slow queries can take up around 60% extra (uncompressed) disk space. 
