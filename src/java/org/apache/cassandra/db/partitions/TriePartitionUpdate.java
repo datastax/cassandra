@@ -133,7 +133,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     /** @see PartitionUpdate.Factory#fullPartitionDelete */
     public static TriePartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, long nowInSec)
     {
-        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = TrieBackedRow.newTrie();
+        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = newTrieWithPartitionMarker();
         DeletionTime deletionTime = DeletionTime.build(timestamp, nowInSec);
         putPartitionDeletionInTrie(makeNoConflictMutator(trie), deletionTime);
         return new TriePartitionUpdate(metadata,
