@@ -38,7 +38,9 @@ import static org.github.jamm.MemoryMeterStrategy.MEMORY_LAYOUT;
 /// Like [BufferManagerMultibuf], we use multiple lists that grow in size and can optionally recycle indexes.
 public class ContentManagerPojo<T> implements ContentManager<T>
 {
-    static final int CONTENT_FLAGS_SHIFT = 30;
+    // This is chosen to fit the largest number of content pointers we can have in a trie.
+    // It takes at least 4 bytes to write pointer to one content thus the largest content index we can have is 1/2 G.
+    static final int CONTENT_FLAGS_SHIFT = 29;
     static final int CONTENT_INDEX_MASK = (1 << CONTENT_FLAGS_SHIFT) - 1;
 
     static final int CONTENT_AFTER_BRANCH = 1 << CONTENT_FLAGS_SHIFT;
@@ -63,7 +65,7 @@ public class ContentManagerPojo<T> implements ContentManager<T>
                               InMemoryBaseTrie.ExpectedLifetime lifetime,
                               OpOrder opOrder)
     {
-        this.contentArrays = new AtomicReferenceArray[29 - CONTENTS_START_SHIFT];
+        this.contentArrays = new AtomicReferenceArray[CONTENT_FLAGS_SHIFT - CONTENTS_START_SHIFT];
         this.shouldPreserveWithoutChildren = shouldPreserveWithoutChildren;
         switch (lifetime)
         {
@@ -114,11 +116,14 @@ public class ContentManagerPojo<T> implements ContentManager<T>
         return ~(id & CONTENT_INDEX_MASK);
     }
 
-    /// Allocate a new position in the object array. Used by the memory allocation strategy to allocate a content spot
+    /// Allocate a new position in the object array. Called by the memory allocation strategy to allocate a content spot
     /// when it runs out of recycled positions.
-    private int allocateNewObject()
+    private int allocateNewObject() throws TrieSpaceExhaustedException
     {
         int index = reservedCount++;
+        if ((index & CONTENT_INDEX_MASK) != index)
+            throw new TrieSpaceExhaustedException();
+
         int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
         AtomicReferenceArray<T> array = contentArrays[leadBit];
         if (array == null)

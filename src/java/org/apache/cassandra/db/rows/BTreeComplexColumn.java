@@ -279,7 +279,7 @@ public class BTreeComplexColumn extends ComplexColumnData
     }
 
     @Override
-    public ColumnData clone(Cloner cloner)
+    public ComplexColumnData clone(Cloner cloner)
     {
         return transform(c -> cloner.clone(c));
     }
