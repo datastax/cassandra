@@ -25,6 +25,7 @@ import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.BiLongAccumulator;
 import org.apache.cassandra.utils.LongAccumulator;
+import org.apache.cassandra.utils.memory.Cloner;
 
 /**
  * The data for a complex column, that is it's cells and potential complex
@@ -80,6 +81,8 @@ public abstract class ComplexColumnData extends ColumnData implements Iterable<C
         for (Cell<?> cell : this)
             cell.digest(digest);
     }
+
+    public abstract ComplexColumnData clone(Cloner cloner);
 
     public abstract ComplexColumnData purge(DeletionPurger purger, long nowInSec);
 
