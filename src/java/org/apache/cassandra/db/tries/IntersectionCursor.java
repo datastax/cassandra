@@ -218,7 +218,7 @@ implements Cursor<T>
                 case MATCHING:
                     // Slice bounds fall on the same positions as ordered content. The right side of the state,
                     // regardless of the direction of iteration, determines coverage for the specific position.
-                    return set.state().applicableAfter ? source.content() : null;
+                    return set.nonNullState().applicableAfter ? source.content() : null;
                 default:
                     throw new AssertionError();
             }
