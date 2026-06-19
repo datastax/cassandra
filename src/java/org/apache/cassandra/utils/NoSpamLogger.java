@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.utils;
 
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -24,6 +25,10 @@ import java.util.function.Supplier;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Expiry;
+import com.github.benmanes.caffeine.cache.Ticker;
 import com.google.common.annotations.VisibleForTesting;
 
 import static org.apache.cassandra.utils.Clock.Global;
@@ -36,8 +41,11 @@ import static org.apache.cassandra.utils.Clock.Global;
  * result in the original time being used. No warning is provided if there is a mismatch.
  *
  * If the statement is cached and used to log directly then only a volatile read will be required in the common case.
- * If the Logger is cached then there is a single concurrent hash map lookup + the volatile read.
- * If neither the logger nor the statement is cached then it is two concurrent hash map lookups + the volatile read.
+ * If the Logger is cached then there is a single Caffeine cache lookup + the volatile read.
+ * If neither the logger nor the statement is cached then it is a NonBlockingHashMap lookup + a Caffeine cache lookup + the volatile read.
+ *
+ * The implementation uses Caffeine cache with time-based expiration to automatically evict log statements
+ * after their minimum interval has passed, preventing unbounded memory growth from dynamic log messages.
  *
  */
 public class NoSpamLogger
@@ -62,6 +70,41 @@ public class NoSpamLogger
     public static void unsafeSetClock(Clock clock)
     {
         CLOCK = clock;
+    }
+
+    private static Ticker TICKER = Ticker.systemTicker();
+
+    @VisibleForTesting
+    public static void unsafeSetTicker(Ticker ticker)
+    {
+        TICKER = ticker;
+    }
+
+    /**
+     * Maximum number of log statements cached per NoSpamLogger instance.
+     * This prevents unbounded memory growth when log messages contain dynamic content.
+     * Defaults to MAX_VALUE as a default behavior since we rely on the cache time-based expiration.
+     */
+    private static long noSpamLoggerMaxStatementsPerLogger = getOrDefaultNoSpamLoggerMaxStatementsPerLogger();
+
+    @VisibleForTesting
+    public static void setNospamLoggerMaxStatementsPerLoggerUnsafe(long maxStatementsPerLogger)
+    {
+        noSpamLoggerMaxStatementsPerLogger = maxStatementsPerLogger;
+    }
+
+    @VisibleForTesting
+    public static void resetNospamLoggerMaxStatementsPerLoggerUnsafe()
+    {
+        noSpamLoggerMaxStatementsPerLogger = getOrDefaultNoSpamLoggerMaxStatementsPerLogger();
+    }
+
+    public static final String NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER_PROPERTY = "cassandra.nospam_logger.max_statements_per_logger";
+
+    private static long getOrDefaultNoSpamLoggerMaxStatementsPerLogger()
+    {
+        // checkstyle: suppress below 'blockSystemPropertyUsage'
+        return Long.getLong(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER_PROPERTY, Long.MAX_VALUE);
     }
 
     public class NoSpamLogStatement extends AtomicLong
@@ -157,6 +200,11 @@ public class NoSpamLogger
         {
             return NoSpamLogStatement.this.error(CLOCK.nanoTime(), objects);
         }
+
+        public long expiry()
+        {
+            return minIntervalNanos;
+        }
     }
 
     private static final NonBlockingHashMap<Logger, NoSpamLogger> wrappedLoggers = new NonBlockingHashMap<>();
@@ -165,6 +213,28 @@ public class NoSpamLogger
     static void clearWrappedLoggersForTest()
     {
         wrappedLoggers.clear();
+    }
+
+    /**
+     * Forces eviction of entries from the {@link NoSpamLogStatement} cache for this logger instance.
+     * This is useful for testing to ensure cache size limits are enforced immediately.
+     */
+    @VisibleForTesting
+    void cleanUpStatementsForTest()
+    {
+        lastMessage.cleanUp();
+    }
+
+    /**
+     * Returns the current size of the lastMessage cache for this logger instance.
+     * This is useful for testing cache eviction behavior.
+     *
+     * @return the number of log statements currently cached for this logger
+     */
+    @VisibleForTesting
+    long getStatementsCount()
+    {
+        return lastMessage.estimatedSize();
     }
 
     public static NoSpamLogger getLogger(Logger logger, long minInterval, TimeUnit unit)
@@ -222,7 +292,47 @@ public class NoSpamLogger
 
     private final Logger wrapped;
     private final long minIntervalNanos;
-    private final NonBlockingHashMap<String, NoSpamLogStatement> lastMessage = new NonBlockingHashMap<>();
+
+    /**
+     * Custom expiry policy for NoSpamLogStatement cache entries.
+     * Each entry expires based on its own minIntervalNanos value.
+     */
+    private static class StatementExpiry implements Expiry<String, NoSpamLogStatement>
+    {
+        @Override
+        public long expireAfterCreate(String key, NoSpamLogStatement value, long currentTime)
+        {
+            return value.expiry();
+        }
+
+        @Override
+        public long expireAfterUpdate(String key, NoSpamLogStatement value,
+                                      long currentTime, long currentDuration)
+        {
+            return value.expiry();
+        }
+
+        @Override
+        public long expireAfterRead(String key, NoSpamLogStatement value,
+                                    long currentTime, long currentDuration)
+        {
+            return currentDuration;
+        }
+    }
+
+    /**
+     * Cache of NoSpamLogStatement instances per NoSpamLogger instance.
+     * Bounded by size and time to prevent memory exhaustion from dynamic log messages.
+     * Uses Caffeine with W-TinyLFU eviction policy.
+     * Uses custom per-entry expiry based on each statement's minIntervalNanos.
+     */
+    private final Cache<String, NoSpamLogStatement> lastMessage = Caffeine.newBuilder()
+                                                                          .maximumSize(noSpamLoggerMaxStatementsPerLogger)
+                                                                          .expireAfter(new StatementExpiry())
+                                                                          .ticker(TICKER)
+                                                                          .executor(ForkJoinPool.commonPool())
+                                                                          .recordStats()
+                                                                          .build();
 
     private NoSpamLogger(Logger wrapped, long minInterval, TimeUnit timeUnit)
     {
@@ -297,14 +407,6 @@ public class NoSpamLogger
 
     public NoSpamLogStatement getStatement(String key, String s, long minIntervalNanos)
     {
-        NoSpamLogStatement statement = lastMessage.get(key);
-        if (statement == null)
-        {
-            statement = new NoSpamLogStatement(s, minIntervalNanos);
-            NoSpamLogStatement temp = lastMessage.putIfAbsent(key, statement);
-            if (temp != null)
-                statement = temp;
-        }
-        return statement;
+        return lastMessage.get(key, k -> new NoSpamLogStatement(s, minIntervalNanos));
     }
 }

@@ -41,6 +41,8 @@ import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIter
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
+import static org.apache.cassandra.utils.NoSpamLogger.NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER_PROPERTY;
+
 // checkstyle: suppress below 'blockSystemPropertyUsage'
 
 /** A class that extracts system properties for the cassandra node it runs within. */
@@ -632,6 +634,18 @@ public enum CassandraRelevantProperties
      * when the JVM terminates. Therefore, we can use such optimization and not wait unnecessarily. */
     NON_GRACEFUL_CLOSE("cassandra.messagingService.nonGracefulClose"),
     NON_GRACEFUL_SHUTDOWN("cassandra.test.messagingService.nonGracefulShutdown"),
+    /**
+     * Maximum number of log statements cached per NoSpamLogger instance.
+     * This prevents unbounded memory growth when log messages contain dynamic content.
+     * Note: This property is accessed manually in NoSpamLogger via Long.getLong() to avoid circular dependencies.
+     * The circular dependency occurs because some classes referenced in CassandraRelevantProperties use NoSpamLogger.
+     * For example, {@link StorageCompatibilityMode} has a NoSpamLogger instance and is referenced in
+     * TEST_STORAGE_COMPATIBILITY_MODE, which would create a circular dependency if NoSpamLogger tried to
+     * access CassandraRelevantProperties during initialization.
+     *
+     * @see org.apache.cassandra.utils.NoSpamLogger
+     */
+    NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER(NOSPAM_LOGGER_MAX_STATEMENTS_PER_LOGGER_PROPERTY, convertToString(Long.MAX_VALUE)),
     /**
      * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
      * {@link OperationContext} instances.

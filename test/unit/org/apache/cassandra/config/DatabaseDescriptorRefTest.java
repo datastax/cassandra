@@ -212,6 +212,7 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.utils.FBUtilities",
     "org.apache.cassandra.utils.NoSpamLogger",
     "org.apache.cassandra.utils.NoSpamLogger$Clock",
+    "org.apache.cassandra.utils.NoSpamLogger$StatementExpiry",
     "org.apache.cassandra.utils.Pair",
     "org.apache.cassandra.utils.StorageCompatibilityMode",
     "org.apache.cassandra.utils.binlog.BinLogOptions",
