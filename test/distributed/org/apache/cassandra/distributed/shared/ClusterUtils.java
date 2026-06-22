@@ -21,7 +21,6 @@ package org.apache.cassandra.distributed.shared;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
-import java.security.Permission;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -58,6 +57,7 @@ import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tools.SystemExitException;
+import org.apache.cassandra.tools.SystemExitManager;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Isolated;
 import org.apache.cassandra.utils.Shared;
@@ -973,24 +973,12 @@ public class ClusterUtils
 
     public static void preventSystemExit()
     {
-        System.setSecurityManager(new SecurityManager()
-        {
-            @Override
-            public void checkExit(int status)
-            {
-                throw new SystemExitException(status);
-            }
+        SystemExitManager.blockExit();
+    }
 
-            @Override
-            public void checkPermission(Permission perm)
-            {
-            }
-
-            @Override
-            public void checkPermission(Permission perm, Object context)
-            {
-            }
-        });
+    public static void allowSystemExit()
+    {
+        SystemExitManager.reset();
     }
 
     @Shared

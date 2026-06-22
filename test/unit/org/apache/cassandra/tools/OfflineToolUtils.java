@@ -78,6 +78,12 @@ public abstract class OfflineToolUtils
                        // and may still be active when we check
     "Attach Listener", // spawned in intellij IDEA
     "JNA Cleaner",     // spawned by JNA
+    "ThreadLocalMetrics-Cleaner",   // spawned by org.apache.cassandra.metrics.ThreadLocalMetrics
+    "Native reference cleanup thread",
+    "^ForkJoinPool\\.commonPool-worker-\\d+$",
+    // Byteman listener/agent threads spawned when SystemExitManager.ensureInstalled() attaches the agent
+    "Byteman Thread.*",
+    "Thread-\\d+ \\(agent listener\\)",
     };
 
     static final String[] NON_DEFAULT_MEMTABLE_THREADS =
@@ -200,6 +206,11 @@ public abstract class OfflineToolUtils
 
         // may start an async appender
         LoggerFactory.getLogger(OfflineToolUtils.class);
+
+        // ToolRunner.invokeClass()/runClassAsTool() install the Byteman System.exit interceptor on first use,
+        // which starts a listener thread. Install it now, before the baseline thread snapshot below, so that
+        // thread is part of the baseline and not flagged by assertNoUnexpectedThreadsStarted().
+        SystemExitManager.ensureInstalled();
 
         ThreadMXBean threads = ManagementFactory.getThreadMXBean();
         initialThreads = Arrays.asList(threads.getThreadInfo(threads.getAllThreadIds()));

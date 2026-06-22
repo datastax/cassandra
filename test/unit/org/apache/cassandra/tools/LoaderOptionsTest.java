@@ -22,9 +22,9 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.file.Paths;
-import java.security.Permission;
 
 import com.google.common.net.HostAndPort;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.io.util.File;
@@ -36,6 +36,14 @@ import static org.junit.Assert.assertTrue;
 // LoaderOptionsTester for custom configuration
 public class LoaderOptionsTest
 {
+    @BeforeClass
+    public static void setUp()
+    {
+        // Install the Byteman agent before any test calls blockExit(), so the java.lang.Runtime.exit
+        // interception rule is active before System.exit() is invoked.
+        SystemExitManager.ensureInstalled();
+    }
+
     @Test
     public void testNativePort() throws Exception
     {
@@ -186,22 +194,9 @@ public class LoaderOptionsTest
 
     private void failureHelper(String[] args, int expectedErrorCode)
     {
-        // install security manager to get informed about the exit-code
-        System.setSecurityManager(new SecurityManager()
-        {
-            public void checkExit(int status)
-            {
-                throw new SystemExitException(status);
-            }
-
-            public void checkPermission(Permission perm)
-            {
-            }
-
-            public void checkPermission(Permission perm, Object context)
-            {
-            }
-        });
+        // intercept System.exit to capture the exit-code (replaces the SecurityManager,
+        // which cannot be installed on JDK 24+)
+        SystemExitManager.blockExit();
         try
         {
             LoaderOptions.builder().parseArgs(args).build();
@@ -212,7 +207,7 @@ public class LoaderOptionsTest
         }
         finally
         {
-            System.setSecurityManager(null);
+            SystemExitManager.unblockExit();
         }
     }
 }

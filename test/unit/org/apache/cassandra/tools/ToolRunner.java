@@ -24,7 +24,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
-import java.security.Permission;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -39,6 +38,7 @@ import java.util.stream.Stream;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 
+import org.assertj.core.util.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +46,6 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.distributed.api.IInstance;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.utils.Pair;
-import org.assertj.core.util.Lists;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertTrue;
@@ -57,29 +56,21 @@ public class ToolRunner
     protected static final Logger logger = LoggerFactory.getLogger(ToolRunner.class);
 
     public static final ImmutableList<String> DEFAULT_CLEANERS = ImmutableList.of("(?im)^picked up.*\\R",
-                                                                                   "(?im)^.*`USE <keyspace>` with prepared statements is.*\\R");
+                                                                                  "(?im)^.*package jdk.internal.util.jar not in java.base*\\R",
+                                                                                  "(?im)^.*Not generating a deterministic id for table.*\\R",
+                                                                                  "(?im)^.*`USE <keyspace>` with prepared statements is.*\\R",
+                                                                                  // jamm 0.4.0 prints this once on JDK 25 (the UseEmptySlotsInSupers flag was removed); the sizes are still correct
+                                                                                  "(?im)^WARNING: Jamm is starting with.*\\R");
+
     private static final ImmutableList<String> STDOUT_CLEANERS = ImmutableList.of("^DEBUG .*\\R");
 
     public static int runClassAsTool(String clazz, String... args)
     {
         try
         {
-            // install security manager to get informed about the exit-code
-            System.setSecurityManager(new SecurityManager()
-            {
-                public void checkExit(int status)
-                {
-                    throw new SystemExitException(status);
-                }
-
-                public void checkPermission(Permission perm)
-                {
-                }
-
-                public void checkPermission(Permission perm, Object context)
-                {
-                }
-            });
+            // intercept System.exit/Runtime.exit to capture the exit-code (replaces the SecurityManager,
+            // which cannot be installed on JDK 24+)
+            SystemExitManager.blockExit();
 
             try
             {
@@ -111,8 +102,7 @@ public class ToolRunner
         }
         finally
         {
-            // uninstall security manager
-            System.setSecurityManager(null);
+            SystemExitManager.unblockExit();
         }
     }
 
