@@ -46,6 +46,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -82,7 +83,18 @@ public final class JavaBasedUDFunction extends UDFunction
 
     private static final EcjTargetClassLoader targetClassLoader = new EcjTargetClassLoader();
 
+    // Base verifier: the always-blocked classes/methods (reflection, class loaders, the JDK 9 module API,
+    // DNS, direct ByteBuffers, ...). Used when java.lang.System access is policed elsewhere — i.e. by the
+    // SecurityManager at runtime (legacy mechanism), by the UDF class loader in the legacy sync path, or
+    // when the explicit insecure opt-in deliberately permits it.
     private static final UDFByteCodeVerifier udfByteCodeVerifier = new UDFByteCodeVerifier();
+
+    // Sandbox verifier: the base set plus the dangerous java.lang.System methods (and the property-read
+    // aliases). Used by the SecurityManager-free sandbox to reject those calls at CREATE FUNCTION time, the
+    // job the SecurityManager used to do at runtime. Selected dynamically per creation (see verifierFor())
+    // so that changing the relevant flags takes effect without a JVM restart, mirroring the legacy class
+    // loader, which evaluated them per class-load rather than once at class-init.
+    private static final UDFByteCodeVerifier udfByteCodeVerifierSandbox = new UDFByteCodeVerifier();
 
     private static final ProtectionDomain protectionDomain;
 
@@ -99,38 +111,36 @@ public final class JavaBasedUDFunction extends UDFunction
 
     static
     {
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/Class", "forName");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/Class", "getClassLoader");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/Class", "getResource");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/Class", "getResourceAsStream");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "clearAssertionStatus");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "getResource");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "getResourceAsStream");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "getResources");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "getSystemClassLoader");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "getSystemResource");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "getSystemResourceAsStream");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "getSystemResources");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "loadClass");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "setClassAssertionStatus");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "setDefaultAssertionStatus");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/lang/ClassLoader", "setPackageAssertionStatus");
-        udfByteCodeVerifier.addDisallowedMethodCall("java/nio/ByteBuffer", "allocateDirect");
-        for (String ia : new String[]{"java/net/InetAddress", "java/net/Inet4Address", "java/net/Inet6Address"})
-        {
-            // static method, probably performing DNS lookups (despite SecurityManager)
-            udfByteCodeVerifier.addDisallowedMethodCall(ia, "getByAddress");
-            udfByteCodeVerifier.addDisallowedMethodCall(ia, "getAllByName");
-            udfByteCodeVerifier.addDisallowedMethodCall(ia, "getByName");
-            udfByteCodeVerifier.addDisallowedMethodCall(ia, "getLocalHost");
-            // instance methods, probably performing DNS lookups (despite SecurityManager)
-            udfByteCodeVerifier.addDisallowedMethodCall(ia, "getHostName");
-            udfByteCodeVerifier.addDisallowedMethodCall(ia, "getCanonicalHostName");
-            // ICMP PING
-            udfByteCodeVerifier.addDisallowedMethodCall(ia, "isReachable");
-        }
-        udfByteCodeVerifier.addDisallowedClass("java/net/NetworkInterface");
-        udfByteCodeVerifier.addDisallowedClass("java/net/SocketException");
+        // The always-blocked set applies to both verifiers.
+        configureBaseDisallowed(udfByteCodeVerifier);
+        configureBaseDisallowed(udfByteCodeVerifierSandbox);
+
+        // The sandbox verifier additionally rejects the dangerous java.lang.System methods (and the
+        // property-read aliases). When the SecurityManager-free sandbox is in use (JDK 24+ by default, or
+        // when forced via cassandra.udf.security_mechanism=sandbox), java.lang.System remains loadable in
+        // threaded UDF mode (UDFs need System.nanoTime/currentTimeMillis/arraycopy). The dangerous System
+        // methods that the SecurityManager used to block at runtime (exit, property/env access, native
+        // library loading, stream redirection, ...) must instead be rejected at CREATE FUNCTION time.
+        // Reflection and MethodHandle routes to these are already impossible because java/lang/reflect and
+        // java/lang/invoke are blocked by the UDF class loader, so static byte-code blocking is complete.
+        for (String m : new String[]{ "exit", "setSecurityManager", "getSecurityManager",
+                                      "setProperty", "getProperty", "getProperties", "setProperties",
+                                      "clearProperty", "getenv", "load", "loadLibrary",
+                                      "setIn", "setOut", "setErr", "inheritedChannel", "console",
+                                      "getLogger" })
+            udfByteCodeVerifierSandbox.addDisallowedMethodCall("java/lang/System", m);
+
+        // Integer.getInteger / Long.getLong / Boolean.getBoolean are thin wrappers around System.getProperty
+        // and would otherwise leak system properties past the System.getProperty block.
+        udfByteCodeVerifierSandbox.addDisallowedMethodCall("java/lang/Integer", "getInteger");
+        udfByteCodeVerifierSandbox.addDisallowedMethodCall("java/lang/Long", "getLong");
+        udfByteCodeVerifierSandbox.addDisallowedMethodCall("java/lang/Boolean", "getBoolean");
+
+        // System.LoggerFinder (JDK 9, JEP 264) is the back door to the same system logger factory that
+        // System.getLogger fronts: LoggerFinder.getLoggerFinder() required RuntimePermission("loggerFinder")
+        // under the SecurityManager, so UDFs (noPermissions) could never reach it. Block it alongside
+        // System.getLogger so the SM-free sandbox does not expose a capability the SecurityManager denied.
+        udfByteCodeVerifierSandbox.addDisallowedMethodCall("java/lang/System$LoggerFinder", "getLoggerFinder");
 
         Map<String, String> settings = new HashMap<>();
         settings.put(CompilerOptions.OPTION_LineNumberAttribute,
@@ -180,6 +190,83 @@ public final class JavaBasedUDFunction extends UDFunction
         }
 
         protectionDomain = new ProtectionDomain(codeSource, ThreadAwareSecurityManager.noPermissions, targetClassLoader, null);
+    }
+
+    /** The classes/methods that are always rejected, regardless of the security mechanism or UDF flags. */
+    private static void configureBaseDisallowed(UDFByteCodeVerifier verifier)
+    {
+        verifier.addDisallowedMethodCall("java/lang/Class", "forName");
+        verifier.addDisallowedMethodCall("java/lang/Class", "getClassLoader");
+        verifier.addDisallowedMethodCall("java/lang/Class", "getResource");
+        verifier.addDisallowedMethodCall("java/lang/Class", "getResourceAsStream");
+        // JDK 9 module API: Class.getModule() is the entry point to a java.lang.Module (which exposes
+        // getClassLoader()/getResourceAsStream()). java.lang.Module/ModuleLayer cannot be blocked by the UDF
+        // class loader because java.lang.Class references Module in its signature, so block them here instead.
+        verifier.addDisallowedMethodCall("java/lang/Class", "getModule");
+        verifier.addDisallowedClass("java/lang/Module");
+        verifier.addDisallowedClass("java/lang/ModuleLayer");
+        // Deny java.lang.ClassLoader wholesale (CASSANDRA-21171). It is reachable under the allowed java/lang/
+        // prefix, and several of its methods hand back a live ClassLoader or resource stream (getPlatformClassLoader,
+        // getParent, resources, ...). Denying the class - rather than enumerating individual methods - also covers
+        // any loader/resource-yielding method a future JDK may add. The verifier rejects any call whose owner is a
+        // disallowed class, and the generated UDF wrapper never references ClassLoader, so no legitimate UDF breaks.
+        // The explicit per-method entries below are retained as documentation of the surface being closed.
+        verifier.addDisallowedClass("java/lang/ClassLoader");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "clearAssertionStatus");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "getResource");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "getResourceAsStream");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "getResources");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "getSystemClassLoader");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "getSystemResource");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "getSystemResourceAsStream");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "getSystemResources");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "loadClass");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "setClassAssertionStatus");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "setDefaultAssertionStatus");
+        verifier.addDisallowedMethodCall("java/lang/ClassLoader", "setPackageAssertionStatus");
+        verifier.addDisallowedMethodCall("java/nio/ByteBuffer", "allocateDirect");
+        for (String ia : new String[]{"java/net/InetAddress", "java/net/Inet4Address", "java/net/Inet6Address"})
+        {
+            // static method, probably performing DNS lookups (despite SecurityManager)
+            verifier.addDisallowedMethodCall(ia, "getByAddress");
+            verifier.addDisallowedMethodCall(ia, "getAllByName");
+            verifier.addDisallowedMethodCall(ia, "getByName");
+            verifier.addDisallowedMethodCall(ia, "getLocalHost");
+            // instance methods, probably performing DNS lookups (despite SecurityManager)
+            verifier.addDisallowedMethodCall(ia, "getHostName");
+            verifier.addDisallowedMethodCall(ia, "getCanonicalHostName");
+            // ICMP PING
+            verifier.addDisallowedMethodCall(ia, "isReachable");
+        }
+        verifier.addDisallowedClass("java/net/NetworkInterface");
+        verifier.addDisallowedClass("java/net/SocketException");
+    }
+
+    /**
+     * Selects the byte-code verifier for a CREATE FUNCTION, mirroring the legacy SecurityManager-era access
+     * model for java.lang.System. Under the SecurityManager, the class loader's secureResource() only applied
+     * the System.* block (disallowedPatternsSyncUDF) when
+     * {@code (!enableUserDefinedFunctionsThreads() && !allowExtraInsecureUDFs())}; in threaded mode the SM
+     * blocked the dangerous calls at runtime instead, and the explicit insecure opt-in (threads disabled +
+     * {@code allow_extra_insecure_udfs=true}) ran UDFs on a non-secured thread where System.* was deliberately
+     * permitted. Net legacy effect: System.* dangerous calls were blocked unless
+     * {@code (threads disabled AND allow_extra_insecure_udfs=true)}.
+     * <p>
+     * The SecurityManager-free sandbox enforces the same policy statically at CREATE FUNCTION time, so the
+     * System.*-blocking verifier is used under the equivalent condition
+     * {@code (enableUserDefinedFunctionsThreads() || !allowExtraInsecureUDFs())} and the base verifier (no
+     * System.* block) only for the explicit insecure opt-in, preserving that escape hatch rather than
+     * tightening it. The decision is made per creation (not cached at class-init) so the flags can change
+     * without a JVM restart, matching the legacy class loader. When the SecurityManager is in use the base
+     * verifier is always used: System.* is policed by the SM at runtime, or by the class loader's
+     * disallowedPatternsSyncUDF in the legacy sync path.
+     */
+    private static UDFByteCodeVerifier verifierFor()
+    {
+        if (!ThreadAwareSecurityManager.useSecurityManager()
+            && (DatabaseDescriptor.enableUserDefinedFunctionsThreads() || !DatabaseDescriptor.allowExtraInsecureUDFs()))
+            return udfByteCodeVerifierSandbox;
+        return udfByteCodeVerifier;
     }
 
     private final JavaUDF javaUDF;
@@ -300,8 +387,15 @@ public final class JavaBasedUDFunction extends UDFunction
                     throw new InvalidRequestException("Java source compilation failed:\n" + problems);
             }
 
-            // Verify the UDF bytecode against use of probably dangerous code
-            Set<String> errors = udfByteCodeVerifier.verify(targetClassName, targetClassLoader.classData(targetClassName));
+            // A valid UDF compiles to exactly one class. More than one emitted class file means the UDF
+            // declared an inner/nested/anonymous class; the byte-code verifier below only inspects a single
+            // class, so such code would be only partially verified. Reject it to keep verification complete.
+            if (compilationUnit.emittedClassFileCount != 1)
+                throw new InvalidRequestException("Java UDF validation failed: the function must not declare additional classes");
+
+            // Verify the UDF bytecode against use of probably dangerous code. The verifier is selected per
+            // creation so the java.lang.System policy tracks the current security mechanism and UDF flags.
+            Set<String> errors = verifierFor().verify(targetClassName, targetClassLoader.classData(targetClassName));
             String validDeclare = "not allowed method declared: " + executeInternalName + '(';
             for (Iterator<String> i = errors.iterator(); i.hasNext();)
             {
@@ -501,6 +595,7 @@ public final class JavaBasedUDFunction extends UDFunction
     static final class EcjCompilationUnit implements ICompilationUnit, ICompilerRequestor, INameEnvironment
     {
         List<IProblem> problemList;
+        int emittedClassFileCount;
         private final String className;
         private final char[] sourceCode;
 
@@ -586,6 +681,7 @@ public final class JavaBasedUDFunction extends UDFunction
             else
             {
                 ClassFile[] classFiles = result.getClassFiles();
+                emittedClassFileCount += classFiles.length;
                 for (ClassFile classFile : classFiles)
                     targetClassLoader.addClass(className, classFile.getBytes());
             }

@@ -111,15 +111,22 @@ public class GCInspector implements NotificationListener, GCInspectorMXBean
         final GarbageCollectorMXBean gcBean;
         final boolean assumeGCIsPartiallyConcurrent;
         final boolean assumeGCIsOldGen;
+        final boolean isZGC;
         private String[] keys;
         long lastGcTotalDuration = 0;
 
 
-        GCState(GarbageCollectorMXBean gcBean, boolean assumeGCIsPartiallyConcurrent, boolean assumeGCIsOldGen)
+        GCState(GarbageCollectorMXBean gcBean, boolean assumeGCIsPartiallyConcurrent, boolean assumeGCIsOldGen, boolean isZGC)
         {
             this.gcBean = gcBean;
             this.assumeGCIsPartiallyConcurrent = assumeGCIsPartiallyConcurrent;
             this.assumeGCIsOldGen = assumeGCIsOldGen;
+            this.isZGC = isZGC;
+        }
+
+        public boolean isZGC()
+        {
+            return isZGC;
         }
 
         String[] keys(GarbageCollectionNotificationInfo info)
@@ -146,7 +153,7 @@ public class GCInspector implements NotificationListener, GCInspectorMXBean
             for (ObjectName name : MBeanWrapper.instance.queryNames(gcName, null))
             {
                 GarbageCollectorMXBean gc = ManagementFactory.newPlatformMXBeanProxy(MBeanWrapper.instance.getMBeanServer(), name.getCanonicalName(), GarbageCollectorMXBean.class);
-                gcStates.put(gc.getName(), new GCState(gc, assumeGCIsPartiallyConcurrent(gc), assumeGCIsOldGen(gc)));
+                gcStates.put(gc.getName(), new GCState(gc, assumeGCIsPartiallyConcurrent(gc), assumeGCIsOldGen(gc), isZGC(gc)));
             }
             ObjectName me = new ObjectName(MBEAN_NAME);
             if (!MBeanWrapper.instance.isRegistered(me))
@@ -169,29 +176,42 @@ public class GCInspector implements NotificationListener, GCInspectorMXBean
         }
     }
 
+    private static boolean isZGC(GarbageCollectorMXBean gc)
+    {
+        return gc.getName().contains("ZGC");
+    }
+
     /*
      * Assume that a GC type is at least partially concurrent and so a side channel method
      * should be used to calculate application stopped time due to the GC.
      *
      * If the GC isn't recognized then assume that is concurrent and we need to do our own calculation
-     * via the the side channel.
+     * via the side channel.
      */
     private static boolean assumeGCIsPartiallyConcurrent(GarbageCollectorMXBean gc)
     {
         switch (gc.getName())
         {
-                //First two are from the serial collector
+                // First two are from the serial collector
             case "Copy":
             case "MarkSweepCompact":
-                //Parallel collector
+                // Parallel collector
             case "PS MarkSweep":
             case "PS Scavenge":
             case "G1 Young Generation":
-                //CMS young generation collector
+                // CMS young generation collector
             case "ParNew":
+                // gen zgc
+            case "ZGC Minor Pauses":
+            case "ZGC Major Pauses":
+                // zgc
+            case "ZGC Pauses":
                 return false;
             case "ConcurrentMarkSweep":
             case "G1 Old Generation":
+            case "ZGC Minor Cycles":
+            case "ZGC Major Cycles":
+            case "ZGC Cycles":
                 return true;
             default:
                 //Assume possibly concurrent if unsure
@@ -213,11 +233,17 @@ public class GCInspector implements NotificationListener, GCInspectorMXBean
             case "PS Scavenge":
             case "G1 Young Generation":
             case "ParNew":
+            case "ZGC Minor Pauses":
+            case "ZGC Minor Cycles":
                 return false;
             case "MarkSweepCompact":
             case "PS MarkSweep":
             case "ConcurrentMarkSweep":
             case "G1 Old Generation":
+            case "ZGC Major Pauses":
+            case "ZGC Major Cycles":
+            case "ZGC Pauses":
+            case "ZGC Cycles":
                 return true;
             default:
                 //Assume not old gen otherwise, don't call

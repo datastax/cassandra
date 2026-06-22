@@ -35,14 +35,15 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.UDF_SECURITY_MECHANISM;
 
 /**
  * Custom {@link SecurityManager} and {@link Policy} implementation that only performs access checks
  * if explicitly enabled.
  * <p>
- * This implementation gives no measurable performance penalty
- * (see <a href="http://cstar.datastax.com/tests/id/1d461628-12ba-11e5-918f-42010af0688f">see cstar test</a>).
  * This is better than the penalty of 1 to 3 percent using a standard {@code SecurityManager} with an <i>allow all</i> policy.
  * </p>
  */
@@ -81,10 +82,62 @@ public final class ThreadAwareSecurityManager extends SecurityManager
 
     private static volatile boolean installed;
 
+    /**
+     * Whether a {@link SecurityManager} can actually be installed on the running JVM. Starting with
+     * JDK 24 (JEP 486) {@code System.setSecurityManager(non-null)} unconditionally throws
+     * {@link UnsupportedOperationException}, so the legacy UDF sandbox based on a SecurityManager is not
+     * available there. On such JVMs Cassandra uses the SecurityManager-free UDF sandbox instead (see the
+     * JDK 25 design notes). On JDK 11/17/21 this returns {@code true} and the legacy mechanism is used.
+     */
+    public static boolean isSecurityManagerSupported()
+    {
+        return Runtime.version().feature() < 24;
+    }
+
+    /**
+     * Whether the legacy {@link SecurityManager}-based UDF sandbox should be used, as opposed to the
+     * SecurityManager-free sandbox. Controlled by {@link CassandraRelevantProperties#UDF_SECURITY_MECHANISM}:
+     * {@code auto} (default) uses the SecurityManager when one can be installed (JDK &lt; 24); {@code sandbox}
+     * always uses the SecurityManager-free mechanism; {@code securitymanager} always requests the legacy
+     * mechanism (and {@link #install()} then fails fast if a SecurityManager cannot be installed).
+     */
+    public static boolean useSecurityManager()
+    {
+        String mechanism = UDF_SECURITY_MECHANISM.getString().trim();
+        if (mechanism.equalsIgnoreCase("securitymanager"))
+            return true;
+        if (mechanism.equalsIgnoreCase("sandbox"))
+            return false;
+        if (mechanism.equalsIgnoreCase("auto"))
+            return isSecurityManagerSupported();
+        throw new ConfigurationException(String.format("Invalid value '%s' for %s; expected one of: auto, securitymanager, sandbox",
+                                                       UDF_SECURITY_MECHANISM.getString(), UDF_SECURITY_MECHANISM.getKey()));
+    }
+
     public static void install()
     {
         if (installed)
             return;
+
+        if (!useSecurityManager())
+        {
+            // The SecurityManager-free UDF sandbox (strict class-loader allow/deny list plus byte-code
+            // verification) is responsible for restricting UDF execution; nothing to install here. This is
+            // the default on JDK 24+ (where a SecurityManager can no longer be installed) and whenever
+            // cassandra.udf.security_mechanism=sandbox.
+            logger.info("Using the SecurityManager-free UDF sandbox (Java {}, {}={}).",
+                        Runtime.version().feature(), UDF_SECURITY_MECHANISM.getKey(), UDF_SECURITY_MECHANISM.getString());
+            return;
+        }
+
+        if (!isSecurityManagerSupported())
+        {
+            // cassandra.udf.security_mechanism=securitymanager was requested but a SecurityManager cannot be
+            // installed on this JVM (JDK 24+). Fail fast rather than silently running UDFs unsandboxed.
+            throw new ConfigurationException(String.format("%s=securitymanager but a SecurityManager cannot be installed on Java %d. " +
+                                                           "Use 'auto' or 'sandbox' to use the SecurityManager-free UDF sandbox.",
+                                                           UDF_SECURITY_MECHANISM.getKey(), Runtime.version().feature()));
+        }
 
         // this line is needed - we need to make sure AccessControlException is loaded before we install this SM
         // otherwise we may get into stackoverflow when javax.security is not allowed package, and ACE is tried to be
@@ -111,6 +164,16 @@ public final class ThreadAwareSecurityManager extends SecurityManager
         // A ProtectionDomain can have its origin at an oridinary code-source or provided via a
         // AccessController.doPrivileded() call.
         //
+        // On JDK 24+ Policy.setPolicy always throws UnsupportedOperationException (JEP 486); skip it there.
+        // This class may still be loaded on those JVMs (e.g. via isSecuredThread()), so the static
+        // initializer must not fail. The SecurityManager-free UDF sandbox does not rely on a Policy.
+        if (isSecurityManagerSupported())
+            installLegacyPolicy();
+    }
+
+    @SuppressWarnings("removal")
+    private static void installLegacyPolicy()
+    {
         Policy.setPolicy(new Policy()
         {
             public PermissionCollection getPermissions(CodeSource codesource)

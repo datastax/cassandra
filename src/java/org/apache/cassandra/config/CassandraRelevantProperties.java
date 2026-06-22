@@ -1150,6 +1150,18 @@ public enum CassandraRelevantProperties
     UCS_VECTOR_SSTABLE_GROWTH("unified_compaction.vector_sstable_growth", "1.0"),
     UCS_VECTOR_TARGET_SSTABLE_SIZE("unified_compaction.vector_target_sstable_size", "5GiB"),
     UDF_EXECUTOR_THREAD_KEEPALIVE_MS("cassandra.udf_executor_thread_keepalive_ms", "30000"),
+    /**
+     * Selects the mechanism used to sandbox user-defined functions:
+     * <ul>
+     *   <li>{@code auto} (default): use the legacy {@link java.lang.SecurityManager}-based mechanism when a
+     *       SecurityManager can be installed (JDK &lt; 24), otherwise use the SecurityManager-free sandbox.</li>
+     *   <li>{@code securitymanager}: force the legacy SecurityManager mechanism (fails fast on JDK 24+ where a
+     *       SecurityManager can no longer be installed).</li>
+     *   <li>{@code sandbox}: force the SecurityManager-free sandbox on any JDK (used to exercise the new
+     *       mechanism on JDK 11/17/21 in CI).</li>
+     * </ul>
+     */
+    UDF_SECURITY_MECHANISM("cassandra.udf.security_mechanism", "auto"),
     /** Disables flush changes to local and schema keyspaces. Also, disables recycling all segments of commitlog after
      * dropping a table. Tests which do not restart nodes may enable this option in order to run faster. Note that this
      * is enabled for unit tests but if an individual test requires schema to be flushed, it can be also done manually

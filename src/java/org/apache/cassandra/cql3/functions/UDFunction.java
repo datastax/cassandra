@@ -150,6 +150,17 @@ public abstract class UDFunction extends UserFunction implements ScalarFunction
     "java/lang/Thread.class",
     "java/lang/ThreadGroup.class",
     "java/lang/ThreadLocal.class",
+    // Classes/APIs added after JDK 8 that fall under an allowed prefix (mostly java/lang/) and would
+    // otherwise be loadable by a UDF. These must be blocked so the sandbox does not depend on the
+    // SecurityManager (which is unavailable on JDK 24+). See the JDK 25 design notes.
+    // NOTE: java.lang.Module / java.lang.ModuleLayer are intentionally NOT blocked here. java.lang.Class
+    // (which every UDF needs) references Module via Class.getModule(), so blocking Module here makes Class
+    // itself unresolvable and breaks all UDFs. Module/ModuleLayer use is instead blocked at the byte-code
+    // verifier (see JavaBasedUDFunction): Class.getModule() and any Module/ModuleLayer method call.
+    "java/lang/ProcessHandle",     // JDK 9: process discovery/termination (also ProcessHandle$Info)
+    "java/lang/StackWalker",       // JDK 9: stack/Class introspection (also StackWalker$StackFrame)
+    "java/lang/foreign/",          // JDK 22: Foreign Function & Memory API (native calls + raw memory)
+    "java/lang/classfile/",        // JDK 24: ClassFile API (class-file generation/parsing)
     "java/lang/instrument/",
     "java/lang/invoke/",
     "java/lang/management/",
