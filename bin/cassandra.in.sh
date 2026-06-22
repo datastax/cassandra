@@ -79,7 +79,10 @@ if [ -f "$CASSANDRA_HOME"/lib/jsr223/scala/scala-compiler.jar ] ; then
 fi
 
 # set JVM javaagent opts to avoid warnings/errors
-JAVA_AGENT="$JAVA_AGENT -javaagent:$CASSANDRA_HOME/lib/jamm-0.4.0.jar"
+# cassandra-jamm-<version>.jar - the version tracks the build, so resolve it by glob rather than a hardcoded name
+for jamm_jar in "$CASSANDRA_HOME"/lib/cassandra-jamm-*.jar; do
+    if [ -f "$jamm_jar" ]; then JAVA_AGENT="$JAVA_AGENT -javaagent:$jamm_jar"; break; fi
+done
 
 # Added sigar-bin to the java.library.path CASSANDRA-7838
 JAVA_OPTS="$JAVA_OPTS:-Djava.library.path=$CASSANDRA_HOME/lib/sigar-bin"
@@ -122,7 +125,7 @@ jvmver=`echo "$java_ver_output" | grep '[openjdk|java] version' | awk -F'"' 'NR=
 JVM_VERSION=${jvmver%_*}
 short=$(echo "${jvmver}" | cut -c1-2)
 
-JAVA_VERSION=22
+JAVA_VERSION=25
 if [ "$short" = "11" ]  ; then
      JAVA_VERSION=11
 elif [ "$JVM_VERSION" \< "17" ] ; then
@@ -130,9 +133,13 @@ elif [ "$JVM_VERSION" \< "17" ] ; then
     exit 1;
 elif [ "$short" = "17" ]  ; then
      JAVA_VERSION=17
-elif [ "$JVM_VERSION" \< "22" ] ; then
+elif [ "$JVM_VERSION" \< "21" ] ; then
     echo "DSE DB 5.0 requires Java 11 or higher."
     exit 1;
+elif [ "$short" = "21" ]  ; then
+     JAVA_VERSION=21
+elif [ "$short" = "22" ]  ; then
+     JAVA_VERSION=22
 fi
 
 jvm=`echo "$java_ver_output" | grep -A 1 '[openjdk|java] version' | awk 'NR==2 {print $1}'`
@@ -156,8 +163,12 @@ esac
 
 # Read user-defined JVM options from jvm-server.options file
 JVM_OPTS_FILE=$CASSANDRA_CONF/jvm${jvmoptions_variant:--clients}.options
-if [ $JAVA_VERSION -ge 22 ] ; then
+if [ $JAVA_VERSION -ge 25 ] ; then
+    JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm25${jvmoptions_variant:--clients}.options
+elif [ $JAVA_VERSION -ge 22 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm22${jvmoptions_variant:--clients}.options
+elif [ $JAVA_VERSION -ge 21 ] ; then
+    JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm21${jvmoptions_variant:--clients}.options
 elif [ $JAVA_VERSION -ge 17 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm17${jvmoptions_variant:--clients}.options
 elif [ $JAVA_VERSION -ge 11 ] ; then
