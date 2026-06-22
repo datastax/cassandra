@@ -170,7 +170,7 @@ public class NativeTransportEncryptionOptionsTest extends AbstractEncryptionOpti
             c.set("client_encryption_options",
                   ImmutableMap.builder().putAll(validKeystore)
                               .put("enabled", true)
-                              .put("accepted_protocols", ImmutableList.of("TLSv1.2", "TLSv1.3"))
+                              .put("accepted_protocols", ImmutableList.of("TLSv1.1", "TLSv1.2", "TLSv1.3"))
                               .build());
         }).start())
         {
@@ -183,9 +183,21 @@ public class NativeTransportEncryptionOptionsTest extends AbstractEncryptionOpti
             tls10Connection.assertReceivedHandshakeException();
 
             TlsConnection tls11Connection = new TlsConnection(address.getHostAddress(), port, Collections.singletonList("TLSv1.1"));
-            Assert.assertEquals("Should not be possible to establish a TLSv1.1 connection",
-                                ConnectResult.FAILED_TO_NEGOTIATE, tls11Connection.connect());
-            tls11Connection.assertReceivedHandshakeException();
+            if (isProtocolEnabledByDefault("TLSv1.1"))
+            {
+                Assert.assertEquals("Should be possible to establish a TLSv1.1 connection",
+                                    ConnectResult.NEGOTIATED, tls11Connection.connect());
+                Assert.assertEquals("TLSv1.1", tls11Connection.lastProtocol());
+            }
+            else
+            {
+                // TLSv1.1 is disabled by default in this JDK (e.g. JDK 25, via jdk.tls.disabledAlgorithms),
+                // so it must not negotiate, exactly like the deprecated TLSv1 above. The positive negotiation
+                // coverage is preserved by the TLSv1.2/TLSv1.3 checks below.
+                Assert.assertEquals("Should not be possible to establish a TLSv1.1 connection when the JDK disables it",
+                                    ConnectResult.FAILED_TO_NEGOTIATE, tls11Connection.connect());
+                tls11Connection.assertReceivedHandshakeException();
+            }
 
             TlsConnection tls12Connection = new TlsConnection(address.getHostAddress(), port, Collections.singletonList("TLSv1.2"));
             Assert.assertEquals("Should be possible to establish a TLSv1.2 connection",

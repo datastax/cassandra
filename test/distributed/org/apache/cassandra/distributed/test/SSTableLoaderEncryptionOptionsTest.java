@@ -98,7 +98,7 @@ public class SSTableLoaderEncryptionOptionsTest extends AbstractEncryptionOption
                                                             "--truststore", validTrustStorePath,
                                                             "--truststore-password", validTrustStorePassword,
                                                             "--conf-path", "test/conf/sstableloader_with_encryption.yaml",
-                                                            "--ssl-ciphers", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+                                                            "--ssl-ciphers", sslCiphersForJdk(),
                                                             sstables_to_upload.absolutePath());
         tool.assertOnCleanExit();
         assertTrue(tool.getStdout().contains("Summary statistics"));
@@ -141,6 +141,20 @@ public class SSTableLoaderEncryptionOptionsTest extends AbstractEncryptionOption
                                                             "test/data/legacy-sstables/na/legacy_tables/legacy_na_clust");
         assertNotEquals(0, tool.getExitCode());
         assertTrue(tool.getStderr().contains("Unable to initialise " + NativeSSTableLoaderClient.class.getName()));
+    }
+
+    /**
+     * The legacy {@code TLS_RSA_WITH_AES_*_CBC_SHA} suites this test historically exercised are disabled by
+     * default on recent JDKs (e.g. JDK 25, via {@code jdk.tls.disabledAlgorithms}), so a handshake restricted
+     * to them fails there. Keep using them where the JDK still enables them (preserving the original coverage
+     * that a user-supplied cipher list is honored) and otherwise fall back to modern TLSv1.2 ECDHE/GCM suites
+     * that are enabled on every supported JDK and are compatible with the RSA test certificate.
+     */
+    private static String sslCiphersForJdk()
+    {
+        if (isCipherEnabledByDefault("TLS_RSA_WITH_AES_128_CBC_SHA"))
+            return "TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_256_CBC_SHA";
+        return "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384";
     }
 
     private static File prepareSstablesForUpload() throws IOException

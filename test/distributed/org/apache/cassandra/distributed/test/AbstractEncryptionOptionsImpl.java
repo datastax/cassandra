@@ -18,12 +18,14 @@
 
 package org.apache.cassandra.distributed.test;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLSession;
 
@@ -48,6 +50,7 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.concurrent.FutureListener;
 import org.apache.cassandra.config.EncryptionOptions;
+import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.security.ISslContextFactory;
 import org.apache.cassandra.security.SSLFactory;
 
@@ -69,6 +72,48 @@ public class AbstractEncryptionOptionsImpl extends TestBaseImpl
                                                                     "keystore_password", validKeyStorePassword,
                                                                     "truststore", validTrustStorePath,
                                                                     "truststore_password", validTrustStorePassword);
+
+    /**
+     * Whether the running JDK still enables the given TLS protocol by default. TLSv1 and TLSv1.1 are listed
+     * in {@code jdk.tls.disabledAlgorithms} on recent JDKs (and are disabled on JDK 25), so a client that
+     * offers only such a protocol will {@code FAILED_TO_NEGOTIATE} there. Tests use this to assert that a
+     * legacy protocol negotiates only where the JDK still permits it, and otherwise expect it to be rejected,
+     * relying on the newer TLSv1.2/TLSv1.3 protocols for the positive negotiation coverage.
+     */
+    public static boolean isProtocolEnabledByDefault(String protocol)
+    {
+        try
+        {
+            SSLContext ctx = SSLContext.getInstance("TLS");
+            ctx.init(null, null, null);
+            return Arrays.asList(ctx.createSSLEngine().getEnabledProtocols()).contains(protocol);
+        }
+        catch (Exception e)
+        {
+            return false;
+        }
+    }
+
+    /**
+     * Whether the running JDK still enables the given cipher suite by default. Legacy suites such as the
+     * {@code TLS_RSA_WITH_AES_*_CBC_SHA} family are listed in {@code jdk.tls.disabledAlgorithms} on recent
+     * JDKs (and are disabled on JDK 25), so a handshake restricted to them fails there. Tests use this to keep
+     * exercising the legacy suites where the JDK still permits them, and otherwise fall back to a modern
+     * suite, mirroring {@link #isProtocolEnabledByDefault(String)}.
+     */
+    public static boolean isCipherEnabledByDefault(String cipherSuite)
+    {
+        try
+        {
+            SSLContext ctx = SSLContext.getInstance("TLS");
+            ctx.init(null, null, null);
+            return Arrays.asList(ctx.createSSLEngine().getEnabledCipherSuites()).contains(cipherSuite);
+        }
+        catch (Exception e)
+        {
+            return false;
+        }
+    }
 
     // Configuration with a valid keystore, but an unknown protocol
     final static Map<String,Object> nonExistantProtocol = ImmutableMap.<String,Object>builder()
@@ -331,6 +376,25 @@ public class AbstractEncryptionOptionsImpl extends TestBaseImpl
                               lastThrowable().getMessage().contains("Received fatal alert: handshake_failure") ||
                               lastThrowable().getMessage().contains("Received fatal alert: protocol_version") ||
                               lastThrowable.getCause() instanceof  SSLHandshakeException);
+        }
+    }
+
+    /* Provide the cluster cannot start with the configured options */
+    protected void assertCannotStartDueToConfigurationException(Cluster cluster)
+    {
+        org.apache.cassandra.exceptions.ConfigurationException tr = null;
+        try
+        {
+            cluster.startup();
+        }
+        catch (org.apache.cassandra.exceptions.ConfigurationException maybeConfigException)
+        {
+            tr = maybeConfigException;
+        }
+
+        if (tr == null)
+        {
+            Assert.fail("Expected a ConfigurationException");
         }
     }
 }

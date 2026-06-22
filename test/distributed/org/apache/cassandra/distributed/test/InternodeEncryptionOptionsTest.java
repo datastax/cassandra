@@ -220,6 +220,11 @@ public class InternodeEncryptionOptionsTest extends AbstractEncryptionOptionsImp
 
     /**
      * Tests that the negotiated protocol is the highest common protocol between the client and server.
+     * <p>
+     * Note: This test uses TLSv1.1, which is disabled by default on JDK 25 (via jdk.tls.disabledAlgorithms).
+     * When the JDK disables TLSv1.1, the test asserts that negotiation fails, exactly like the deprecated
+     * TLSv1. The positive negotiation coverage is preserved by the TLSv1.2/TLSv1.3 checks below.
+     * @see <a href="https://issues.apache.org/jira/browse/CASSANDRA-18540">CASSANDRA-18540</a>
      */
     @Test
     public void negotiatedProtocolMustBeAcceptedProtocolTest() throws Throwable
@@ -229,7 +234,7 @@ public class InternodeEncryptionOptionsTest extends AbstractEncryptionOptionsImp
             c.set("server_encryption_options",
                   ImmutableMap.builder().putAll(validKeystore)
                               .put("internode_encryption", "all")
-                              .put("accepted_protocols", ImmutableList.of("TLSv1.2", "TLSv1.3"))
+                              .put("accepted_protocols", ImmutableList.of("TLSv1.1", "TLSv1.2", "TLSv1.3"))
                               .build());
         }).start())
         {
@@ -243,9 +248,20 @@ public class InternodeEncryptionOptionsTest extends AbstractEncryptionOptionsImp
             tls10Connection.assertReceivedHandshakeException();
 
             TlsConnection tls11Connection = new TlsConnection(address.getHostAddress(), port, Collections.singletonList("TLSv1.1"));
-            Assert.assertEquals("Should not be possible to establish a TLSv1.1 connection",
-                                ConnectResult.FAILED_TO_NEGOTIATE, tls11Connection.connect());
-            tls11Connection.assertReceivedHandshakeException();
+            if (isProtocolEnabledByDefault("TLSv1.1"))
+            {
+                Assert.assertEquals("Should be possible to establish a TLSv1.1 connection",
+                                    ConnectResult.NEGOTIATED, tls11Connection.connect());
+                Assert.assertEquals("TLSv1.1", tls11Connection.lastProtocol());
+            }
+            else
+            {
+                // TLSv1.1 is disabled by default in this JDK (e.g. JDK 25, via jdk.tls.disabledAlgorithms),
+                // so it must not negotiate, exactly like the deprecated TLSv1 above.
+                Assert.assertEquals("Should not be possible to establish a TLSv1.1 connection when the JDK disables it",
+                                    ConnectResult.FAILED_TO_NEGOTIATE, tls11Connection.connect());
+                tls11Connection.assertReceivedHandshakeException();
+            }
 
             TlsConnection tls12Connection = new TlsConnection(address.getHostAddress(), port, Collections.singletonList("TLSv1.2"));
             Assert.assertEquals("Should be possible to establish a TLSv1.2 connection",
