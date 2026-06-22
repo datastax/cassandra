@@ -86,7 +86,19 @@ public class FileTest
         Files.createSymbolicLink(nonEmptySubdirLink.toPath(), nonEmptySubdir.toPath());
         new java.io.File(nonEmptySubdir, "something").createNewFile(); //checkstyle: permit this instantiation
 
-        testEquivalence("");
+        // The empty path is special-cased and cannot be exercised through the java.io.File equivalence
+        // harness because the two APIs deliberately diverge here, and java.io.File's own behaviour is
+        // JDK-version-dependent: on JDK <= 18 new java.io.File("") reports as non-existent, whereas on
+        // JDK 25 an empty abstract pathname resolves to the current working directory (exists(),
+        // isDirectory() and lastModified() all reflect user.dir). Cassandra's File(String) instead maps
+        // the empty string to a null/empty path (see the File(String) constructor) that is always
+        // non-existent. Assert that defined contract directly so the case stays covered and stable
+        // across JDK 11-25 rather than comparing against the JDK-dependent java.io.File("").
+        File emptyPath = new File("");
+        Assert.assertFalse(emptyPath.exists());
+        Assert.assertFalse(emptyPath.isDirectory());
+        Assert.assertFalse(emptyPath.isFile());
+        Assert.assertEquals(0L, emptyPath.lastModified());
 
         List<Runnable> setup = ImmutableList.of(
             () -> {},
