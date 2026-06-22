@@ -19,8 +19,6 @@
 package org.apache.cassandra.auth.jmx;
 
 import java.lang.reflect.*;
-import java.security.AccessControlContext;
-import java.security.AccessController;
 import java.security.Principal;
 import java.util.Collections;
 import java.util.Set;
@@ -41,6 +39,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.security.JMXSubjects;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.MBeanWrapper;
 
@@ -153,9 +152,8 @@ public class AuthorizationProxy implements InvocationHandler
         if (methodName.equals("invoke") && args.length == 4)
             checkVulnerableMethods(args);
 
-        // Retrieve Subject from current AccessControlContext
-        AccessControlContext acc = AccessController.getContext();
-        Subject subject = Subject.getSubject(acc);
+        // Retrieve the Subject associated with the current JMX invocation (JDK-version-safe).
+        Subject subject = JMXSubjects.current();
 
         // Allow setMBeanServer iff performed on behalf of the connector server itself
         if (("setMBeanServer").equals(methodName))
