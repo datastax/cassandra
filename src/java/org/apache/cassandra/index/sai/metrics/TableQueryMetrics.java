@@ -201,16 +201,37 @@ public class TableQueryMetrics
     {
         public static final String METRIC_TYPE = "TableQueryMetrics";
 
+        /** Total number of queries that have timed out. */
         public final Counter totalQueryTimeouts;
+
+        /** Total number of partition/row keys fetched from the indexes. */
         public final Counter totalKeysFetched;
+
+        /** Total number of live partitions fetched from the storage engine, before post-filtering. */
         public final Counter totalPartitionsFetched;
+
+        /** Total number of live partitions returned to the coordinator, after post-filtering. */
         public final Counter totalPartitionsReturned;
+
+        /** Total number of deleted partitions that are fetched. */
         public final Counter totalPartitionTombstonesFetched;
+
+        /** Total number of live rows fetched from the storage engine, before post-filtering. */
         public final Counter totalRowsFetched;
+
+        /** Total number of live rows returned to the coordinator, after post-filtering. */
         public final Counter totalRowsReturned;
+
+        /** Total number of deleted individual rows or ranges of rows that are fetched. */
         public final Counter totalRowTombstonesFetched;
+
+        /** Total number of completed queries. */
         public final Counter totalQueriesCompleted;
 
+        /**
+         * Aggregated metrics about the query plans, {@code null} if not enbaled in
+         * {@link CassandraRelevantProperties#SAI_QUERY_PLAN_METRICS_ENABLED}.
+         */
         @Nullable
         public final QueryPlanMetrics queryPlanMetrics;
 
@@ -240,9 +261,8 @@ public class TableQueryMetrics
         @Override
         public void record(QueryContext.Snapshot snapshot)
         {
-            if (snapshot.queryTimeouts > 0)
+            if (snapshot.queryTimedOut)
             {
-                assert snapshot.queryTimeouts == 1;
                 totalQueryTimeouts.inc();
             }
 
@@ -296,6 +316,7 @@ public class TableQueryMetrics
 
     public static class PerTableAll extends PerTable
     {
+        /** Total number of completed BM25 queries. */
         public final Counter totalBM25QueriesCompleted;
 
         public PerTableAll(TableMetadata table, QueryKind queryKind, Predicate<ReadCommand> filter)
@@ -330,34 +351,47 @@ public class TableQueryMetrics
         @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
         public final Optional<Timer> queryLatency;
 
-        /**
-         * Global metrics for all indices hit during the query.
-         */
+        /** Number of sstables visited by the query. */
         public final Histogram sstablesHit;
+
+        /** Number of index segments having results for the query. */
         public final Histogram segmentsHit;
+
+        /** Number of partition/row keys fetched from the indexes. */
         public final Histogram keysFetched;
+
+        /** Number of live partitions fetched from the storage engine, before post-filtering. */
         public final Histogram partitionsFetched;
+
+        /** Number of live partitions returned to the coordinator, after post-filtering. */
         public final Histogram partitionsReturned;
+
+        /** Number of deleted partitions that have been fetched. */
         public final Histogram partitionTombstonesFetched;
+
+        /** Number of live rows fetched from the storage engine, before post-filtering. */
         public final Histogram rowsFetched;
+
+        /** Number of live rows returned to the coordinator, after post-filtering. */
         public final Histogram rowsReturned;
+
+        /** Number of deleted individual rows or ranges of rows that have been fetched. */
         public final Histogram rowTombstonesFetched;
 
-        /**
-         * BKD index metrics.
-         */
-        public final Histogram kdTreePostingsNumPostings;
-        /**
-         * BKD index posting lists metrics.
-         */
-        public final Histogram kdTreePostingsSkips;
-        public final Histogram kdTreePostingsDecodes;
-
-        /**
-         * Trie index posting lists metrics.
-         */
+        /** Number of times the query has jumped to the position of a row ID within a trie (literal or key) posting list. */
         public final Histogram postingsSkips;
+
+        /** Number of times the query has advanced into a trie (literal or key) posting list. */
         public final Histogram postingsDecodes;
+
+        /** Number of BKD (numeric) merged posting lists visited by the query. */
+        public final Histogram kdTreePostingsNumPostings;
+
+        /** Number of times the query has jumped to the position of a row ID within a BKD (numeric) posting list. */
+        public final Histogram kdTreePostingsSkips;
+
+        /** Number of times the query has advanced into a BKD (numeric) posting list. */
+        public final Histogram kdTreePostingsDecodes;
 
         /**
          * Cumulative time spent searching ANN graph.
@@ -366,6 +400,10 @@ public class TableQueryMetrics
 
         public final Timer postFilteringReadLatency;
 
+        /**
+         * Aggregated metrics about the query plans, {@code null} if not enbaled in
+         * {@link CassandraRelevantProperties#SAI_QUERY_PLAN_METRICS_ENABLED}.
+         */
         @Nullable
         public final QueryPlanMetrics queryPlanMetrics;
 
@@ -392,12 +430,12 @@ public class TableQueryMetrics
             rowsReturned = Metrics.histogram(createMetricName("RowsReturned"), false);
             rowTombstonesFetched = Metrics.histogram(createMetricName("RowTombstonesFetched"), false);
 
+            postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
+            postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
+
             kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), true);
             kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
             kdTreePostingsDecodes = Metrics.histogram(createMetricName("KDTreePostingsDecodes"), false);
-
-            postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
-            postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
 
             // Key vector metrics that translate to performance
             annGraphSearchLatency = Metrics.timer(createMetricName("ANNGraphSearchLatency"));
@@ -422,7 +460,7 @@ public class TableQueryMetrics
             rowsReturned.update(snapshot.rowsReturned);
             rowTombstonesFetched.update(snapshot.rowTombstonesFetched);
 
-            // Record string index cache metrics.
+            // Record literal index cache metrics.
             if (snapshot.trieSegmentsHit > 0)
             {
                 postingsSkips.update(snapshot.triePostingsSkips);
