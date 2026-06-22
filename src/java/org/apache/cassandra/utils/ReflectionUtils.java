@@ -20,9 +20,12 @@ package org.apache.cassandra.utils;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.function.Predicate;
+
+import sun.misc.Unsafe;
 
 public class ReflectionUtils
 {
@@ -30,6 +33,64 @@ public class ReflectionUtils
     {
 
     }
+
+    private static final Unsafe UNSAFE = theUnsafe();
+
+    private static Unsafe theUnsafe()
+    {
+        try
+        {
+            Field f = Unsafe.class.getDeclaredField("theUnsafe");
+            f.setAccessible(true);
+            return (Unsafe) f.get(null);
+        }
+        catch (ReflectiveOperationException e)
+        {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
+
+    /**
+     * Writes a value into a field, including a {@code final} field (instance or static), bypassing the
+     * {@code final} check via {@link Unsafe}. This works on all supported JDKs, unlike clearing the
+     * {@code Field.modifiers} {@code FINAL} bit and then calling {@code Field.set}, which no longer takes
+     * effect on JDK 22+ (the {@code -Djdk.reflect.useDirectMethodHandle=false} workaround was removed).
+     * <p>
+     * Note: like the previous mechanism, this cannot change the value seen at call sites where the compiler
+     * inlined a {@code static final} compile-time constant.
+     *
+     * @param instance the instance whose field to set, or {@code null} for a static field
+     * @param field    the field to write (may be {@code final})
+     * @param value    the new value (a boxed value for primitive fields)
+     */
+    public static void writeField(Object instance, Field field, Object value)
+    {
+        boolean isStatic = Modifier.isStatic(field.getModifiers());
+        Object base = isStatic ? UNSAFE.staticFieldBase(field) : instance;
+        long offset = isStatic ? UNSAFE.staticFieldOffset(field) : UNSAFE.objectFieldOffset(field);
+        Class<?> type = field.getType();
+        if (!type.isPrimitive())
+            UNSAFE.putObject(base, offset, value);
+        else if (type == boolean.class)
+            UNSAFE.putBoolean(base, offset, (Boolean) value);
+        else if (type == byte.class)
+            UNSAFE.putByte(base, offset, (Byte) value);
+        else if (type == char.class)
+            UNSAFE.putChar(base, offset, (Character) value);
+        else if (type == short.class)
+            UNSAFE.putShort(base, offset, (Short) value);
+        else if (type == int.class)
+            UNSAFE.putInt(base, offset, (Integer) value);
+        else if (type == long.class)
+            UNSAFE.putLong(base, offset, (Long) value);
+        else if (type == float.class)
+            UNSAFE.putFloat(base, offset, (Float) value);
+        else if (type == double.class)
+            UNSAFE.putDouble(base, offset, (Double) value);
+        else
+            throw new IllegalArgumentException("Unsupported field type: " + type);
+    }
+
 
     public static Field getModifiersField() throws NoSuchFieldException
     {

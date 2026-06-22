@@ -18,7 +18,6 @@
 package org.apache.cassandra.transport;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.util.EnumSet;
 import java.util.List;
@@ -143,11 +142,7 @@ public abstract class Message
         {
             Codec<?> original = this.codec;
             Field field = Type.class.getDeclaredField("codec");
-            field.setAccessible(true);
-            Field modifiers = ReflectionUtils.getModifiersField();
-            modifiers.setAccessible(true);
-            modifiers.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-            field.set(this, codec);
+            ReflectionUtils.writeField(this, field, codec);
             return original;
         }
     }
