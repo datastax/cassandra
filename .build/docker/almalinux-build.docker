@@ -42,12 +42,35 @@ RUN yum -y install \
    git \
    java-11-openjdk-devel \
    java-17-openjdk-devel \
+   java-21-openjdk-devel \
    make \
    rpm-build \
    sudo \
    python3-pip \
    procps \
-   rsync
+   rsync \
+   wget
+
+# Download and install OpenJDK 25.0.2 for the current architecture.
+# AlmaLinux 8's package repos do not yet carry openjdk-25, so install from a
+# checksum-verified GA tarball, mirroring bullseye-build.docker.
+# SHA256 values are the official checksums published by OpenJDK alongside the
+# GA tarballs (.sha256 sidecars); both x64 and aarch64 are listed so the image
+# builds on amd64 and arm64.
+RUN sh -c '\
+  set -ex ;\
+    JDK_OS=linux ;\
+    JDK_TAR="openjdk-25.0.2_${JDK_OS}-$(uname -m | sed "s/x86_64/x64/")_bin.tar.gz" ;\
+    JDK_VERSION_SHAS="555ce0821e4fe175ea50d54518cd6fbece9663c1998de529bc6ce429534457df 671208d205e70c9805da45a483f670d49dd64654990a7b7223ccffb2abb070dd" ;\
+    curl -L --fail --silent --retry 2 --retry-delay 5 --max-time 3600 "https://download.java.net/java/GA/jdk25.0.2/b1e0dfa218384cb9959bdcb897162d4e/10/GPL/${JDK_TAR}" -o $JDK_TAR ;\
+    JDK_SHA="$(sha256sum $JDK_TAR | cut -d" " -f1)" ;\
+    echo "$JDK_VERSION_SHAS" | sed "s/ /\n/g" | grep -q "$JDK_SHA" || { echo "SHA256 mismatch for $JDK_TAR $JDK_SHA"; exit 1; } ;\
+    mkdir -p /usr/lib/jvm/java-25-openjdk ;\
+    tar -C /usr/lib/jvm/java-25-openjdk --strip-components=1 -xzf $JDK_TAR ;\
+    rm $JDK_TAR'
+
+RUN alternatives --install /usr/bin/java java /usr/lib/jvm/java-25-openjdk/bin/java 1 \
+                 --slave /usr/bin/javac javac /usr/lib/jvm/java-25-openjdk/bin/javac
 
 RUN until curl -f -S -s --retry 9 --retry-connrefused --retry-delay 1 https://vault.centos.org/7.9.2009/os/x86_64/Packages/ant-junit-1.9.4-2.el7.noarch.rpm -o ant-junit-1.9.4-2.el7.noarch.rpm ; do echo "curl failed… trying again in 10s… " ; sleep 10 ; done
 

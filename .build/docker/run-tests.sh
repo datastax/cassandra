@@ -24,6 +24,9 @@
 # variables, with defaults
 [ "x${cassandra_dir}" != "x" ] || cassandra_dir="$(readlink -f $(dirname -- "$0")/../..)"
 [ "x${cassandra_dtest_dir}" != "x" ] || cassandra_dtest_dir="${cassandra_dir}/../cassandra-dtest"
+# optional: a local cassandra-ccm working copy to use instead of the ccm pinned in the dtest
+# requirements.txt. when set, it is mounted into the container and pip-installed over that ccm.
+[ "x${cassandra_ccm_dir}" != "x" ] || cassandra_ccm_dir=""
 [ "x${build_dir}" != "x" ] || build_dir="${cassandra_dir}/build"
 [ "x${m2_dir}" != "x" ] || m2_dir="${HOME}/.m2/repository"
 [ "x${docker_timeout_hours}" != "x" ] || docker_timeout_hours="1"
@@ -147,7 +150,7 @@ if ! ( [[ "$(docker images -q ${image_name} 2>/dev/null)" != "" ]] ) ; then
   if ! ( docker pull -q ${image_name} >/dev/null 2>/dev/null ) ; then
     # Create build images containing the build tool-chain, Java and an Apache Cassandra git working directory, with retry
     echo "Building docker image..."
-    until docker build -t ${image_name} -f docker/${dockerfile} .  ; do
+    until docker build -t ${image_name} -f docker/${dockerfile} --load .  ; do
       echo "docker build failed… trying again in 10s… "
       sleep 10
     done
@@ -188,7 +191,7 @@ docker_flags="-m 5g --memory-swap 5g"
 case ${test_target/-repeat/} in
     "build_dtest_jars")
     ;;
-    "stress-test" | "fqltool-test" )
+    "stress-test" | "fqltool-test" | "sstableloader-test" )
         [[ ${mem} -gt $((1 * 1024 * 1024 * 1024 * ${jenkins_executors})) ]] || { error 1 "${target} require minimum docker memory 1g (per jenkins executor (${jenkins_executors})), found ${mem}"; }
     ;;
     # test-burn doesn't have enough tests in it to split beyond 8, and burn and long we want a bit more resources anyway
@@ -203,6 +206,7 @@ case ${test_target/-repeat/} in
         [ -f "${cassandra_dtest_dir}/dtest.py" ] || { error 1 "${cassandra_dtest_dir}/dtest.py not found. please specify 'cassandra_dtest_dir' to point to the local cassandra-dtest source"; }
         test_script="run-python-dtests.sh"
         docker_mounts="${docker_mounts} -v ${cassandra_dtest_dir}:/home/cassandra/cassandra-dtest"
+        [ -n "${cassandra_ccm_dir}" ] && docker_mounts="${docker_mounts} -v ${cassandra_ccm_dir}:/home/cassandra/cassandra-ccm"
         [[ ${mem} -gt $((15 * 1024 * 1024 * 1024 * ${jenkins_executors})) ]] || { error 1 "${target} require minimum docker memory 16g (per jenkins executor (${jenkins_executors})), found ${mem}"; }
         docker_flags="-m 15g --memory-swap 15g"
     ;;
@@ -294,7 +298,7 @@ docker_command="source \${CASSANDRA_DIR}/.build/docker/_set_java.sh ${java_versi
 # start the container, timeout after 4 hours
 docker_id=$(docker run --name ${container_name} ${docker_flags} ${docker_envs} ${docker_mounts} ${docker_volume_opt} ${image_name} sleep ${docker_timeout_hours}h)
 
-echo "Running container ${container_name} ${docker_id}"
+echo "Running container ${container_name} ${docker_id} using image ${image_name}"
 
 docker exec --user root ${container_name} bash -c "\${CASSANDRA_DIR}/.build/docker/_create_user.sh cassandra $(id -u) $(id -g)" | tee -a ${logfile}
 docker exec --user root ${container_name} update-alternatives --set python /usr/bin/python${python_version} | tee -a ${logfile}
