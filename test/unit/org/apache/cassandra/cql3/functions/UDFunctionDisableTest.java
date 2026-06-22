@@ -174,6 +174,8 @@ public class UDFunctionDisableTest extends CQLTester
         }
         finally
         {
+            // Reset the installed flag again to cleanup
+            org.apache.cassandra.security.ThreadAwareSecurityManager.resetInstalledFlagForTests();
             // Restore original SecurityManager
             System.setSecurityManager(originalSecurityManager);
         }
