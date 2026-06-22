@@ -193,7 +193,7 @@ public class ConnectionTest
             .withTrustStore("test/conf/cassandra_ssl_test.truststore")
             .withTrustStorePassword("cassandra")
             .withRequireClientAuth(false)
-            .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA");
+            .withCipherSuites("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256");
 
     // 30 is not supported in 5.0
     // 40 is used for CNDB compatibility

@@ -177,7 +177,7 @@ public class PEMBasedSslContextFactoryTest
     {
         commonConfig.put(ENCODED_CERTIFICATES.getKeyName(), trusted_certificates);
         commonConfig.put("require_client_auth", Boolean.FALSE);
-        commonConfig.put("cipher_suites", Arrays.asList("TLS_RSA_WITH_AES_128_CBC_SHA"));
+        commonConfig.put("cipher_suites", Arrays.asList("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"));
     }
 
     private void addKeyStoreOptions(Map<String, Object> config)
@@ -216,7 +216,7 @@ public class PEMBasedSslContextFactoryTest
                                                            .withKeyStore("test/conf/cassandra_ssl_test.keystore.pem")
                                                            .withKeyStorePassword("cassandra")
                                                            .withRequireClientAuth(false)
-                                                           .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA")
+                                                           .withCipherSuites("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")
                                                            .withSslContextFactory(sslContextFactory);
         SslContext sslContext = SSLFactory.getOrCreateSslContext(options, true, ISslContextFactory.SocketType.SERVER, "test");
         Assert.assertNotNull(sslContext);
@@ -237,7 +237,7 @@ public class PEMBasedSslContextFactoryTest
                                                                                                            .withOutboundKeystore("test/conf/cassandra_ssl_test.keystore.pem")
                                                                                                            .withOutboundKeystorePassword("cassandra")
                                                                                                            .withRequireClientAuth(false)
-                                                                                                           .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA")
+                                                                                                           .withCipherSuites("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")
                                                                                                            .withSslContextFactory(sslContextFactory);
         SslContext sslContext = SSLFactory.getOrCreateSslContext(options, true, ISslContextFactory.SocketType.CLIENT, "test");
         Assert.assertNotNull(sslContext);

@@ -47,7 +47,7 @@ public class DefaultSslContextFactoryTest
         commonConfig.put("truststore", "test/conf/cassandra_ssl_test.truststore");
         commonConfig.put("truststore_password", "cassandra");
         commonConfig.put("require_client_auth", Boolean.FALSE);
-        commonConfig.put("cipher_suites", Arrays.asList("TLS_RSA_WITH_AES_128_CBC_SHA"));
+        commonConfig.put("cipher_suites", Arrays.asList("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"));
     }
 
     private void addKeystoreOptions(Map<String,Object> config)
@@ -72,7 +72,7 @@ public class DefaultSslContextFactoryTest
                                                                                                            .withOutboundKeystore("test/conf/cassandra_ssl_test_outbound.keystore")
                                                                                                            .withOutboundKeystorePassword("cassandra")
                                                                                                            .withRequireClientAuth(false)
-                                                                                                           .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA");
+                                                                                                           .withCipherSuites("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256");
         SslContext sslContext = SSLFactory.getOrCreateSslContext(options, true, ISslContextFactory.SocketType.CLIENT, "test");
         Assert.assertNotNull(sslContext);
         if (OpenSsl.isAvailable())

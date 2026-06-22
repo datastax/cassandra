@@ -66,7 +66,7 @@ public class FileBasedSslContextFactoryTest
                             .withTrustStore("test/conf/cassandra_ssl_test.truststore")
                             .withTrustStorePassword("cassandra")
                             .withRequireClientAuth(false)
-                            .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA")
+                            .withCipherSuites("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")
                             .withKeyStore("test/conf/cassandra_ssl_test.keystore")
                             .withKeyStorePassword("cassandra")
                             .withOutboundKeystore("test/conf/cassandra_ssl_test_outbound.keystore")
