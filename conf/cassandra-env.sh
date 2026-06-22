@@ -100,6 +100,8 @@ echo $JVM_OPTS | grep -q UseConcMarkSweepGC
 USING_CMS=$?
 echo $JVM_OPTS | grep -q +UseG1GC
 USING_G1=$?
+echo $JVM_OPTS | grep -q +UseZGC
+USING_ZGC=$?
 
 calculate_heap_sizes
 
@@ -177,6 +179,11 @@ if [ $DEFINED_XMN -eq 0 ] && [ $USING_G1 -eq 0 ]; then
     exit 1
 fi
 
+# If a user tries to use -Xmn with ZGC we should let them know it's not going to work. Not worth killing the node over though.
+if [ $DEFINED_XMN -eq 0 ] && [ $USING_ZGC -eq 0 ]; then
+    echo "-Xmn does nothing when used in conjunction with ZGC; this setting will be ignored."
+fi
+
 if [ $USING_G1 -eq 0 ] && [ $DEFINED_PARALLEL_GC_THREADS -ne 0 ] && [ $DEFINED_CONC_GC_THREADS -ne 0 ] ; then
     # Set ParallelGCThreads and ConcGCThreads equal to number of cpu cores.
     # Setting both to the same value is important to reduce STW durations.
@@ -191,7 +198,10 @@ fi
 JVM_OPTS="$JVM_OPTS -XX:CompileCommandFile=$CASSANDRA_CONF/hotspot_compiler"
 
 # add the jamm javaagent
-JVM_OPTS="$JVM_OPTS -javaagent:$CASSANDRA_HOME/lib/jamm-0.4.0.jar"
+# cassandra-jamm-<version>.jar - the version tracks the build, so resolve it by glob rather than a hardcoded name
+for jamm_jar in "$CASSANDRA_HOME"/lib/cassandra-jamm-*.jar; do
+    if [ -f "$jamm_jar" ]; then JVM_OPTS="$JVM_OPTS -javaagent:$jamm_jar"; break; fi
+done
 
 
 if [ "x$CASSANDRA_HEAPDUMP_DIR" = "x" ]; then
