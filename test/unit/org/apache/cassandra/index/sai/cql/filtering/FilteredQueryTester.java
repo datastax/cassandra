@@ -28,7 +28,7 @@ import org.junit.Before;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-import com.google.monitoring.runtime.instrumentation.common.collect.Sets;
+import com.google.common.collect.Sets;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 

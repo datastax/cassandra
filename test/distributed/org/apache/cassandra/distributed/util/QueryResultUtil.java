@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
 
-import com.google.monitoring.runtime.instrumentation.common.collect.Iterators;
+import com.google.common.collect.Iterators;
 import org.apache.cassandra.distributed.api.QueryResults;
 import org.apache.cassandra.distributed.api.Row;
 import org.apache.cassandra.distributed.api.SimpleQueryResult;

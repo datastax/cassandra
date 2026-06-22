@@ -30,7 +30,7 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.google.monitoring.runtime.instrumentation.common.collect.Sets;
+import com.google.common.collect.Sets;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -40,7 +40,7 @@ import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional.AbstractTransactional.State;
 
-import static com.google.monitoring.runtime.instrumentation.common.collect.ImmutableSet.copyOf;
+import static com.google.common.collect.ImmutableSet.copyOf;
 
 public class CompositeLifecycleTransactionTest
 {
