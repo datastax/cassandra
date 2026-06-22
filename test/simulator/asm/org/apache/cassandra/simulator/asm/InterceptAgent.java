@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.regex.Pattern;
 
@@ -46,8 +47,10 @@ import static org.apache.cassandra.simulator.asm.Flag.NO_PROXY_METHODS;
 import static org.apache.cassandra.simulator.asm.Flag.SYSTEM_CLOCK;
 import static org.apache.cassandra.simulator.asm.InterceptClasses.BYTECODE_VERSION;
 import static org.objectweb.asm.Opcodes.ALOAD;
+import static org.objectweb.asm.Opcodes.F_SAME;
 import static org.objectweb.asm.Opcodes.GETFIELD;
 import static org.objectweb.asm.Opcodes.GETSTATIC;
+import static org.objectweb.asm.Opcodes.IFEQ;
 import static org.objectweb.asm.Opcodes.INVOKESPECIAL;
 import static org.objectweb.asm.Opcodes.INVOKESTATIC;
 import static org.objectweb.asm.Opcodes.INVOKEVIRTUAL;
@@ -93,6 +96,9 @@ public class InterceptAgent
                 if (className.equals("java/lang/Object"))
                     return transformObject(bytecode);
 
+                if (className.equals("java/lang/Class"))
+                    return transformClass(bytecode);
+
                 if (className.equals("java/lang/Enum"))
                     return transformEnum(bytecode);
 
@@ -103,16 +109,20 @@ public class InterceptAgent
                     return transformThreadLocalRandom(bytecode);
 
                 if (className.startsWith("java/util/concurrent/ConcurrentHashMap"))
-                    return transformConcurrent(className, bytecode, DETERMINISTIC, NO_PROXY_METHODS);
+                    return InterceptAgent.transform(className, bytecode, DETERMINISTIC, NO_PROXY_METHODS);
 
                 if (className.startsWith("java/util/concurrent/locks"))
-                    return transformConcurrent(className, bytecode, SYSTEM_CLOCK, LOCK_SUPPORT, NO_PROXY_METHODS);
+                {
+                    if (className.equals("java/util/concurrent/locks/AbstractQueuedSynchronizer"))
+                        return InterceptAgent.transformAbstractQueuedSynchronizer(className, bytecode, SYSTEM_CLOCK, LOCK_SUPPORT, NO_PROXY_METHODS);
+                    return InterceptAgent.transform(className, bytecode, SYSTEM_CLOCK, LOCK_SUPPORT, NO_PROXY_METHODS);
+                }
 
                 return null;
             }
         });
 
-        Pattern reloadPattern = Pattern.compile("java\\.(lang\\.Enum|util\\.concurrent\\.(locks\\..*|ConcurrentHashMap)|util\\.(concurrent\\.ThreadLocal)?Random|lang\\.Object)");
+        Pattern reloadPattern = Pattern.compile("java\\.(lang\\.(Class|Enum)|util\\.concurrent\\.(locks\\..*|ConcurrentHashMap)|util\\.(concurrent\\.ThreadLocal)?Random|lang\\.Object)");
         List<ClassDefinition> redefine = new ArrayList<>();
         for (Class<?> loadedClass : instrumentation.getAllLoadedClasses())
         {
@@ -173,7 +183,38 @@ public class InterceptAgent
     }
 
     /**
-     * We want Enum to have a deterministic hashCode() so we simply forward calls to ordinal()
+     * We don't want Object.toString() to invoke our overridden identityHashCode by virtue of invoking some overridden hashCode()
+     * So we overwrite Class.toString() (and Class.toGenericString()) to replace calls to Object.hashCode() with direct calls to System.identityHashCode()
+     */
+    private static byte[] transformClass(byte[] bytes)
+    {
+        class ClazzVisitor extends ClassVisitor
+        {
+            public ClazzVisitor(int api, ClassVisitor classVisitor)
+            {
+                super(api, classVisitor);
+            }
+
+            @Override
+            public void visitEnd()
+            {
+                new StringHashcode(api).accept(this);
+                super.visitEnd();
+            }
+        }
+        return transform(bytes, ClazzVisitor::new);
+    }
+
+    /**
+     * We want enums to have a deterministic hashCode() (the ordinal), so simulated enum-keyed collections
+     * iterate reproducibly. But this rewrite of java.lang.Enum.hashCode() is global (the agent redefines the
+     * already-loaded bootstrap Enum), so it also reaches JDK enums — and hashing THOSE by ordinal corrupts
+     * JDK-internal immutable collections keyed by an enum's identity hash. Most visibly
+     * AccessFlag.FINAL.locations() is a Set.of(...) built at CDS init (before the redefine) with the real
+     * identity hash; on JDK 25 that breaks invokedynamic type switches with "unexpected flag: FINAL use in
+     * target location: CLASS". So hash by ordinal for every enum EXCEPT JDK-internal ones
+     * (Global.ordinalEnumHash), and fall back to the real identity hash (Object.hashCode, which
+     * transformObject leaves untouched) for those — see ordinalEnumHash for why only JDK enums need this.
      */
     private static byte[] transformEnum(byte[] bytes)
     {
@@ -190,11 +231,22 @@ public class InterceptAgent
                 if (descriptor.equals("()I") && name.equals("hashCode"))
                 {
                     MethodVisitor visitor = super.visitMethod(access, name, descriptor, signature, exceptions);
+                    Label identity = new Label();
                     visitor.visitLabel(new Label());
-                    visitor.visitIntInsn(ALOAD, 0);
+                    // if (!Global.ordinalEnumHash(this)) goto identity;
+                    visitor.visitVarInsn(ALOAD, 0);
+                    visitor.visitMethodInsn(INVOKESTATIC, "org/apache/cassandra/simulator/systems/InterceptorOfSystemMethods$Global", "ordinalEnumHash", "(Ljava/lang/Object;)Z", false);
+                    visitor.visitJumpInsn(IFEQ, identity);
+                    // simulated enum: return this.ordinal;
+                    visitor.visitVarInsn(ALOAD, 0);
                     visitor.visitFieldInsn(GETFIELD, "java/lang/Enum", "ordinal", "I");
                     visitor.visitInsn(IRETURN);
-                    visitor.visitLabel(new Label());
+                    // everything else: return the real identity hash (Object.hashCode is not rewritten)
+                    visitor.visitLabel(identity);
+                    visitor.visitFrame(F_SAME, 0, null, 0, null);
+                    visitor.visitVarInsn(ALOAD, 0);
+                    visitor.visitMethodInsn(INVOKESPECIAL, "java/lang/Object", "hashCode", "()I", false);
+                    visitor.visitInsn(IRETURN);
                     visitor.visitMaxs(1, 1);
                     visitor.visitEnd();
 
@@ -285,27 +337,47 @@ public class InterceptAgent
                 {
                     if (unsafeFieldName == null)
                     {
+                        // Fallback only when ThreadLocalRandom did not expose an Unsafe field above. JDK 8 used
+                        // sun.misc.Unsafe in field UNSAFE; JDK 11+ (incl. 17/21/25) use jdk.internal.misc.Unsafe
+                        // in field U. Earlier this threw "Unsupported Java Version" for anything but 11/8, which
+                        // broke the simulator on 17/21/25 (CI only runs it on the default JDK 11).
                         String version = System.getProperty("java.version");
-                        if (version.startsWith("11.")) { unsafeFieldName = "U"; unsafeDescriptor = "Ljdk/internal/misc/Unsafe;"; }
-                        else if (version.startsWith("1.8")) { unsafeFieldName = "UNSAFE"; unsafeDescriptor = "Lsun/misc/Unsafe;"; }
-                        else throw new AssertionError("Unsupported Java Version");
+                        if (version.startsWith("1.8")) { unsafeFieldName = "UNSAFE"; unsafeDescriptor = "Lsun/misc/Unsafe;"; }
+                        else { unsafeFieldName = "U"; unsafeDescriptor = "Ljdk/internal/misc/Unsafe;"; }
                     }
+
+                    // INVOKEVIRTUAL's owner is an internal name (e.g. jdk/internal/misc/Unsafe), not a type
+                    // descriptor (Ljdk/internal/misc/Unsafe;). Using the descriptor produced an illegal class
+                    // name in the rewritten ThreadLocalRandom on JDK 25.
+                    String unsafeOwner = unsafeDescriptor.substring(1, unsafeDescriptor.length() - 1);
 
                     MethodVisitor visitor = super.visitMethod(access, name, descriptor, signature, exceptions);
                     visitor.visitLabel(new Label());
-                    visitor.visitIntInsn(ALOAD, 0);
+                    // NB: no `aload 0` here. localInit() is a static method (no `this`, no locals — it is
+                    // static on OpenJDK 8/11/25), so loading local 0 references a non-existent local and is
+                    // invalid bytecode. The loaded value was never consumed anyway — putLong/putInt take their
+                    // receiver from `getstatic U` below — so the aload was a dead instruction; it slipped
+                    // through before but JDK 25 rejects it ("Bad local variable type"), so just drop it.
                     visitor.visitFieldInsn(GETSTATIC, "java/util/concurrent/ThreadLocalRandom", unsafeFieldName, unsafeDescriptor);
                     visitor.visitMethodInsn(INVOKESTATIC, "java/lang/Thread", "currentThread", "()Ljava/lang/Thread;", false);
                     visitor.visitFieldInsn(GETSTATIC, "java/util/concurrent/ThreadLocalRandom", "SEED", "J");
                     visitor.visitMethodInsn(INVOKESTATIC, "org/apache/cassandra/simulator/systems/InterceptorOfSystemMethods$Global", "randomSeed", "()J", false);
-
-                    String unsafeClass = Utils.descriptorToClassName(unsafeDescriptor);
-                    visitor.visitMethodInsn(INVOKEVIRTUAL, unsafeClass, "putLong", "(Ljava/lang/Object;JJ)V", false);
+                    visitor.visitMethodInsn(INVOKEVIRTUAL, unsafeOwner, "putLong", "(Ljava/lang/Object;JJ)V", false);
                     visitor.visitFieldInsn(GETSTATIC, "java/util/concurrent/ThreadLocalRandom", unsafeFieldName, unsafeDescriptor);
                     visitor.visitMethodInsn(INVOKESTATIC, "java/lang/Thread", "currentThread", "()Ljava/lang/Thread;", false);
                     visitor.visitFieldInsn(GETSTATIC, "java/util/concurrent/ThreadLocalRandom", "PROBE", "J");
-                    visitor.visitLdcInsn(0);
-                    visitor.visitMethodInsn(INVOKEVIRTUAL, unsafeClass, "putInt", "(Ljava/lang/Object;JI)V", false);
+                    // The per-thread PROBE must be NON-ZERO. JDK 25's ForkJoinPool.submissionQueue() only
+                    // attempts q.tryLockPhase() when the probe-derived 'reuse' value is non-zero, and the
+                    // probe is advanced with an xorshift for which advanceProbe(0) == 0 — so a probe pinned to
+                    // 0 leaves 'reuse' == 0 forever and, once a submission queue slot already exists, the loop
+                    // never terminates and the thread spins (livelock). (JDK 11's externalPush has no such
+                    // gate, which is why 0 worked there.) PROBE only selects queue/striping indices, never the
+                    // random values (those come from SEED), so pinning it to a deterministic non-zero constant
+                    // preserves the simulator's determinism. Use the JDK's own probe increment for parity and
+                    // good slot distribution; any non-zero constant works (the xorshift is full-period over
+                    // non-zero ints, so it never returns to 0).
+                    visitor.visitLdcInsn(0x9e3779b9);
+                    visitor.visitMethodInsn(INVOKEVIRTUAL, unsafeOwner, "putInt", "(Ljava/lang/Object;JI)V", false);
                     visitor.visitInsn(RETURN);
                     visitor.visitLabel(new Label());
                     visitor.visitMaxs(6, 1);
@@ -316,7 +388,7 @@ public class InterceptAgent
                 else
                 {
                     MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
-                    if (determinismCheck && (name.equals("nextSeed") || name.equals("nextSecondarySeed")))
+                    if (determinismCheck && (name.equals("nextSeed") || name.equals("nextSecondarySeed") || name.equals("advanceProbe")))
                         mv = new ThreadLocalRandomCheckTransformer(api, mv);
                     return mv;
                 }
@@ -325,7 +397,61 @@ public class InterceptAgent
         return transform(bytes, ThreadLocalRandomVisitor::new);
     }
 
-    private static byte[] transform(byte[] bytes, BiFunction<Integer, ClassWriter, ClassVisitor> constructor)
+
+    /**
+     * We require AbstractQueuedSynchronizer to not spin (its loop  interacts poorly with SimulatedTime)
+     */
+    private static byte[] transformAbstractQueuedSynchronizer(String className, byte[] bytes, Flag flag, Flag ... flags)
+    {
+        class AbstractQueuedSynchronizerVisitor extends ClassVisitor
+        {
+            private long defaultSpinForTimeoutThreshold = 1000L;
+
+            public AbstractQueuedSynchronizerVisitor(int api, ClassVisitor classVisitor)
+            {
+                super(api, classVisitor);
+            }
+
+            @Override
+            public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value)
+            {
+                if (name.equals("SPIN_FOR_TIMEOUT_THRESHOLD"))
+                {
+                    defaultSpinForTimeoutThreshold = (Long)value;
+                    return super.visitField(access, name, descriptor, signature, 0L);
+                }
+
+                return super.visitField(access, name, descriptor, signature, value);
+            }
+
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions)
+            {
+                /// !!!!! WARNING !!!!!
+                /// THIS IS SUPER BRITTLE BECAUSE rt.jar INLINES GETSTATIC AS LDC
+                // TODO (desired): visit constructor to fetch actual value of constant in case changes in future release -
+                //  but this is brittle enough changes upstream will likely need revisiting anyway
+                MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!name.equals("doAcquireNanos") && !name.equals("doAcquireSharedNanos"))
+                    return mv;
+
+                return new MethodVisitor(api, mv)
+                {
+                    @Override
+                    public void visitLdcInsn(Object value)
+                    {
+                        if (Objects.equals(defaultSpinForTimeoutThreshold, value))
+                            super.visitLdcInsn(0L);
+                        else
+                            super.visitLdcInsn(value);
+                    }
+                };
+            }
+        }
+        return transform(className, bytes, AbstractQueuedSynchronizerVisitor::new, flag, flags);
+    }
+
+    private static byte[] transform(byte[] bytes, BiFunction<Integer, ClassVisitor, ClassVisitor> constructor)
     {
         ClassWriter out = new ClassWriter(0);
         ClassReader in = new ClassReader(bytes);
@@ -334,12 +460,21 @@ public class InterceptAgent
         return out.toByteArray();
     }
 
-    private static byte[] transformConcurrent(String className, byte[] bytes, Flag flag, Flag ... flags)
+    private static byte[] transform(String className, byte[] bytes, Flag flag, Flag ... flags)
     {
         ClassTransformer transformer = new ClassTransformer(BYTECODE_VERSION, className, EnumSet.of(flag, flags), null);
         transformer.readAndTransform(bytes);
         if (!transformer.isTransformed())
             return null;
+        return transformer.toBytes();
+    }
+
+    private static byte[] transform(String className, byte[] bytes, BiFunction<Integer, ClassVisitor, ClassVisitor> constructor, Flag flag, Flag ... flags)
+    {
+        ClassReader in = new ClassReader(bytes);
+        ClassTransformer transformer = new ClassTransformer(BYTECODE_VERSION, className, EnumSet.of(flag, flags), null);
+        ClassVisitor extraTransformer = constructor.apply(BYTECODE_VERSION, transformer);
+        in.accept(extraTransformer, 0);
         return transformer.toBytes();
     }
 }

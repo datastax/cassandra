@@ -244,6 +244,30 @@ public class ShadowingTransformer extends ClassTransformer
     }
 
     @Override
+    public void visitPermittedSubclass(String permittedSubclass)
+    {
+        super.visitPermittedSubclass(toShadowType(permittedSubclass));
+    }
+
+    // Remap the nestmate attributes (JEP 181, present since JDK 11) just like the other type references.
+    // Without this, a shadowed inner class keeps NestHost = the original (e.g. java/util/concurrent/
+    // ConcurrentHashMap) while its instructions are rewritten to access the shadow's private members, so the
+    // JVM nest-mate check rejects the access. This first bit on JDK 25, where ConcurrentHashMap.TreeBin reads
+    // the outer ConcurrentHashMap.U field cross-class (nest-gated); JDK 11's TreeBin had its own U and read it
+    // intra-class, so the stale attribute was inert there.
+    @Override
+    public void visitNestHost(String nestHost)
+    {
+        super.visitNestHost(toShadowType(nestHost));
+    }
+
+    @Override
+    public void visitNestMember(String nestMember)
+    {
+        super.visitNestMember(toShadowType(nestMember));
+    }
+
+    @Override
     public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value)
     {
         return super.visitField(access, name, toShadowTypeDescriptor(descriptor), signature, value);

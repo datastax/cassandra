@@ -214,6 +214,29 @@ public interface InterceptorOfSystemMethods
             return identityHashCode.applyAsInt(object);
         }
 
+        /**
+         * Whether the given enum constant should hash by ordinal (deterministic) rather than by its real
+         * identity hash. The simulator redefines java.lang.Enum.hashCode() globally to hash by ordinal so the
+         * simulated code's enum-keyed collections iterate reproducibly; we keep that for every enum EXCEPT
+         * JDK-internal ones.
+         * <p>
+         * JDK enums must keep their real identity hash because some JDK-internal immutable collections are
+         * keyed by it and are built from the CDS archive BEFORE the agent redefines Enum — e.g.
+         * {@code AccessFlag.FINAL.locations()} is a {@code Set.of(...)} populated with the real identity hash;
+         * after the redefine, hashing those constants by ordinal makes {@code contains()} probe the wrong slot.
+         * On JDK 25 that breaks invokedynamic type switches: {@code SwitchBootstraps.generateTypeSwitch} probes
+         * such a set and gets a false negative, throwing "unexpected flag: FINAL use in target location: CLASS".
+         * Application and third-party classes initialize only after premain, so their enum sets are built and
+         * queried entirely under the ordinal regime (consistent, no bug) — so excluding only JDK enums is the
+         * minimal change and preserves deterministic hashing for everything else.
+         */
+        public static boolean ordinalEnumHash(Object enumConstant)
+        {
+            String name = enumConstant.getClass().getName();
+            return !(name.startsWith("java.") || name.startsWith("javax.") || name.startsWith("jdk.")
+                     || name.startsWith("sun.") || name.startsWith("com.sun."));
+        }
+
         public static Unsafe getUnsafe()
         {
             try
