@@ -247,12 +247,6 @@ public class QueryContext
         postFilteringReadLatency += val;
     }
 
-    public void setFilterSortOrder(FilterSortOrder filterSortOrder)
-    {
-        checkThreadOwnership();
-        this.filterSortOrder = filterSortOrder;
-    }
-
     /**
      * Checks if the query has exceeded its execution quota and aborts it if it has timed out.
      *
