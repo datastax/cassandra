@@ -283,6 +283,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
             this.value = value;
         }
 
+        @VisibleForTesting
         public static List<Version> supportedVersions()
         {
             List<Version> versions = new ArrayList<>();

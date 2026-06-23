@@ -63,9 +63,6 @@ public class StreamRequestTest
 
         for (MessagingService.Version version : MessagingService.Version.supportedVersions())
         {
-            if (version.value < MessagingService.VERSION_40 || version.value > MessagingService.current_version)
-                continue;
-
             int expectedSize = (int) StreamRequest.serializer.serializedSize(orig, version.value);
             try (DataOutputBuffer out = new DataOutputBuffer(expectedSize))
             {
