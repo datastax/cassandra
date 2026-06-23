@@ -274,6 +274,14 @@ public enum CassandraRelevantProperties
 
     DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES ("default.provide.overlapping.tombstones"),
     ORG_APACHE_CASSANDRA_DISABLE_MBEAN_REGISTRATION ("org.apache.cassandra.disable_mbean_registration"),
+
+    /**
+     * Disables user-defined functions (UDFs). When set to true, UDF creation and execution are blocked.
+     * This property can be used to forcibly disable UDFs for security reasons, or when running on JDK
+     * versions where SecurityManager-based sandboxing may not be reliable or available.
+     */
+    DISABLE_USER_DEFINED_FUNCTIONS("cassandra.disable_user_defined_functions", "false"),
+
     //only for testing
     ORG_APACHE_CASSANDRA_CONF_CASSANDRA_RELEVANT_PROPERTIES_TEST("org.apache.cassandra.conf.CassandraRelevantPropertiesTest"),
     ORG_APACHE_CASSANDRA_DB_VIRTUAL_SYSTEM_PROPERTIES_TABLE_TEST("org.apache.cassandra.db.virtual.SystemPropertiesTableTest"),
