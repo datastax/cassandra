@@ -19,6 +19,7 @@
 package org.apache.cassandra.net;
 
 import java.nio.channels.ClosedChannelException;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -131,30 +132,44 @@ public class HandshakeTest
         }
     }
 
+    private static int latestStreamingVersionBeforeCurrent()
+    {
+        List<MessagingService.Version> versions = MessagingService.Version.supportedVersions();
+        int previousVersion = -1;
+        for (MessagingService.Version version : versions)
+        {
+            if (version.value >= VERSION_40 && version.value < current_version)
+                previousVersion = version.value;
+        }
+        Assert.assertTrue(previousVersion >= VERSION_40);
+        return previousVersion;
+    }
+
     @Test
     public void testStreamingNegotiatesCommonVersion() throws InterruptedException, ExecutionException
     {
-        Result result = streamingHandshake(VERSION_DS_12, VERSION_40, VERSION_DS_12, VERSION_40, VERSION_DS_11);
+        int previousVersion = latestStreamingVersionBeforeCurrent();
+        Result result = streamingHandshake(current_version, VERSION_40, current_version, VERSION_40, previousVersion);
         Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
-        Assert.assertEquals(VERSION_DS_11, result.success().messagingVersion);
+        Assert.assertEquals(previousVersion, result.success().messagingVersion);
         result.success().channel.close();
     }
 
     @Test
     public void testStreamingNegotiatesCommonVersionReversed() throws InterruptedException, ExecutionException
     {
-        // lower initiator (max DS_11) to higher follower (max DS_12) still negotiates the common DS_11
-        Result result = streamingHandshake(VERSION_DS_11, VERSION_40, VERSION_DS_11, VERSION_40, VERSION_DS_12);
+        int previousVersion = latestStreamingVersionBeforeCurrent();
+        Result result = streamingHandshake(previousVersion, VERSION_40, previousVersion, VERSION_40, current_version);
         Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
-        Assert.assertEquals(VERSION_DS_11, result.success().messagingVersion);
+        Assert.assertEquals(previousVersion, result.success().messagingVersion);
         result.success().channel.close();
     }
 
     @Test
     public void testStreamingIncompatibleVersions() throws InterruptedException, ExecutionException
     {
-        // initiator only supports DS_12, follower only supports up to DS_11: no common version
-        Result result = streamingHandshake(VERSION_DS_12, VERSION_DS_12, VERSION_DS_12, VERSION_40, VERSION_DS_11);
+        int previousVersion = latestStreamingVersionBeforeCurrent();
+        Result result = streamingHandshake(current_version, current_version, current_version, VERSION_40, previousVersion);
         Assert.assertEquals(Result.Outcome.INCOMPATIBLE, result.outcome);
     }
 
