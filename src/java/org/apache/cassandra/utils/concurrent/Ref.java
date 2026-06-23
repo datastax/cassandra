@@ -539,9 +539,25 @@ public final class Ref<T> implements RefCounted<T>
                 if (o instanceof WeakReference & nextField.getDeclaringClass() == Reference.class)
                     continue;
 
-                Object nextObject = getFieldValue(o, nextField);
+                Object nextObject;
+                try
+                {
+                    nextObject = getFieldValue(o, nextField);
+                }
+                catch (UnaccessibleFieldException e)
+                {
+                    // Some fields cannot be read reflectively or via Unsafe: record components
+                    // (Unsafe.objectFieldOffset throws UnsupportedOperationException for record classes on JDK 16+,
+                    // and the JVM forbids this on JDK 25), as well as module-protected/hidden-class fields. These are
+                    // never Cassandra leak candidates, so skip the unreadable field and keep walking the graph rather
+                    // than letting one field abort the whole leak-detection pass. See CASSANDRA-21171.
+                    NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 5, TimeUnit.MINUTES,
+                                     "Could not read field {} of {} while checking for self-referential leaks; skipping it",
+                                     nextField.getName(), o.getClass().getName(), e);
+                    continue;
+                }
                 if (nextObject != null)
-                    return Pair.create(getFieldValue(o, nextField), nextField);
+                    return Pair.create(nextObject, nextField);
             }
         }
 
