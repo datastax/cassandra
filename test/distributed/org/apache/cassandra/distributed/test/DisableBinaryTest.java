@@ -159,27 +159,43 @@ public class DisableBinaryTest extends TestBaseImpl
                 }
             });
 
-            Future<?> afterShutdown = CompletableFuture.supplyAsync(() -> session.execute("select * from tbl").one());
+            // afterShutdown must run on a dedicated thread, NOT CompletableFuture.supplyAsync's common ForkJoinPool.
+            // The common pool's parallelism is 1 (the dtest JVM sees 2 processors) and its single worker is already
+            // blocked in the disablebinary call above (which drains the in-flight queries for ~1s). JDK 17's pool
+            // promptly starts a compensating worker, so the request runs immediately and the stopped transport
+            // rejects it with OverloadedException; JDK 25's reworked ForkJoinPool does not, so the task would not
+            // run until disablebinary completes ~1s later - after the server has reset the connection and the host
+            // is marked down - and the request would instead fail with NoHostAvailableException. A dedicated
+            // executor runs it immediately, deterministically inside the OverloadedException window. CASSANDRA-21171.
+            ExecutorService afterShutdownExecutor = Executors.newSingleThreadExecutor();
             try
             {
-                session.execute("select * from tbl").one();
-                fail("Should have thrown OverloadedException");
-            }
-            catch (OverloadedException e) {}
+                Future<?> afterShutdown = afterShutdownExecutor.submit(() -> session.execute("select * from tbl").one());
+                try
+                {
+                    session.execute("select * from tbl").one();
+                    fail("Should have thrown OverloadedException");
+                }
+                catch (OverloadedException e) {}
 
-            control.get(1).runOnInstance(() -> BlockingSelect.signal.countDown());
-            result.get();
-            for (Future<?> future : futures)
-                future.get();
+                control.get(1).runOnInstance(() -> BlockingSelect.signal.countDown());
+                result.get();
+                for (Future<?> future : futures)
+                    future.get();
 
-            try
-            {
-                afterShutdown.get();
-                fail("Should have thrown OverloadedException");
+                try
+                {
+                    afterShutdown.get();
+                    fail("Should have thrown OverloadedException");
+                }
+                catch (ExecutionException e)
+                {
+                    Assert.assertTrue("Unexpected cause: " + e.getCause(), e.getCause() instanceof OverloadedException);
+                }
             }
-            catch (ExecutionException e)
+            finally
             {
-                Assert.assertTrue(e.getCause() instanceof OverloadedException);
+                afterShutdownExecutor.shutdownNow();
             }
         }
         finally

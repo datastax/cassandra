@@ -29,6 +29,8 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -103,7 +105,11 @@ public abstract class DecommissionAvoidTimeouts extends TestBaseImpl
                 toDecom.coordinator().execute("INSERT INTO " + table + "(pk) VALUES (?)", ConsistencyLevel.EACH_QUORUM, key);
             }
 
-            CompletableFuture<Void> nodetool = CompletableFuture.runAsync(() -> toDecom.nodetoolResult("decommission").asserts().success());
+            // Run the blocking decommission on a dedicated executor, not the common ForkJoinPool: on JDK 25 the
+            // low-parallelism common pool may not start a compensating worker, which could starve this task so
+            // the awaitGossipStateMatch below never observes the decommission. See CASSANDRA-21171.
+            ExecutorService decommissionExecutor = Executors.newSingleThreadExecutor();
+            CompletableFuture<Void> nodetool = CompletableFuture.runAsync(() -> toDecom.nodetoolResult("decommission").asserts().success(), decommissionExecutor);
 
             Hooks statusHooks = StatusChangeListener.hooks(DECOM_NODE);
             statusHooks.leaving.awaitAndEnter();
@@ -116,6 +122,7 @@ public abstract class DecommissionAvoidTimeouts extends TestBaseImpl
             statusHooks.leave.enter();
 
             nodetool.join();
+            decommissionExecutor.shutdownNow();
 
             List<String> failures = new ArrayList<>();
             String query = getQuery(table);

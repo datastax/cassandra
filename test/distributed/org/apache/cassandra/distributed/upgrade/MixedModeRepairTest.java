@@ -20,6 +20,8 @@ package org.apache.cassandra.distributed.upgrade;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -98,10 +100,14 @@ public class MixedModeRepairTest extends UpgradeTestBase
                     // repair before verifying the "unknown verb id" error in the upgraded node.
                     else
                     {
+                        // Run the blocking repair on a dedicated executor, not the common ForkJoinPool: on JDK 25
+                        // the low-parallelism common pool may not start a compensating worker, which could starve
+                        // the task so the get() below times out for the wrong reason. See CASSANDRA-21171.
+                        ExecutorService repairExecutor = Executors.newSingleThreadExecutor();
                         try
                         {
                             IUpgradeableInstance instance = cluster.get(repairedNode);
-                            CompletableFuture.supplyAsync(() -> instance.nodetoolResult("repair", "--full", KEYSPACE))
+                            CompletableFuture.supplyAsync(() -> instance.nodetoolResult("repair", "--full", KEYSPACE), repairExecutor)
                                              .get(10, TimeUnit.SECONDS);
                             fail("Repair in the not upgraded node should have timed out");
                         }
@@ -109,6 +115,10 @@ public class MixedModeRepairTest extends UpgradeTestBase
                         {
                             assertLogHas(cluster, UPGRADED_NODE, "unexpected exception caught while processing inbound messages");
                             assertLogHas(cluster, UPGRADED_NODE, "java.lang.IllegalArgumentException: Unknown verb id");
+                        }
+                        finally
+                        {
+                            repairExecutor.shutdownNow();
                         }
                     }
 

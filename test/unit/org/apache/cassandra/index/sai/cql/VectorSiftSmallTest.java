@@ -28,9 +28,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.IntStream;
+import java.util.function.IntConsumer;
 
 import org.junit.Test;
 
@@ -330,13 +334,40 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
         return testRecall(topK, queryVectors, groundTruth, null, null);
     }
 
+    // Run body over [0, count) on a dedicated thread pool rather than IntStream.parallel()'s common ForkJoinPool.
+    // Each body here performs a blocking CQL execute(); on JDK 25 the common pool no longer starts a compensating
+    // worker when its (low-parallelism) workers block, so parallel().forEach would serialize or stall. A dedicated
+    // pool runs the work concurrently regardless of common-pool sizing. See CASSANDRA-21171.
+    private static void runConcurrently(int count, IntConsumer body)
+    {
+        ExecutorService pool = Executors.newFixedThreadPool(Math.max(1, Math.min(count, Math.max(4, Runtime.getRuntime().availableProcessors()))));
+        try
+        {
+            List<Future<?>> futures = new ArrayList<>(count);
+            for (int i = 0; i < count; i++)
+            {
+                int idx = i;
+                futures.add(pool.submit(() -> body.accept(idx)));
+            }
+            for (Future<?> future : futures)
+                future.get();
+        }
+        catch (InterruptedException | ExecutionException e)
+        {
+            throw new RuntimeException(e);
+        }
+        finally
+        {
+            pool.shutdownNow();
+        }
+    }
+
     public double testRecall(int topK, List<float[]> queryVectors, List<List<Integer>> groundTruth, Integer rerankK, Boolean usePruning)
     {
         AtomicInteger topKfound = new AtomicInteger(0);
 
         // Perform query and compute recall
-        var stream = IntStream.range(0, queryVectors.size()).parallel();
-        stream.forEach(i -> {
+        runConcurrently(queryVectors.size(), i -> {
             float[] queryVector = queryVectors.get(i);
             String queryVectorAsString = Arrays.toString(queryVector);
 
@@ -392,7 +423,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
 
     private void insertVectors(List<float[]> vectors, int baseRowId)
     {
-        IntStream.range(0, vectors.size()).parallel().forEach(i -> {
+        runConcurrently(vectors.size(), i -> {
             float[] arrayVector = vectors.get(i);
             try {
                 execute("INSERT INTO %s (pk, val) VALUES (?, ?)", baseRowId + i, vector(arrayVector));

@@ -21,6 +21,8 @@ package org.apache.cassandra.distributed.test;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -146,7 +148,10 @@ public abstract class RepairCoordinatorNeighbourDown extends RepairCoordinatorBa
                 participantShutdown.set(CLUSTER.get(2).shutdown());
                 return true; // drop it so this node doesn't reply before shutdown.
             })).drop();
-            // since nodetool is blocking, need to handle participantShutdown in the background
+            // since nodetool is blocking, need to handle participantShutdown in the background.
+            // Use a dedicated executor, not the common ForkJoinPool: on JDK 25 the low-parallelism common pool may
+            // not start a compensating worker, which could starve this background recovery task. CASSANDRA-21171.
+            ExecutorService recoverExecutor = Executors.newSingleThreadExecutor();
             CompletableFuture<Void> recovered = CompletableFuture.runAsync(() -> {
                 try {
                     while (participantShutdown.get() == null) {
@@ -162,11 +167,12 @@ public abstract class RepairCoordinatorNeighbourDown extends RepairCoordinatorBa
                     }
                     throw new RuntimeException(e);
                 }
-            });
+            }, recoverExecutor);
 
             long repairExceptions = getRepairExceptions(CLUSTER, 1);
             NodeToolResult result = repair(1, KEYSPACE, table);
             recovered.join(); // if recovery didn't happen then the results are not what are being tested, so block here first
+            recoverExecutor.shutdownNow();
             result.asserts()
                   .failure()
                   .errorContains("/127.0.0.2:7012 died");
