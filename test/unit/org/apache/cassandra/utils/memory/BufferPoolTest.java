@@ -20,10 +20,17 @@
 package org.apache.cassandra.utils.memory;
 
 import java.nio.ByteBuffer;
+import java.security.Provider;
+import java.security.Security;
 import java.util.*;
 import java.util.concurrent.*;
 
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+
 import com.google.common.collect.Iterables;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -41,6 +48,64 @@ public class BufferPoolTest
     public void setUp()
     {
         bufferPool = new BufferPool("test_pool", 8 * 1024 * 1024, true);
+    }
+
+    /**
+     * CASSANDRA-21171: JDK 25's AES-GCM {@code GaloisCounterMode.overlapDetection} walks a direct buffer's
+     * attachment chain casting each link to {@code java.nio.Buffer}. BufferPool stashes a non-Buffer (the owning
+     * {@code Chunk}, or a {@code Ref.DirectBufferRef} under {@code -Dcassandra.debugrefcount}) in the buffer's
+     * attachment, so {@code AES/GCM/NoPadding} on a pooled direct {@code ByteBuffer} threw {@link ClassCastException}
+     * and broke every encrypted (TLS) connection on JDK 25. This exercises that exact path - a full encrypt/decrypt
+     * round trip with pooled direct buffers, both drawn from the same (single-macro) pool so overlapDetection's
+     * shared-memory check is hit - and must complete without throwing. Passes on every supported JDK; only JDK 25
+     * regresses without the fix.
+     */
+    @Test
+    public void testAesGcmRoundTripWithPooledDirectBuffers() throws Exception
+    {
+        byte[] keyBytes = new byte[32];
+        new Random(0).nextBytes(keyBytes);
+        SecretKeySpec key = new SecretKeySpec(keyBytes, "AES");
+        byte[] iv = new byte[12];
+        new Random(1).nextBytes(iv);
+        Provider sunJce = Security.getProvider("SunJCE");
+        Assume.assumeTrue("SunJCE provider is required to exercise OpenJDK GaloisCounterMode", sunJce != null);
+
+        final int len = 8192;
+        // Both buffers come from the same 8 MiB (single-macro) pool, so they share the macro allocation - the case
+        // overlapDetection inspects (and the one that could trigger a defensive heap copy of dst).
+        ByteBuffer plaintext = bufferPool.get(len, BufferType.OFF_HEAP);
+        ByteBuffer ciphertext = bufferPool.get(len + 16, BufferType.OFF_HEAP); // + 128-bit GCM tag
+        ByteBuffer decrypted = bufferPool.get(len, BufferType.OFF_HEAP);
+        try
+        {
+            assertTrue(plaintext.isDirect() && ciphertext.isDirect() && decrypted.isDirect());
+            for (int i = 0; i < len; i++)
+                plaintext.put(i, (byte) i);
+            plaintext.position(0).limit(len);
+
+            Cipher enc = Cipher.getInstance("AES/GCM/NoPadding", sunJce);
+            enc.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
+            ciphertext.clear();
+            enc.doFinal(plaintext, ciphertext); // direct src + direct dst -> GaloisCounterMode.overlapDetection
+            ciphertext.flip();
+
+            Cipher dec = Cipher.getInstance("AES/GCM/NoPadding", sunJce);
+            dec.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, iv));
+            decrypted.clear();
+            dec.doFinal(ciphertext, decrypted); // direct src + direct dst -> GaloisCounterMode.overlapDetection
+            decrypted.flip();
+
+            assertEquals(len, decrypted.remaining());
+            for (int i = 0; i < len; i++)
+                assertEquals((byte) i, decrypted.get(i));
+        }
+        finally
+        {
+            bufferPool.put(plaintext);
+            bufferPool.put(ciphertext);
+            bufferPool.put(decrypted);
+        }
     }
 
     @Test
