@@ -162,7 +162,7 @@ interface VerificationCursor
                               Cursor.toString(returnedPosition),
                               Cursor.toString(encodedSkipPosition),
                               this);
-            int skipTransition = Cursor.incomingTransitionWithOverflow(encodedSkipPosition);
+            int skipTransition = Cursor.incomingTransition(encodedSkipPosition);
             if (skipDepth <= currDepth && skipDepth > 0)
             {
                 int visitedByte = getByte(skipDepth);

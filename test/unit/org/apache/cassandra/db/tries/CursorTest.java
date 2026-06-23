@@ -289,11 +289,9 @@ public class CursorTest
                 long newPos = Cursor.positionForSkippingBranch(pos);
                 assertTrue(Cursor.compare(pos, newPos) < 0);
                 assertEquals(depth.intValue(), Cursor.depth(newPos));
-                if (transition.intValue() != direction.select(0xFF, 0x00))
-                    assertEquals(transition + direction.increase, Cursor.incomingTransition(newPos));
-                else
+                if (transition.intValue() == direction.select(0xFF, 0x00))
                     assertEquals(0x200, VerificationCursor.undecodedTransition(newPos));
-                assertEquals(transition + direction.increase, Cursor.incomingTransitionWithOverflow(newPos));
+                assertEquals(transition + direction.increase, Cursor.incomingTransition(newPos));
                 assertEquals(direction, Cursor.direction(newPos));
             });
     }
