@@ -945,6 +945,13 @@ public enum CassandraRelevantProperties
     SET_SEP_THREAD_NAME("cassandra.set_sep_thread_name", "true"),
     SHUTDOWN_ANNOUNCE_DELAY_IN_MS("cassandra.shutdown_announce_in_ms", "2000"),
     SIMULATOR_ITERATIONS("simulator.iterations", "3"),
+    /**
+     * Pins the base seed used by the simulator for reproducible runs. When set, all simulator entry points
+     * (SimulationRunner, SimulationTestBase, HarrySimulatorTest, SemaphoreTest, …) derive their seed from
+     * this value instead of the wall clock or a random source. Seeds are printed as 0x-prefixed hex; the
+     * property accepts that form as well as plain decimal.
+     */
+    SIMULATOR_SEED("cassandra.simulator.seed"),
     SIZE_RECORDER_INTERVAL("cassandra.size_recorder_interval", "300"),
 
     SKIP_DEFAULT_ROLE_SETUP("cassandra.skip_default_role_setup"),

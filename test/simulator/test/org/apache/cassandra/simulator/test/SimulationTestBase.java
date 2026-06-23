@@ -68,6 +68,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SIMULATOR_ITERATIONS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SIMULATOR_SEED;
 import static org.apache.cassandra.simulator.ActionSchedule.Mode.STREAM_LIMITED;
 import static org.apache.cassandra.simulator.ActionSchedule.Mode.UNLIMITED;
 import static org.apache.cassandra.simulator.ClusterSimulation.ISOLATE;
@@ -82,6 +83,16 @@ public class SimulationTestBase
 {
     private static final Logger logger = LoggerFactory.getLogger(SimulationTestBase.class);
     public static final int DEFAULT_ITERATIONS = SIMULATOR_ITERATIONS.getInt();
+
+    /**
+     * The seed for a simulation. Defaults to the wall clock (a fresh randomized run each time), but can be
+     * pinned with -Dcassandra.simulator.seed=&lt;value&gt; to deterministically reproduce a specific run — e.g.
+     * to re-run a seed that failed, or to compare a fix against the exact seed that exhibited the problem.
+     */
+    public static long defaultSeed()
+    {
+        return SIMULATOR_SEED.isPresent() ? SimulationRunner.parseSeed(SIMULATOR_SEED.getString()) : System.currentTimeMillis();
+    }
 
     static abstract class DTestClusterSimulation implements Simulation
     {
@@ -157,7 +168,7 @@ public class SimulationTestBase
                                 int iterations) throws IOException
     {
         SimulationRunner.beforeAll();
-        long seed = System.currentTimeMillis();
+        long seed = defaultSeed();
         class Factory extends ClusterSimulation.Builder<DTestClusterSimulation>
         {
             public ClusterSimulation<DTestClusterSimulation> create(long seed) throws IOException
@@ -225,7 +236,7 @@ public class SimulationTestBase
                                 IIsolatedExecutor.SerializableRunnable check,
                                 int iterations)
     {
-        long seed = System.currentTimeMillis();
+        long seed = defaultSeed();
         for (int i = 0; i < iterations; i++)
         {
             long currentSeed = seed + i;

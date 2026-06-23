@@ -341,7 +341,10 @@ public class SimulationRunner
 
             propagate(builder);
 
-            long seed = parseHex(Optional.ofNullable(this.seed)).orElse(new Random(System.nanoTime()).nextLong());
+            long seed = parseHex(Optional.ofNullable(this.seed))
+                        .orElseGet(() -> CassandraRelevantProperties.SIMULATOR_SEED.isPresent()
+                                         ? parseSeed(CassandraRelevantProperties.SIMULATOR_SEED.getString())
+                                         : new Random(System.nanoTime()).nextLong());
             for (int i = 0 ; i < simulationCount ; ++i)
             {
                 cleanup();
@@ -436,6 +439,16 @@ public class SimulationRunner
         }
     }
 
+
+    /**
+     * Parse a simulator seed supplied via {@code cassandra.simulator.seed}. Seeds are printed and stored as
+     * unsigned {@code 0x}-prefixed hex (16 digits, so the high bit can be set), a form {@link Long#decode}
+     * cannot read; accept that form here, as well as plain decimal.
+     */
+    public static long parseSeed(String s)
+    {
+        return s.startsWith("0x") ? Hex.parseLong(s, 2, s.length()) : Long.parseLong(s);
+    }
 
     private static Optional<Long> parseHex(Optional<String> value)
     {

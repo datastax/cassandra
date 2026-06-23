@@ -23,6 +23,7 @@ import java.lang.ref.ReferenceQueue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.Set;
@@ -1255,6 +1256,11 @@ public class BufferPool
         @VisibleForTesting
         Object debugAttachment;
 
+        // On JDK 25+ (GCM_NEEDS_BUFFER_ATTACHMENT) a per-chunk java.nio.Buffer marker with a null attachment and an
+        // address of the chunk base, stashed in each sliced buffer's att so AES-GCM overlapDetection can walk it and
+        // stop at the chunk boundary; the owning Chunk is recovered via CHUNK_BY_MARKER. null on JDK <= 24.
+        private final ByteBuffer attachmentMarker;
+
         Chunk(Chunk recycle)
         {
             assert recycle.freeSlots == 0L;
@@ -1263,6 +1269,9 @@ public class BufferPool
             this.shift = recycle.shift;
             this.freeSlots = -1L;
             this.recycler = recycle.recycler;
+            this.attachmentMarker = recycle.attachmentMarker; // same slab/base, so the marker is identical
+            if (GCM_NEEDS_BUFFER_ATTACHMENT)
+                CHUNK_BY_MARKER.put(attachmentMarker, this);
         }
 
         Chunk(Recycler recycler, ByteBuffer slab)
@@ -1277,6 +1286,22 @@ public class BufferPool
             this.shift = 31 & (Integer.numberOfTrailingZeros(slab.capacity() / 64));
             // -1 means all free whilst 0 means all in use
             this.freeSlots = slab.capacity() == 0 ? 0L : -1L;
+            this.attachmentMarker = GCM_NEEDS_BUFFER_ATTACHMENT ? newAttachmentMarker(baseAddress, slab.capacity()) : null;
+            if (GCM_NEEDS_BUFFER_ATTACHMENT)
+                CHUNK_BY_MARKER.put(attachmentMarker, this);
+        }
+
+        /**
+         * A hollow direct buffer aliasing this chunk's memory with a {@code null} attachment and an address of the
+         * chunk base. Stashed (rather than the {@link Chunk} itself) in each sliced buffer's {@code att} field so JDK
+         * 25's AES-GCM overlapDetection, which casts attachments to {@code java.nio.Buffer}, can walk it and terminate
+         * at the chunk boundary (see {@link #CHUNK_BY_MARKER}).
+         */
+        private static ByteBuffer newAttachmentMarker(long baseAddress, int capacity)
+        {
+            ByteBuffer marker = MemoryUtil.getHollowDirectByteBuffer(ByteOrder.BIG_ENDIAN);
+            MemoryUtil.setDirectByteBuffer(marker, baseAddress, capacity);
+            return marker;
         }
 
         @Override
@@ -1417,12 +1442,27 @@ public class BufferPool
             if (attachment instanceof DirectBufferRef)
                 return ((DirectBufferRef<Chunk>) attachment).get();
 
+            // On JDK 25+ the attachment is the per-chunk marker (a java.nio.Buffer); recover the exact chunk by the
+            // marker's object identity. Gated on GCM_NEEDS_BUFFER_ATTACHMENT because on JDK <= 24 a macro-root
+            // attachment is still a ByteBuffer here but the map is null - those chunks resolve via the Chunk branch
+            // above (or fall through to the clean() path).
+            if (GCM_NEEDS_BUFFER_ATTACHMENT && attachment instanceof ByteBuffer)
+                return CHUNK_BY_MARKER.get(attachment);
+
             return null;
         }
 
         void setAttachment(ByteBuffer buffer)
         {
-            if (Ref.DEBUG_ENABLED)
+            // On JDK 25+ stash the per-chunk marker (a java.nio.Buffer whose null attachment stops AES-GCM
+            // overlapDetection at the chunk boundary); the owning Chunk is recovered via CHUNK_BY_MARKER. A
+            // DirectBufferRef cannot be used there even when Ref.TRACE_ENABLED, as it is not a java.nio.Buffer and would
+            // throw ClassCastException on every encrypted (AES-GCM) connection (BufferPool keeps its own leak detection
+            // via debug/debugLeaks). On JDK <= 24 keep the original zero-overhead direct Chunk (or DirectBufferRef)
+            // attachment, so getParentChunk stays a plain instanceof with no map lookup on the hot path.
+            if (GCM_NEEDS_BUFFER_ATTACHMENT)
+                MemoryUtil.setAttachment(buffer, attachmentMarker);
+            else if (Ref.DEBUG_ENABLED)
                 MemoryUtil.setAttachment(buffer, new DirectBufferRef<>(this, null));
             else
                 MemoryUtil.setAttachment(buffer, this);
@@ -1434,7 +1474,7 @@ public class BufferPool
             if (attachment == null)
                 return false;
 
-            if (Ref.DEBUG_ENABLED)
+            if (Ref.DEBUG_ENABLED && attachment instanceof DirectBufferRef)
                 ((DirectBufferRef<Chunk>) attachment).release();
 
             return true;
