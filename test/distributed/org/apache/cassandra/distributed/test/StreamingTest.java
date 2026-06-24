@@ -44,6 +44,7 @@ import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.streaming.messages.StreamMessage;
 
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.apache.cassandra.distributed.shared.AssertUtils.assertRow;
 import static org.apache.cassandra.streaming.StreamSession.State.PREPARING;
 import static org.apache.cassandra.streaming.StreamSession.State.STREAMING;
 import static org.apache.cassandra.streaming.StreamSession.State.WAIT_COMPLETE;
@@ -160,9 +161,7 @@ public class StreamingTest extends TestBaseImpl
             Arrays.sort(results, Comparator.comparingInt(a -> Integer.parseInt((String) a[0])));
             for (int i = 0 ; i < results.length ; ++i)
             {
-                Assert.assertEquals(Integer.toString(i), results[i][0]);
-                Assert.assertEquals("value1", results[i][1]);
-                Assert.assertEquals("value2", results[i][2]);
+                assertRow(results[i], Integer.toString(i), "value1", "value2");
             }
         }
     }
