@@ -130,9 +130,7 @@ interface Cursor<T>
     int DEPTH_SHIFT = 32;
     /// The 9 bits from this position store the incoming transition (0-256), inverted according to direction and
     /// accommodating an overflow value for skipping over branches.
-    int TRANSITION_SHIFT = 20;
-
-    // Bits 29 and 30 must be 0.
+    int TRANSITION_SHIFT = 22;
 
     /// 1 for reverse direction, 0 for forward. Used to xor transition bits for incomingTransition.
     /// This takes part in comparisons but this does not matter positions are always compared with same direction.
@@ -141,11 +139,11 @@ interface Cursor<T>
 
     /// An additional transition bit used to revisit positions on the way back after iterating the branch.
     /// Used for sets and ranges to correctly define the range states for branch-inclusive ranges.
-    long ON_RETURN_PATH_BIT = 1L << 19;
+    long ON_RETURN_PATH_BIT = 1L << 21;
 
     /// Mask of the transition bits including the direction. We apply xor with this value to form a position in the
     /// reverse direction.
-    long TRANSITION_MASK = 0x8FFL << TRANSITION_SHIFT;
+    long TRANSITION_MASK = 0x2FFL << TRANSITION_SHIFT;
 
     long ROOT_POSITION_FORWARD = encode(0, 0, Direction.FORWARD);
     long ROOT_POSITION_REVERSE = encode(0, 0, Direction.REVERSE);
@@ -188,9 +186,9 @@ interface Cursor<T>
     /// by [#positionForSkippingBranch].
     static int incomingTransition(long encodedPosition)
     {
-        // The transition bits are stored in bits 20-28 in the encoding (9 bits to allow for the overflow value 0x100),
-        // we keep bits 29 and 30 zeroed, and bit 31 is the direction.
-        // In the forward direction we can simply return these 12 bits shifted right.
+        // The transition bits are stored in bits 22-30 in the encoding (9 bits to allow for the overflow value 0x100),
+        // and bit 31 is the direction.
+        // In the forward direction we can simply return these 10 bits shifted right.
         // In the reverse we also need to subtract the value of the 9 transition bits from 0xFF. (Note: flipping the
         // 8 transition bits is sufficient for the normal values between 0 and 255; the subtraction also works correctly
         // for the overflow value.)
@@ -198,13 +196,13 @@ interface Cursor<T>
         int transitionInt = (int) encodedPosition;
         int transitionBits = transitionInt >>> TRANSITION_SHIFT;
         // The code below is equivalent to
-        //   return (transitionInt < 0) ? 0x8FF - transitionBits : transitionBits;
+        //   return (transitionInt < 0) ? 0x2FF - transitionBits : transitionBits;
         // which in turn is a shorthand for
         //   return (transitionInt < 0) ? 0xFF - transitionBits & 0x1FF : transitionBits & 0x1FF;
         // transitionBits ^ mask returns -transitionBits - 1 for negative transitionInt, which we compensate for by
-        // bumping 0x8FF to 0x900.
+        // bumping 0x2FF to 0x300.
         int mask = transitionInt >> DIRECTION_BIT;
-        return (mask & 0x900) + (transitionBits ^ mask);
+        return (mask & 0x300) + (transitionBits ^ mask);
     }
 
     static Direction direction(long encodedPosition)
@@ -397,9 +395,10 @@ interface Cursor<T>
 
     /// Advance to the specified depth and incoming transition or the first valid position that is after the specified
     /// position. The inputs must be something that could be returned by a single call to [#advance] (i.e.
-    /// the depth must be <= current depth + 1, and the incoming transition must be higher than what the
+    /// the depth must be at most current depth + 1, and the incoming transition must be higher than what the
     /// current state saw at the requested depth); to facilitate skipping over the current branch, this can also be
-    /// given overflowing positions (i.e. incoming transition of 256 in forward direction, or -1 in reverse).
+    /// given overflowing positions (i.e. incoming transition of 256 in forward direction, or -1 in reverse, see
+    /// [#positionForSkippingBranch]).
     ///
     /// @return encoded position after the skip; the new position will satisfy
     ///         `compare(returnedSkipPosition, encodedSkipPosition) >= 0`.
@@ -455,7 +454,7 @@ interface Cursor<T>
     /// Returns a tail cursor, i.e. a cursor whose root is the current position. Walking a tail cursor will list all
     /// descendants of the current position with depth adjusted by the current depth.
     ///
-    /// It is an error to call `tailCursor` on an exhausted cursor.
+    /// It is an error to call `tailCursor` on an exhausted cursor or one positioned on the return path.
     ///
     /// Descendants that override this class should return their specific cursor type.
     Cursor<T> tailCursor(Direction direction);
@@ -538,7 +537,7 @@ interface Cursor<T>
             if (acceptancePredicate.test(content))
             {
                 walker.content(content);
-                // skip over the branch by requesting a position that is beyond
+                // skip over the branch by requesting a position that is beyond it
                 long current = skipTo(positionForSkippingBranch(encodedPosition()));
                 if (isExhausted(current))
                     break;
@@ -618,9 +617,7 @@ interface Cursor<T>
     /// Dump the current branch. To be used for debugging only.
     private String dumpBranch(Direction direction, Function<T, String> toStringFunction)
     {
-        TrieDumper<T> dumper = new TrieDumper.Plain<>(toStringFunction);
-        tailCursor(direction).process(dumper);
-        return dumper.complete();
+        return tailCursor(direction).process(new TrieDumper.Plain<>(toStringFunction));
     }
 
     default void assertFresh()
