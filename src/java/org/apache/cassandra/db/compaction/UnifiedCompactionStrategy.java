@@ -581,9 +581,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
         }
 
-        /// Testing only, use specified values.
+        /**
+         * Reconstructs sharding statistics using the specified density and shard counts.
+         * Used by CNDB to propagate pre-computed density from the leader to follower compactor nodes,
+         * and for testing.
+         */
         @VisibleForTesting
-        ShardingStats(PartitionPosition min, PartitionPosition max, long totalOnDiskSize, double overheadToDataRatio, double uniqueKeyRatio, double density, int shardCountForDensity, int coveredShardCount)
+        public ShardingStats(PartitionPosition min, PartitionPosition max, long totalOnDiskSize, double overheadToDataRatio, double uniqueKeyRatio, double density, int shardCountForDensity, int coveredShardCount)
         {
 
             this.min = min;
