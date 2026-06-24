@@ -405,6 +405,9 @@ public enum CassandraRelevantProperties
      */
     MONITORING_EXECUTION_INFO_ENABLED("cassandra.monitoring_execution_info_enabled", "true"),
 
+    /** Whether to skip secondary indexes when the query specifies full primary keys */
+    SKIP_INDEXES_ON_FULL_PRIMARY_KEYS("cassandra.index.skip_on_full_primary_keys", "true"),
+
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
 
