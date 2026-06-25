@@ -26,7 +26,6 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
-import java.security.Permission;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -142,6 +141,7 @@ import org.apache.cassandra.streaming.async.NettyStreamingChannel;
 import org.apache.cassandra.tools.NodeTool;
 import org.apache.cassandra.tools.Output;
 import org.apache.cassandra.tools.SystemExitException;
+import org.apache.cassandra.tools.SystemExitManager;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -1010,22 +1010,10 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             try (CapturingOutput output = new CapturingOutput();
                  DTestNodeTool nodetool = new DTestNodeTool(withNotifications, output.delegate))
             {
-                // install security manager to get informed about the exit-code
-                System.setSecurityManager(new SecurityManager()
-                {
-                    public void checkExit(int status)
-                    {
-                        throw new SystemExitException(status);
-                    }
+                // intercept System.exit to get informed about the exit-code (replaces the SecurityManager,
+                // which cannot be installed on JDK 24+)
+                SystemExitManager.blockExit();
 
-                    public void checkPermission(Permission perm)
-                    {
-                    }
-
-                    public void checkPermission(Permission perm, Object context)
-                    {
-                    }
-                });
                 int rc;
                 try
                 {
@@ -1037,7 +1025,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 }
                 finally
                 {
-                    System.setSecurityManager(null);
+                    SystemExitManager.unblockExit();
                 }
                 return new NodeToolResult(commandAndArgs, rc,
                                           new ArrayList<>(nodetool.notifications.notifications),

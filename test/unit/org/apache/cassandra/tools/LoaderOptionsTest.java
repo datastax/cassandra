@@ -24,7 +24,6 @@ import java.net.InetSocketAddress;
 import java.nio.file.Paths;
 
 import com.google.common.net.HostAndPort;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.io.util.File;
@@ -36,14 +35,6 @@ import static org.junit.Assert.assertTrue;
 // LoaderOptionsTester for custom configuration
 public class LoaderOptionsTest
 {
-    @BeforeClass
-    public static void setUp()
-    {
-        // Install the Byteman agent before any test calls blockExit(), so the java.lang.Runtime.exit
-        // interception rule is active before System.exit() is invoked.
-        SystemExitManager.ensureInstalled();
-    }
-
     @Test
     public void testNativePort() throws Exception
     {

@@ -95,6 +95,26 @@ public final class BytemanAgentSupport
         }
     }
 
+    /** A {@link Submit} bound to this JVM's Byteman agent, attaching the agent first if necessary. */
+    public static Submit submitter()
+    {
+        ensureInstalled();
+        return new Submit(HOST, port);
+    }
+
+    /** The host the agent listens on. */
+    public static String host()
+    {
+        return HOST;
+    }
+
+    /** The port the agent listens on (attaching the agent first if necessary). */
+    public static int port()
+    {
+        ensureInstalled();
+        return port;
+    }
+
     /** Submits the given Byteman rule text to this JVM's agent (attaching it first if necessary). */
     public static void submitRules(String ruleText)
     {

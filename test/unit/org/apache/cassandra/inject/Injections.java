@@ -17,14 +17,10 @@
  */
 package org.apache.cassandra.inject;
 
-import java.io.IOException;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import java.lang.management.ManagementFactory;
-import java.net.ServerSocket;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
@@ -39,10 +35,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import org.apache.commons.io.IOUtils;
 
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.INativeLibrary;
-import org.jboss.byteman.agent.install.Install;
-import org.jboss.byteman.agent.submit.Submit;
 import org.jboss.byteman.rule.helper.Helper;
 
 import static org.apache.cassandra.inject.ActionBuilder.newActionBuilder;
@@ -52,90 +44,22 @@ import static org.apache.cassandra.inject.Expression.quote;
 
 public class Injections
 {
-    private static Submit submitter;
-
     public static void inject(Injection...injections) throws Throwable
     {
         String script = Arrays.stream(injections).map(Injection::format).collect(Collectors.joining("\n"));
-        getSubmitter().addRulesFromResources(Lists.newArrayList(IOUtils.toInputStream(script)));
+        BytemanAgentSupport.submitter().addRulesFromResources(Lists.newArrayList(IOUtils.toInputStream(script)));
     }
 
     public static void deleteAll()
     {
         try
         {
-            getSubmitter().deleteAllRules();
+            BytemanAgentSupport.submitter().deleteAllRules();
         }
         catch (Throwable ignore)
         {
             // Ignore because it will throw if there aren't any injections
         }
-    }
-
-    private static Submit getSubmitter() throws Throwable
-    {
-        if (submitter == null)
-        {
-            submitter = new Submit(FBUtilities.getBroadcastAddressAndPort().getAddress().getHostAddress(), loadAgent());
-        }
-        return submitter;
-    }
-
-    private static int loadAgent() throws Throwable
-    {
-        int port = getPort();
-        long pid = getProcessId();
-        List<String> properties = new ArrayList<>();
-        properties.add("org.jboss.byteman.transform.all=true");
-        // uncomment below two lines to add debug or/and more verbose info, if you need to debug an injection
-        // properties.add("org.jboss.byteman.verbose=true");
-        // properties.add("org.jboss.byteman.debug=true");
-        Install.install(Long.toString(pid), true, true, FBUtilities.getBroadcastAddressAndPort().getAddress().getHostAddress(), port, properties.toArray(new String[0]));
-        return port;
-    }
-
-    private static int getPort()
-    {
-        try (ServerSocket serverSocket = new ServerSocket(0))
-        {
-            return serverSocket.getLocalPort();
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
-    }
-
-    /**
-     * Retrieves the process ID or <code>null</code> if the process ID cannot be retrieved.
-     * @return the process ID or <code>null</code> if the process ID cannot be retrieved.
-     */
-    private static Long getProcessId()
-    {
-        long pid = INativeLibrary.instance.getProcessID();
-        if (pid >= 0)
-            return pid;
-
-        return getProcessIdFromJvmName();
-    }
-
-    /**
-     * Retrieves the process ID from the JVM name.
-     * @return the process ID or <code>null</code> if the process ID cannot be retrieved.
-     */
-    private static Long getProcessIdFromJvmName()
-    {
-        // the JVM name in Oracle JVMs is: '<pid>@<hostname>' but this might not be the case on all JVMs
-        String jvmName = ManagementFactory.getRuntimeMXBean().getName();
-        try
-        {
-            return Long.valueOf(jvmName.split("@")[0]);
-        }
-        catch (NumberFormatException e)
-        {
-            // ignore
-        }
-        return null;
     }
 
     @Retention(RetentionPolicy.RUNTIME)
@@ -447,94 +371,6 @@ public class Injections
             public Barrier build()
             {
                 return new Barrier(id, name, parties, cyclic, doCountDown, doAwait, getRules());
-            }
-        }
-    }
-
-    /**
-     * Creates {@link Times} injection.
-     *
-     * @param name name of the internal counter
-     * @param defaultTimes the number of times the action should be executed
-     */
-    public static Times.TimesBuilder newTimes(String name, int defaultTimes)
-    {
-        return new Times.TimesBuilder(name, defaultTimes);
-    }
-
-    /**
-     * Creates an injection which allows to invoke a defined action for a defined number of times.
-     */
-    public static class Times extends Injection
-    {
-        private static Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
-        private final AtomicLong internalCounter;
-        private final int defaultTimes;
-
-        private Times(String id, String name, int defaultTimes, Rule[] rules)
-        {
-            super(id, rules);
-            this.internalCounter = counters.computeIfAbsent(name, n -> new AtomicLong(defaultTimes));
-            this.defaultTimes = defaultTimes;
-            reset();
-        }
-
-        /**
-         * Get the remaining number of times the action will be attempted to be executed.
-         */
-        public long get()
-        {
-            return internalCounter.get();
-        }
-
-        /**
-         * Reset the internal counter to the original value.
-         */
-        public void reset()
-        {
-            reset(defaultTimes);
-        }
-
-        /**
-         * Reset the internal counter to the given value.
-         */
-        public void reset(int n)
-        {
-            internalCounter.set(n);
-        }
-
-        @CallMe
-        public static boolean decrementAndCheck(String name)
-        {
-            AtomicLong counter = counters.get(name);
-            long value = counter.decrementAndGet();
-            return value >= 0;
-        }
-
-        public static class TimesBuilder extends CrossProductInjectionBuilder<Times, TimesBuilder>
-        {
-            private final String name;
-            private final int defaultTimes;
-
-            private TimesBuilder(String name, int defaultTimes)
-            {
-                super(String.format("times/%s/%s", name, UUID.randomUUID().toString()));
-                this.name = name;
-                this.defaultTimes = defaultTimes;
-            }
-
-            @Override
-            public TimesBuilder add(ActionBuilder builder)
-            {
-                super.add(builder);
-                builder.conditions().when(method(Times.class, CallMe.class).args(quote(name)));
-                return this;
-            }
-
-            @Override
-            public Times build()
-            {
-                return new Times(id, name, defaultTimes, getRules());
             }
         }
     }
