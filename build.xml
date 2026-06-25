@@ -507,6 +507,8 @@
         <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
         <string>--add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
         <string>--add-opens jdk.management/com.sun.management=ALL-UNNAMED</string>
+        <!-- required for org.apache.cassandra.Util.getSupportedMTimeGranularity -->
+        <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
     </resources>
     <pathconvert property="_jvm25_args_concat" refid="_jvm25_arg_items" pathsep=" "/>
     <condition property="java-jvmargs" value="${_jvm25_args_concat}" else="">
@@ -581,6 +583,8 @@
         <!-- Open things up so we don't run into any jamm rejections that'd then go unsafe and crash out on in-jvm dtests-->
         <string>--add-opens=java.base/java.lang=ALL-UNNAMED</string>
         <string>--add-exports=java.base/jdk.internal.vm.annotation=ALL-UNNAMED</string>
+        <!-- required for org.apache.cassandra.Util.getSupportedMTimeGranularity -->
+        <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
 
         <!-- NOTE: -Dnet.bytebuddy.experimental is not set: byte-buddy is upgraded to a release with
              native JDK 25 support. -Djava.security.manager=allow is not set: SecurityManager install is
@@ -604,7 +608,7 @@
     <!-- needed to compile org.apache.cassandra.utils.JMXServerUtils -->
     <!-- needed to compile org.apache.cassandra.distributed.impl.Instance-->
     <!-- needed to compile org.apache.cassandra.utils.memory.BufferPool -->
-    <property name="jdk11plus-javac-exports" value="--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED --add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-exports java.base/sun.nio.ch=ALL-UNNAMED"/>
+    <property name="jdk11plus-javac-exports" value="--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED --add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-exports java.base/sun.nio.ch=ALL-UNNAMED --add-exports java.management/com.sun.jmx.remote.security=ALL-UNNAMED"/>
 
     <!--
          Add all the dependencies.
