@@ -60,6 +60,7 @@ import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.ReadFailureException;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -81,7 +82,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.Plan;
-import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -231,8 +231,9 @@ public class SAITester extends CQLTester
     public void resetQueryOptimizationLevel()
     {
         // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
-        QueryController.QUERY_OPT_LEVEL = 1;
-        QueryController.QUERY_OPT_USE_TERM_STATS = true;
+        CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_LEVEL.setInt(1);
+        CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(2);
+        CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.setBoolean(true);
     }
 
     @Before
@@ -1060,7 +1061,7 @@ public class SAITester extends CQLTester
 
     public void disableQueryOptimization()
     {
-        QueryController.QUERY_OPT_LEVEL = 0;
+        CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_LEVEL.setInt(0);
     }
 
     /**

@@ -63,6 +63,8 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
             ('sstable_compression', 'chunk_length_kb', 'crc_check_chance')),
         ('caching', None,
             ('rows_per_partition', 'keys')),
+        ('storage_attached_indexing', 'storage_attached_indexing_parameters',
+            ('query_optimization_level', 'intersection_clause_limit', 'use_term_statistics')),
     )
 
     obsolete_cf_options = ()
@@ -554,6 +556,8 @@ def cf_prop_val_mapkey_completer(ctxt, cass):
             opts = opts.union(set(CqlRuleSet.time_window_compaction_strategy_options))
 
         return list(map(escape_value, opts))
+    if optname == 'storage_attached_indexing':
+        return list(map(escape_value, set(subopts).difference(keysseen)))
     return ()
 
 

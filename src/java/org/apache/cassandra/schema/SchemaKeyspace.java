@@ -41,7 +41,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.antlr.runtime.RecognitionException;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -164,6 +163,7 @@ public final class SchemaKeyspace
               + "additional_write_policy text,"
               + "cdc boolean,"
               + "read_repair text,"
+              + "storage_attached_indexing frozen<map<text, text>>,"
               + "PRIMARY KEY ((keyspace_name), table_name))");
 
     private static final TableMetadata Columns =
@@ -1026,6 +1026,9 @@ public final class SchemaKeyspace
                                                      SpeculativeRetryPolicy.fromString("99PERCENTILE"))
                           .cdc(row.has("cdc") && row.getBoolean("cdc"))
                           .readRepair(getReadRepairStrategy(row))
+                          .storageAttachedIndexing(row.has("query_options") ?
+                                                   StorageAttachedIndexingParams.fromMap(row.getFrozenTextMap("query_options")) :
+                                                   StorageAttachedIndexingParams.DEFAULT)
                           .build();
     }
 

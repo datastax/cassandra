@@ -57,7 +57,8 @@ public final class TableParams
         ADDITIONAL_WRITE_POLICY,
         CRC_CHECK_CHANCE,
         CDC,
-        READ_REPAIR;
+        READ_REPAIR,
+        STORAGE_ATTACHED_INDEXING;
 
         @Override
         public String toString()
@@ -83,6 +84,7 @@ public final class TableParams
     public final ImmutableMap<String, ByteBuffer> extensions;
     public final boolean cdc;
     public final ReadRepairStrategy readRepair;
+    public final StorageAttachedIndexingParams storageAttachedIndexingParams;
 
     private TableParams(Builder builder)
     {
@@ -105,6 +107,7 @@ public final class TableParams
         extensions = builder.extensions;
         cdc = builder.cdc;
         readRepair = builder.readRepair;
+        storageAttachedIndexingParams = builder.storageAttachedIndexing;
     }
 
     public static Builder builder()
@@ -130,7 +133,8 @@ public final class TableParams
                             .additionalWritePolicy(params.additionalWritePolicy)
                             .extensions(params.extensions)
                             .cdc(params.cdc)
-                            .readRepair(params.readRepair);
+                            .readRepair(params.readRepair)
+                            .storageAttachedIndexing(params.storageAttachedIndexingParams);
     }
 
     public Builder unbuild()
@@ -204,21 +208,22 @@ public final class TableParams
         TableParams p = (TableParams) o;
 
         return comment.equals(p.comment)
-            && bloomFilterFpChance == p.bloomFilterFpChance
-            && crcCheckChance == p.crcCheckChance
-            && gcGraceSeconds == p.gcGraceSeconds
-            && defaultTimeToLive == p.defaultTimeToLive
-            && memtableFlushPeriodInMs == p.memtableFlushPeriodInMs
-            && minIndexInterval == p.minIndexInterval
-            && maxIndexInterval == p.maxIndexInterval
-            && speculativeRetry.equals(p.speculativeRetry)
-            && caching.equals(p.caching)
-            && compaction.equals(p.compaction)
-            && compression.equals(p.compression)
-            && memtable.equals(p.memtable)
-            && extensions.equals(p.extensions)
-            && cdc == p.cdc
-            && readRepair == p.readRepair;
+               && bloomFilterFpChance == p.bloomFilterFpChance
+               && crcCheckChance == p.crcCheckChance
+               && gcGraceSeconds == p.gcGraceSeconds
+               && defaultTimeToLive == p.defaultTimeToLive
+               && memtableFlushPeriodInMs == p.memtableFlushPeriodInMs
+               && minIndexInterval == p.minIndexInterval
+               && maxIndexInterval == p.maxIndexInterval
+               && speculativeRetry.equals(p.speculativeRetry)
+               && caching.equals(p.caching)
+               && compaction.equals(p.compaction)
+               && compression.equals(p.compression)
+               && memtable.equals(p.memtable)
+               && extensions.equals(p.extensions)
+               && cdc == p.cdc
+               && readRepair == p.readRepair
+               && storageAttachedIndexingParams.equals(p.storageAttachedIndexingParams);
     }
 
     @Override
@@ -239,7 +244,8 @@ public final class TableParams
                                 memtable,
                                 extensions,
                                 cdc,
-                                readRepair);
+                                readRepair,
+                                storageAttachedIndexingParams);
     }
 
     @Override
@@ -262,6 +268,7 @@ public final class TableParams
                           .add(Option.EXTENSIONS.toString(), extensions)
                           .add(Option.CDC.toString(), cdc)
                           .add(Option.READ_REPAIR.toString(), readRepair)
+                          .add(Option.STORAGE_ATTACHED_INDEXING.toString(), storageAttachedIndexingParams)
                           .toString();
     }
 
@@ -307,6 +314,8 @@ public final class TableParams
                .newLine()
                .append("AND min_index_interval = ").append(minIndexInterval)
                .newLine()
+               .append("AND storage_attached_indexing = ").append(storageAttachedIndexingParams.asMap())
+               .newLine()
                .append("AND read_repair = ").appendWithSingleQuotes(readRepair.toString())
                .newLine()
                .append("AND speculative_retry = ").appendWithSingleQuotes(speculativeRetry.toString());
@@ -331,6 +340,7 @@ public final class TableParams
         private ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of();
         private boolean cdc;
         private ReadRepairStrategy readRepair = ReadRepairStrategy.BLOCKING;
+        private StorageAttachedIndexingParams storageAttachedIndexing = StorageAttachedIndexingParams.DEFAULT;
 
         public Builder()
         {
@@ -428,6 +438,12 @@ public final class TableParams
         public Builder cdc(boolean val)
         {
             cdc = val;
+            return this;
+        }
+
+        public Builder storageAttachedIndexing(StorageAttachedIndexingParams val)
+        {
+            storageAttachedIndexing = val;
             return this;
         }
 
