@@ -20,6 +20,7 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 
 import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -135,10 +136,10 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
     }
 
     @Override
-    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
     {
         CqlBuilder builder = new CqlBuilder();
-        builder.append(slices.toCQLString(metadata, rowFilter, redact));
+        builder.append(slices.toCQLString(metadata, rowFilter, redaction));
         appendOrderByToCQLString(metadata, builder);
         return builder.toString();
     }

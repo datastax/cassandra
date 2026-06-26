@@ -532,16 +532,22 @@ public class Expression
         return boundedAnnEuclideanDistanceThreshold;
     }
 
+    @Override
     public String toString()
+    {
+        return toString(false);
+    }
+
+    public String toString(boolean redact)
     {
         return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
                              context.getColumnName(),
                              operation,
-                             lower == null ? "null" : validator.getString(lower.value.raw),
+                             lower == null ? "null" : validator.getString(lower.value.raw, redact),
                              lower != null && lower.inclusive,
-                             upper == null ? "null" : validator.getString(upper.value.raw),
+                             upper == null ? "null" : validator.getString(upper.value.raw, redact),
                              upper != null && upper.inclusive,
-                             Iterators.toString(Iterators.transform(exclusions.iterator(), validator::getString)));
+                             Iterators.toString(Iterators.transform(exclusions.iterator(), x -> validator.getString(x, redact))));
     }
 
     public String getIndexName()

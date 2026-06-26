@@ -45,6 +45,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PurgeFunction;
@@ -635,7 +636,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 Threshold guardrail = shouldRespectTombstoneThresholds()
                                                 ? Guardrails.scannedTombstones
                                                 : DefaultGuardrail.DefaultThreshold.NEVER_TRIGGERED;
-                return guardrail.newCounter(ReadCommand.this::toRedactedCQLString, false, null);
+                return guardrail.newCounter(() -> ReadCommand.this.toCQLString(Redaction.REDACT), false, null);
             }
 
             private MetricRecording()
@@ -699,7 +700,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 {
                     metric.tombstoneFailures.inc();
                     throw new TombstoneOverwhelmingException(tombstones.get(),
-                                                             ReadCommand.this.toRedactedCQLString(),
+                                                             ReadCommand.this.toCQLString(Redaction.REDACT),
                                                              ReadCommand.this.metadata(),
                                                              currentKey,
                                                              clustering);

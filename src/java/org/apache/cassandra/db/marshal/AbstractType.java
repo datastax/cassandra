@@ -195,11 +195,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      * Returns a CQL literal representing the specified binary value, or "?" if redaction is requested.
      *
      * @param bytes the value to convert to a CQL literal
-     * @param redact whether to mask the value with '?' (for redaction purposes)
+     * @param redaction whether to mask the value with '?' (for redaction purposes)
      */
-    public String toCQLString(ByteBuffer bytes, boolean redact)
+    public String toCQLString(ByteBuffer bytes, Redaction redaction)
     {
-        if (redact)
+        if (redaction == Redaction.REDACT)
             return RedactionUtil.redact(bytes, isValueLengthFixed());
 
         if (bytes == null)
@@ -222,6 +222,14 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
     public final String getString(ByteBuffer bytes)
     {
+        return getString(bytes, false);
+    }
+
+    public final String getString(ByteBuffer bytes, boolean redact)
+    {
+        if (redact)
+            return RedactionUtil.redact(bytes, isValueLengthFixed());
+
         return getString(bytes, ByteBufferAccessor.instance);
     }
 

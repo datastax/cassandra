@@ -34,6 +34,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.*;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
@@ -1152,9 +1153,9 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @Override
-    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
+    public void appendCQLWhereClause(CqlBuilder builder, Redaction redaction)
     {
-        SinglePartitionReadQuery.super.appendCQLWhereClause(builder, redact);
+        SinglePartitionReadQuery.super.appendCQLWhereClause(builder, redaction);
     }
 
     protected void serializeSelection(DataOutputPlus out, int version) throws IOException

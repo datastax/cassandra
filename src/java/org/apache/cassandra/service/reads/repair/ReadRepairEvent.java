@@ -32,6 +32,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.diag.DiagnosticEvent;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.reads.DigestResolver;
@@ -65,7 +66,7 @@ final class ReadRepairEvent extends DiagnosticEvent
     {
         this.keyspace = readRepair.cfs.keyspace;
         this.tableName = readRepair.cfs.getTableName();
-        this.cqlCommand = readRepair.command.toRedactedCQLString();
+        this.cqlCommand = readRepair.command.toCQLString(Redaction.REDACT);
         this.consistency = readRepair.replicaPlan().consistencyLevel();
         this.speculativeRetry = readRepair.cfs.metadata().params.speculativeRetry.kind();
         this.destinations = destinations;
