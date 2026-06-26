@@ -18,6 +18,8 @@ package org.apache.cassandra.db.compaction.unified;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -52,9 +54,18 @@ public class StaticController extends Controller
     static final String DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS = getSystemProperty(VECTOR_PREFIX + SCALING_PARAMETERS_OPTION, "L10");
     private final int[] scalingParameters;
 
+    /**
+     * Ordered list of time bucket definitions parsed from the {@code scaling_parameters} option.
+     * Empty when no time-driven levels are configured (the common case).
+     * {@link TimeBucket.Mode#BY} buckets appear first, followed by {@link TimeBucket.Mode#EACH} buckets
+     * sorted youngest-threshold-first.
+     */
+    private final List<TimeBucket> timeBuckets;
+
     @VisibleForTesting // comp. simulation
     public StaticController(Environment env,
                             int[] scalingParameters,
+                            List<TimeBucket> timeBuckets,
                             double[] survivalFactors,
                             long dataSetSize,
                             long minSSTableSize,
@@ -99,7 +110,62 @@ public class StaticController extends Controller
               maxSstablesPerShardFactor,
               metadata);
         this.scalingParameters = scalingParameters;
+        this.timeBuckets = timeBuckets != null ? Collections.unmodifiableList(timeBuckets) : Collections.emptyList();
     }
+
+    /**
+     * Convenience constructor for callers that do not need time-driven levels (no {@link TimeBucket}s).
+     * Delegates to the full constructor with an empty time-bucket list.
+     */
+    @VisibleForTesting
+    public StaticController(Environment env,
+                            int[] scalingParameters,
+                            double[] survivalFactors,
+                            long dataSetSize,
+                            long minSSTableSize,
+                            long flushSizeOverride,
+                            long currentFlushSize,
+                            double maxSpaceOverhead,
+                            int maxSSTablesToCompact,
+                            long expiredSSTableCheckFrequency,
+                            boolean ignoreOverlapsInExpirationCheck,
+                            int baseShardCount,
+                            boolean isReplicaAware,
+                            long targetSStableSize,
+                            double sstableGrowthModifier,
+                            int reservedThreadsPerLevel,
+                            Reservations.Type reservationsType,
+                            Overlaps.InclusionMethod overlapInclusionMethod,
+                            boolean parallelizeOutputShards,
+                            boolean hasVectorType,
+                            double maxSstablesPerShardFactor,
+                            TableMetadata metadata)
+    {
+        this(env,
+             scalingParameters,
+             Collections.emptyList(),
+             survivalFactors,
+             dataSetSize,
+             minSSTableSize,
+             flushSizeOverride,
+             currentFlushSize,
+             maxSpaceOverhead,
+             maxSSTablesToCompact,
+             expiredSSTableCheckFrequency,
+             ignoreOverlapsInExpirationCheck,
+             baseShardCount,
+             isReplicaAware,
+             targetSStableSize,
+             sstableGrowthModifier,
+             reservedThreadsPerLevel,
+             reservationsType,
+             overlapInclusionMethod,
+             parallelizeOutputShards,
+             hasVectorType,
+             maxSstablesPerShardFactor,
+             metadata);
+    }
+
 
     static Controller fromOptions(Environment env,
                                   double[] survivalFactors,
@@ -124,13 +190,23 @@ public class StaticController extends Controller
                                   Map<String, String> options,
                                   boolean useVectorOptions)
     {
+        // Parse the scaling parameters, which may include time-bucket definitions.
         int[] scalingParameters;
+        List<TimeBucket> timeBuckets;
+        String rawParams;
         if (options.containsKey(STATIC_SCALING_FACTORS_OPTION))
-            scalingParameters = parseScalingParameters(options.get(STATIC_SCALING_FACTORS_OPTION));
+        {
+            rawParams = options.get(STATIC_SCALING_FACTORS_OPTION);
+        }
         else
-            scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION,
-                                                                            useVectorOptions ? DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS
-                                                                                             : DEFAULT_STATIC_SCALING_PARAMETERS));
+        {
+            rawParams = options.getOrDefault(SCALING_PARAMETERS_OPTION,
+                                             useVectorOptions ? DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS
+                                                              : DEFAULT_STATIC_SCALING_PARAMETERS);
+        }
+        TimeBucket.ParseResult parseResult = parseScalingParameterGroups(rawParams);
+        scalingParameters = parseResult.baseScalingParameters;
+        timeBuckets = parseResult.timeBuckets;
 
         long currentFlushSize = flushSizeOverride;
 
@@ -164,6 +240,7 @@ public class StaticController extends Controller
         }
         return new StaticController(env,
                                     scalingParameters,
+                                    timeBuckets,
                                     survivalFactors,
                                     dataSetSize,
                                     minSSTableSize,
@@ -190,10 +267,11 @@ public class StaticController extends Controller
     {
         String parameters = options.remove(SCALING_PARAMETERS_OPTION);
         if (parameters != null)
-            parseScalingParameters(parameters);
+            // Full parse validates both the W values and any time-bucket clauses.
+            TimeBucket.parseScalingParameterGroups(parameters);
         String factors = options.remove(STATIC_SCALING_FACTORS_OPTION);
         if (factors != null)
-            parseScalingParameters(factors);
+            TimeBucket.parseScalingParameterGroups(factors);
         if (parameters != null && factors != null)
             throw new ConfigurationException(String.format("Either '%s' or '%s' should be used, not both", SCALING_PARAMETERS_OPTION, STATIC_SCALING_FACTORS_OPTION));
         return options;
@@ -213,6 +291,12 @@ public class StaticController extends Controller
     {
         //scalingParameters is not updated in StaticController so previous scalingParameters = scalingParameters
         return getScalingParameter(index);
+    }
+
+    @Override
+    public List<TimeBucket> getTimeBuckets()
+    {
+        return timeBuckets;
     }
 
     @Override
@@ -236,9 +320,17 @@ public class StaticController extends Controller
     @Override
     public String toString()
     {
-        return String.format("Static controller, m: %d, o: %s, scalingParameters: %s, cost: %s", minSSTableSize,
-                             Arrays.toString(survivalFactors),
-                             printScalingParameters(scalingParameters),
-                             calculator);
+        if (timeBuckets.isEmpty())
+            return String.format("Static controller, m: %d, o: %s, scalingParameters: %s, cost: %s", minSSTableSize,
+                                 Arrays.toString(survivalFactors),
+                                 printScalingParameters(scalingParameters),
+                                 calculator);
+        else
+            return String.format("Static controller, m: %d, o: %s, scalingParameters: %s, timeBuckets: %s, cost: %s",
+                                 minSSTableSize,
+                                 Arrays.toString(survivalFactors),
+                                 printScalingParameters(scalingParameters),
+                                 timeBuckets,
+                                 calculator);
     }
 }
