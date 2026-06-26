@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -532,16 +533,22 @@ public class Expression
         return boundedAnnEuclideanDistanceThreshold;
     }
 
+    @Override
     public String toString()
+    {
+        return toString(false);
+    }
+
+    public String toString(boolean redact)
     {
         return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
                              context.getColumnName(),
                              operation,
-                             lower == null ? "null" : validator.getString(lower.value.raw),
+                             lower == null ? "null" : validator.getString(lower.value.raw, redact ? Redaction.REDACT : Redaction.NONE),
                              lower != null && lower.inclusive,
-                             upper == null ? "null" : validator.getString(upper.value.raw),
+                             upper == null ? "null" : validator.getString(upper.value.raw, redact ? Redaction.REDACT : Redaction.NONE),
                              upper != null && upper.inclusive,
-                             Iterators.toString(Iterators.transform(exclusions.iterator(), validator::getString)));
+                             Iterators.toString(Iterators.transform(exclusions.iterator(), x -> validator.getString(x, redact ? Redaction.REDACT : Redaction.NONE))));
     }
 
     public String getIndexName()

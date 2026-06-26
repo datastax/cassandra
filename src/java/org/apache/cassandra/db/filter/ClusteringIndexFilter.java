@@ -20,6 +20,7 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.*;
@@ -159,10 +160,10 @@ public interface ClusteringIndexFilter
      *
      * @param metadata the table metadata
      * @param rowFilter a row filter
-     * @param redact whether to redact the clustering column value
+     * @param redaction whether to redact the clustering column value
      * @return a CQL string representing this clustering index filter and the specified {@link RowFilter}
      */
-    String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact);
+    String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction);
 
     public interface Serializer
     {

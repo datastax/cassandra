@@ -31,6 +31,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
@@ -155,16 +156,16 @@ public interface SinglePartitionReadQuery extends ReadQuery
         return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
-    default void appendCQLWhereClause(CqlBuilder builder, boolean redact)
+    default void appendCQLWhereClause(CqlBuilder builder, Redaction redaction)
     {
         builder.append(" WHERE ");
 
         // Append the partition key restrictions.
         TableMetadata metadata = metadata();
-        builder.append(partitionKey().toCQLString(metadata, redact));
+        builder.append(partitionKey().toCQLString(metadata, redaction));
 
         // Append the clustering index filter and the row filter.
-        String filter = clusteringIndexFilter().toCQLString(metadata(), rowFilter(), redact);
+        String filter = clusteringIndexFilter().toCQLString(metadata(), rowFilter(), redaction);
         builder.appendRestrictions(filter, true);
     }
 

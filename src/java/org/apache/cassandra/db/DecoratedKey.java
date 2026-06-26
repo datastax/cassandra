@@ -24,6 +24,7 @@ import java.util.StringJoiner;
 import java.util.function.BiFunction;
 
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.dht.Token.KeyBound;
@@ -164,29 +165,29 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
     /**
      * Returns a CQL representation of this key.
      *
-     * @param metadata the metadata of the table that this key belogs to
-     * @param redact whether to redact the key value, as in "k1 = ? AND k2 = ?".
+     * @param metadata the table metadata
+     * @param redaction whether to redact the key value, as in "k1 = ? AND k2 = ?".
      * @return a CQL representation of this key
      */
-    public String toCQLString(TableMetadata metadata, boolean redact)
+    public String toCQLString(TableMetadata metadata, Redaction redaction)
     {
         List<ColumnMetadata> columns = metadata.partitionKeyColumns();
 
         if (columns.size() == 1)
-            return toCQLString(columns.get(0), getKey(), redact);
+            return toCQLString(columns.get(0), getKey(), redaction);
 
         ByteBuffer[] values = ((CompositeType) metadata.partitionKeyType).split(getKey());
         StringJoiner joiner = new StringJoiner(" AND ");
 
         for (int i = 0; i < columns.size(); i++)
-            joiner.add(toCQLString(columns.get(i), values[i], redact));
+            joiner.add(toCQLString(columns.get(i), values[i], redaction));
 
         return joiner.toString();
     }
 
-    private static String toCQLString(ColumnMetadata metadata, ByteBuffer key, boolean redact)
+    private static String toCQLString(ColumnMetadata metadata, ByteBuffer key, Redaction redaction)
     {
-        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.toCQLString(key, redact));
+        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.toCQLString(key, redaction));
     }
 
     public Token getToken()

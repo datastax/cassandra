@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.filter.*;
@@ -301,10 +302,10 @@ public class DataRange
         return String.format("range=%s pfilter=%s", keyRange.getString(metadata.partitionKeyType), clusteringIndexFilter.toString(metadata));
     }
 
-    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
     {
         if (isUnrestricted(metadata))
-            return rowFilter.toCQLString(redact);
+            return rowFilter.toCQLString(redaction);
 
         if (isSinglePartition())
         {
@@ -313,20 +314,20 @@ public class DataRange
              * key are the same. If that is the case, we want to print the query as an equality on the partition key
              * rather than a token range, as if it was a partition query, for better readability.
              */
-            return ((DecoratedKey) startKey()).toCQLString(metadata, redact);
+            return ((DecoratedKey) startKey()).toCQLString(metadata, redaction);
         }
         else
         {
             StringBuilder builder = new StringBuilder();
             if (!startKey().isMinimum())
             {
-                appendCQLClause(startKey(), builder, metadata, true, keyRange.isStartInclusive(), redact);
+                appendCQLClause(startKey(), builder, metadata, true, keyRange.isStartInclusive(), redaction);
             }
             if (!stopKey().isMinimum())
             {
                 if (builder.length() > 0)
                     builder.append(" AND ");
-                appendCQLClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive(), redact);
+                appendCQLClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive(), redaction);
             }
             return builder.toString();
         }
@@ -337,7 +338,7 @@ public class DataRange
                                  TableMetadata metadata,
                                  boolean isStart,
                                  boolean isInclusive,
-                                 boolean redact)
+                                 Redaction redaction)
     {
         builder.append("token(");
         builder.append(ColumnMetadata.toCQLString(metadata.partitionKeyColumns()));
@@ -346,14 +347,14 @@ public class DataRange
         {
             builder.append(getOperator(isStart, isInclusive)).append(" ");
             builder.append("token(");
-            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey)pos).getKey(), redact);
-            builder.append(")");
+            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey)pos).getKey(), redaction);
+            builder.append(')');
         }
         else
         {
             Token.KeyBound keyBound = (Token.KeyBound) pos;
             builder.append(getOperator(isStart, isStart == keyBound.isMinimumBound)).append(' ');
-            builder.append(redact ? "?" : keyBound.getToken());
+            builder.append(redaction == Redaction.REDACT ? "?" : keyBound.getToken());
         }
     }
 
@@ -366,18 +367,18 @@ public class DataRange
 
     // TODO: this is reused in SinglePartitionReadCommand but this should not really be here. Ideally
     // we need a more "native" handling of composite partition keys.
-    public static void appendKeyString(StringBuilder builder, AbstractType<?> type, ByteBuffer key, boolean redact)
+    public static void appendKeyString(StringBuilder builder, AbstractType<?> type, ByteBuffer key, Redaction redaction)
     {
         if (type instanceof CompositeType)
         {
             CompositeType ct = (CompositeType)type;
             ByteBuffer[] values = ct.split(key);
             for (int i = 0; i < ct.subTypes().size(); i++)
-                builder.append(i == 0 ? "" : ", ").append(ct.subTypes().get(i).toCQLString(values[i], redact));
+                builder.append(i == 0 ? "" : ", ").append(ct.subTypes().get(i).toCQLString(values[i], redaction));
         }
         else
         {
-            builder.append(type.toCQLString(key, redact));
+            builder.append(type.toCQLString(key, redaction));
         }
     }
 

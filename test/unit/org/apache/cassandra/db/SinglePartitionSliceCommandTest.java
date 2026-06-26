@@ -39,6 +39,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.db.marshal.Redaction;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -488,7 +490,7 @@ public class SinglePartitionSliceCommandTest
                                                             DataLimits.NONE,
                                                             key,
                                                             sliceFilter);
-        String ret = cmd.toRedactedCQLString();
+        String ret = cmd.toCQLString(Redaction.REDACT);
         Assert.assertNotNull(ret);
         assertFalse(ret.isEmpty());
     }
