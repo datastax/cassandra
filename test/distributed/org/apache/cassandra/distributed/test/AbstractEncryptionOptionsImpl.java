@@ -382,12 +382,12 @@ public class AbstractEncryptionOptionsImpl extends TestBaseImpl
     /* Provide the cluster cannot start with the configured options */
     protected void assertCannotStartDueToConfigurationException(Cluster cluster)
     {
-        org.apache.cassandra.exceptions.ConfigurationException tr = null;
+        Throwable tr = null;
         try
         {
             cluster.startup();
         }
-        catch (org.apache.cassandra.exceptions.ConfigurationException maybeConfigException)
+        catch (Throwable maybeConfigException)
         {
             tr = maybeConfigException;
         }
@@ -395,6 +395,10 @@ public class AbstractEncryptionOptionsImpl extends TestBaseImpl
         if (tr == null)
         {
             Assert.fail("Expected a ConfigurationException");
+        }
+        else
+        {
+            Assert.assertEquals(org.apache.cassandra.exceptions.ConfigurationException.class.getName(), tr.getClass().getName());
         }
     }
 }
