@@ -18,6 +18,7 @@ package org.apache.cassandra.distributed.test.sai;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
@@ -110,7 +111,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
                               "SAI slow query plan:",
-                              "NumericIndexScan");
+                              "NumericIndexScan",
+                              Pattern.quote("predicate: Expression{name: n, op: RANGE, lower: (?, false), upper: (null, false), exclusions: []}"));
 
             // test aggregated numeric query
             mark = node.logs().mark();
@@ -136,7 +138,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
                               "SAI slowest query plan:",
-                              "NumericIndexScan");
+                              "NumericIndexScan",
+                              Pattern.quote("predicate: Expression{name: n, op: RANGE, lower: (?, false), upper: (null, false), exclusions: []}"));
 
             // test single text query
             mark = node.logs().mark();
@@ -162,7 +165,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsDecodes: 2",
                               "annGraphSearchLatencyNanos: 0",
                               "SAI slow query plan:",
-                              "LiteralIndexScan");
+                              "LiteralIndexScan",
+                              Pattern.quote("predicate: Expression{name: s, op: EQ, lower: (?, true), upper: (?, true), exclusions: []}"));
 
             // test aggregated text query
             mark = node.logs().mark();
@@ -188,7 +192,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsDecodes: 2",
                               "annGraphSearchLatencyNanos: 0",
                               "SAI slowest query plan:",
-                              "LiteralIndexScan");
+                              "LiteralIndexScan",
+                              Pattern.quote("predicate: Expression{name: s, op: EQ, lower: (?, true), upper: (?, true), exclusions: []}"));
 
             // test single ANN query
             mark = node.logs().mark();
@@ -214,7 +219,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
                               "SAI slow query plan:",
-                              "AnnIndexScan");
+                              "AnnIndexScan",
+                              Pattern.quote("v ANN OF ? DESC"));
 
             // test aggregated ANN query
             mark = node.logs().mark();
@@ -240,7 +246,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: [1-9][0-9]*", // unknown, but greater than zero
                               "SAI slowest query plan:",
-                              "AnnIndexScan");
+                              "AnnIndexScan",
+                              Pattern.quote("v ANN OF ? DESC"));
 
             // test single hybrid query
             mark = node.logs().mark();
@@ -266,7 +273,8 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
                               "SAI slow query plan:",
-                              "LiteralIndexScan");
+                              "LiteralIndexScan",
+                              Pattern.quote("ordering: s ASC"));
 
             // test aggregated hybrid query
             mark = node.logs().mark();
@@ -292,34 +300,36 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               "triePostingsDecodes: 0",
                               "annGraphSearchLatencyNanos: 0",
                               "SAI slowest query plan:",
-                              "LiteralIndexScan");
+                              "LiteralIndexScan",
+                              Pattern.quote("ordering: s ASC"));
 
             // Disable query optimizer to prevent skipping hybrid query logic and hit orderByResults to verify metrics update
             node.runOnInstance(() -> QueryController.QUERY_OPT_LEVEL = 0);
             mark = node.logs().mark();
             coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
             assertLogsContain(mark, node,
-                    "SAI slow query metrics:",
-                    "sstablesHit: 2",
-                    "segmentsHit: 2",
-                    "keysFetched: 3",
-                    "partitionsFetched: 3",
-                    "partitionsReturned: 2",
-                    "partitionTombstonesFetched: 0",
-                    "rowsFetched: 3",
-                    "rowsReturned: 3",
-                    "rowTombstonesFetched: 0",
-                    "trieSegmentsHit: 0",
-                    "bkdPostingListsHit: 1",
-                    "bkdSegmentsHit: 1",
-                    "bkdPostingsSkips: 0",
-                    "bkdPostingsDecodes: 4",
-                    "triePostingsSkips: 0",
-                    "triePostingsDecodes: 0",
-                    "annGraphSearchLatencyNanos: 0",
-                    "SAI slow query plan:",
-                    "KeysSort",
-                    "NumericIndexScan");
+                              "SAI slow query metrics:",
+                              "sstablesHit: 2",
+                              "segmentsHit: 2",
+                              "keysFetched: 3",
+                              "partitionsFetched: 3",
+                              "partitionsReturned: 2",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 3",
+                              "rowsReturned: 3",
+                              "rowTombstonesFetched: 0",
+                              "trieSegmentsHit: 0",
+                              "triePostingsSkips: 0",
+                              "triePostingsDecodes: 0",
+                              "bkdSegmentsHit: 1",
+                              "bkdPostingListsHit: 1",
+                              "bkdPostingsSkips: 0",
+                              "bkdPostingsDecodes: 4",
+                              "annGraphSearchLatencyNanos: 0",
+                              "SAI slow query plan:",
+                              "KeysSort",
+                              "NumericIndexScan",
+                              Pattern.quote("predicate: Expression{name: n, op: RANGE, lower: (?, false), upper: (null, false), exclusions: []}"));
 
             node.runOnInstance(() -> QueryController.QUERY_OPT_LEVEL = CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt());
 

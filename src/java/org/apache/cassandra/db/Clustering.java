@@ -24,6 +24,7 @@ import java.util.List;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -79,13 +80,14 @@ public interface Clustering<V> extends ClusteringPrefix<V>, IMeasurableMemory
         return sb.toString();
     }
 
-    default String toCQLString(TableMetadata metadata, boolean redact)
+    default String toCQLString(TableMetadata metadata, Redaction redaction)
     {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < size(); i++)
         {
             ColumnMetadata c = metadata.clusteringColumns().get(i);
-            sb.append(i == 0 ? "" : ", ").append(c.type.toCQLString(bufferAt(i), redact));
+            ByteBuffer value = bufferAt(i);
+            sb.append(i == 0 ? "" : ", ").append(c.type.toCQLString(value, redaction));
         }
         return sb.toString();
     }

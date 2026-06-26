@@ -60,6 +60,7 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.LocalReadSizeTooLargeException;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PurgeFunction;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -709,7 +710,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 Threshold guardrail = shouldRespectTombstoneThresholds()
                                                 ? Guardrails.scannedTombstones
                                                 : Threshold.NEVER_TRIGGERED;
-                return guardrail.newCounter(ReadCommand.this::toRedactedCQLString, false, null);
+                return guardrail.newCounter(() -> ReadCommand.this.toCQLString(Redaction.REDACT), false, null);
             }
 
             private MetricRecording()
@@ -773,7 +774,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 {
                     metric.tombstoneFailures.inc();
                     throw new TombstoneOverwhelmingException(tombstones.get(),
-                                                             ReadCommand.this.toRedactedCQLString(),
+                                                             ReadCommand.this.toCQLString(Redaction.REDACT),
                                                              ReadCommand.this.metadata(),
                                                              currentKey,
                                                              clustering);
@@ -873,7 +874,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 if (failBytes != -1 && this.sizeInBytes >= failBytes)
                 {
                     String msg = String.format("Query %s attempted to read %d bytes but max allowed is %s; query aborted  (see local_read_size_fail_threshold)",
-                                               ReadCommand.this.toRedactedCQLString(), this.sizeInBytes, failThreshold);
+                                               ReadCommand.this.toCQLString(Redaction.REDACT), this.sizeInBytes, failThreshold);
                     Tracing.trace(msg);
                     MessageParams.remove(ParamType.LOCAL_READ_SIZE_WARN);
                     MessageParams.add(ParamType.LOCAL_READ_SIZE_FAIL, this.sizeInBytes);

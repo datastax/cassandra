@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.TableMetadata;
@@ -479,9 +480,9 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
     }
 
     @Override
-    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
+    public void appendCQLWhereClause(CqlBuilder builder, Redaction redaction)
     {
-        PartitionRangeReadQuery.super.appendCQLWhereClause(builder, redact);
+        PartitionRangeReadQuery.super.appendCQLWhereClause(builder, redaction);
     }
 
     @Override

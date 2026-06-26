@@ -24,6 +24,7 @@ import java.util.Comparator;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.exceptions.UnknownColumnException;
@@ -91,17 +92,17 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
     @Override
     public String toString()
     {
-        return toString(false, false);
+        return toString(false, Redaction.NONE);
     }
 
     /**
      * Returns a string representation of this subselection.
      *
      * @param cql if true, the string representation will be in CQL format
-     * @param redact if true, the string representation will redact sensitive data
+     * @param redaction if true, the string representation will redact sensitive data
      * @return a string representation of this subselection
      */
-    protected abstract String toString(boolean cql, boolean redact);
+    protected abstract String toString(boolean cql, Redaction redaction);
 
     private static class Slice extends ColumnSubselection
     {
@@ -137,13 +138,13 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
         }
 
         @Override
-        protected String toString(boolean cql, boolean redact)
+        protected String toString(boolean cql, Redaction redaction)
         {
             // This asserts we're dealing with a collection since that's the only thing it's used for so far.
             AbstractType<?> type = ((CollectionType<?>)column().type).nameComparator();
             return String.format("[%s:%s]",
-                                 from == CellPath.BOTTOM ? "" : (cql ? type.toCQLString(from.get(0), redact) : type.getString(from.get(0))),
-                                 to == CellPath.TOP ? "" : (cql ? type.toCQLString(to.get(0), redact) : type.getString(to.get(0))));
+                                 from == CellPath.BOTTOM ? "" : (cql ? type.toCQLString(from.get(0), redaction) : type.getString(from.get(0))),
+                                 to == CellPath.TOP ? "" : (cql ? type.toCQLString(to.get(0), redaction) : type.getString(to.get(0))));
         }
     }
 
@@ -173,11 +174,11 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
         }
 
         @Override
-        protected String toString(boolean cql, boolean redact)
+        protected String toString(boolean cql, Redaction redaction)
         {
             // This asserts we're dealing with a collection since that's the only thing it's used for so far.
             AbstractType<?> type = ((CollectionType<?>)column().type).nameComparator();
-            return String.format("[%s]", cql ? type.toCQLString(element.get(0), redact) : type.getString(element.get(0)));
+            return String.format("[%s]", cql ? type.toCQLString(element.get(0), redaction) : type.getString(element.get(0)));
         }
     }
 

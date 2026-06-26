@@ -35,6 +35,7 @@ import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.index.Index;
@@ -190,22 +191,22 @@ public class ANNOptionsTest extends CQLTester
         // without ANN options
         String formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1]");
         ReadCommand command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toRedactedCQLString()).doesNotContain("WITH ann_options");
+        Assertions.assertThat(command.toCQLString(Redaction.NONE)).doesNotContain("WITH ann_options");
 
         // with rerank_k option
         formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 1 WITH ann_options = {'rerank_k': 2}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toRedactedCQLString()).contains("WITH ann_options = {'rerank_k': 2}");
+        Assertions.assertThat(command.toCQLString(Redaction.NONE)).contains("WITH ann_options = {'rerank_k': 2}");
 
         // with use_pruning option
         formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': true}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toRedactedCQLString()).contains("WITH ann_options = {'use_pruning': true}");
+        Assertions.assertThat(command.toCQLString(Redaction.NONE)).contains("WITH ann_options = {'use_pruning': true}");
 
         // with both options
         formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 1 WITH ann_options = {'rerank_k': 2, 'use_pruning': false}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toRedactedCQLString()).contains("WITH ann_options = {'rerank_k': 2, 'use_pruning': false}");
+        Assertions.assertThat(command.toCQLString(Redaction.NONE)).contains("WITH ann_options = {'rerank_k': 2, 'use_pruning': false}");
     }
 
     /**

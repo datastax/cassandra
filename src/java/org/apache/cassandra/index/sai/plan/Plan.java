@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
@@ -286,60 +287,47 @@ abstract public class Plan
      */
     protected abstract double estimateSelectivity();
 
-    public final String toUnredactedStringRecursive()
-    {
-        return toStringRecursive(false, null);
-    }
-
     /**
-     * Formats the whole plan as a pretty tree, redacting the queried column values.
-     */
-    public final String toRedactedStringRecursive()
-    {
-        return toRedactedStringRecursive(null);
-    }
-
-    /**
-     * Formats the whole plan as a pretty tree, redacting the queried column values, with indentation.
+     * Formats the whole plan as a pretty tree.
      *
-     * @param indent a string used for indentation
+     * @param redaction whether to redact the queried column values.
      */
-    public final String toRedactedStringRecursive(String indent)
+    public String toStringRecursive(Redaction redaction)
     {
-        return toStringRecursive(true, indent);
+        return toStringRecursive(redaction, null);
     }
 
     /**
      * Formats the whole plan as a pretty tree, with indentation
      *
-     * @param redact whether to redact the queried column values.
+     * @param redaction whether to redact the queried column values.
      * @param indent a string used for indentation
      */
-    private String toStringRecursive(boolean redact, String indent)
+    public String toStringRecursive(Redaction redaction, String indent)
     {
-        TreeFormatter<Plan> formatter = new TreeFormatter<>(plan -> plan.toString(redact), Plan::subplans, indent);
+        TreeFormatter<Plan> formatter = new TreeFormatter<>(plan -> plan.toString(redaction), Plan::subplans, indent);
         return formatter.format(this);
     }
 
     /**
      * Returns the string representation of this node only, without redacting the queried column values.
-     * @see #toString(boolean)
+     * @see #toString(Redaction)
      */
     @Override
     public final String toString()
     {
-        return toString(false);
+        return toString(Redaction.NONE);
     }
 
     /**
      * Returns the string representation of this node only
      *
-     * @param redact whether to redact the queried column values.
+     * @param redaction whether to redact the queried column values.
      */
-    public final String toString(boolean redact)
+    public final String toString(Redaction redaction)
     {
-        String title = title(redact);
-        String description = description();
+        String title = title(redaction);
+        String description = description(redaction);
         return (title.isEmpty())
                ? String.format("%s (%s)\n%s", getClass().getSimpleName(), cost(), description).stripTrailing()
                : String.format("%s %s (%s)\n%s", getClass().getSimpleName(), title, cost(), description).stripTrailing();
@@ -350,7 +338,7 @@ abstract public class Plan
      * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
      * It is up to subclasses to implement it.
      */
-    protected String title(boolean redact)
+    protected String title(Redaction redaction)
     {
         return "";
     }
@@ -360,7 +348,7 @@ abstract public class Plan
      * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
      * It is up to subclasses to implement it.
      */
-    protected String description()
+    protected String description(Redaction redaction)
     {
         return "";
     }
@@ -395,7 +383,7 @@ abstract public class Plan
     protected Plan optimize()
     {
         if (logger.isTraceEnabled())
-            logger.trace("Optimizing plan:\n{}", toRedactedStringRecursive());
+            logger.trace("Optimizing plan:\n{}", toStringRecursive(Redaction.REDACT));
 
         Plan bestPlanSoFar = this;
         List<Leaf> leaves = nodesOfType(Leaf.class);
@@ -410,14 +398,14 @@ abstract public class Plan
 
             Plan candidate = bestPlanSoFar.removeRestriction(leaf.id);
             if (logger.isTraceEnabled())
-                logger.trace("Candidate query plan:\n{}", candidate.toRedactedStringRecursive());
+                logger.trace("Candidate query plan:\n{}", candidate.toStringRecursive(Redaction.REDACT));
 
             if (candidate.fullCost() <= bestPlanSoFar.fullCost())
                 bestPlanSoFar = candidate;
         }
 
         if (logger.isTraceEnabled())
-            logger.trace("Optimized plan:\n{}", bestPlanSoFar.toRedactedStringRecursive());
+            logger.trace("Optimized plan:\n{}", bestPlanSoFar.toStringRecursive(Redaction.REDACT));
         return bestPlanSoFar;
     }
 
@@ -920,26 +908,26 @@ abstract public class Plan
         }
 
         @Override
-        protected final String title(boolean redact)
+        protected final String title(Redaction redaction)
         {
             return String.format("of %s (sel: %.9f, step: %.1f)",
                                  getIndexName(), selectivity(), access.meanDistance());
         }
 
         @Override
-        protected String description()
+        protected String description(Redaction redaction)
         {
             StringBuilder sb = new StringBuilder();
             if (predicate != null)
             {
                 sb.append("predicate: ");
-                sb.append(predicate);
+                sb.append(predicate.toString(redaction == Redaction.REDACT));
                 sb.append('\n');
             }
             if (ordering != null)
             {
                 sb.append("ordering: ");
-                sb.append(ordering);
+                sb.append(ordering.toString(redaction));
                 sb.append('\n');
             }
             return sb.toString();
@@ -1529,9 +1517,9 @@ abstract public class Plan
         }
 
         @Override
-        protected String description()
+        protected String description(Redaction redaction)
         {
-            return ordering.toString();
+            return ordering.toString(redaction);
         }
     }
 
@@ -1619,9 +1607,9 @@ abstract public class Plan
         }
 
         @Override
-        protected String description()
+        protected String description(Redaction redaction)
         {
-            return ordering.toString();
+            return ordering.toString(redaction);
         }
     }
 
@@ -1662,6 +1650,12 @@ abstract public class Plan
         protected void visitIndexes(Consumer<IndexContext> consumer)
         {
             consumer.accept(ordering.context);
+        }
+
+        @Override
+        protected String description(Redaction redaction)
+        {
+            return ordering.toString(redaction);
         }
     }
 
@@ -1851,9 +1845,9 @@ abstract public class Plan
         }
 
         @Override
-        protected String title(boolean redact)
+        protected String title(Redaction redaction)
         {
-            return String.format("%s (sel: %.9f)", filter.toCQLString(redact), selectivity() / source.get().selectivity());
+            return String.format("%s (sel: %.9f)", filter.toCQLString(redaction), selectivity() / source.get().selectivity());
         }
     }
 
@@ -1919,7 +1913,7 @@ abstract public class Plan
         }
 
         @Override
-        protected String title(boolean redact)
+        protected String title(Redaction redaction)
         {
             return "" + limit;
         }

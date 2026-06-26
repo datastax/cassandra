@@ -23,6 +23,7 @@ import java.util.stream.StreamSupport;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Digest;
@@ -143,7 +144,7 @@ public abstract class AbstractRow implements Row
         if (includeClusterKeys)
             sb.append(clustering().toString(metadata));
         else
-            sb.append(clustering().toCQLString(metadata, false));
+            sb.append(clustering().toCQLString(metadata, Redaction.NONE));
         sb.append(" | ");
         boolean isFirst = true;
         for (ColumnData cd : this)

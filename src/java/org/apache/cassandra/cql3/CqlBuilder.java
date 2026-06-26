@@ -29,6 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.Redaction;
 
 /**
  * Utility class to facilitate the creation of the CQL representation of {@code SchemaElements}.
@@ -271,12 +272,8 @@ public final class CqlBuilder
 
     /**
      * Builds a `WITH option1 = ... AND option2 = ... AND option3 = ... clause
-<<<<<<< HEAD
-     * @param builder a receiver to receive a builder allowing to add each option
-=======
      *
      * @param builder a consumer to receive a builder for the options to append
->>>>>>> 4714c43331 (CNDB-13129: Add index hints)
      */
     public CqlBuilder appendOptions(Consumer<OptionsBuilder> builder)
     {
@@ -289,12 +286,12 @@ public final class CqlBuilder
      *
      * @param filter the row filter to append
      * @param hasKeyRestrictions whether the query has key restrictions that have already been appended
-     * @param redact whether to redact the column values in the row filter
+     * @param redaction whether to redact the column values in the row filter
      * @return this CQL builder after appending the row filter
      */
-    public CqlBuilder append(RowFilter filter, boolean hasKeyRestrictions, boolean redact)
+    public CqlBuilder append(RowFilter filter, boolean hasKeyRestrictions, Redaction redaction)
     {
-        return filter.isEmpty() ? this : appendRestrictions(filter.toCQLString(redact), hasKeyRestrictions);
+        return filter.isEmpty() ? this : appendRestrictions(filter.toCQLString(redaction), hasKeyRestrictions);
     }
 
     /**

@@ -99,10 +99,4 @@ public interface PartitionRangeReadQuery extends MultiPartitionReadQuery
         return dataRange().selectsAllPartition() && !rowFilter().hasExpressionOnClusteringOrRegularColumns();
     }
 
-    default void appendCQLWhereClause(StringBuilder sb, boolean redact)
-    {
-        String filterString = dataRange().toCQLString(metadata(), rowFilter(), redact);
-        if (!filterString.isEmpty())
-            sb.append(" WHERE ").append(filterString);
-    }
 }

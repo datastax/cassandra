@@ -111,6 +111,7 @@ import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
@@ -2158,7 +2159,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
         StringBuilder sb = new StringBuilder();
 
-        sb.append("SELECT ").append(queriedColumns().toCQLString(false));
+        sb.append("SELECT ").append(queriedColumns().toCQLString(Redaction.NONE));
         sb.append(" FROM ").append(table.keyspace).append('.').append(table.name);
         if (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing())
         {
@@ -2188,7 +2189,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                         sb.append(" AND ");
                 }
                 if (!dataRange.isUnrestricted(table))
-                    sb.append(dataRange.toCQLString(table, rowFilter, false));
+                    sb.append(dataRange.toCQLString(table, rowFilter, Redaction.NONE));
             }
         }
         else
@@ -2212,7 +2213,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             {
                 sb.append(" = ");
                 if (compoundPk) sb.append('(');
-                DataRange.appendKeyString(sb, table.partitionKeyType, Iterables.getOnlyElement(keys), false);
+                DataRange.appendKeyString(sb, table.partitionKeyType, Iterables.getOnlyElement(keys), Redaction.NONE);
                 if (compoundPk) sb.append(')');
             }
             else
@@ -2225,7 +2226,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                         sb.append(", ");
 
                     if (compoundPk) sb.append('(');
-                    DataRange.appendKeyString(sb, table.partitionKeyType, key, false);
+                    DataRange.appendKeyString(sb, table.partitionKeyType, key, Redaction.NONE);
                     if (compoundPk) sb.append(')');
                     first = false;
                 }
@@ -2237,7 +2238,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             if (!rowFilter.isEmpty())
                 sb.append(" AND ").append(rowFilter);
 
-            String filterString = filter.toCQLString(table, rowFilter, false);
+            String filterString = filter.toCQLString(table, rowFilter, Redaction.NONE);
             if (!filterString.isEmpty())
                 sb.append(" AND ").append(filterString);
         }
