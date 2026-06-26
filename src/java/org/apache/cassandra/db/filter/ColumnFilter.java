@@ -28,6 +28,7 @@ import com.google.common.collect.TreeMultimap;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -298,10 +299,10 @@ public abstract class ColumnFilter
     /**
      * Returns the CQL string corresponding to this {@code ColumnFilter}.
      *
-     * @param redact whether to redact the queried column names, in case they contain sensitive data.
+     * @param redaction whether to redact the queried column names, in case they contain sensitive data.
      * @return the CQL string corresponding to this {@code ColumnFilter}.
      */
-    public abstract String toCQLString(boolean redact);
+    public abstract String toCQLString(Redaction redaction);
 
     /**
      * Returns the sub-selections or {@code null} if there are none.
@@ -615,7 +616,7 @@ public abstract class ColumnFilter
         }
 
         @Override
-        public String toCQLString(boolean redact)
+        public String toCQLString(Redaction redaction)
         {
             return "*";
         }
@@ -817,21 +818,21 @@ public abstract class ColumnFilter
             {
                 prefix = queried.statics.isEmpty()
                        ? "<all regulars>/"
-                       : String.format("<all regulars>+%s/", toString(queried.statics.selectOrderIterator(), false, false));
+                       : String.format("<all regulars>+%s/", toString(queried.statics.selectOrderIterator(), false, Redaction.NONE));
             }
 
-            return prefix + toString(queried.selectOrderIterator(), false, false);
+            return prefix + toString(queried.selectOrderIterator(), false, Redaction.NONE);
         }
 
         @Override
-        public String toCQLString(boolean redact)
+        public String toCQLString(Redaction redaction)
         {
-            return queried.isEmpty() ? "*" : toString(queried.selectOrderIterator(), true, redact);
+            return queried.isEmpty() ? "*" : toString(queried.selectOrderIterator(), true, redaction);
         }
 
-        private String toString(Iterator<ColumnMetadata> columns, boolean cql, boolean redact)
+        private String toString(Iterator<ColumnMetadata> columns, boolean cql, Redaction redaction)
         {
-            assert cql || !redact : "Cannot redact non-CQL representation";
+            assert cql || redaction == Redaction.NONE : "Cannot redact non-CQL representation";
 
             StringJoiner joiner = cql ? new StringJoiner(", ") : new StringJoiner(", ", "[", "]");
 
@@ -847,7 +848,7 @@ public abstract class ColumnFilter
                 if (s.isEmpty())
                     joiner.add(columnName);
                 else
-                    s.forEach(subSel -> joiner.add(String.format("%s%s", columnName, subSel.toString(cql, redact))));
+                    s.forEach(subSel -> joiner.add(String.format("%s%s", columnName, subSel.toString(cql, redaction))));
             }
             return joiner.toString();
         }

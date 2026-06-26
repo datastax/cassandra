@@ -46,6 +46,7 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.CachedBTreePartition;
 import org.apache.cassandra.db.partitions.CachedPartition;
@@ -1267,9 +1268,9 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @Override
-    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
+    public void appendCQLWhereClause(CqlBuilder builder, Redaction redaction)
     {
-        SinglePartitionReadQuery.super.appendCQLWhereClause(builder, redact);
+        SinglePartitionReadQuery.super.appendCQLWhereClause(builder, redaction);
     }
 
     @Override

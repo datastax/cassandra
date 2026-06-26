@@ -21,6 +21,7 @@ package org.apache.cassandra.service.context;
 import java.util.function.Supplier;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.marshal.Redaction;
 
 /**
  * Default implementation of {@link OperationContext}.
@@ -58,7 +59,7 @@ public class DefaultOperationContext implements OperationContext
         @Override
         public OperationContext forRead(ReadCommand command, ColumnFamilyStore cfs)
         {
-            return new DefaultOperationContext(command::toUnredactedCQLString);
+            return new DefaultOperationContext(() -> command.toCQLString(Redaction.NONE));
         }
     }
 }

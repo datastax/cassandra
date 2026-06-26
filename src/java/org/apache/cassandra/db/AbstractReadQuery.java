@@ -19,8 +19,6 @@ package org.apache.cassandra.db;
 
 import java.util.Set;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.SelectOptions;
@@ -28,6 +26,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.monitoring.MonitorableImpl;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
@@ -64,7 +63,7 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     // Monitorable interface
     public String name()
     {
-        return toRedactedCQLString();
+        return toCQLString(Redaction.REDACT);
     }
 
     @Override
@@ -98,27 +97,6 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     }
 
     /**
-     * Recreates the CQL string corresponding to this query, representing any specific values with '?',
-     * to prevent leaking sensitive data.
-     * @see #toCQLString(boolean)
-     */
-    public String toRedactedCQLString()
-    {
-        return toCQLString(true);
-    }
-
-    /**
-     * Recreates the CQL string corresponding to this query, printing specific values without any redaction.
-     * This might leak sensitive data if the query string ends up in logs or any other unprotected place, so this only
-     * should be used for debugging purposes or to present the query string to the same end user that created the query.
-     * @see #toCQLString(boolean)
-     */
-    public String toUnredactedCQLString()
-    {
-        return toCQLString(false);
-    }
-
-    /**
      * Recreates the CQL string corresponding to this query.
      * </p>
      * If the {@code redact} parameter is set to {@code true}, the query string will be redacted, replacing any specific
@@ -133,18 +111,28 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
      * we query them all). So this shouldn't be relied upon too strongly, but this should be good enough for
      * debugging purposes which is what this is for.
      *
-     * @param redact whether to redact the queried column values.
+     * @param redaction whether to redact the queried column values.
      */
-    @VisibleForTesting
-    protected String toCQLString(boolean redact)
+
+    public String toUnredactedCQLString()
+    {
+        return toCQLString(Redaction.NONE);
+    }
+
+    public String toRedactedCQLString()
+    {
+        return toCQLString(Redaction.REDACT);
+    }
+
+    public String toCQLString(Redaction redaction)
     {
         CqlBuilder builder = new CqlBuilder();
-        builder.append("SELECT ").append(columnFilter().toCQLString(redact));
+        builder.append("SELECT ").append(columnFilter().toCQLString(redaction));
         builder.append(" FROM ").append(ColumnIdentifier.maybeQuote(metadata().keyspace))
                .append('.')
                .append(ColumnIdentifier.maybeQuote(metadata().name));
 
-        appendCQLWhereClause(builder, redact);
+        appendCQLWhereClause(builder, redaction);
 
         if (limits() != DataLimits.NONE)
             builder.append(' ').append(limits());
@@ -164,5 +152,5 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
         return builder.toString();
     }
 
-    protected abstract void appendCQLWhereClause(CqlBuilder builder, boolean redact);
+    protected abstract void appendCQLWhereClause(CqlBuilder builder, Redaction redaction);
 }
