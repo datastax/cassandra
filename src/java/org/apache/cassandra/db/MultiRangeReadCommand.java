@@ -32,6 +32,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
@@ -374,9 +375,9 @@ public class MultiRangeReadCommand extends ReadCommand implements MultiPartition
     }
 
     @Override
-    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
+    public void appendCQLWhereClause(CqlBuilder builder, Redaction redaction)
     {
-        MultiPartitionReadQuery.super.appendCQLWhereClause(builder, redact);
+        MultiPartitionReadQuery.super.appendCQLWhereClause(builder, redaction);
     }
 
     @Override

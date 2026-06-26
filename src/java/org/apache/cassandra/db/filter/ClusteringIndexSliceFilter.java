@@ -20,6 +20,8 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 
 import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.db.marshal.Redaction;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.Partition;
@@ -27,7 +29,6 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * A filter over a single partition.
@@ -135,14 +136,12 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
     }
 
     @Override
-    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
     {
-        CqlBuilder sb = new CqlBuilder();
-
-        sb.append(slices.toCQLString(metadata, rowFilter, redact));
-        appendOrderByToCQLString(metadata, sb);
-
-        return sb.toString();
+        CqlBuilder builder = new CqlBuilder();
+        builder.append(slices.toCQLString(metadata, rowFilter, redaction));
+        appendOrderByToCQLString(metadata, builder);
+        return builder.toString();
     }
 
     public Kind kind()

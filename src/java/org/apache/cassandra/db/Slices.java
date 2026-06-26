@@ -28,6 +28,7 @@ import com.google.common.collect.Iterators;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -155,10 +156,10 @@ public abstract class Slices implements Iterable<Slice>
      *
      * @param metadata the table metadata
      * @param rowFilter a row filter
-     * @param redact whether to redact the slice column values
+     * @param redaction whether to redact the slice column values
      * @return a CQL string representing this slice and the specified {@link RowFilter}
      */
-    public abstract String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact);
+    public abstract String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction);
 
     /**
      * Checks if this <code>Slices</code> is empty.
@@ -550,7 +551,7 @@ public abstract class Slices implements Iterable<Slice>
         }
 
         @Override
-        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
         {
             CqlBuilder sb = new CqlBuilder();
 
@@ -602,7 +603,7 @@ public abstract class Slices implements Iterable<Slice>
 
                     if (values.size() == 1)
                     {
-                        sb.append(" = ").append(column.type.toCQLString(first.startValue, redact));
+                        sb.append(" = ").append(column.type.toCQLString(first.startValue, redaction));
                         rowFilter = rowFilter.without(column, Operator.EQ, first.startValue);
                     }
                     else
@@ -611,7 +612,7 @@ public abstract class Slices implements Iterable<Slice>
                         int j = 0;
                         for (ByteBuffer value : values)
                         {
-                            sb.append(j++ == 0 ? "" : ", ").append(column.type.toCQLString(value, redact));
+                            sb.append(j++ == 0 ? "" : ", ").append(column.type.toCQLString(value, redaction));
                             rowFilter = rowFilter.without(column, Operator.EQ, value);
                         }
                         sb.append(")");
@@ -635,7 +636,7 @@ public abstract class Slices implements Iterable<Slice>
                         else
                             operator = first.startInclusive ? Operator.GTE : Operator.GT;
                         sb.append(' ').append(operator).append(' ')
-                          .append(column.type.toCQLString(first.startValue, redact));
+                          .append(column.type.toCQLString(first.startValue, redaction));
                         rowFilter = rowFilter.without(column, operator, first.startValue);
                     }
                     if (first.endValue != null)
@@ -649,7 +650,7 @@ public abstract class Slices implements Iterable<Slice>
                         else
                             operator = first.endInclusive ? Operator.LTE : Operator.LT;
                         sb.append(' ').append(operator).append(' ')
-                          .append(column.type.toCQLString(first.endValue, redact));
+                          .append(column.type.toCQLString(first.endValue, redaction));
                         rowFilter = rowFilter.without(column, operator, first.endValue);
                     }
                 }
@@ -663,7 +664,7 @@ public abstract class Slices implements Iterable<Slice>
             }
 
             // Append the row filter.
-            sb.append(rowFilter, true, redact);
+            sb.append(rowFilter, true, redaction);
 
             return sb.toString();
         }
@@ -787,9 +788,9 @@ public abstract class Slices implements Iterable<Slice>
         }
 
         @Override
-        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
         {
-            return rowFilter.toCQLString(redact);
+            return rowFilter.toCQLString(redaction);
         }
     }
 
@@ -864,7 +865,7 @@ public abstract class Slices implements Iterable<Slice>
         }
 
         @Override
-        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
         {
             return "";
         }
