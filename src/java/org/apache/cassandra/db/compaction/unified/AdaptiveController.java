@@ -456,6 +456,17 @@ public class AdaptiveController extends Controller
         return maxAdaptiveCompactions;
     }
 
+    /**
+     * The adaptive controller does not support time-driven levels. Time-driven levels require stable,
+     * per-bucket scaling parameters which are incompatible with the dynamic parameter optimization
+     * performed by this controller. Returns an empty list.
+     */
+    @Override
+    public java.util.List<TimeBucket> getTimeBuckets()
+    {
+        return java.util.Collections.emptyList();
+    }
+
     /** Protected by the synchronized block in UnifiedCompactionStrategy#getNextBackgroundTasks */
     @Override
     public void onStrategyBackgroundTaskRequest()

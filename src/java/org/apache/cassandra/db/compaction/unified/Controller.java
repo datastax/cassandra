@@ -318,6 +318,13 @@ public abstract class Controller
     /**
      * The scaling parameters W, one per bucket index and separated by a comma.
      * Higher indexes will use the value of the last index with a W specified.
+     *
+     * <p>Optionally, time-driven level definitions may be appended after a {@code ;} separator:
+     * <ul>
+     *   <li>{@code T4; L1000000 each 2w} — T4 for recent data, aggressive leveling for data older than 2 weeks</li>
+     *   <li>{@code T6, T2 by 1d} — separate time-window arena per day, using T6/T2 scaling within each</li>
+     * </ul>
+     * See {@link TimeBucket} for the full syntax description.
      */
     static final String SCALING_PARAMETERS_OPTION = "scaling_parameters";
     @Deprecated
@@ -335,7 +342,7 @@ public abstract class Controller
      */
     static final boolean USE_FACTORIZATION_SHARD_COUNT_GROWTH = Boolean.parseBoolean(getSystemProperty("use_factorization_shard_count_growth", "true"));
 
-    protected final MonotonicClock clock;
+    public final MonotonicClock clock;
     protected final Environment env;
     protected final double[] survivalFactors;
     protected final long dataSetSize;
@@ -498,6 +505,19 @@ public abstract class Controller
 
     public abstract int getPreviousScalingParameter(int index);
 
+    /**
+     * Returns the list of {@link TimeBucket} definitions that drive time-based arena splitting.
+     *
+     * <p>When the list is non-empty, incoming SSTables are additionally partitioned by their minimum timestamp
+     * into time-based arenas, each using its own scaling parameters. The list is ordered such that
+     * {@link TimeBucket.Mode#EACH} buckets (if any) sorted from oldest to youngest threshold appear first,
+     * followed by the {@link TimeBucket.Mode#BY} bucket (if any) at the end.
+     *
+     * @return an unmodifiable list of {@link TimeBucket} definitions; empty when no time-driven levels are
+     *         configured (the common case, for full backward compatibility)
+     */
+    public abstract java.util.List<TimeBucket> getTimeBuckets();
+
     public abstract int getMaxRecentAdaptiveCompactions();
     public abstract boolean isRecentAdaptive(CompactionPick pick);
 
@@ -507,6 +527,79 @@ public abstract class Controller
 
     public int getThreshold(int index) {
         return UnifiedCompactionStrategy.thresholdFromScalingParameter(getScalingParameter(index));
+    }
+
+    public int getScalingParameter(int index, @Nullable TimeBucket bucket)
+    {
+        if (bucket != null)
+        {
+            int[] params = bucket.scalingParameters;
+            return params[Math.min(index, params.length - 1)];
+        }
+        return getScalingParameter(index);
+    }
+
+    public int getPreviousScalingParameter(int index, @Nullable TimeBucket bucket)
+    {
+        if (bucket != null)
+        {
+            int[] params = bucket.scalingParameters;
+            return params[Math.min(index, params.length - 1)];
+        }
+        return getPreviousScalingParameter(index);
+    }
+
+    public int getFanout(int index, @Nullable TimeBucket bucket)
+    {
+        return UnifiedCompactionStrategy.fanoutFromScalingParameter(getScalingParameter(index, bucket));
+    }
+
+    public int getThreshold(int index, @Nullable TimeBucket bucket)
+    {
+        return UnifiedCompactionStrategy.thresholdFromScalingParameter(getScalingParameter(index, bucket));
+    }
+
+    public int getPreviousFanout(int index, @Nullable TimeBucket bucket)
+    {
+        return UnifiedCompactionStrategy.fanoutFromScalingParameter(getPreviousScalingParameter(index, bucket));
+    }
+
+    public int getPreviousThreshold(int index, @Nullable TimeBucket bucket)
+    {
+        return UnifiedCompactionStrategy.thresholdFromScalingParameter(getPreviousScalingParameter(index, bucket));
+    }
+
+    /**
+     * Determines which {@link TimeBucket} is applicable for a given SSTable.
+     *
+     * <p>Iterates through the configured time buckets (which are ordered such that
+     * {@link TimeBucket.Mode#EACH} threshold buckets are evaluated oldest-first, and
+     * {@link TimeBucket.Mode#BY} repeating window buckets are checked last).
+     *
+     * @param sstable the SSTable being evaluated
+     * @param nowUs the current wall-clock epoch timestamp in microseconds
+     * @return the matching {@link TimeBucket}, or {@code null} if no time buckets are configured
+     *         or if the SSTable does not fall into any age-threshold bucket (and no repeating
+     *         window bucket is present).
+     */
+    public @Nullable TimeBucket getTimeBucketForSSTable(CompactionSSTable sstable, long nowUs)
+    {
+        List<TimeBucket> buckets = getTimeBuckets();
+        if (buckets.isEmpty())
+            return null;
+
+        long minTimestampUs = sstable.getMinTimestamp();
+        for (TimeBucket bucket : buckets)
+        {
+            if (bucket.mode == TimeBucket.Mode.BY)
+                return bucket;
+            else if (bucket.mode == TimeBucket.Mode.EACH)
+            {
+                if (bucket.isOld(minTimestampUs, nowUs))
+                    return bucket;
+            }
+        }
+        return null;
     }
 
     public int getPreviousFanout(int index) {
@@ -1495,6 +1588,11 @@ public abstract class Controller
         return Math.floor(minSize * getFanout(index) * getSurvivalFactor(index));
     }
 
+    public double getMaxLevelDensity(int index, double minSize, @Nullable TimeBucket bucket)
+    {
+        return Math.floor(minSize * getFanout(index, bucket) * getSurvivalFactor(index));
+    }
+
     public double maxThroughput()
     {
         return env.maxThroughput();
@@ -1552,18 +1650,56 @@ public abstract class Controller
         return overlapInclusionMethod;
     }
 
+    /**
+     * Parses a scaling-parameters string and returns only the W values (the base scaling parameters),
+     * stripping any time-bucket clauses ({@code by <duration>}, {@code each <duration>}) that may be
+     * present in the string.
+     *
+     * <p>This method is called from the hot path and must remain backward-compatible: if no time-bucket
+     * clauses are present the string is parsed exactly as before. When time-bucket clauses are present,
+     * the W values from the first (base) segment are returned, allowing the controller to fall back to
+     * purely density-based compaction for contexts that do not yet understand time bucketing.
+     *
+     * <p>For full parsing of time-bucket clauses use {@link TimeBucket#parseScalingParameterGroups(String)}.
+     *
+     * @param str the raw value of the {@code scaling_parameters} option
+     * @return the base W values as an {@code int[]}
+     * @throws ConfigurationException on parse errors
+     */
     public static int[] parseScalingParameters(String str)
     {
-        String[] vals = str.split(",");
-        int[] ret = new int[vals.length];
-        for (int i = 0; i < vals.length; i++)
+        // Fast path: if no ';' present there are no time-bucket clauses.
+        if (!str.contains(";") && !str.toLowerCase().contains(" by ") && !str.toLowerCase().contains(" each "))
         {
-            String value = vals[i].trim();
-            int W = UnifiedCompactionStrategy.parseScalingParameter(value);
-            ret[i] = W;
+            String[] vals = str.split(",");
+            int[] ret = new int[vals.length];
+            for (int i = 0; i < vals.length; i++)
+            {
+                String value = vals[i].trim();
+                ret[i] = UnifiedCompactionStrategy.parseScalingParameter(value);
+            }
+            return ret;
         }
+        // Delegate to the full parser and return only the base parameters.
+        return TimeBucket.parseScalingParameterGroups(str).baseScalingParameters;
+    }
 
-        return ret;
+    /**
+     * Parses the full structured representation of a {@code scaling_parameters} value, including any
+     * time-bucket definitions ({@code by <duration>} and {@code each <duration>} clauses).
+     *
+     * <p>Returns a {@link TimeBucket.ParseResult} that bundles the base scaling parameters together with
+     * the ordered list of time bucket definitions. Controllers that need time-bucket awareness call this
+     * method during construction; controllers that do not (e.g. {@link AdaptiveController}) continue to
+     * call {@link #parseScalingParameters(String)} for simplicity.
+     *
+     * @param str the raw value of the {@code scaling_parameters} option
+     * @return the structured parse result
+     * @throws ConfigurationException on any parse or semantic error
+     */
+    public static TimeBucket.ParseResult parseScalingParameterGroups(String str)
+    {
+        return TimeBucket.parseScalingParameterGroups(str);
     }
 
     public static String printScalingParameters(int[] parameters)

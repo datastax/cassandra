@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -25,16 +26,23 @@ import java.util.stream.Collectors;
 import com.google.common.collect.ImmutableList;
 import org.junit.Test;
 
+import org.apache.cassandra.db.compaction.CompactionSSTable;
+import org.apache.cassandra.db.compaction.ArenaSelector;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.ReplicationFactor;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.MonotonicClockTranslation;
+import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 public class StaticControllerTest extends ControllerTest
@@ -411,5 +419,173 @@ public class StaticControllerTest extends ControllerTest
         numDirectories = 1;
         controller = controller.fromOptions(cfs, options);
         assertEquals(Controller.DEFAULT_BASE_SHARD_COUNT, controller.baseShardCount);
+    }
+
+    @Test
+    public void testTimeBucketsParsing()
+    {
+        // test duration parsing
+        assertEquals(TimeUnit.DAYS.toMicros(1), TimeBucket.parseDurationUs("1d"));
+        assertEquals(TimeUnit.DAYS.toMicros(14), TimeBucket.parseDurationUs("2w"));
+        assertEquals(TimeUnit.HOURS.toMicros(12), TimeBucket.parseDurationUs("12h"));
+        assertEquals(TimeUnit.MINUTES.toMicros(45), TimeBucket.parseDurationUs("45m"));
+        assertEquals(TimeUnit.SECONDS.toMicros(30), TimeBucket.parseDurationUs("30s"));
+        assertEquals(TimeUnit.DAYS.toMicros(1) + TimeUnit.HOURS.toMicros(12), TimeBucket.parseDurationUs("1d12h"));
+
+        // test human-readable words parsing
+        assertEquals(TimeUnit.DAYS.toMicros(1), TimeBucket.parseDurationUs("1 day"));
+        assertEquals(TimeUnit.DAYS.toMicros(2), TimeBucket.parseDurationUs("2 days"));
+        assertEquals(TimeUnit.DAYS.toMicros(7), TimeBucket.parseDurationUs("1 week"));
+        assertEquals(TimeUnit.DAYS.toMicros(14), TimeBucket.parseDurationUs("2 weeks"));
+        assertEquals(TimeUnit.HOURS.toMicros(1), TimeBucket.parseDurationUs("1 hour"));
+        assertEquals(TimeUnit.HOURS.toMicros(12), TimeBucket.parseDurationUs("12 hours"));
+        assertEquals(TimeUnit.MINUTES.toMicros(1), TimeBucket.parseDurationUs("1 minute"));
+        assertEquals(TimeUnit.MINUTES.toMicros(45), TimeBucket.parseDurationUs("45 minutes"));
+        assertEquals(TimeUnit.SECONDS.toMicros(1), TimeBucket.parseDurationUs("1 second"));
+        assertEquals(TimeUnit.SECONDS.toMicros(30), TimeBucket.parseDurationUs("30 seconds"));
+
+        // test duration formatting
+        assertEquals("1d", TimeBucket.formatDurationUs(TimeUnit.DAYS.toMicros(1)));
+        assertEquals("2w", TimeBucket.formatDurationUs(TimeUnit.DAYS.toMicros(14)));
+        assertEquals("12h", TimeBucket.formatDurationUs(TimeUnit.HOURS.toMicros(12)));
+        assertEquals("45m", TimeBucket.formatDurationUs(TimeUnit.MINUTES.toMicros(45)));
+        assertEquals("30s", TimeBucket.formatDurationUs(TimeUnit.SECONDS.toMicros(30)));
+
+        // invalid durations
+        try
+        {
+            TimeBucket.parseDurationUs("abc");
+            fail("Expected ConfigurationException");
+        }
+        catch (ConfigurationException e)
+        {
+            // expected
+        }
+
+        try
+        {
+            TimeBucket.parseDurationUs("1y");
+            fail("Expected ConfigurationException");
+        }
+        catch (ConfigurationException e)
+        {
+            // expected
+        }
+
+        try
+        {
+            TimeBucket.parseDurationUs("-1d");
+            fail("Expected ConfigurationException");
+        }
+        catch (ConfigurationException e)
+        {
+            // expected
+        }
+    }
+
+    @Test
+    public void testFromOptionsWithTimeBuckets()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(StaticController.SCALING_PARAMETERS_OPTION, "T6, T2 by 1d; L1000000 each 2w; L5 each 2d");
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
+
+        Controller controller = testFromOptions(false, options);
+        assertTrue(controller instanceof StaticController);
+
+        java.util.List<TimeBucket> buckets = controller.getTimeBuckets();
+        assertEquals(3, buckets.size());
+
+        // 'each' buckets are sorted oldest-first (2w then 2d) to match precedence order
+        TimeBucket each2w = buckets.get(0);
+        assertEquals(TimeBucket.Mode.EACH, each2w.mode);
+        assertEquals(TimeUnit.DAYS.toMicros(14), each2w.durationUs);
+        assertEquals(-999998, each2w.scalingParameters[0]); // L1000000 (w=-999998 corresponds to L1000000)
+
+        TimeBucket each2d = buckets.get(1);
+        assertEquals(TimeBucket.Mode.EACH, each2d.mode);
+        assertEquals(TimeUnit.DAYS.toMicros(2), each2d.durationUs);
+        assertEquals(-3, each2d.scalingParameters[0]); // L5 (w=-3 corresponds to L5)
+
+        // 'by' bucket is placed at the end to avoid shadowing the EACH thresholds
+        TimeBucket byBucket = buckets.get(2);
+        assertEquals(TimeBucket.Mode.BY, byBucket.mode);
+        assertEquals(TimeUnit.DAYS.toMicros(1), byBucket.durationUs);
+        assertEquals(0, byBucket.scalingParameters[1]); // T2 W value is 0 (fanout is 2)
+    }
+
+    @Test
+    public void testArenaSelectorWithTimeBuckets() throws Exception
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(StaticController.SCALING_PARAMETERS_OPTION, "T2 by 1h; L1000000 each 10m");
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
+
+        Controller controller = testFromOptions(false, options);
+        assertTrue(controller instanceof StaticController);
+
+        // We mock a custom MonotonicClock and MonotonicClockTranslation to have a deterministic time domain.
+        long nowUs = TimeUnit.HOURS.toMicros(100) + TimeUnit.MINUTES.toMicros(2); // 100 hours and 2 minutes since epoch
+        MonotonicClock mockClock = Mockito.mock(MonotonicClock.class);
+        MonotonicClockTranslation mockTranslation = Mockito.mock(MonotonicClockTranslation.class);
+
+        when(mockClock.translate()).thenReturn(mockTranslation);
+        when(mockClock.now()).thenReturn(1000L); // dummy monotonic nanoseconds
+        when(mockTranslation.toMillisSinceEpoch(1000L)).thenReturn(nowUs / 1000L); // return nowUs in epoch milliseconds
+
+        // Replace the clock on the controller using reflection
+        Field clockField = Controller.class.getDeclaredField("clock");
+        clockField.setAccessible(true);
+        clockField.set(controller, mockClock);
+
+        org.apache.cassandra.db.DiskBoundaries diskBoundaries = Mockito.mock(org.apache.cassandra.db.DiskBoundaries.class);
+        when(diskBoundaries.getNumBoundaries()).thenReturn(1);
+
+        ArenaSelector selector = new ArenaSelector(controller, diskBoundaries);
+
+        // Define SSTables with different timestamps:
+        // Recent 1: 2 minutes old (same window as nowUs: 100h 2m - 2m = 100h, which is inside the [100h, 101h) window index 100)
+        CompactionSSTable sstableRecent1 = Mockito.mock(CompactionSSTable.class);
+        when(sstableRecent1.getMinTimestamp()).thenReturn(nowUs - TimeUnit.MINUTES.toMicros(2));
+
+        // Recent 2: 3 minutes old (crossed window boundary: 100h 2m - 3m = 99h 59m, which is inside [99h, 100h) window index 99)
+        CompactionSSTable sstableRecent2 = Mockito.mock(CompactionSSTable.class);
+        when(sstableRecent2.getMinTimestamp()).thenReturn(nowUs - TimeUnit.MINUTES.toMicros(3));
+
+        // Recent 3: 1.5 minutes old (same window as sstableRecent1: index 100)
+        CompactionSSTable sstableRecent3 = Mockito.mock(CompactionSSTable.class);
+        when(sstableRecent3.getMinTimestamp()).thenReturn(nowUs - TimeUnit.SECONDS.toMicros(90));
+
+        // Old: 15 minutes old (older than 10 minutes, matches 'each 10m' bucket)
+        CompactionSSTable sstableOld = Mockito.mock(CompactionSSTable.class);
+        when(sstableOld.getMinTimestamp()).thenReturn(nowUs - TimeUnit.MINUTES.toMicros(15));
+
+        org.apache.cassandra.io.sstable.Descriptor desc = Mockito.mock(org.apache.cassandra.io.sstable.Descriptor.class);
+        when(desc.filenameFor(any())).thenReturn("dummy-Data.db");
+
+        for (CompactionSSTable sst : new CompactionSSTable[] { sstableRecent1, sstableRecent2, sstableRecent3, sstableOld })
+        {
+            when(sst.getDescriptor()).thenReturn(desc);
+            when(sst.getKeyspaceName()).thenReturn("ks");
+            when(sst.getColumnFamilyName()).thenReturn("tbl");
+            when(sst.isRepaired()).thenReturn(false);
+            when(sst.isPendingRepair()).thenReturn(false);
+        }
+
+        // Verify grouping names (without repair/disk splits since disk count is 1)
+        assertEquals("unrepaired-tw_100", selector.name(sstableRecent1));
+        assertEquals("unrepaired-tw_99", selector.name(sstableRecent2));
+        assertEquals("unrepaired-tw_100", selector.name(sstableRecent3));
+        assertEquals("unrepaired-old_10m", selector.name(sstableOld));
+
+        // Verify comparison/equality logic:
+        // 1. Same recent window compares as equal:
+        assertEquals(0, selector.compare(sstableRecent1, sstableRecent3));
+
+        // 2. Different recent windows compare as different:
+        assertNotEquals(0, selector.compare(sstableRecent1, sstableRecent2));
+
+        // 3. Recent and old compare as different:
+        assertNotEquals(0, selector.compare(sstableRecent1, sstableOld));
     }
 }
