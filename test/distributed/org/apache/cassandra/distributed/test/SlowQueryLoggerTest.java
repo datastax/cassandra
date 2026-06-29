@@ -17,6 +17,7 @@
 package org.apache.cassandra.distributed.test;
 
 import java.nio.ByteBuffer;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
@@ -46,6 +47,8 @@ import org.assertj.core.api.AbstractIterableAssert;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ListAssert;
 
+import static java.util.regex.Pattern.quote;
+
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
@@ -68,7 +71,11 @@ public class SlowQueryLoggerTest extends TestBaseImpl
 
         cluster = init(Cluster.build(2)
                               .withInstanceInitializer(SlowQueryLoggerTest.BBHelper::install)
-                              .withConfig(config -> config.set("slow_query_log_timeout_in_ms", SLOW_QUERY_LOG_TIMEOUT_MS))
+                              .withConfig(config -> {
+                                  config.set("slow_query_log_timeout_in_ms", SLOW_QUERY_LOG_TIMEOUT_MS);
+                                  config.set("read_request_timeout_in_ms", 60000L);
+                                  config.set("range_request_timeout_in_ms", 60000L);
+                              })
                               .start());
         coordinator = cluster.coordinator(1);
         node = cluster.get(2);
@@ -108,14 +115,24 @@ public class SlowQueryLoggerTest extends TestBaseImpl
 
         // verify that slow queries are logged with redacted values
         long mark = node.logs().mark();
-        Object[][] rows = coordinator.execute(format("SELECT * FROM %s.%s WHERE k = 'secret_k' AND c = 'secret_c' AND v = 'secret_v' ALLOW FILTERING"), ALL);
+        String query = format("SELECT * FROM %s.%s WHERE k = 'secret_k' AND c = 'secret_c' AND v = 'secret_v' ALLOW FILTERING");
+        Object[][] rows = coordinator.execute(query, ALL);
         Assertions.assertThat(rows).hasNumberOfRows(1);
         assertLogsContain(mark, node, "operations were slow", format("<SELECT \\* FROM %s\\.%s WHERE k = \\? AND c = \\? AND v = \\? ALLOW FILTERING>"));
         assertLogsDoNotContain(mark, node, "secret_k", "secret_c", "secret_v");
 
+        // verify again with paging
+        mark = node.logs().mark();
+        Iterator<Object[]> pagedRows = coordinator.executeWithPaging(query, ALL, 1);
+        while (pagedRows.hasNext())
+            pagedRows.next();
+        assertLogsContain(mark, node, "operations were slow", quote(format("<SELECT * FROM %s.%s WHERE k = ? AND c = ? AND v = ? LIMIT 1 ALLOW FILTERING>")));
+        assertLogsContain(mark, node, "operations were slow", quote(format("<SELECT * FROM %s.%s WHERE k = ? AND v = ? LIMIT 1 ALLOW FILTERING [paging continuation]>")));
+        assertLogsDoNotContain(mark, node, "secret_k", "secret_c", "secret_v");
+
         // verify that large values include size hints
         mark = node.logs().mark();
-        String query = format("SELECT * FROM %s.%s WHERE b = ? ALLOW FILTERING");
+        query = format("SELECT * FROM %s.%s WHERE b = ? ALLOW FILTERING");
         coordinator.execute(query, ALL, ByteBuffer.allocate(100 + 1));
         coordinator.execute(query, ALL, ByteBuffer.allocate(1024 + 1));
         coordinator.execute(query, ALL, ByteBuffer.allocate(10 * 1024 + 1));
@@ -183,6 +200,19 @@ public class SlowQueryLoggerTest extends TestBaseImpl
                           "  Fetched/returned/tombstones:",
                           "    partitions: 10/3/0",
                           "    rows: 100/25/0");
+
+        // paged query
+        mark = node.logs().mark();
+        Iterator<Object[]> pagedRows = coordinator.executeWithPaging(format("SELECT * FROM %s.%s"), ALL, 5);
+        int readRows = 0;
+        while (pagedRows.hasNext())
+        {
+            pagedRows.next();
+            readRows++;
+        }
+        Assertions.assertThat(readRows).isEqualTo(numRows);
+        assertLogsContain(mark, node, quote(format("<SELECT * FROM %s.%s LIMIT 5 ALLOW FILTERING>")));
+        assertLogsContain(mark, node, quote(format("<SELECT * FROM %s.%s WHERE token(k) >= token(?) LIMIT 5 ALLOW FILTERING [paging continuation]>")));
 
         // test multiple slow runs of different queries with the same redacted form, it should log the slowest one
         mark = node.logs().mark();
