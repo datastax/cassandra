@@ -30,6 +30,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
+import org.apache.cassandra.utils.PageAware;
 
 /** A class that extracts system properties for the cassandra node it runs within. */
 public enum CassandraRelevantProperties
@@ -818,6 +819,12 @@ public enum CassandraRelevantProperties
      */
     COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE("cassandra.compression_chunk_offsets_cache_block_size_bytes", "65536"),
     /**
+     * Number of bytes per compression chunk offsets cache block when {@code chunk_cache} is configured.
+     * The value must resolve to a power-of-two whole number of offsets. Defaults to one chunk-cache page
+     * to avoid caching unused metadata pages into the shared chunk cache.
+     */
+    COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE("cassandra.compression_chunk_offsets_chunk_cache_block_size_bytes", String.valueOf(PageAware.PAGE_SIZE)),
+    /**
      * Selects the {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} implementation. One of:
      * <ul>
      *     <li>{@code in_memory} (default): load all offsets into off-heap memory.</li>
@@ -826,6 +833,8 @@ public enum CassandraRelevantProperties
      *     when the compression info file is fully available on local disk.</li>
      *     <li>{@code block_cache}: use the block cache sized by {@link #COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE}
      *     and fail configuration validation if that size resolves to zero or less.</li>
+     *     <li>{@code chunk_cache}: use the global chunk cache. Requires the file cache to be enabled; the effective
+     *     {@link #COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE} value must be a power of two.</li>
      * </ul>
      */
     COMPRESSION_CHUNK_OFFSETS_TYPE("cassandra.compression_chunk_offsets_type", "in_memory"),

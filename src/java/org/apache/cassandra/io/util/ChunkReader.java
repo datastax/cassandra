@@ -60,7 +60,8 @@ public interface ChunkReader extends RebuffererFactory
     enum ReaderType
     {
         SIMPLE,
-        COMPRESSED;
+        COMPRESSED,
+        COMPRESSION_OFFSET;
         /** The number of types. Declared as a constant to avoid allocating on values(). */
         public static final int COUNT = ReaderType.values().length;
     }

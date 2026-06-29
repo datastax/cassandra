@@ -27,15 +27,22 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.AbstractReaderFileProxy;
+import org.apache.cassandra.io.util.BufferManagingRebufferer;
+import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.Memory;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.concurrent.Ref;
@@ -368,6 +375,225 @@ public interface CompressionChunkOffsets extends AutoCloseable
                 cache.invalidate(new CompressionChunkOffsetCache.BlockKey(fileId, i));
 
             FileUtils.closeQuietly(fileChannel);
+        }
+    }
+
+    class ChunkCache implements CompressionChunkOffsets
+    {
+        private final File file;
+        private final int baseChunkIndex;
+        private final int size;
+        private final int chunkCount;
+        private final long compressedFileLength;
+        private final Rebufferer rebufferer;
+
+        public ChunkCache(File file,
+                          long offsetsStart,
+                          int baseChunkIndex,
+                          int size,
+                          int endIndex,
+                          int chunkCount,
+                          long compressedFileLength,
+                          CompressionMetadataReaderType readerType) throws IOException
+        {
+            org.apache.cassandra.cache.ChunkCache cache = org.apache.cassandra.cache.ChunkCache.instance;
+            if (cache == null || !cache.isEnabled())
+            {
+                String msg = "Compression chunk offsets type 'chunk_cache' requires the global chunk cache " +
+                             "to be enabled.";
+                throw new ConfigurationException(msg);
+            }
+
+            this.file = file;
+            this.baseChunkIndex = baseChunkIndex;
+            this.size = size;
+            this.chunkCount = chunkCount;
+
+            OffsetChunkReader chunkReader = new OffsetChunkReader(file,
+                                                                  offsetsStart,
+                                                                  (long) chunkCount * Long.BYTES,
+                                                                  readerType,
+                                                                  chunkCacheBlockBufferSize());
+            boolean success = false;
+            try
+            {
+                this.rebufferer = cache.maybeWrap(chunkReader).instantiateRebufferer();
+                // Save the post-last-chunk position to calculate the last compressed chunk length.
+                // Some files add an empty trailing chunk, so we cannot rely on file length here.
+                this.compressedFileLength = endIndex < chunkCount
+                                            ? getAbsolute(endIndex) - getAbsolute(baseChunkIndex)
+                                            : compressedFileLength;
+                success = true;
+            }
+            finally
+            {
+                if (!success)
+                    chunkReader.close();
+            }
+        }
+
+        @Override
+        public long get(int index)
+        {
+            return getAbsolute(baseChunkIndex + index);
+        }
+
+        private long getAbsolute(int absoluteIndex)
+        {
+            if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
+            {
+                String msg = String.format("Chunk %d out of bounds: %d", absoluteIndex, chunkCount);
+                throw new CorruptSSTableException(new EOFException(msg), file);
+            }
+
+            long position = (long) absoluteIndex * Long.BYTES;
+            Rebufferer.BufferHolder holder = rebufferer.rebuffer(position);
+            try
+            {
+                ByteBuffer buffer = holder.buffer();
+                int offset = Math.toIntExact(position - holder.offset());
+                if (offset < 0 || offset + Long.BYTES > buffer.limit())
+                {
+                    String msg = String.format("Chunk %d offset is outside cached buffer: offset=%d limit=%d",
+                                               absoluteIndex, offset, buffer.limit());
+                    throw new CorruptSSTableException(new EOFException(msg), file);
+                }
+                return buffer.getLong(offset);
+            }
+            finally
+            {
+                holder.release();
+            }
+        }
+
+        @Override
+        public int size()
+        {
+            return size;
+        }
+
+        @Override
+        public long offHeapMemoryUsed()
+        {
+            // Chunk cache memory is shared and reported through chunk cache metrics.
+            return 0;
+        }
+
+        @Override
+        public void addTo(Ref.IdentityCollection identities)
+        {
+            // no-op - the chunk cache manages its own memory
+        }
+
+        @Override
+        public long compressedFileLength()
+        {
+            return compressedFileLength;
+        }
+
+        @Override
+        public void close()
+        {
+            rebufferer.close();
+        }
+
+        @VisibleForTesting
+        static int chunkCacheBlockBufferSize()
+        {
+            int configuredSize = CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE
+                                                            .getInt();
+            int roundedSize = Math.max(Long.BYTES, (configuredSize / Long.BYTES) * Long.BYTES);
+            if (Integer.bitCount(roundedSize) != 1)
+            {
+                CassandraRelevantProperties blockSizeProperty =
+                    CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE;
+                String blockSizeKey = blockSizeProperty.getKey();
+                String typeKey = CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.getKey();
+                String msg = String.format("%s must resolve to a power of two when %s is 'chunk_cache'; " +
+                                           "got %d",
+                                           blockSizeKey, typeKey, roundedSize);
+                throw new ConfigurationException(msg);
+            }
+            return roundedSize;
+        }
+
+        private static final class OffsetChunkReader extends AbstractReaderFileProxy implements ChunkReader
+        {
+            private final long offsetsStart;
+            private final long offsetsLength;
+            private final int chunkSize;
+
+            private OffsetChunkReader(File file,
+                                      long offsetsStart,
+                                      long offsetsLength,
+                                      CompressionMetadataReaderType readerType,
+                                      int chunkSize) throws IOException
+            {
+                super(new ChannelProxy(file, CompressionChunkOffsets.openChannel(file, readerType)),
+                      offsetsLength);
+                this.offsetsStart = offsetsStart;
+                this.offsetsLength = offsetsLength;
+                this.chunkSize = chunkSize;
+            }
+
+            @Override
+            public void readChunk(long position, ByteBuffer buffer)
+            {
+                if (position < 0 || position >= offsetsLength)
+                {
+                    buffer.position(0).limit(0);
+                    return;
+                }
+
+                int bytesToRead = Math.toIntExact(Math.min(buffer.capacity(), offsetsLength - position));
+                buffer.clear().limit(bytesToRead);
+
+                int read = 0;
+                long filePosition = offsetsStart + position;
+                while (read < bytesToRead)
+                {
+                    int n = channel.read(buffer, filePosition + read);
+                    if (n < 0)
+                    {
+                        String msg = "EOF reading compression offsets from " + channel.getFile();
+                        throw new CorruptSSTableException(new EOFException(msg), channel.getFile());
+                    }
+                    if (n == 0)
+                        continue;
+                    read += n;
+                }
+                buffer.flip();
+            }
+
+            @Override
+            public int chunkSize()
+            {
+                return chunkSize;
+            }
+
+            @Override
+            public BufferType preferredBufferType()
+            {
+                return BufferType.OFF_HEAP;
+            }
+
+            @Override
+            public Rebufferer instantiateRebufferer()
+            {
+                return new BufferManagingRebufferer.Aligned(this);
+            }
+
+            @Override
+            public ReaderType type()
+            {
+                return ReaderType.COMPRESSION_OFFSET;
+            }
+
+            @Override
+            public void close()
+            {
+                channel.close();
+            }
         }
     }
 

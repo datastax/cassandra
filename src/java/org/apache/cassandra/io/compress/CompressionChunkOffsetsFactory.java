@@ -51,6 +51,7 @@ import static org.apache.cassandra.io.compress.CompressionMetadata.NATIVE_MEMORY
  *     pressure. Requires the file to be fully present on local disk.</li>
  *     <li>{@code block_cache}: use {@link CompressionChunkOffsets.BlockCache} sized by
  *     {@link CassandraRelevantProperties#COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE}.</li>
+ *     <li>{@code chunk_cache}: use {@link CompressionChunkOffsets.ChunkCache} backed by the global chunk cache.</li>
  * </ul>
  */
 public interface CompressionChunkOffsetsFactory
@@ -61,7 +62,7 @@ public interface CompressionChunkOffsetsFactory
 
     enum Type
     {
-        IN_MEMORY, MMAP, BLOCK_CACHE
+        IN_MEMORY, MMAP, BLOCK_CACHE, CHUNK_CACHE
     }
 
     /**
@@ -77,7 +78,7 @@ public interface CompressionChunkOffsetsFactory
         }
         catch (IllegalArgumentException e)
         {
-            throw new ConfigurationException(String.format("Invalid value '%s' for %s. Valid values are: in_memory, mmap, block_cache",
+            throw new ConfigurationException(String.format("Invalid value '%s' for %s. Valid values are: in_memory, mmap, block_cache, chunk_cache",
                                                            value, COMPRESSION_CHUNK_OFFSETS_TYPE.getKey()));
         }
     }
@@ -112,6 +113,9 @@ public interface CompressionChunkOffsetsFactory
                 CompressionChunkOffsetCache cache = CompressionChunkOffsetCache.get();
                 return new CompressionChunkOffsets.BlockCache(indexFilePath, offsetsStart, startIndex, endIndex - startIndex,
                                                               endIndex, chunkCount, compressedFileLength, readerType, cache);
+            case CHUNK_CACHE:
+                return new CompressionChunkOffsets.ChunkCache(indexFilePath, offsetsStart, startIndex, endIndex - startIndex,
+                                                              endIndex, chunkCount, compressedFileLength, readerType);
             case IN_MEMORY:
             default:
                 return createInMemoryOffsets(indexFilePath, input, startIndex, endIndex, chunkCount, compressedFileLength);
@@ -169,6 +173,11 @@ public interface CompressionChunkOffsetsFactory
                 memoryChunkOffsets.close();
                 return new CompressionChunkOffsets.BlockCache(indexFilePath, offsetsStart, startIndex, endIndex - startIndex,
                                                               endIndex, chunkCount, compressedFileLength, readerType, cache);
+            case CHUNK_CACHE:
+                // Release writer's in-memory offsets since we'll use chunk-cached implementation.
+                memoryChunkOffsets.close();
+                return new CompressionChunkOffsets.ChunkCache(indexFilePath, offsetsStart, startIndex, endIndex - startIndex,
+                                                              endIndex, chunkCount, compressedFileLength, readerType);
             case IN_MEMORY:
             default:
                 NATIVE_MEMORY_USAGE.addAndGet(memoryChunkOffsets.memoryUsed());

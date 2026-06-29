@@ -39,6 +39,7 @@ import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.CompressionMetadata;
@@ -57,7 +58,7 @@ public class CompressionChunkOffsetsBench
     public static class BenchmarkState
     {
         // Selects the compression chunk offsets implementation to benchmark.
-        @Param({ "IN_MEMORY", "BLOCK_CACHE", "MMAP"})
+        @Param({ "IN_MEMORY", "BLOCK_CACHE", "CHUNK_CACHE", "MMAP"})
         public String offsetsType;
 
         @Param({ "1000000"})
@@ -67,6 +68,7 @@ public class CompressionChunkOffsetsBench
         private static final int COMPRESSED_LEN = 12;
         private static final int CHECKSUM_LEN = 4;
         private static final int OFFSETS_TO_READ = 1024 * 512;
+        private static final int CHUNK_CACHE_SIZE_MB = 512;
 
         private CompressionMetadata metadata;
         private File metadataFile;
@@ -84,7 +86,21 @@ public class CompressionChunkOffsetsBench
                     break;
                 case "BLOCK_CACHE":
                     CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("block_cache");
-                    CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("256MiB");
+                    CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE
+                                               .setString("256MiB");
+                    CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE.setString("65536");
+                    break;
+                case "CHUNK_CACHE":
+                    DatabaseDescriptor.enableChunkCache(CHUNK_CACHE_SIZE_MB);
+                    if (ChunkCache.instance == null)
+                    {
+                        String msg = "ChunkCache was initialized before file cache was enabled.";
+                        throw new IllegalStateException(msg);
+                    }
+                    ChunkCache.instance.enable(true);
+                    ChunkCache.instance.clear();
+                    CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("chunk_cache");
+                    CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.setString("4096");
                     break;
                 case "IN_MEMORY":
                 default:
@@ -105,15 +121,20 @@ public class CompressionChunkOffsetsBench
             if (metadata != null)
                 metadata.close();
 
+            if ("CHUNK_CACHE".equals(offsetsType) && ChunkCache.instance != null)
+                ChunkCache.instance.clear();
+
             CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.reset();
+            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE.reset();
+            CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.reset();
             CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.reset();
         }
 
         @Setup(Level.Iteration)
         public void prewarmCache()
         {
-            // Only prewarm the block-cache type.
-            if (!"BLOCK_CACHE".equals(offsetsType))
+            // Only prewarm cache-backed types.
+            if (!"BLOCK_CACHE".equals(offsetsType) && !"CHUNK_CACHE".equals(offsetsType))
                 return;
 
             for (long position : positions)

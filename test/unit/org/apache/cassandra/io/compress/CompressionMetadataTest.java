@@ -36,6 +36,7 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.CompressionMetadata.Chunk;
@@ -49,9 +50,12 @@ import static java.util.Arrays.asList;
 import static org.apache.cassandra.io.compress.CompressionChunkOffsetCache.getCacheSizeInBytes;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assume.assumeNotNull;
 
 public class CompressionMetadataTest
 {
+    private static boolean chunkCacheTouched;
+
     @BeforeClass
     public static void init()
     {
@@ -64,9 +68,12 @@ public class CompressionMetadataTest
         CompressionChunkOffsetCache.resetCache();
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.reset();
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE.reset();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.reset();
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.reset();
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_MMAP_SEGMENT_SIZE.reset();
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_FACTORY.reset();
+        if (chunkCacheTouched && ChunkCache.instance != null)
+            ChunkCache.instance.clear();
     }
 
     private File generateMetaDataFile(long dataLength, long... offsets) throws IOException
@@ -118,10 +125,21 @@ public class CompressionMetadataTest
             case BLOCK_CACHE:
                 // in-memory only when the block cache is disabled
                 return CompressionChunkOffsetCache.get() == null;
+            case CHUNK_CACHE:
+                return false;
             case IN_MEMORY:
             default:
                 return true;
         }
+    }
+
+    private static void assumeChunkCacheAvailable()
+    {
+        DatabaseDescriptor.enableChunkCache(512);
+        assumeNotNull(ChunkCache.instance);
+        chunkCacheTouched = true;
+        ChunkCache.instance.enable(true);
+        ChunkCache.instance.clear();
     }
 
     private void assertChunks(CompressionMetadata metadata, long from, long to, long expectedOffset, long expectedLength)
@@ -154,6 +172,15 @@ public class CompressionMetadataTest
     {
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("block_cache");
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("100MiB");
+        testLargeFileAccess();
+    }
+
+    @Test
+    public void testLargeFileAccessChunkCache() throws IOException
+    {
+        assumeChunkCacheAvailable();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("chunk_cache");
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.setString("64");
         testLargeFileAccess();
     }
 
@@ -237,6 +264,30 @@ public class CompressionMetadataTest
     }
 
     @Test
+    public void chunkForWithChunkCache() throws IOException
+    {
+        assumeChunkCacheAvailable();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("chunk_cache");
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.setString("16");
+        chunkFor();
+    }
+
+    @Test
+    public void chunkCacheTypePopulatesGlobalChunkCache() throws IOException
+    {
+        assumeChunkCacheAvailable();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("chunk_cache");
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.setString("16");
+
+        File file = generateMetaDataFile(64, 0, 16, 32, 48);
+        try (CompressionMetadata metadata = new CompressionMetadata(file, 64, true))
+        {
+            assertThat(metadata.chunkFor(32).offset).isEqualTo(32);
+            assertThat(ChunkCache.instance.sizeOfFile(file)).isGreaterThan(0);
+        }
+    }
+
+    @Test
     public void testBlockCacheBlockSizeIsRoundedToWholeOffset()
     {
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE.setString("15");
@@ -247,6 +298,23 @@ public class CompressionMetadataTest
 
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE.setString("1");
         assertThat(CompressionChunkOffsetCache.blockBufferSize()).isEqualTo(Long.BYTES);
+    }
+
+    @Test
+    public void testChunkCacheBlockSizeMustBePowerOfTwo()
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("chunk_cache");
+
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.setString("15");
+        assertThat(CompressionChunkOffsets.ChunkCache.chunkCacheBlockBufferSize()).isEqualTo(Long.BYTES);
+
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.setString("17");
+        assertThat(CompressionChunkOffsets.ChunkCache.chunkCacheBlockBufferSize()).isEqualTo(2 * Long.BYTES);
+
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.setString("24");
+        assertThatThrownBy(CompressionChunkOffsets.ChunkCache::chunkCacheBlockBufferSize)
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("power of two");
     }
 
     @Test
@@ -404,6 +472,15 @@ public class CompressionMetadataTest
     public void testConcurrentAccessMmap() throws Exception
     {
         CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("mmap");
+        testConcurrentAccess();
+    }
+
+    @Test
+    public void testConcurrentAccessChunkCache() throws Exception
+    {
+        assumeChunkCacheAvailable();
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("chunk_cache");
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_CHUNK_CACHE_BLOCK_SIZE.setString("64");
         testConcurrentAccess();
     }
 
