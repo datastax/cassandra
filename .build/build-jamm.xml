@@ -27,6 +27,14 @@
            org.apache.cassandra:cassandra-jamm:${version} (mirroring how Accord is built) so the parent
            pom resolves it from the local build rather than the upstream com.github.jbellis:jamm release.
            Compiled to match the JDK building Cassandra. -->
+      <!-- Populate the submodule if the CI checkout did not recurse into it.
+           Shallow clones without recurse-submodules leave modules/jamm/src empty. -->
+      <exec executable="git" dir="${basedir}" failonerror="true">
+        <arg value="submodule"/>
+        <arg value="update"/>
+        <arg value="--init"/>
+        <arg value="${jamm.dir}"/>
+      </exec>
       <property name="jamm.build.dir" location="${basedir}/${jamm.dir}/build"/>
       <property name="jamm.build.classes" location="${jamm.build.dir}/classes"/>
       <delete dir="${jamm.build.dir}" quiet="true"/>
