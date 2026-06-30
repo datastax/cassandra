@@ -231,7 +231,9 @@ public class ToolRunner
         ProcessBuilder pb = new ProcessBuilder(args);
         if (env != null && !env.isEmpty())
             pb.environment().putAll(env);
-        String jvmOpts = pb.environment().getOrDefault("JVM_OPTS", "") + " -Dcassandra.disable_tcactive_openssl=true";
+        String jvmOpts = pb.environment().getOrDefault("JVM_OPTS", "") + " -Dcassandra.disable_tcactive_openssl=true"
+                         // Allow sun.misc.Unsafe memory-access without the JDK 23+ terminal-deprecation warning (JEP 471)
+                         + " --sun-misc-unsafe-memory-access=allow";
         pb.environment().put("JVM_OPTS", jvmOpts);
 
         try
