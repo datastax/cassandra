@@ -826,6 +826,7 @@ public class Paxos
 
 
             metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
+            metrics.allRequestsMetrics.executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForConsensus).executionTimeMetrics.addNano(latency);
         }
     }
@@ -927,6 +928,7 @@ public class Paxos
             long latency = nanoTime() - start;
             metrics.readMetrics.executionTimeMetrics.addNano(latency);
             metrics.casReadMetrics.executionTimeMetrics.addNano(latency);
+            metrics.allRequestsMetrics.executionTimeMetrics.addNano(latency);
             metrics.readMetricsForLevel(consistencyForConsensus).executionTimeMetrics.addNano(latency);
             TableMetadata table = read.metadata();
             ColumnFamilyStore cfs = Keyspace.open(table.keyspace).getColumnFamilyStore(table.name);
