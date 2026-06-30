@@ -669,6 +669,8 @@ public class StorageProxy implements StorageProxyMBean
             long latency = nanoTime() - requestTime.startedAtNanos();
             metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
             metrics.casWriteMetrics.serviceTimeMetrics.addNano(latency);
+            metrics.allRequestsMetrics.executionTimeMetrics.addNano(latency);
+            metrics.allRequestsMetrics.serviceTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(latency);
             Keyspace.openAndGetStore(metadata).metric.coordinatorCasWriteLatency.update(latency, NANOSECONDS);
@@ -2295,6 +2297,8 @@ public class StorageProxy implements StorageProxyMBean
             metrics.readMetrics.serviceTimeMetrics.addNano(serviceLatency);
             metrics.casReadMetrics.executionTimeMetrics.addNano(latency);
             metrics.casReadMetrics.serviceTimeMetrics.addNano(serviceLatency);
+            metrics.allRequestsMetrics.executionTimeMetrics.addNano(latency);
+            metrics.allRequestsMetrics.serviceTimeMetrics.addNano(serviceLatency);
             metrics.readMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
             metrics.readMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(serviceLatency);
             ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name);

@@ -87,6 +87,7 @@ public class ClientRequestsMetrics
         writeMetrics.release();
         casWriteMetrics.release();
         casReadMetrics.release();
+        allRequestsMetrics.release();
         readMetricsMap.values().forEach(ClientRequestMetrics::release);
         writeMetricsMap.values().forEach(ClientRequestMetrics::release);
     }
