@@ -98,6 +98,7 @@ public class TableMetrics
     private static final Logger logger = LoggerFactory.getLogger(TableMetrics.class);
 
     public static final String TABLE_EXTENSIONS_HISTOGRAMS_METRICS_KEY = "HISTOGRAM_METRICS";
+    private final CassandraMetricsRegistry metricsRegistry;
 
     public enum MetricsAggregation
     {
@@ -433,29 +434,35 @@ public class TableMetrics
         }
         return Pair.create(filtered, total);
     }
+    public static final Gauge<Double> globalPercentRepaired;
+    public static final Gauge<Long> globalBytesRepaired;
+    public static final Gauge<Long> globalBytesUnrepaired;
+    public static final Gauge<Long> globalBytesPendingRepair;
 
-    public static final Gauge<Double> globalPercentRepaired = Metrics.register(GLOBAL_FACTORY.createMetricName("PercentRepaired"),
-                                                                               new Gauge<Double>()
+    static
     {
-        public Double getValue()
-        {
-            Pair<Long, Long> result = totalNonSystemTablesSize(SSTableReader::isRepaired);
-            double repaired = result.left;
-            double total = result.right;
-            return total > 0 ? (repaired / total) * 100 : 100.0;
-        }
-    });
+        CassandraMetricsRegistry metricsRegistry = CassandraRelevantProperties.TABLE_METRICS_ENABLED.getBoolean() ? Metrics : CassandraMetricsRegistry.NoOpMetrics;
 
-    public static final Gauge<Long> globalBytesRepaired = Metrics.register(GLOBAL_FACTORY.createMetricName("BytesRepaired"),
-                                                                           () -> totalNonSystemTablesSize(SSTableReader::isRepaired).left);
+        globalPercentRepaired = metricsRegistry.register(GLOBAL_FACTORY.createMetricName("PercentRepaired"),
+                                                         () -> {
+                                                             Pair<Long, Long> result = totalNonSystemTablesSize(SSTableReader::isRepaired);
+                                                             double repaired = result.left;
+                                                             double total = result.right;
+                                                             return total > 0 ? (repaired / total) * 100 : 100.0;
+                                                         });
 
-    public static final Gauge<Long> globalBytesUnrepaired =
-        Metrics.register(GLOBAL_FACTORY.createMetricName("BytesUnrepaired"),
-                         () -> totalNonSystemTablesSize(s -> !s.isRepaired() && !s.isPendingRepair()).left);
+        globalBytesRepaired = metricsRegistry.register(GLOBAL_FACTORY.createMetricName("BytesRepaired"),
+                                               () -> totalNonSystemTablesSize(SSTableReader::isRepaired).left);
 
-    public static final Gauge<Long> globalBytesPendingRepair =
-        Metrics.register(GLOBAL_FACTORY.createMetricName("BytesPendingRepair"),
-                         () -> totalNonSystemTablesSize(SSTableReader::isPendingRepair).left);
+        globalBytesUnrepaired = metricsRegistry.register(GLOBAL_FACTORY.createMetricName("BytesUnrepaired"),
+                                                 () -> totalNonSystemTablesSize(s -> !s.isRepaired() && !s.isPendingRepair()).left);
+
+        globalBytesPendingRepair = metricsRegistry.register(GLOBAL_FACTORY.createMetricName("BytesPendingRepair"),
+                                                    () -> totalNonSystemTablesSize(SSTableReader::isPendingRepair).left);
+
+    }
+
+
 
     public final Meter readRepairRequests;
     public final Meter shortReadProtectionRequests;
@@ -520,7 +527,7 @@ public class TableMetrics
      *
      * @param cfs ColumnFamilyStore to measure metrics
      */
-    public TableMetrics(final ColumnFamilyStore cfs, ReleasableMetric memtableMetrics)
+    public TableMetrics(final ColumnFamilyStore cfs, ReleasableMetric memtableMetrics, CassandraMetricsRegistry metricsRegistry)
     {
         metricsAggregation = MetricsAggregation.fromMetadata(cfs.metadata());
         logger.trace("Using {} histograms for table={}", metricsAggregation, cfs.metadata());
@@ -576,6 +583,7 @@ public class TableMetrics
         samplers.put(SamplerType.CAS_CONTENTIONS, topCasPartitionContention);
         samplers.put(SamplerType.LOCAL_READ_TIME, topLocalReadQueryTime);
 
+        this.metricsRegistry = metricsRegistry;
         memtableColumnsCount = createTableGauge("MemtableColumnsCount",
                                                 () -> cfs.getTracker().getView().getCurrentMemtable().getOperations());
 
@@ -1259,10 +1267,10 @@ public class TableMetrics
 
     protected <G,T> Gauge<T> createTableGauge(String name, String alias, Gauge<T> gauge, Gauge<G> globalGauge)
     {
-        Gauge<T> cfGauge = Metrics.register(factory.createMetricName(name), aliasFactory.createMetricName(alias), gauge);
+        Gauge<T> cfGauge = metricsRegistry.register(factory.createMetricName(name), aliasFactory.createMetricName(alias), gauge);
         if (register(name, alias, cfGauge) && globalGauge != null)
         {
-            Metrics.register(GLOBAL_FACTORY.createMetricName(name), GLOBAL_ALIAS_FACTORY.createMetricName(alias), globalGauge);
+            metricsRegistry.register(GLOBAL_FACTORY.createMetricName(name), GLOBAL_ALIAS_FACTORY.createMetricName(alias), globalGauge);
         }
         return cfGauge;
     }
@@ -1279,7 +1287,7 @@ public class TableMetrics
         assert deprecated != null : "no deprecated metric name provided";
         assert globalGauge != null : "no global Gauge metric provided";
         
-        Gauge<T> cfGauge = Metrics.register(factory.createMetricName(name), 
+        Gauge<T> cfGauge = metricsRegistry.register(factory.createMetricName(name),
                                             gauge,
                                             aliasFactory.createMetricName(name),
                                             factory.createMetricName(deprecated),
@@ -1287,7 +1295,7 @@ public class TableMetrics
         
         if (register(name, name, deprecated, cfGauge))
         {
-            Metrics.register(GLOBAL_FACTORY.createMetricName(name),
+            metricsRegistry.register(GLOBAL_FACTORY.createMetricName(name),
                              globalGauge,
                              GLOBAL_ALIAS_FACTORY.createMetricName(name),
                              GLOBAL_FACTORY.createMetricName(deprecated),
@@ -1307,10 +1315,10 @@ public class TableMetrics
 
     protected Counter createTableCounter(final String name, final String alias)
     {
-        Counter cfCounter = Metrics.counter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
+        Counter cfCounter = metricsRegistry.counter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
         if (register(name, alias, cfCounter))
         {
-            Metrics.register(GLOBAL_FACTORY.createMetricName(name),
+            metricsRegistry.register(GLOBAL_FACTORY.createMetricName(name),
                              GLOBAL_ALIAS_FACTORY.createMetricName(alias),
                              new Gauge<Long>()
                              {
@@ -1335,14 +1343,14 @@ public class TableMetrics
 
     private Meter createTableMeter(final String name, final String alias)
     {
-        Meter tableMeter = Metrics.meter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
+        Meter tableMeter = metricsRegistry.meter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
         register(name, alias, tableMeter);
         return tableMeter;
     }
     
     private Histogram createHistogram(String name, boolean considerZeroes)
     {
-        Histogram histogram = Metrics.histogram(factory.createMetricName(name), aliasFactory.createMetricName(name), considerZeroes);
+        Histogram histogram = metricsRegistry.histogram(factory.createMetricName(name), aliasFactory.createMetricName(name), considerZeroes);
         register(name, name, histogram);
         return histogram;
     }
@@ -1387,7 +1395,7 @@ public class TableMetrics
         Histogram globalHistogram = null;
         if (EXPORT_GLOBAL_METRICS)
         {
-            globalHistogram = Metrics.histogram(GLOBAL_FACTORY.createMetricName(name),
+            globalHistogram = metricsRegistry.histogram(GLOBAL_FACTORY.createMetricName(name),
                                                 GLOBAL_ALIAS_FACTORY.createMetricName(alias),
                                                 considerZeroes);
         }
@@ -1395,7 +1403,7 @@ public class TableMetrics
         Histogram tableHistogram = null;
         if (metricsAggregation == MetricsAggregation.INDIVIDUAL)
         {
-            tableHistogram = Metrics.histogram(factory.createMetricName(name), aliasFactory.createMetricName(alias), considerZeroes);
+            tableHistogram = metricsRegistry.histogram(factory.createMetricName(name), aliasFactory.createMetricName(alias), considerZeroes);
             register(name, alias, tableHistogram);
         }
 
@@ -1409,7 +1417,7 @@ public class TableMetrics
 
     protected Histogram createTableHistogram(String name, String alias, boolean considerZeroes)
     {
-        Histogram tableHistogram = Metrics.histogram(factory.createMetricName(name), aliasFactory.createMetricName(alias), considerZeroes);
+        Histogram tableHistogram = metricsRegistry.histogram(factory.createMetricName(name), aliasFactory.createMetricName(alias), considerZeroes);
         register(name, alias, tableHistogram);
         return tableHistogram;
     }
@@ -1419,13 +1427,13 @@ public class TableMetrics
         Timer globalTimer = null;
         if (EXPORT_GLOBAL_METRICS)
         {
-            globalTimer = Metrics.timer(GLOBAL_FACTORY.createMetricName(name), GLOBAL_ALIAS_FACTORY.createMetricName(name));
+            globalTimer = metricsRegistry.timer(GLOBAL_FACTORY.createMetricName(name), GLOBAL_ALIAS_FACTORY.createMetricName(name));
         }
 
         Timer tableTimer = null;
         if (metricsAggregation == MetricsAggregation.INDIVIDUAL)
         {
-            tableTimer = Metrics.timer(factory.createMetricName(name), aliasFactory.createMetricName(name));
+            tableTimer = metricsRegistry.timer(factory.createMetricName(name), aliasFactory.createMetricName(name));
             register(name, name, keyspaceTimer);
         }
 
@@ -1434,7 +1442,7 @@ public class TableMetrics
 
     protected Timer createTableTimer(String name)
     {
-        Timer tableTimer = Metrics.timer(factory.createMetricName(name), aliasFactory.createMetricName(name));
+        Timer tableTimer = metricsRegistry.timer(factory.createMetricName(name), aliasFactory.createMetricName(name));
         register(name, name, tableTimer);
         return tableTimer;
     }
@@ -1449,14 +1457,14 @@ public class TableMetrics
         Meter globalMeter = null;
         if (EXPORT_GLOBAL_METRICS)
         {
-            globalMeter = Metrics.meter(GLOBAL_FACTORY.createMetricName(name),
+            globalMeter = metricsRegistry.meter(GLOBAL_FACTORY.createMetricName(name),
                                         GLOBAL_ALIAS_FACTORY.createMetricName(alias));
         }
 
         Meter tableMeter = null;
         if (metricsAggregation == MetricsAggregation.INDIVIDUAL)
         {
-            tableMeter = Metrics.meter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
+            tableMeter = metricsRegistry.meter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
             register(name, alias, tableMeter);
         }
 
@@ -1470,7 +1478,7 @@ public class TableMetrics
         {
             LatencyMetrics[] parents = Stream.of(Optional.of(keyspace), global).filter(Optional::isPresent)
                                              .map(Optional::get).toArray(LatencyMetrics[]::new);
-            LatencyMetrics innerMetrics = new LatencyMetrics(factory, namePrefix, parents);
+            LatencyMetrics innerMetrics = new LatencyMetrics(factory, namePrefix, metricsRegistry, parents);
             metric = new TableLatencyMetrics.IndividualTableLatencyMetrics(innerMetrics);
         }
         else
@@ -1511,7 +1519,7 @@ public class TableMetrics
     {
         CassandraMetricsRegistry.MetricName name = factory.createMetricName(tableMetricName);
 
-        final Metric metric = Metrics.getMetrics().get(name.getMetricName());
+        final Metric metric = metricsRegistry.getMetrics().get(name.getMetricName());
         if (metric != null)
         {
             // Metric will be null if we are releasing a view metric.  Views have null for ViewLockAcquireTime and ViewLockReadTime
@@ -1520,11 +1528,11 @@ public class TableMetrics
             
             if (tableMetricAlias != null)
             {
-                Metrics.remove(name, cfAlias, factory.createMetricName(tableMetricAlias), aliasFactory.createMetricName(tableMetricAlias));
+                metricsRegistry.remove(name, cfAlias, factory.createMetricName(tableMetricAlias), aliasFactory.createMetricName(tableMetricAlias));
             }
             else
             {
-                Metrics.remove(name, cfAlias);
+                metricsRegistry.remove(name, cfAlias);
             }
         }
     }
