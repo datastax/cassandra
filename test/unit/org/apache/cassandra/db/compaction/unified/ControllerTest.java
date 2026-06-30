@@ -17,7 +17,6 @@
 package org.apache.cassandra.db.compaction.unified;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -973,11 +972,7 @@ public abstract class ControllerTest
     private static void setScalingParameterPersistenceForTest(boolean enabled) throws Exception
     {
         Field field = Controller.class.getDeclaredField("SCALING_PARAMETER_PERSISTENCE");
-        field.setAccessible(true);
-        Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-        field.set(null, enabled);
+        ReflectionUtils.writeField(null, field, enabled);
     }
 
     @Test
