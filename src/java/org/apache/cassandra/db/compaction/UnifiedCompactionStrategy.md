@@ -424,6 +424,25 @@ compaction thread count by default. Using a jobs of 0 will let the compaction us
 as quickly as possible, but this will prevent other compaction operations from running until it completes and thus
 should be used with caution, only while the database is known to not receive any writes.
 
+## Time-driven levels
+
+To support time-partitioned workloads (similar to DateTieredCompactionStrategy or TimeWindowCompactionStrategy), UCS allows partitioning SSTables into separate compaction arenas based on the age of the data (determined by the SSTable's minimum timestamp). 
+
+Time-driven levels are defined within the `scaling_parameters` option using semicolon-separated segments:
+1. **`until <duration>` (Transient young period)**: SSTables whose age (now - minimum timestamp) is less than the duration are matched by this segment. Multiple `until` segments can be defined; they must be ordered by strictly increasing duration.
+2. **`every <duration>` (Repeating time-window)**: Older SSTables (whose age is greater than all `until` segments) are partitioned into fixed-size repeating time windows of the specified duration. The window boundaries align to multiples of the duration since the Unix epoch.
+3. **Plain/unqualified scaling parameters**: The final segment in the list can also be plain scaling parameters, which act as the catch-all for all remaining (older) SSTables.
+
+### SSTable Size Adjustment (Stranded SSTable Prevention)
+
+In time-window systems, traffic fluctuations can cause some windows to contain much smaller SSTables than normal. For example, if a node is configured with `T4 until 1d; L4` (where older data uses leveled compaction $L4$), a typical day might produce $16\text{ GiB}$ SSTables that end up on Level 2 in the older arena. However, a lower-traffic day might result in a $5\text{ GiB}$ SSTable that falls on Level 1. Because subsequent days return to normal, this smaller SSTable remains on Level 1 and is never compacted, preventing tombstone clearance.
+
+To prevent stranded SSTables, UCS dynamically adjusts the Level 0 boundary (base SSTable size) of each older bucket based on the actual size of SSTables currently present in the younger buckets. In the compaction planning phase, for each bucket $B$, UCS scans the active SSTables and finds the maximum density (size) among those that fall into buckets younger than $B$. The base SSTable size for bucket $B$ is then adjusted to be the maximum of the configured base size and this younger maximum density:
+
+$$\text{baseSSTableSize}_B = \max(\text{baseSSTableSize}, \text{youngerMaxDensity})$$
+
+This ensures that any SSTable entering an older bucket that is smaller than or equal to the size of data produced by younger buckets starts at Level 0, allowing it to compact properly with other SSTables.
+
 ## Differences with STCS and LCS
 
 Note that there are some differences between the tiered flavors of UCS (UCS-tiered) and STCS, and between the leveled
@@ -494,7 +513,8 @@ UCS accepts these compaction strategy parameters:
   N is the middle ground that has the features of levelled (one sstable run per level) as well as tiered (one
   compaction to be promoted to the next level) and a fan factor of 2. This can also be specified as T2 or L2.  
   The default value is T4, matching the default STCS behaviour with threshold 4. The default value in vector mode (see
-  paragraph below) is L10, equivalent to LCS with its default fan factor 10.
+  paragraph below) is L10, equivalent to LCS with its default fan factor 10.  
+  Time-driven levels can also be configured by suffixing scaling parameter segments with `until <duration>` or `every <duration>`, separated by semicolons. For example, `T4 until 1d; L1000000 every 1d` configures tiered compaction ($T4$) for data younger than 1 day, and repeating 1-day windows with aggressive leveling ($L1000000$) for older data. See the **Time-driven levels** section below for more details.
 * `target_sstable_size` The target sstable size $t$, specified as a human-friendly size in bytes (e.g. 100 MiB =
   $100\cdot 2^{20}$ B or (10 MB = 10,000,000 B)). The strategy will split data in shards that aim to produce sstables
   of size between $t / \sqrt 2$ and $t \cdot \sqrt 2$.  

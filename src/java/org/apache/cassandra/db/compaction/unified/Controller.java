@@ -321,8 +321,8 @@ public abstract class Controller
      *
      * <p>Optionally, time-driven level definitions may be appended after a {@code ;} separator:
      * <ul>
-     *   <li>{@code T4; L1000000 each 2w} — T4 for recent data, aggressive leveling for data older than 2 weeks</li>
-     *   <li>{@code T6, T2 by 1d} — separate time-window arena per day, using T6/T2 scaling within each</li>
+     *   <li>{@code T4 until 2w; L1000000} — T4 for recent data, aggressive leveling for data older than 2 weeks</li>
+     *   <li>{@code T6, T2 every 1d} — separate time-window arena per day, using T6/T2 scaling within each</li>
      * </ul>
      * See {@link TimeBucket} for the full syntax description.
      */
@@ -510,8 +510,8 @@ public abstract class Controller
      *
      * <p>When the list is non-empty, incoming SSTables are additionally partitioned by their minimum timestamp
      * into time-based arenas, each using its own scaling parameters. The list is ordered such that
-     * {@link TimeBucket.Mode#EACH} buckets (if any) sorted from oldest to youngest threshold appear first,
-     * followed by the {@link TimeBucket.Mode#BY} bucket (if any) at the end.
+     * {@link TimeBucket.Mode#UNTIL} buckets appear first (sorted from youngest to oldest duration),
+     * followed by the {@link TimeBucket.Mode#EVERY} bucket (if any) at the end.
      *
      * @return an unmodifiable list of {@link TimeBucket} definitions; empty when no time-driven levels are
      *         configured (the common case, for full backward compatibility)
@@ -573,13 +573,13 @@ public abstract class Controller
      * Determines which {@link TimeBucket} is applicable for a given SSTable.
      *
      * <p>Iterates through the configured time buckets (which are ordered such that
-     * {@link TimeBucket.Mode#EACH} threshold buckets are evaluated oldest-first, and
-     * {@link TimeBucket.Mode#BY} repeating window buckets are checked last).
+     * {@link TimeBucket.Mode#UNTIL} transient young buckets are evaluated first in ascending duration order, and
+     * {@link TimeBucket.Mode#EVERY} repeating window buckets are checked last).
      *
      * @param sstable the SSTable being evaluated
      * @param nowUs the current wall-clock epoch timestamp in microseconds
      * @return the matching {@link TimeBucket}, or {@code null} if no time buckets are configured
-     *         or if the SSTable does not fall into any age-threshold bucket (and no repeating
+     *         or if the SSTable does not fall into any transient young bucket (and no repeating
      *         window bucket is present).
      */
     public @Nullable TimeBucket getTimeBucketForSSTable(CompactionSSTable sstable, long nowUs)
@@ -591,12 +591,14 @@ public abstract class Controller
         long minTimestampUs = sstable.getMinTimestamp();
         for (TimeBucket bucket : buckets)
         {
-            if (bucket.mode == TimeBucket.Mode.BY)
-                return bucket;
-            else if (bucket.mode == TimeBucket.Mode.EACH)
+            if (bucket.mode == TimeBucket.Mode.UNTIL)
             {
-                if (bucket.isOld(minTimestampUs, nowUs))
+                if ((nowUs - minTimestampUs) < bucket.durationUs)
                     return bucket;
+            }
+            else if (bucket.mode == TimeBucket.Mode.EVERY)
+            {
+                return bucket;
             }
         }
         return null;
@@ -1583,6 +1585,11 @@ public abstract class Controller
         return Math.max(1 << 20, getFlushSizeBytes()) * (1.0 - 0.9 / F);
     }
 
+    public double getBaseSstableSize(int F, double youngerMaxSSTableSize)
+    {
+        return Math.max(getBaseSstableSize(F), youngerMaxSSTableSize);
+    }
+
     public double getMaxLevelDensity(int index, double minSize)
     {
         return Math.floor(minSize * getFanout(index) * getSurvivalFactor(index));
@@ -1652,24 +1659,24 @@ public abstract class Controller
 
     /**
      * Parses a scaling-parameters string and returns only the W values (the base scaling parameters),
-     * stripping any time-bucket clauses ({@code by <duration>}, {@code each <duration>}) that may be
-     * present in the string.
-     *
-     * <p>This method is called from the hot path and must remain backward-compatible: if no time-bucket
-     * clauses are present the string is parsed exactly as before. When time-bucket clauses are present,
-     * the W values from the first (base) segment are returned, allowing the controller to fall back to
-     * purely density-based compaction for contexts that do not yet understand time bucketing.
-     *
-     * <p>For full parsing of time-bucket clauses use {@link TimeBucket#parseScalingParameterGroups(String)}.
-     *
-     * @param str the raw value of the {@code scaling_parameters} option
-     * @return the base W values as an {@code int[]}
-     * @throws ConfigurationException on parse errors
-     */
+     *     * stripping any time-bucket clauses ({@code until <duration>}, {@code every <duration>}) that may be
+     *     * present in the string.
+     *     *
+     *     * <p>This method is called from the hot path and must remain backward-compatible: if no time-bucket
+     *     * clauses are present the string is parsed exactly as before. When time-bucket clauses are present,
+     *     * the W values from the first (base) segment are returned, allowing the controller to fall back to
+     *     * purely density-based compaction for contexts that do not yet understand time bucketing.
+     *     *
+     *     * <p>For full parsing of time-bucket clauses use {@link TimeBucket#parseScalingParameterGroups(String)}.
+     *     *
+     *     * @param str the raw value of the {@code scaling_parameters} option
+     *     * @return the base W values as an {@code int[]}
+     *     * @throws ConfigurationException on parse errors
+     *     */
     public static int[] parseScalingParameters(String str)
     {
         // Fast path: if no ';' present there are no time-bucket clauses.
-        if (!str.contains(";") && !str.toLowerCase().contains(" by ") && !str.toLowerCase().contains(" each "))
+        if (!str.contains(";") && !str.toLowerCase().contains(" until ") && !str.toLowerCase().contains(" every "))
         {
             String[] vals = str.split(",");
             int[] ret = new int[vals.length];
@@ -1686,7 +1693,7 @@ public abstract class Controller
 
     /**
      * Parses the full structured representation of a {@code scaling_parameters} value, including any
-     * time-bucket definitions ({@code by <duration>} and {@code each <duration>} clauses).
+     * time-bucket definitions ({@code until <duration>} and {@code every <duration>} clauses).
      *
      * <p>Returns a {@link TimeBucket.ParseResult} that bundles the base scaling parameters together with
      * the ordered list of time bucket definitions. Controllers that need time-bucket awareness call this

@@ -57,8 +57,8 @@ public class StaticController extends Controller
     /**
      * Ordered list of time bucket definitions parsed from the {@code scaling_parameters} option.
      * Empty when no time-driven levels are configured (the common case).
-     * {@link TimeBucket.Mode#BY} buckets appear first, followed by {@link TimeBucket.Mode#EACH} buckets
-     * sorted youngest-threshold-first.
+     * {@link TimeBucket.Mode#UNTIL} buckets appear first (sorted from youngest to oldest duration),
+     * followed by the {@link TimeBucket.Mode#EVERY} bucket at the end if present.
      */
     private final List<TimeBucket> timeBuckets;
 
