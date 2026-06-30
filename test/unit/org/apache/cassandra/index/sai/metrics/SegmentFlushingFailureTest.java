@@ -87,6 +87,12 @@ public abstract class SegmentFlushingFailureTest extends SAITester
                       "complete",
                       RuntimeException.class);
 
+    private static final Injection v9sstableComponentsWriterFailure =
+    newFailureOnEntry("sstableComponentsWriterFailure",
+                      org.apache.cassandra.index.sai.disk.v9.SSTableComponentsWriter.class,
+                      "complete",
+                      RuntimeException.class);
+
     private static final Injection segmentFlushFailure =
             newFailureOnEntry("segmentFlushFailure", SegmentBuilder.class, "flush", RuntimeException.class);
 
@@ -141,9 +147,21 @@ public abstract class SegmentFlushingFailureTest extends SAITester
     @Test
     public void shouldZeroMemoryTrackerOnOffsetsRuntimeFailure() throws Throwable
     {
-        shouldZeroMemoryTrackerOnFailure(Version.current(KEYSPACE) == Version.AA ? v1sstableComponentsWriterFailure : v2sstableComponentsWriterFailure, "v1");
+        shouldZeroMemoryTrackerOnFailure(getSstableComponentsWriterFailure(),
+                                         "v1");
         resetCounters();
-        shouldZeroMemoryTrackerOnFailure(Version.current(KEYSPACE) == Version.AA ? v1sstableComponentsWriterFailure : v2sstableComponentsWriterFailure, "v2");
+        shouldZeroMemoryTrackerOnFailure(getSstableComponentsWriterFailure(),
+                                         "v2");
+    }
+
+    private static Injection getSstableComponentsWriterFailure()
+    {
+        if (Version.current(KEYSPACE).onOrAfter(Version.GA))
+            return v9sstableComponentsWriterFailure;
+        else if (Version.current(KEYSPACE).onOrAfter(Version.BA))
+            return v2sstableComponentsWriterFailure;
+        else
+            return v1sstableComponentsWriterFailure;
     }
 
     @Test
@@ -224,25 +242,25 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         assertEquals("Segment buffer memory tracker should start at zero!", 0L, getSegmentBufferUsedBytes());
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
 
-        execute("INSERT INTO " + KEYSPACE + "." + table1 + "(id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + KEYSPACE + '.' + table1 + "(id1, v1, v2) VALUES ('0', 0, '0')");
         flush(KEYSPACE, table1);
-        execute("INSERT INTO " + KEYSPACE + "." + table1 + "(id1, v1, v2) VALUES ('1', 1, '1')");
+        execute("INSERT INTO " + KEYSPACE + '.' + table1 + "(id1, v1, v2) VALUES ('1', 1, '1')");
         flush(KEYSPACE, table1);
         Collection<SSTableReader> sstablesTable1 = getColumnFamilyStore(KEYSPACE, table1).getLiveSSTables();
 
-        execute("INSERT INTO " + KEYSPACE + "." + table2 + "(id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + KEYSPACE + '.' + table2 + "(id1, v1, v2) VALUES ('0', 0, '0')");
         flush(KEYSPACE, table2);
-        execute("INSERT INTO " + KEYSPACE + "." + table2 + "(id1, v1, v2) VALUES ('1', 1, '1')");
+        execute("INSERT INTO " + KEYSPACE + '.' + table2 + "(id1, v1, v2) VALUES ('1', 1, '1')");
         flush(KEYSPACE, table2);
         Collection<SSTableReader> sstablesTable2 = getColumnFamilyStore(KEYSPACE, table2).getLiveSSTables();
 
         // Start compaction against both tables/indexes and verify that they are aborted safely:
         verifyCompactionIndexBuilds(2, segmentFlushFailure, table1, table2);
 
-        executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1));
+        executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + '.' + table1));
         assertThat(getColumnFamilyStore(KEYSPACE, table1).getLiveSSTables()).isEqualTo(sstablesTable1);
 
-        executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table2));
+        executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + '.' + table2));
         assertThat(getColumnFamilyStore(KEYSPACE, table2).getLiveSSTables()).isEqualTo(sstablesTable2);
     }
 
@@ -258,25 +276,25 @@ public abstract class SegmentFlushingFailureTest extends SAITester
         assertEquals("Segment buffer memory tracker should start at zero!", 0L, getSegmentBufferUsedBytes());
         assertEquals("There should be no segment builders in progress.", 0L, getColumnIndexBuildsInProgress());
 
-        execute("INSERT INTO " + KEYSPACE + "." + table1 + "(id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + KEYSPACE + '.' + table1 + "(id1, v1, v2) VALUES ('0', 0, '0')");
         flush(KEYSPACE, table1);
-        execute("INSERT INTO " + KEYSPACE + "." + table1 + "(id1, v1, v2) VALUES ('1', 1, '1')");
+        execute("INSERT INTO " + KEYSPACE + '.' + table1 + "(id1, v1, v2) VALUES ('1', 1, '1')");
         flush(KEYSPACE, table1);
         Collection<SSTableReader> sstablesTable1 = getColumnFamilyStore(KEYSPACE, table1).getLiveSSTables();
 
-        execute("INSERT INTO " + KEYSPACE + "." + table2 + "(id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + KEYSPACE + '.' + table2 + "(id1, v1, v2) VALUES ('0', 0, '0')");
         flush(KEYSPACE, table2);
-        execute("INSERT INTO " + KEYSPACE + "." + table2 + "(id1, v1, v2) VALUES ('1', 1, '1')");
+        execute("INSERT INTO " + KEYSPACE + '.' + table2 + "(id1, v1, v2) VALUES ('1', 1, '1')");
         flush(KEYSPACE, table2);
 
         // Start compaction against both tables/indexes, and verify only the numeric index is aborted:
         verifyCompactionIndexBuilds(1, kdTreeSegmentFlushFailure, table1, table2);
 
         // index is still queryable and sstables remain the same
-        executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + "." + table1));
+        executeNet(String.format("SELECT * FROM %s WHERE v1 = 0", KEYSPACE + '.' + table1));
         assertThat(getColumnFamilyStore(KEYSPACE, table1).getLiveSSTables()).isEqualTo(sstablesTable1);
 
-        ResultSet rows = executeNet(String.format("SELECT * FROM %s WHERE v2 = '0'", KEYSPACE + "." + table2));
+        ResultSet rows = executeNet(String.format("SELECT * FROM %s WHERE v2 = '0'", KEYSPACE + '.' + table2));
         assertEquals(1, rows.all().size());
 
         // table2 succeeded compaction
