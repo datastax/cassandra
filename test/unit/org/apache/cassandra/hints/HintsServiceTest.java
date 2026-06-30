@@ -18,12 +18,14 @@
 package org.apache.cassandra.hints;
 
 import java.net.UnknownHostException;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import com.google.common.util.concurrent.Futures;
@@ -37,8 +39,13 @@ import org.junit.Test;
 
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
+import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.schema.TableMetadata;
@@ -63,12 +70,15 @@ import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class HintsServiceTest
 {
     private static final String KEYSPACE = "hints_service_test";
     private static final String TABLE = "table";
+    private static final String AFFINITY_KEYSPACE = "hints_service_affinity_test";
 
     private final AtomicBoolean isAlive = new AtomicBoolean(true);
 
@@ -81,6 +91,9 @@ public class HintsServiceTest
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE, TABLE));
+        SchemaLoader.createKeyspace(AFFINITY_KEYSPACE,
+                                    KeyspaceParams.simple(3),
+                                    SchemaLoader.standardCFMD(AFFINITY_KEYSPACE, TABLE));
     }
 
     @AfterClass
@@ -305,6 +318,86 @@ public class HintsServiceTest
         assertFalse(anotherStore.hasFiles());
         assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(0);
         assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
+    }
+
+    @Test
+    public void testWriteForAllReplicasAppliesWriteAffinityFilter() throws UnknownHostException
+    {
+        TokenMetadata tokenMeta = StorageService.instance.getTokenMetadata();
+
+        InetAddressAndPort localEndpoint = FBUtilities.getBroadcastAddressAndPort();
+        UUID localHostId = StorageService.instance.getLocalHostUUID();
+        Collection<Token> localTokens = tokenMeta.getTokens(localEndpoint);
+        IEndpointSnitch savedSnitch = DatabaseDescriptor.getEndpointSnitch();
+
+        InetAddressAndPort replicaA = InetAddressAndPort.getByName("127.0.0.11");
+        InetAddressAndPort replicaB = InetAddressAndPort.getByName("127.0.0.12");
+        InetAddressAndPort replicaC = InetAddressAndPort.getByName("127.0.0.13");
+        UUID hostIdA = UUID.randomUUID();
+        UUID hostIdB = UUID.randomUUID();
+        UUID hostIdC = UUID.randomUUID();
+
+        try
+        {
+            tokenMeta.clearUnsafe();
+            tokenMeta.updateHostId(hostIdA, replicaA);
+            tokenMeta.updateNormalToken(dk("a").getToken(), replicaA);
+            tokenMeta.updateHostId(hostIdB, replicaB);
+            tokenMeta.updateNormalToken(dk("b").getToken(), replicaB);
+            tokenMeta.updateHostId(hostIdC, replicaC);
+            tokenMeta.updateNormalToken(dk("c").getToken(), replicaC);
+
+            // Snitch that excludes replicaB from write affinity.
+            DatabaseDescriptor.setEndpointSnitch(new WriteAffinityExcludingSnitch(replicaB));
+
+            long now = System.currentTimeMillis();
+            TableMetadata metadata = Schema.instance.getTableMetadata(AFFINITY_KEYSPACE, TABLE);
+            PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, dk("key0")).timestamp(now);
+            builder.row("column0").add("val", "value0");
+            Hint hint = Hint.create(builder.buildAsMutation(), now);
+
+            HintsService.instance.writeForAllReplicas(hint);
+
+            // replicaA and replicaC pass the affinity filter and get a hints store; replicaB is filtered out.
+            HintsCatalog catalog = HintsService.instance.getCatalog();
+            assertNotNull("expected a hints store for the non-filtered replicaA", catalog.getNullable(hostIdA));
+            assertNotNull("expected a hints store for the non-filtered replicaC", catalog.getNullable(hostIdC));
+            assertNull("replicaB should have been filtered out by write affinity", catalog.getNullable(hostIdB));
+        }
+        finally
+        {
+            DatabaseDescriptor.setEndpointSnitch(savedSnitch);
+            tokenMeta.clearUnsafe();
+            tokenMeta.updateHostId(localHostId, localEndpoint);
+            if (localTokens != null && !localTokens.isEmpty())
+                tokenMeta.updateNormalTokens(localTokens, localEndpoint);
+        }
+    }
+
+    private static class WriteAffinityExcludingSnitch extends AbstractNetworkTopologySnitch
+    {
+        private final InetAddressAndPort excluded;
+
+        WriteAffinityExcludingSnitch(InetAddressAndPort excluded)
+        {
+            this.excluded = excluded;
+        }
+
+        public String getRack(InetAddressAndPort endpoint)
+        {
+            return "rack1";
+        }
+
+        public String getDatacenter(InetAddressAndPort endpoint)
+        {
+            return "datacenter1";
+        }
+
+        @Override
+        public Predicate<InetAddressAndPort> filterByAffinityForWrites(String keyspace)
+        {
+            return endpoint -> !endpoint.equals(excluded);
+        }
     }
 
     private MockMessagingSpy sendHintsAndResponses(int noOfHints, int noOfResponses)
