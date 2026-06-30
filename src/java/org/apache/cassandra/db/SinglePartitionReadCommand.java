@@ -498,7 +498,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         metric.readRequests.inc();
     }
 
-    protected UnfilteredPartitionIterator queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public UnfilteredPartitionIterator queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         // skip the row cache and go directly to sstables/memtable if repaired status of
         // data is being tracked. This is only requested after an initial digest mismatch
@@ -1348,6 +1348,11 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         public PartitionIterator execute(ConsistencyLevel consistency, ClientState state, Dispatcher.RequestTime requestTime) throws RequestExecutionException
         {
             return StorageProxy.read(this, consistency, state, requestTime);
+        }
+
+        public PartitionIterator postReconciliationProcessing(PartitionIterator result)
+        {
+            return queries.isEmpty() ? result : queries.get(0).postReconciliationProcessing(result);
         }
     }
 

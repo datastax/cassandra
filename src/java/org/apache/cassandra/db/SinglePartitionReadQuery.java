@@ -27,6 +27,7 @@ import com.google.common.collect.Iterables;
 import org.apache.commons.lang3.tuple.Pair;
 
 import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -35,6 +36,7 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.MultiPartitionPager;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.service.pager.QueryPager;
@@ -177,6 +179,7 @@ public interface SinglePartitionReadQuery extends ReadQuery
         private final DataLimits limits;
         private final long nowInSec;
         private final boolean selectsFullPartitions;
+        private final boolean isTopK;
 
         public Group(List<T> queries, DataLimits limits)
         {
@@ -186,8 +189,14 @@ public interface SinglePartitionReadQuery extends ReadQuery
             T firstQuery = queries.get(0);
             this.nowInSec = firstQuery.nowInSec();
             this.selectsFullPartitions = firstQuery.selectsFullPartition();
-            for (int i = 1; i < queries.size(); i++)
-                assert queries.get(i).nowInSec() == nowInSec;
+            this.isTopK = firstQuery.isTopK();
+
+            for (T query : queries)
+            {
+                assert query.nowInSec() == nowInSec;
+                assert query.selectsFullPartition() == selectsFullPartitions;
+                assert query.isTopK() == isTopK;
+            }
         }
 
         @Override
@@ -216,6 +225,21 @@ public interface SinglePartitionReadQuery extends ReadQuery
         public boolean selectsFullPartition()
         {
             return selectsFullPartitions;
+        }
+
+        @Override
+        public boolean isTopK()
+        {
+            return isTopK;
+        }
+
+        @Override
+        public void validateSelectOptions(SelectOptions selectOptions, ClientState state)
+        {
+            for (T query : queries)
+            {
+                query.validateSelectOptions(selectOptions, state);
+            }
         }
 
         public ReadExecutionController executionController()
