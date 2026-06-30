@@ -16,20 +16,48 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.compaction.unified.Controller;
+import org.apache.cassandra.db.compaction.unified.TimeBucket;
+import org.apache.cassandra.io.sstable.Component;
 
 /**
  * Arena selector, used by UnifiedCompactionStrategy to distribute SSTables to separate compaction arenas.
  *
- * This is used to:
- * - ensure that sstables that should not be compacted together (e.g. repaired with unrepaired) are separated
- * - ensure that each disk's sstables are compacted separately
+ * <p>This is used to:
+ * <ul>
+ *   <li>Ensure that SSTables that should not be compacted together (e.g. repaired with unrepaired)
+ *       are separated.</li>
+ *   <li>Ensure that each disk's SSTables are compacted separately.</li>
+ *   <li>Optionally, partition SSTables into time-driven arenas when {@link TimeBucket} definitions are
+ *       present in the controller configuration.</li>
+ * </ul>
+ *
+ * <p>When time-driven levels are configured via the {@code scaling_parameters} option, a {@code TimeEquivClassSplitter}
+ * is appended to the equivalence-class chain. The splitter groups SSTables by their minimum timestamp:
+ * <ul>
+ *   <li>For {@link TimeBucket.Mode#UNTIL} buckets: SSTables whose age is less than the bucket's duration
+ *       are placed into the corresponding "until" arena.</li>
+ *   <li>For {@link TimeBucket.Mode#EVERY} buckets: SSTables are partitioned into fixed-size repeating time windows
+ *       (aligned to multiples of the window duration since the epoch).</li>
+ * </ul>
+ *
+ * <p>The current wall-clock time for {@link TimeBucket.Mode#UNTIL} evaluation is captured once at
+ * construction time, so that the arena boundaries remain stable during a single compaction planning
+ * cycle.
  */
 public class ArenaSelector implements Comparator<CompactionSSTable>
 {
@@ -42,13 +70,20 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
         this.controller = controller;
         this.diskBoundaries = diskBoundaries;
 
-        ArrayList<EquivClassSplitter> ret = new ArrayList<>(2);
+        ArrayList<EquivClassSplitter> ret = new ArrayList<>(3);
 
         ret.add(RepairEquivClassSplitter.INSTANCE);
 
         if (diskBoundaries.getNumBoundaries() > 1)
-        {
             ret.add(new DiskIndexEquivClassSplitter());
+
+        // Add time-based splitting when time-bucket definitions are present.
+        List<TimeBucket> timeBuckets = controller.getTimeBuckets();
+        if (!timeBuckets.isEmpty())
+        {
+            // Capture now() once so the 'each' thresholds are evaluated consistently within this cycle.
+            long nowUs = TimeUnit.MILLISECONDS.toMicros(controller.clock.translate().toMillisSinceEpoch(controller.clock.now()));
+            ret.add(new TimeEquivClassSplitter(timeBuckets, nowUs));
         }
 
         classSplitters = ret.toArray(new EquivClassSplitter[0]);
@@ -138,6 +173,144 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
         public String name(CompactionSSTable ssTableReader)
         {
             return "disk_" + diskBoundaries.getDiskIndexFromKey(ssTableReader);
+        }
+    }
+
+    /**
+     * Partitions SSTables into time-based arenas using the ordered list of {@link TimeBucket} definitions.
+     *
+     * <h3>Evaluation order</h3>
+     * <p>The buckets are evaluated in the order they appear in the {@code timeBuckets} list, which is:
+     * <ol>
+     *   <li>{@link TimeBucket.Mode#UNTIL} buckets (zero or more, ordered from youngest to oldest duration) —
+     *       each creates a separate transient young arena.</li>
+     *   <li>{@link TimeBucket.Mode#EVERY} bucket (at most one) — determines the time-window index by dividing
+     *       the SSTable's minimum timestamp by the window duration.</li>
+     * </ol>
+     *
+     * <h3>Arena naming</h3>
+     * <p>The arena name suffix returned by {@link #name(CompactionSSTable)} encodes which bucket the
+     * SSTable belongs to:
+     * <ul>
+     *   <li>{@code until_<duration>} for {@link TimeBucket.Mode#UNTIL} arenas.</li>
+     *   <li>{@code every_<timestamp>} for {@link TimeBucket.Mode#EVERY} arenas, where {@code timestamp} is the
+     *       start of the window formatted as a human-readable date.</li>
+     *   <li>{@code base} if the SSTable does not fall into any time bucket (applies to the oldest data).</li>
+     * </ul>
+     *
+     * <h3>Comparison logic</h3>
+     * <p>Two SSTables compare as equal (value 0) only when both their time-bucket keys are identical.
+     * If both fall in the same {@code EVERY} window, they compare as 0. If both fall in the same {@code UNTIL}
+     * bucket or both match the base arena, they compare as 0.
+     */
+    private static final class TimeEquivClassSplitter implements EquivClassSplitter
+    {
+        private static final Logger logger = LoggerFactory.getLogger(TimeEquivClassSplitter.class);
+
+        private final List<TimeBucket> timeBuckets;
+        /**
+         * Wall-clock time in microseconds captured at ArenaSelector construction, used to evaluate
+         * {@link TimeBucket.Mode#UNTIL} age limits consistently within a planning cycle.
+         */
+        private final long nowUs;
+
+        private final Function<CompactionSSTable, Long> computeTimeKeyRef;
+        private final Function<CompactionSSTable, String> computeNameRef;
+
+        /** Thread-safe caches to avoid redundant computations and logging during sorting and grouping. */
+        private final ConcurrentHashMap<CompactionSSTable, Long> keyCache = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<CompactionSSTable, String> nameCache = new ConcurrentHashMap<>();
+
+        TimeEquivClassSplitter(List<TimeBucket> timeBuckets, long nowUs)
+        {
+            this.timeBuckets = timeBuckets;
+            this.nowUs = nowUs;
+            this.computeTimeKeyRef = this::computeTimeKey;
+            this.computeNameRef = this::computeName;
+            if (logger.isTraceEnabled())
+            {
+                logger.trace("TimeEquivClassSplitter initialized with nowUs = {} (time={}), buckets = {}",
+                            nowUs, Instant.ofEpochMilli(nowUs / 1000), timeBuckets);
+            }
+        }
+
+        private long computeTimeKey(CompactionSSTable sstable)
+        {
+            long minTimestampUs = sstable.getMinTimestamp();
+
+            for (TimeBucket bucket : timeBuckets)
+            {
+                if (bucket.mode == TimeBucket.Mode.UNTIL)
+                {
+                    boolean isYoung = (nowUs - minTimestampUs) < bucket.durationUs;
+                    if (logger.isTraceEnabled())
+                    {
+                        logger.trace("timeKey for sstable {} in keyspace {} table {}: checking UNTIL bucket {}, minTimestampUs={}, nowUs={}, ageSecs={}, isYoung={}",
+                                    sstable.getDescriptor().filenameFor(Component.DATA),
+                                    sstable.getKeyspaceName(), sstable.getColumnFamilyName(),
+                                    bucket, minTimestampUs, nowUs, (nowUs - minTimestampUs) / 1000000.0, isYoung);
+                    }
+                    if (isYoung)
+                    {
+                        return bucket.durationUs;
+                    }
+                }
+                else if (bucket.mode == TimeBucket.Mode.EVERY)
+                {
+                    long wIdx = bucket.windowIndex(minTimestampUs);
+                    if (logger.isTraceEnabled())
+                    {
+                        logger.trace("timeKey for sstable {} in keyspace {} table {}: matches EVERY bucket {}, minTimestampUs={}, nowUs={}, windowIndex={}",
+                                    sstable.getDescriptor().filenameFor(Component.DATA),
+                                    sstable.getKeyspaceName(), sstable.getColumnFamilyName(),
+                                    bucket, minTimestampUs, nowUs, wIdx);
+                    }
+                    return (Long.MAX_VALUE / 2) + wIdx;
+                }
+            }
+
+            if (logger.isTraceEnabled())
+            {
+                logger.trace("timeKey for sstable {} in keyspace {} table {}: matches no buckets, categorized as base",
+                            sstable.getDescriptor().filenameFor(Component.DATA),
+                            sstable.getKeyspaceName(), sstable.getColumnFamilyName());
+            }
+            return Long.MAX_VALUE;
+        }
+
+        private long timeKey(CompactionSSTable sstable)
+        {
+            return keyCache.computeIfAbsent(sstable, computeTimeKeyRef);
+        }
+
+        @Override
+        public int compare(CompactionSSTable a, CompactionSSTable b)
+        {
+            return Long.compare(timeKey(a), timeKey(b));
+        }
+
+        private String computeName(CompactionSSTable sstable)
+        {
+            long minTimestampUs = sstable.getMinTimestamp();
+            for (TimeBucket bucket : timeBuckets)
+            {
+                if (bucket.mode == TimeBucket.Mode.UNTIL)
+                {
+                    if ((nowUs - minTimestampUs) < bucket.durationUs)
+                        return "until_" + bucket.formattedDuration;
+                }
+                else if (bucket.mode == TimeBucket.Mode.EVERY)
+                {
+                    return "every_" + bucket.arenaName(bucket.windowIndex(minTimestampUs));
+                }
+            }
+            return "base";
+        }
+
+        @Override
+        public String name(CompactionSSTable sstable)
+        {
+            return nameCache.computeIfAbsent(sstable, computeNameRef);
         }
     }
 }

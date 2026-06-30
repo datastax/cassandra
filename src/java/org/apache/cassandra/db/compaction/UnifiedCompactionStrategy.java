@@ -49,6 +49,7 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.compaction.unified.Controller;
+import org.apache.cassandra.db.compaction.unified.TimeBucket;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.ShardedMultiWriter;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
@@ -815,7 +816,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     ArenaSelector getArenaSelector()
     {
         maybeUpdateSelector();
-        return currentArenaSelector;
+        return new ArenaSelector(controller, currentArenaSelector.diskBoundaries);
     }
 
     private CompactionLimits getCurrentLimits(int maxConcurrentCompactions)
@@ -1249,6 +1250,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public Map<Arena, List<Level>> getLevels(Collection<? extends CompactionSSTable> sstables,
                                              BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
+        long nowUs = java.util.concurrent.TimeUnit.MILLISECONDS.toMicros(controller.clock.translate().toMillisSinceEpoch(controller.clock.now()));
         // Copy to avoid race condition
         var currentShardManager = getShardManager();
         Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter);
@@ -1256,6 +1258,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
         for (Arena arena : arenas)
         {
+            TimeBucket bucket = arena.sstables.isEmpty() ? null : controller.getTimeBucketForSSTable(arena.sstables.get(0), nowUs);
             List<Level> levels = new ArrayList<>(MAX_LEVELS);
 
             // Precompute the density, then sort.
@@ -1264,9 +1267,28 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 ssTableWithDensityList.add(new SSTableWithDensity(sstable, currentShardManager.density(sstable)));
             Collections.sort(ssTableWithDensityList);
 
-            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0)) / currentShardManager.localSpaceCoverage());
+            double youngerMaxDensity = 0;
+            List<TimeBucket> timeBuckets = controller.getTimeBuckets();
+            if (!timeBuckets.isEmpty())
+            {
+                int bucketIdx = bucket == null ? timeBuckets.size() : timeBuckets.indexOf(bucket);
+                if (bucketIdx > 0)
+                {
+                    for (CompactionSSTable sstable : sstables)
+                    {
+                        TimeBucket sstBucket = controller.getTimeBucketForSSTable(sstable, nowUs);
+                        int sstBucketIdx = sstBucket == null ? timeBuckets.size() : timeBuckets.indexOf(sstBucket);
+                        if (sstBucketIdx < bucketIdx)
+                        {
+                            youngerMaxDensity = Math.max(youngerMaxDensity, currentShardManager.density(sstable));
+                        }
+                    }
+                }
+            }
+
+            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0, bucket), youngerMaxDensity) / currentShardManager.localSpaceCoverage(), bucket);
             int index = 0;
-            Level level = new Level(controller, index, 0, maxSize);
+            Level level = new Level(controller, bucket, index, 0, maxSize);
             for (SSTableWithDensity candidateWithDensity : ssTableWithDensityList)
             {
                 final CompactionSSTable candidate = candidateWithDensity.sstable;
@@ -1284,8 +1306,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 {
                     ++index;
                     double minSize = maxSize;
-                    maxSize = controller.getMaxLevelDensity(index, minSize);
-                    level = new Level(controller, index, minSize, maxSize);
+                    maxSize = controller.getMaxLevelDensity(index, minSize, bucket);
+                    level = new Level(controller, bucket, index, minSize, maxSize);
                     if (size < level.max)
                     {
                         level.add(candidate);
@@ -1478,8 +1500,14 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         final double max; // max density of sstables for this level
         double avg = 0; // avg size of sstables in this level
         int maxOverlap = -1; // maximum number of overlapping sstables
+        final TimeBucket bucket;
 
         Level(int index, int scalingParameter, int fanout, int threshold, double survivalFactor, double min, double max)
+        {
+            this(index, scalingParameter, fanout, threshold, survivalFactor, min, max, null);
+        }
+
+        Level(int index, int scalingParameter, int fanout, int threshold, double survivalFactor, double min, double max, @Nullable TimeBucket bucket)
         {
             this.index = index;
             this.scalingParameter = scalingParameter;
@@ -1489,17 +1517,24 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.min = min;
             this.max = max;
             this.sstables = new ArrayList<>(threshold);
+            this.bucket = bucket;
         }
 
         Level(Controller controller, int index, double min, double max)
         {
+            this(controller, null, index, min, max);
+        }
+
+        Level(Controller controller, @Nullable TimeBucket bucket, int index, double min, double max)
+        {
             this(index,
-                 controller.getScalingParameter(index),
-                 controller.getFanout(index),
-                 controller.getThreshold(index),
+                 controller.getScalingParameter(index, bucket),
+                 controller.getFanout(index, bucket),
+                 controller.getThreshold(index, bucket),
                  controller.getSurvivalFactor(index),
                  min,
-                 max);
+                 max,
+                 bucket);
         }
 
         public Collection<CompactionSSTable> getSSTables()
@@ -1797,7 +1832,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             // number of sstables. This is not always true (we may, e.g. select alternately from different overlap
             // sections if the structure is complex enough), but is good enough heuristic that results in usable
             // compaction sets.
-            else if (count <= fanout * controller.getFanout(index + 1) || maxSSTablesToCompact == fanout)
+            else if (count <= fanout * controller.getFanout(index + 1, level.bucket) || maxSSTablesToCompact == fanout)
             {
                 // Compaction is a bit late, but not enough to jump levels via layout compactions. We need a special
                 // case to cap compaction pick at maxSSTablesToCompact.
@@ -1877,8 +1912,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (step > maxOverlap || step > maxSSTablesToCompact)
                 return 0;
 
-            int w = controller.getScalingParameter(level);
-            int f = controller.getFanout(level);
+            int w = controller.getScalingParameter(level, this.level.bucket);
+            int f = controller.getFanout(level, this.level.bucket);
             int pos = layoutCompactions(controller,
                                         level + 1,
                                         step * f,
