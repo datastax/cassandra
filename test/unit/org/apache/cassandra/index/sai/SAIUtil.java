@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.util.Map;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -62,8 +61,6 @@ public class SAIUtil
             // set the current version
             Field field = Version.class.getDeclaredField("SELECTOR");
             field.setAccessible(true);
-            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-            modifiersField.setAccessible(true);
             field.set(null, versionSelector);
 
             // update the index contexts for each keyspace
@@ -106,11 +103,7 @@ public class SAIUtil
         {
             CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.setBoolean(enableNVQ);
             Field field = JVectorVersionUtil.class.getDeclaredField("ENABLE_NVQ");
-            field.setAccessible(true);
-            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-            modifiersField.setAccessible(true);
-            modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-            field.set(null, enableNVQ);
+            ReflectionUtils.writeField(null, field, enableNVQ);
         }
         catch (Exception e)
         {
