@@ -420,7 +420,6 @@ public abstract class SSTable
     /**
      * Appends new component names to the TOC component.
      */
-    @SuppressWarnings("resource")
     protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
     {
         File tocFile = descriptor.fileFor(Component.TOC);

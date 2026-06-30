@@ -51,7 +51,7 @@ public class CompositePartitionKeyIndexTest extends SAITester
     }
 
     @Test
-    public void queryFromMemtable() throws Throwable
+    public void queryFromMemtable()
     {
         insertData1();
         insertData2();
@@ -59,7 +59,7 @@ public class CompositePartitionKeyIndexTest extends SAITester
     }
 
     @Test
-    public void queryFromSingleSSTable() throws Throwable
+    public void queryFromSingleSSTable()
     {
         insertData1();
         insertData2();
@@ -68,7 +68,7 @@ public class CompositePartitionKeyIndexTest extends SAITester
     }
 
     @Test
-    public void queryFromMultipleSSTables() throws Throwable
+    public void queryFromMultipleSSTables()
     {
         insertData1();
         flush();
@@ -78,7 +78,7 @@ public class CompositePartitionKeyIndexTest extends SAITester
     }
 
     @Test
-    public void queryFromMemtableAndSSTables() throws Throwable
+    public void queryFromMemtableAndSSTables()
     {
         insertData1();
         flush();
@@ -87,7 +87,7 @@ public class CompositePartitionKeyIndexTest extends SAITester
     }
 
     @Test
-    public void queryFromCompactedSSTable() throws Throwable
+    public void queryFromCompactedSSTable()
     {
         insertData1();
         flush();
@@ -101,7 +101,7 @@ public class CompositePartitionKeyIndexTest extends SAITester
         return row(index, Integer.toString(index), index);
     }
 
-    private void runQueries() throws Throwable
+    private void runQueries()
     {
         assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE pk1 = 2"),
                 expectedRow(2));
