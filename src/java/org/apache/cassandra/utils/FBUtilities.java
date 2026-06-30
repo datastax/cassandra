@@ -66,6 +66,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.commons.lang3.StringUtils;
+import org.objectweb.asm.Opcodes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -135,6 +136,8 @@ public class FBUtilities
     }
 
     public static final int MAX_UNSIGNED_SHORT = 0xFFFF;
+
+    public static final int ASM_BYTECODE_VERSION = Opcodes.ASM9;
 
     public static MessageDigest newMessageDigest(String algorithm)
     {
