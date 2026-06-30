@@ -292,6 +292,12 @@ public class RangeCommandsTest extends CQLTester
         {
             return wrapped.withBytesLimit(bytesLimit);
         }
+
+        @Override
+        public String toCQLString()
+        {
+            return wrapped.toCQLString();
+        }
     }
 
     public static final class MockedIndex extends StubIndex

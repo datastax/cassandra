@@ -15,6 +15,7 @@
  */
 package org.apache.cassandra.distributed.test.sai;
 
+import java.util.Iterator;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -44,6 +45,7 @@ import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.QueryMonitorableExecutionInfo;
 import org.awaitility.Awaitility;
 
+import static java.util.regex.Pattern.quote;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.distributed.test.SlowQueryLoggerTest.assertLogsContain;
 import static org.apache.cassandra.distributed.test.SlowQueryLoggerTest.assertLogsDoNotContain;
@@ -402,6 +404,19 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
             assertLogsContain(mark, node,
                               "partitionTombstonesFetched: 1",
                               "rowTombstonesFetched: 2");
+
+            // test with paged queries
+            mark = node.logs().mark();
+            String query =  withKeyspace("SELECT * FROM %s.t WHERE n >= 0");
+            Iterator<Object[]> pagedRows = coordinator.executeWithPaging(query, ConsistencyLevel.ONE, 1);
+            while (pagedRows.hasNext())
+                pagedRows.next();
+            assertLogsContain(mark, node,
+                              quote(withKeyspace("<SELECT * FROM %s.t WHERE n >= ? LIMIT 1 ALLOW FILTERING>")),
+                              "NumericIndexScan");
+            assertLogsContain(mark, node,
+                              quote(withKeyspace("<SELECT * FROM %s.t WHERE token(k) >= token(?) AND n >= ? LIMIT 1 ALLOW FILTERING [paging continuation]>")),
+                              "NumericIndexScan");
         }
     }
 
