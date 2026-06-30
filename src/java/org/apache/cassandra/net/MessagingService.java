@@ -20,6 +20,7 @@ package org.apache.cassandra.net;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -226,7 +227,10 @@ public class MessagingService extends MessagingServiceMBeanImpl
     public static final int VERSION_DSE_68 = 168;
 
     static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version, SUPPORTED_DSE_VERSION);
-    static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
+    // Streaming negotiates any common version in [VERSION_40, current_version]; this is only safe because every
+    // streaming serializer (stream headers, control/file messages, compressed payloads) is wire-compatible across
+    // that range.
+    static AcceptVersions accept_streaming = new AcceptVersions(Math.min(VERSION_40, current_version), current_version);
     static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, Enum::ordinal));
 
     @Deprecated // remove when cndb no longer supports bdp/6.8-cndb
@@ -277,6 +281,18 @@ public class MessagingService extends MessagingServiceMBeanImpl
         Version(int value)
         {
             this.value = value;
+        }
+
+        @VisibleForTesting
+        public static List<Version> supportedVersions()
+        {
+            List<Version> versions = new ArrayList<>();
+            for (Version version : values())
+            {
+                if (minimum_version <= version.value && version.value <= current_version)
+                    versions.add(version);
+            }
+            return Collections.unmodifiableList(versions);
         }
     }
 

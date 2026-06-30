@@ -19,6 +19,7 @@
 package org.apache.cassandra.net;
 
 import java.nio.channels.ClosedChannelException;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -40,6 +41,7 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.MessagingSuccess;
+import org.apache.cassandra.net.OutboundConnectionInitiator.Result.StreamingSuccess;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
@@ -101,6 +103,73 @@ public class HandshakeTest
         {
             inbound.close().await(1L, TimeUnit.SECONDS);
         }
+    }
+
+    private Result streamingHandshake(int req, int outMin, int outMax, int inMin, int inMax) throws ExecutionException, InterruptedException
+    {
+        InboundSockets inbound = new InboundSockets(new InboundConnectionSettings().withAcceptStreaming(new AcceptVersions(inMin, inMax)));
+        try
+        {
+            inbound.open();
+            InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
+            EventLoop eventLoop = factory.defaultGroup().next();
+            Future<Result<StreamingSuccess>> future =
+            initiateStreaming(eventLoop,
+                              new OutboundConnectionSettings(endpoint)
+                                                    .withAcceptVersions(new AcceptVersions(outMin, outMax))
+                                                    .withDefaults(ConnectionCategory.STREAMING),
+                              req);
+            return future.get(20, TimeUnit.SECONDS);
+        }
+        catch (TimeoutException e)
+        {
+            throw new RuntimeException(e);
+        }
+        finally
+        {
+            inbound.close().await(1L, TimeUnit.SECONDS);
+        }
+    }
+
+    private static int latestStreamingVersionBeforeCurrent()
+    {
+        List<MessagingService.Version> versions = MessagingService.Version.supportedVersions();
+        int previousVersion = -1;
+        for (MessagingService.Version version : versions)
+        {
+            if (version.value >= VERSION_40 && version.value < current_version)
+                previousVersion = version.value;
+        }
+        Assert.assertTrue(previousVersion >= VERSION_40);
+        return previousVersion;
+    }
+
+    @Test
+    public void testStreamingNegotiatesCommonVersion() throws InterruptedException, ExecutionException
+    {
+        int previousVersion = latestStreamingVersionBeforeCurrent();
+        Result result = streamingHandshake(current_version, VERSION_40, current_version, VERSION_40, previousVersion);
+        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(previousVersion, result.success().messagingVersion);
+        result.success().channel.close();
+    }
+
+    @Test
+    public void testStreamingNegotiatesCommonVersionReversed() throws InterruptedException, ExecutionException
+    {
+        int previousVersion = latestStreamingVersionBeforeCurrent();
+        Result result = streamingHandshake(previousVersion, VERSION_40, previousVersion, VERSION_40, current_version);
+        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(previousVersion, result.success().messagingVersion);
+        result.success().channel.close();
+    }
+
+    @Test
+    public void testStreamingIncompatibleVersions() throws InterruptedException, ExecutionException
+    {
+        int previousVersion = latestStreamingVersionBeforeCurrent();
+        Result result = streamingHandshake(current_version, current_version, current_version, VERSION_40, previousVersion);
+        Assert.assertEquals(Result.Outcome.INCOMPATIBLE, result.outcome);
     }
 
     @Test

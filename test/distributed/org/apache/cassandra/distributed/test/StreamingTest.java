@@ -34,14 +34,17 @@ import com.google.common.annotations.VisibleForTesting;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.streaming.messages.StreamMessage;
 
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.apache.cassandra.distributed.shared.AssertUtils.assertRow;
 import static org.apache.cassandra.streaming.StreamSession.State.PREPARING;
 import static org.apache.cassandra.streaming.StreamSession.State.STREAMING;
 import static org.apache.cassandra.streaming.StreamSession.State.WAIT_COMPLETE;
@@ -82,7 +85,7 @@ public class StreamingTest extends TestBaseImpl
             cluster.get(nodes).runOnInstance(() -> StorageService.instance.rebuild(null, KEYSPACE, null, null));
             {
                 Object[][] results = cluster.get(nodes).executeInternal(String.format("SELECT k, c1, c2 FROM %s.cf;", KEYSPACE));
-                Assert.assertEquals(1000, results.length);
+                Assert.assertEquals(rowCount, results.length);
                 Arrays.sort(results, Comparator.comparingInt(a -> Integer.parseInt((String) a[0])));
                 for (int i = 0 ; i < results.length ; ++i)
                 {
@@ -98,6 +101,91 @@ public class StreamingTest extends TestBaseImpl
     public void test() throws Throwable
     {
         testStreaming(2, 2, 1000, "LeveledCompactionStrategy");
+    }
+
+    @Test
+    public void testMixedMessagingVersionStreamingDs11ToDs12() throws Throwable
+    {
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_11, MessagingService.VERSION_DS_12, false);
+    }
+
+    @Test
+    public void testMixedMessagingVersionStreamingDs12ToDs11() throws Throwable
+    {
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_12, MessagingService.VERSION_DS_11, false);
+    }
+
+    @Test
+    public void testMixedMessagingVersionUncompressedStreamingDs11ToDs12() throws Throwable
+    {
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_11, MessagingService.VERSION_DS_12, true);
+    }
+
+    @Test
+    public void testMixedMessagingVersionUncompressedStreamingDs12ToDs11() throws Throwable
+    {
+        testMixedMessagingVersionStreaming(MessagingService.VERSION_DS_12, MessagingService.VERSION_DS_11, true);
+    }
+
+    private void testMixedMessagingVersionStreaming(int sourceVersion, int targetVersion, boolean uncompressed) throws Throwable
+    {
+        int rowCount = 1000;
+        String keyspace = KEYSPACE + '_' + sourceVersion + '_' + targetVersion + (uncompressed ? "_uncompressed" : "");
+        try (Cluster cluster = builder().withNodes(2)
+                                       .withDataDirCount(1)
+                                       // disable entire sstable streaming so the per-section CassandraStreamReader/Writer path is used
+                                       .withConfig(config -> config.with(NETWORK).set("stream_entire_sstables", !uncompressed))
+                                       .withInstanceInitializer((classLoader, node) -> initializeMessagingVersion(classLoader, node == 1 ? sourceVersion : targetVersion))
+                                       .start())
+        {
+            Assert.assertEquals(sourceVersion, (int) cluster.get(1).callOnInstance(() -> MessagingService.current_version));
+            Assert.assertEquals(targetVersion, (int) cluster.get(2).callOnInstance(() -> MessagingService.current_version));
+
+            // disable sstable compression so the uncompressed stream path is exercised
+            String compression = uncompressed ? " AND compression = {'enabled': 'false'}" : "";
+            int schemaCoordinator = sourceVersion <= targetVersion ? 1 : 2;
+            cluster.schemaChange("CREATE KEYSPACE " + keyspace + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2};", false, cluster.get(schemaCoordinator));
+            cluster.schemaChange(String.format("CREATE TABLE %s.cf (k text, c1 text, c2 text, PRIMARY KEY (k)) WITH compaction = {'class': 'LeveledCompactionStrategy', 'enabled': 'true'}%s", keyspace, compression), false, cluster.get(schemaCoordinator));
+
+            for (int i = 0 ; i < rowCount ; ++i)
+                cluster.get(1).executeInternal(String.format("INSERT INTO %s.cf (k, c1, c2) VALUES (?, 'value1', 'value2');", keyspace), Integer.toString(i));
+
+            cluster.get(2).executeInternal("TRUNCATE system.available_ranges;");
+            Assert.assertEquals(0, cluster.get(2).executeInternal(String.format("SELECT k, c1, c2 FROM %s.cf;", keyspace)).length);
+
+            registerSink(cluster, 2);
+            cluster.get(2).runOnInstance(() -> StorageService.instance.rebuild(null, keyspace, null, null));
+
+            Object[][] results = cluster.get(2).executeInternal(String.format("SELECT k, c1, c2 FROM %s.cf;", keyspace));
+            Assert.assertEquals(rowCount, results.length);
+            Arrays.sort(results, Comparator.comparingInt(a -> Integer.parseInt((String) a[0])));
+            for (int i = 0 ; i < results.length ; ++i)
+            {
+                assertRow(results[i], Integer.toString(i), "value1", "value2");
+            }
+        }
+    }
+
+    private static void initializeMessagingVersion(ClassLoader classLoader, int version)
+    {
+        String key = CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getKey();
+        String previous = System.getProperty(key);
+        try
+        {
+            System.setProperty(key, Integer.toString(version));
+            Class.forName(MessagingService.class.getName(), true, classLoader).getField("current_version").getInt(null);
+        }
+        catch (ReflectiveOperationException e)
+        {
+            throw new RuntimeException(e);
+        }
+        finally
+        {
+            if (previous == null)
+                System.clearProperty(key);
+            else
+                System.setProperty(key, previous);
+        }
     }
 
     public static void registerSink(Cluster cluster, int initiatorNodeId)

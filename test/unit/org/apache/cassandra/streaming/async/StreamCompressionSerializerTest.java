@@ -42,7 +42,6 @@ import org.apache.cassandra.net.MessagingService;
 
 public class StreamCompressionSerializerTest
 {
-    private static final int VERSION = MessagingService.current_version;
     private static final Random random = new Random(2347623847623L);
 
     private final ByteBufAllocator allocator = PooledByteBufAllocator.DEFAULT;
@@ -63,22 +62,43 @@ public class StreamCompressionSerializerTest
     @After
     public void tearDown()
     {
+        releaseBuffers();
+    }
+
+    private void releaseBuffers()
+    {
         if (input != null)
+        {
             FileUtils.clean(input);
+            input = null;
+        }
         if (compressed != null)
+        {
             FileUtils.clean(compressed);
+            compressed = null;
+        }
         if (output != null && output.refCnt() > 0)
+        {
             output.release(output.refCnt());
+            output = null;
+        }
     }
 
     @Test
     public void roundTrip_HappyPath_NotReadabaleByteBuffer() throws IOException
     {
-        populateInput();
-        StreamCompressionSerializer.serialize(compressor, input, VERSION).write(size -> compressed = ByteBuffer.allocateDirect(size));
-        input.flip();
-        output = serializer.deserialize(decompressor, new DataInputBuffer(compressed, false), VERSION);
-        validateResults();
+        for (MessagingService.Version version : MessagingService.Version.supportedVersions())
+        {
+            if (!isStreamingVersion(version.value))
+                continue;
+
+            releaseBuffers();
+            populateInput();
+            StreamCompressionSerializer.serialize(compressor, input, version.value).write(size -> compressed = ByteBuffer.allocateDirect(size));
+            input.flip();
+            output = serializer.deserialize(decompressor, new DataInputBuffer(compressed, false), version.value);
+            validateResults();
+        }
     }
 
     private void populateInput()
@@ -100,16 +120,24 @@ public class StreamCompressionSerializerTest
     @Test
     public void roundTrip_HappyPath_ReadabaleByteBuffer() throws IOException
     {
-        populateInput();
-        StreamCompressionSerializer.serialize(compressor, input, VERSION)
-                                   .write(size -> {
-                                       if (compressed != null)
-                                           FileUtils.clean(compressed);
-                                       return compressed = ByteBuffer.allocateDirect(size);
-                                   });
-        input.flip();
-        output = serializer.deserialize(decompressor, new ByteBufRCH(Unpooled.wrappedBuffer(compressed)), VERSION);
-        validateResults();
+        for (MessagingService.Version version : MessagingService.Version.supportedVersions())
+        {
+            if (!isStreamingVersion(version.value))
+                continue;
+
+            releaseBuffers();
+            populateInput();
+            StreamCompressionSerializer.serialize(compressor, input, version.value)
+                                       .write(size -> compressed = ByteBuffer.allocateDirect(size));
+            input.flip();
+            output = serializer.deserialize(decompressor, new ByteBufRCH(Unpooled.wrappedBuffer(compressed)), version.value);
+            validateResults();
+        }
+    }
+
+    private static boolean isStreamingVersion(int version)
+    {
+        return version >= MessagingService.VERSION_40 && version <= MessagingService.current_version;
     }
 
     private static class ByteBufRCH extends DataInputBuffer implements ReadableByteChannel
