@@ -118,7 +118,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
 
     private volatile boolean replayed = false;
 
-    CommitLogReplayer(CommitLog commitLog,
+    CommitLogReplayer(ICommitLog commitLog,
                       CommitLogPosition globalPosition,
                       Map<TableId, IntervalSet<CommitLogPosition>> cfPersisted,
                       ReplayFilter replayFilter)
@@ -129,7 +129,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
         this.cfPersisted = cfPersisted;
         this.globalPosition = globalPosition;
         this.replayFilter = replayFilter;
-        this.archiver = commitLog.archiver;
+        this.archiver = commitLog.archiver();
         this.commitLogReader = new CommitLogReader();
     }
 
@@ -250,7 +250,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
     private void handleCDCReplayCompletion(File f) throws IOException
     {
         // Can only reach this point if CDC is enabled, thus we have a CDCSegmentManager
-        ((CommitLogSegmentManagerCDC)CommitLog.instance.getSegmentManager()).addCDCSize(f.length());
+        ((CommitLogSegmentManagerCDC)((CommitLog) CommitLog.instance).getSegmentManager()).addCDCSize(f.length());
 
         File dest = new File(DatabaseDescriptor.getCDCLogLocation(), f.name());
 

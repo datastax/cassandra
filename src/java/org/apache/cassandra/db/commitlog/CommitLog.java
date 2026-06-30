@@ -78,12 +78,12 @@ import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
  * Commit Log tracks every write operation into the system. The aim of the commit log is to be able to
  * successfully recover data that was not stored to disk via the Memtable.
  */
-public class CommitLog implements CommitLogMBean
+public class CommitLog implements CommitLogMBean, ICommitLog
 {
     private static final Logger logger = LoggerFactory.getLogger(CommitLog.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
 
-    public static final CommitLog instance = CommitLog.construct();
+    public static final ICommitLog instance = ICommitLogFactory.instance.create();
 
     private volatile AbstractCommitLogSegmentManager segmentManager;
 
@@ -99,14 +99,6 @@ public class CommitLog implements CommitLogMBean
 
     @VisibleForTesting
     final MonotonicClock clock;
-
-    private static CommitLog construct()
-    {
-        CommitLog log = new CommitLog(CommitLogArchiver.construct(), DatabaseDescriptor.getCommitLogSegmentMgrProvider());
-
-        MBeanWrapper.instance.registerMBean(log, "org.apache.cassandra.db:type=Commitlog");
-        return log;
-    }
 
     @VisibleForTesting
     CommitLog(CommitLogArchiver archiver)
@@ -145,6 +137,15 @@ public class CommitLog implements CommitLogMBean
 
         // register metrics
         metrics.attach(executor, segmentManager);
+    }
+
+    public CommitLogArchiver archiver()
+    {
+        return archiver;
+    }
+
+    public final CommitLogMetrics metrics() {
+        return metrics;
     }
 
     /**
