@@ -903,7 +903,7 @@ public class ClusterSimulation<S extends Simulation> implements AutoCloseable
             Field field = Clock.Global.class.getDeclaredField("instance");
             ReflectionUtils.writeField(null, field, new Clock.Default());
         }
-        catch (NoSuchFieldException|IllegalAccessException e)
+        catch (NoSuchFieldException e)
         {
             throw new RuntimeException(e);
         }
