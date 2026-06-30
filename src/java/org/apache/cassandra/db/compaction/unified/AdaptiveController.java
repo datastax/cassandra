@@ -18,6 +18,8 @@ package org.apache.cassandra.db.compaction.unified;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
@@ -462,9 +464,9 @@ public class AdaptiveController extends Controller
      * performed by this controller. Returns an empty list.
      */
     @Override
-    public java.util.List<TimeBucket> getTimeBuckets()
+    public List<TimeBucket> getTimeBuckets()
     {
-        return java.util.Collections.emptyList();
+        return Collections.emptyList();
     }
 
     /** Protected by the synchronized block in UnifiedCompactionStrategy#getNextBackgroundTasks */

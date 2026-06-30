@@ -1267,7 +1267,26 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 ssTableWithDensityList.add(new SSTableWithDensity(sstable, currentShardManager.density(sstable)));
             Collections.sort(ssTableWithDensityList);
 
-            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0, bucket)) / currentShardManager.localSpaceCoverage(), bucket);
+            double youngerMaxDensity = 0;
+            List<TimeBucket> timeBuckets = controller.getTimeBuckets();
+            if (!timeBuckets.isEmpty())
+            {
+                int bucketIdx = bucket == null ? timeBuckets.size() : timeBuckets.indexOf(bucket);
+                if (bucketIdx > 0)
+                {
+                    for (CompactionSSTable sstable : sstables)
+                    {
+                        TimeBucket sstBucket = controller.getTimeBucketForSSTable(sstable, nowUs);
+                        int sstBucketIdx = sstBucket == null ? timeBuckets.size() : timeBuckets.indexOf(sstBucket);
+                        if (sstBucketIdx < bucketIdx)
+                        {
+                            youngerMaxDensity = Math.max(youngerMaxDensity, currentShardManager.density(sstable));
+                        }
+                    }
+                }
+            }
+
+            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0, bucket), youngerMaxDensity) / currentShardManager.localSpaceCoverage(), bucket);
             int index = 0;
             Level level = new Level(controller, bucket, index, 0, maxSize);
             for (SSTableWithDensity candidateWithDensity : ssTableWithDensityList)
