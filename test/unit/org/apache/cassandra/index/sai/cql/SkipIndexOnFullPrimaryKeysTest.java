@@ -251,6 +251,229 @@ public class SkipIndexOnFullPrimaryKeysTest extends SkipIndexOnFullPrimaryKeysTe
     }
 
     @Test
+    public void testSkipsIndexWideMultiClustering()
+    {
+        createTable("CREATE TABLE %s (k int, c1 int, c2 int, n int, PRIMARY KEY(k, c1, c2))");
+        createIndex("CREATE CUSTOM INDEX n_idx ON %s(n) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (0, 0, 0, 0)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (0, 0, 1, 0)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (0, 0, 2, 0)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (0, 1, 0, 0)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (0, 1, 1, 0)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (0, 1, 2, 0)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (1, 0, 0, 0)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (1, 0, 1, 1)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (1, 0, 2, 0)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (1, 1, 0, 1)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (1, 1, 1, 0)");
+        execute("INSERT INTO %s(k, c1, c2, n) VALUES (1, 1, 2, 1)");
+
+        // range queries, unbounded
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE n = 0",
+                           row(1, 0, 0), row(1, 0, 2), row(1, 1, 1),
+                           row(0, 0, 0), row(0, 0, 1), row(0, 0, 2), row(0, 1, 0), row(0, 1, 1), row(0, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE n = 1", row(1, 0, 1), row(1, 1, 0), row(1, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE n = 2");
+
+        // single-partition queries
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND n = 0", row(0, 0, 0), row(0, 0, 1), row(0, 0, 2), row(0, 1, 0), row(0, 1, 1), row(0, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND n = 0", row(1, 0, 0), row(1, 0, 2), row(1, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND n = 1", row(1, 0, 1), row(1, 1, 0), row(1, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 3 AND n = 2");
+
+        // single-partition queries with eq restriction on first clustering column
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND n = 0", row(0, 0, 0), row(0, 0, 1), row(0, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND n = 0", row(1, 0, 0), row(1, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND n = 1", row(1, 0, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 3 AND c1 = 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND n = 0", row(0, 1, 0), row(0, 1, 1), row(0, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND n = 0", row(1, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND n = 1", row(1, 1, 0), row(1, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 3 AND c1 = 1 AND n = 2");
+
+        // single-partition queries with gt restriction on first clustering column
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 > 0 AND n = 0", row(0, 1, 0), row(0, 1, 1), row(0, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 > 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 > 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 > 0 AND n = 0", row(1, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 > 0 AND n = 1", row(1, 1, 0), row(1, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 > 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 > 0 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 > 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 3 AND c1 > 0 AND n = 2");
+
+        // single-partition queries with lt restriction on first clustering column
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 < 1 AND n = 0", row(0, 0, 0), row(0, 0, 1), row(0, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 < 1 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 < 1 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 < 1 AND n = 0", row(1, 0, 0), row(1, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 < 1 AND n = 1", row(1, 0, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 < 1 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 < 1 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 < 1 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 3 AND c1 < 1 AND n = 2");
+
+        // single-partition queries with gte restriction on first clustering column
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 >= 0 AND n = 0", row(0, 0, 0), row(0, 0, 1), row(0, 0, 2), row(0, 1, 0), row(0, 1, 1), row(0, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 >= 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 >= 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 >= 0 AND n = 0", row(1, 0, 0), row(1, 0, 2), row(1, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 >= 0 AND n = 1", row(1, 0, 1), row(1, 1, 0), row(1, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 >= 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 >= 0 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 >= 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 3 AND c1 >= 0 AND n = 2");
+
+        // single-partition queries with lte restriction on first clustering column
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 <= 1 AND n = 0", row(0, 0, 0), row(0, 0, 1), row(0, 0, 2), row(0, 1, 0), row(0, 1, 1), row(0, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 <= 1 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 <= 1 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 <= 1 AND n = 0", row(1, 0, 0), row(1, 0, 2), row(1, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 <= 1 AND n = 1", row(1, 0, 1), row(1, 1, 0), row(1, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 <= 1 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 <= 1 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 <= 1 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 3 AND c1 <= 1 AND n = 2");
+
+        // single-partition queries with eq restriction on second clustering column
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 = 0 AND n = 0", row(0, 0, 0));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 = 0 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 = 0 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 = 1 AND n = 0", row(0, 0, 1));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 = 1 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 = 1 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 = 2 AND n = 0", row(0, 0, 2));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 = 2 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 = 2 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 0 AND n = 0", row(0, 1, 0));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 0 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 0 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 1 AND n = 0", row(0, 1, 1));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 1 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 1 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 2 AND n = 0", row(0, 1, 2));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 2 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 = 2 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 = 0 AND n = 0", row(1, 0, 0));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 = 0 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 = 0 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 = 1 AND n = 0");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 = 1 AND n = 1", row(1, 0, 1));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 = 1 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 = 2 AND n = 0", row(1, 0, 2));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 = 2 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 = 2 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 = 0 AND n = 0");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 = 0 AND n = 1", row(1, 1, 0));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 = 0 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 = 1 AND n = 0", row(1, 1, 1));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 = 1 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 = 1 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 = 2 AND n = 0");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 = 2 AND n = 1", row(1, 1, 2));
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 = 2 AND n = 2");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 = 0 AND n = 0");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 = 0 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 = 1 AND n = 0");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 = 1 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 = 2 AND n = 0");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 = 2 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 = 0 AND n = 0");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 = 0 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 = 1 AND n = 0");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 = 1 AND n = 1");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 = 2 AND n = 0");
+        assertHasNoQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 = 2 AND n = 1");
+
+        // single-partition queries with gt restriction on second clustering column
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 > 0 AND n = 0", row(0, 0, 1), row(0, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 > 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 > 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 > 0 AND n = 0", row(0, 1, 1), row(0, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 > 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 > 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 > 0 AND n = 0", row(1, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 > 0 AND n = 1", row(1, 0, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 > 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 > 0 AND n = 0", row(1, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 > 0 AND n = 1", row(1, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 > 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 > 0 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 > 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 > 0 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 > 0 AND n = 1");
+
+        // single-partition queries with lt restriction on second clustering column
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 < 2 AND n = 0", row(0, 0, 0), row(0, 0, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 < 2 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 < 2 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 < 2 AND n = 0", row(0, 1, 0), row(0, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 < 2 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 < 2 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 < 2 AND n = 0", row(1, 0, 0));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 < 2 AND n = 1", row(1, 0, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 < 2 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 < 2 AND n = 0", row(1, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 < 2 AND n = 1", row(1, 1, 0));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 < 2 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 < 2 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 < 2 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 < 2 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 < 2 AND n = 1");
+
+        // single-partition queries with gte restriction on second clustering column
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 >= 0 AND n = 0", row(0, 0, 0), row(0, 0, 1), row(0, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 >= 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 >= 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 >= 0 AND n = 0", row(0, 1, 0), row(0, 1, 1), row(0, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 >= 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 >= 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 >= 0 AND n = 0", row(1, 0, 0), row(1, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 >= 0 AND n = 1", row(1, 0, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 >= 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 >= 0 AND n = 0", row(1, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 >= 0 AND n = 1", row(1, 1, 0), row(1, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 >= 0 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 >= 0 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 >= 0 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 >= 0 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 >= 0 AND n = 1");
+
+        // single-partition queries with lte restriction on second clustering column
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 <= 2 AND n = 0", row(0, 0, 0), row(0, 0, 1), row(0, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 <= 2 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 0 AND c2 <= 2 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 <= 2 AND n = 0", row(0, 1, 0), row(0, 1, 1), row(0, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 <= 2 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 0 AND c1 = 1 AND c2 <= 2 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 <= 2 AND n = 0", row(1, 0, 0), row(1, 0, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 <= 2 AND n = 1", row(1, 0, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 0 AND c2 <= 2 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 <= 2 AND n = 0", row(1, 1, 1));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 <= 2 AND n = 1", row(1, 1, 0), row(1, 1, 2));
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 1 AND c1 = 1 AND c2 <= 2 AND n = 2");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 <= 2 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 0 AND c2 <= 2 AND n = 1");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 <= 2 AND n = 0");
+        assertHasQueryPlan("SELECT k, c1, c2 FROM %s WHERE k = 2 AND c1 = 1 AND c2 <= 2 AND n = 1");
+    }
+
+    @Test
     public void testCollections()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, s set<int>, l list<int>, m map<int, int>)");
