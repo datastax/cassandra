@@ -38,7 +38,6 @@ import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.service.QueryInfoTracker;
 
 import static org.apache.cassandra.db.ConsistencyLevel.ONE;
 import static org.apache.cassandra.service.QueryInfoTracker.*;
@@ -287,6 +286,12 @@ public class RangeCommandsTest extends CQLTester
         public DataLimits withBytesLimit(int bytesLimit)
         {
             return wrapped.withBytesLimit(bytesLimit);
+        }
+
+        @Override
+        public String toCQLString()
+        {
+            return wrapped.toCQLString();
         }
     }
 
