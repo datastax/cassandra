@@ -231,17 +231,6 @@ public class VectorPostings<T>
         }
 
         /**
-         * Optimized method to extract the ordinal from the provided entry. Avoids unnecessary deserialization of
-         * the value.
-         * @param entry map entry to use when extracting the value's ordinal
-         * @return an ordinal
-         */
-        public static int extractOrdinal(MapEntry<?, CompactionVectorPostings> entry) {
-            long offset = entry.value().offset();
-            return entry.value().bytes().readInt(offset);
-        }
-
-        /**
          * Optimized method to extract the ordinal and row ids from the posting list, then insert the extras into
          * the provided extraOrdinals map. The first row id must be the same as the ordinal. Avoids unnecessary
          * allocations by iteratively reading integers from the entry's bytes.
