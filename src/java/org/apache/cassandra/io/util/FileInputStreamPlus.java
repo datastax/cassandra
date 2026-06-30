@@ -24,6 +24,8 @@ import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 
+import com.google.common.base.Preconditions;
+
 public class FileInputStreamPlus extends RebufferingInputStream
 {
     final FileChannel channel;
@@ -65,8 +67,10 @@ public class FileInputStreamPlus extends RebufferingInputStream
     @Override
     protected void reBuffer() throws IOException
     {
+        Preconditions.checkState(buffer.remaining() == 0, "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
         buffer.clear();
-        channel.read(buffer);
+        //noinspection StatementWithEmptyBody
+        while (channel.read(buffer) == 0) {}
         buffer.flip();
     }
 

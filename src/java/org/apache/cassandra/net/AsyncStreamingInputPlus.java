@@ -25,6 +25,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
 
 import io.netty.buffer.ByteBuf;
@@ -109,6 +110,11 @@ public class AsyncStreamingInputPlus extends RebufferingInputStream
     @Override
     protected void reBuffer() throws EOFException, InputTimeoutException
     {
+        Preconditions.checkState(!isClosed, "Stream already closed");
+        Preconditions.checkState(buffer != null, "Stream already closed: buffer is null");
+        Preconditions.checkState(currentBuf != null, "Stream already closed: currentBuf is null");
+        Preconditions.checkState(!buffer.hasRemaining(), "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
+
         if (queue.isEmpty())
             channel.read();
 
@@ -129,9 +135,6 @@ public class AsyncStreamingInputPlus extends RebufferingInputStream
         if (null == next)
             throw new InputTimeoutException();
 
-        if (next == Unpooled.EMPTY_BUFFER) // Unpooled.EMPTY_BUFFER is the indicator that the input is closed
-            throw new EOFException();
-
         currentBuf = next;
         buffer = next.nioBuffer();
     }
@@ -150,6 +153,8 @@ public class AsyncStreamingInputPlus extends RebufferingInputStream
         {
             if (!buffer.hasRemaining())
                 reBuffer();
+            if (!buffer.hasRemaining())
+                throw new EOFException();
 
             final int position = buffer.position();
             final int limit = buffer.limit();
