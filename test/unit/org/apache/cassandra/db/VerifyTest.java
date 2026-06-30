@@ -77,6 +77,7 @@ import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -370,6 +371,57 @@ public class VerifyTest
         catch (RuntimeException err) {}
     }
 
+    private void testVerifyDigest(ChecksumType checksumType, Component digestComponent) throws Exception
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+
+        fillCF(cfs, 2);
+
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+
+        // Delete default digest file
+        sstable.descriptor.fileFor(Component.DIGEST).delete();
+
+        File digestFile = sstable.descriptor.fileFor(digestComponent);
+        File dataFile = sstable.descriptor.fileFor(Component.DATA);
+
+        byte[] bytes = Files.readAllBytes(dataFile.toPath());
+        long correctChecksum = checksumType.of(bytes, 0, bytes.length);
+        writeChecksum(correctChecksum, digestFile);
+
+        try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
+        {
+            verifier.verify();
+        }
+        catch (CorruptSSTableException err)
+        {
+            fail("Unexpected CorruptSSTableException");
+        }
+
+        writeChecksum(++correctChecksum, digestFile);
+
+        try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
+        {
+            verifier.verify();
+            fail("Expected a CorruptSSTableException to be thrown");
+        }
+        catch (CorruptSSTableException err) {}
+
+    }
+
+    @Test
+    public void testVerifyDigestCRC32C() throws Exception
+    {
+        testVerifyDigest(ChecksumType.CRC32C, Component.DIGEST_CRC32C);
+    }
+
+    @Test
+    public void testVerifyDigestCRC64NVME() throws Exception
+    {
+        testVerifyDigest(ChecksumType.CRC64NVME, Component.DIGEST_CRC64NVME);
+    }
 
     @Test
     public void testVerifyCorruptRowCorrectDigest() throws IOException, WriteTimeoutException

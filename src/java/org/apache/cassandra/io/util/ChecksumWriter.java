@@ -25,21 +25,23 @@ import java.io.IOError;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.zip.CRC32;
+import java.util.zip.Checksum;
 import javax.annotation.Nonnull;
 
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
+import org.apache.cassandra.utils.ChecksumType;
 
 public class ChecksumWriter
 {
-    private final CRC32 incrementalChecksum = new CRC32();
+    private final Checksum incrementalChecksum = ChecksumType.CRC32.newInstance();
     private final DataOutput incrementalOut;
-    private final CRC32 fullChecksum = new CRC32();
+    private final Checksum fullChecksum;
 
-    public ChecksumWriter(DataOutput incrementalOut)
+    public ChecksumWriter(DataOutput incrementalOut, ChecksumType fullChecksumType)
     {
         this.incrementalOut = incrementalOut;
+        this.fullChecksum = fullChecksumType.newInstance();
     }
 
     public void writeChunkSize(int length)

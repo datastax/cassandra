@@ -248,11 +248,10 @@ public class Verifier implements Closeable
         outputHandler.output(String.format("Checking computed hash of %s ", sstable));
         try
         {
-            validator = null;
+            validator = sstable.maybeGetDigestValidator();
 
-            if (sstable.descriptor.fileFor(Component.DIGEST).exists())
+            if (validator != null)
             {
-                validator = DataIntegrityMetadata.fileDigestValidator(sstable.descriptor);
                 validator.validate();
             }
             else
