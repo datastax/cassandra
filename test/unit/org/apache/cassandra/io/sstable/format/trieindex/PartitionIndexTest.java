@@ -90,7 +90,7 @@ public class PartitionIndexTest
     //Lower the size of the indexes when running without the chunk cache, otherwise the test times out on Jenkins
     static final int COUNT = ChunkCache.instance != null ? 245256 : 24525;
 
-    @Parameterized.Parameters()
+    @Parameterized.Parameters(name = "{0} {1}")
     public static Collection<Object[]> generateData()
     {
         return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard, OSS50 },
