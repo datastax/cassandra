@@ -28,6 +28,7 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import com.datastax.driver.core.ResultSet;
+import net.openhft.chronicle.core.util.BooleanConsumer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ReadCommand;
@@ -39,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics.QueryKind;
+import org.assertj.core.api.Assertions;
 
 public class QueryMetricsTest extends AbstractMetricsTest
 {
@@ -134,6 +136,12 @@ public class QueryMetricsTest extends AbstractMetricsTest
     @Test
     public void testIndexQueryWithPartitionKey()
     {
+        withSkipIndexesOnFullPKs(true, this::testIndexQueryWithPartitionKey);
+        withSkipIndexesOnFullPKs(false, this::testIndexQueryWithPartitionKey);
+    }
+
+    private void testIndexQueryWithPartitionKey(boolean skipIndexesOnFullPKs)
+    {
         String table = "test_range_key_type_with_index";
         String index = "test_range_key_type_with_index_index";
 
@@ -176,7 +184,24 @@ public class QueryMetricsTest extends AbstractMetricsTest
         ObjectName oName = objectNameNoIndex("SSTableIndexesHit", keyspace, table, PER_QUERY_METRIC_TYPE);
         CassandraMetricsRegistry.JmxHistogramMBean o = JMX.newMBeanProxy(jmxConnection, oName, CassandraMetricsRegistry.JmxHistogramMBean.class);
 
-        assertTrue(o.getMean() < 2);
+        if (skipIndexesOnFullPKs)
+            Assertions.assertThat(o.getCount()).isZero();
+        else
+            Assertions.assertThat(o.getMean()).isLessThan(2);
+    }
+
+    private static void withSkipIndexesOnFullPKs(boolean skip, BooleanConsumer consumer)
+    {
+        boolean previous = CassandraRelevantProperties.SKIP_INDEXES_ON_FULL_PRIMARY_KEYS.getBoolean();
+        try
+        {
+            CassandraRelevantProperties.SKIP_INDEXES_ON_FULL_PRIMARY_KEYS.setBoolean(skip);
+            consumer.accept(skip);
+        }
+        finally
+        {
+            CassandraRelevantProperties.SKIP_INDEXES_ON_FULL_PRIMARY_KEYS.setBoolean(previous);
+        }
     }
 
     @Test

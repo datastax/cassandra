@@ -29,6 +29,7 @@ import org.junit.BeforeClass;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.shared.Byteman;
@@ -63,6 +64,8 @@ abstract class MultiNodeQueryTester extends TestBaseImpl
     @BeforeClass
     public static void setupCluster() throws Exception
     {
+        CassandraRelevantProperties.SKIP_INDEXES_ON_FULL_PRIMARY_KEYS.setBoolean(false);
+
         cluster = Cluster.build(3)
                          .withConfig(config -> config.with(Feature.NETWORK, Feature.GOSSIP)
                                                      .set("hinted_handoff_enabled", false))

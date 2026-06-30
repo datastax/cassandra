@@ -103,6 +103,8 @@ public class StatementRestrictions
     public static final String VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE = "Vector indexes only support ANN and GEO_DISTANCE queries";
     public static final String ANN_OPTIONS_WITHOUT_ORDER_BY_ANN = "ANN options specified without ORDER BY ... ANN OF ...";
 
+    public static final String INDEX_WITH_IN_ON_PK_MESSAGE = "Select on indexed columns and with IN clause for the PRIMARY KEY are not supported";
+
     /**
      * The Column Family meta data
      */
@@ -675,8 +677,7 @@ public class StatementRestrictions
             }
 
             if (usesSecondaryIndexing)
-                checkFalse(partitionKeyRestrictions.hasIN(),
-                           "Select on indexed columns and with IN clause for the PRIMARY KEY are not supported");
+                checkFalse(partitionKeyRestrictions.hasIN(), INDEX_WITH_IN_ON_PK_MESSAGE);
 
             ImmutableList.Builder<StatementRestrictions> children = ImmutableList.builder();
 

@@ -29,6 +29,7 @@ import org.junit.Ignore;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -57,6 +58,8 @@ abstract class SingleNodeQueryTester extends SAITester
     @Before
     public void setup() throws Throwable
     {
+        CassandraRelevantProperties.SKIP_INDEXES_ON_FULL_PRIMARY_KEYS.setBoolean(false);
+
         SAIUtil.setCurrentVersion(version);
         requireNetwork();
 

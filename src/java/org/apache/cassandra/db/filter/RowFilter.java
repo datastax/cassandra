@@ -112,6 +112,19 @@ public class RowFilter
     }
 
     /**
+     * @return {@code true} if this filter contains any expression with an ordering expression, {@code false} otherwise.
+     */
+    public boolean hasOrdering()
+    {
+        for (Expression expression : root.expressions()) // ordering expressions are always on the first tree level
+        {
+            if (expression.isOrderingExpression())
+                return true;
+        }
+        return false;
+    }
+
+    /**
      * Returns a copy of this {@link RowFilter} with ordering expressions removed
      */
     public RowFilter withoutOrderingExpressions()
