@@ -52,8 +52,8 @@ import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.io.util.SafeMemory;
 import org.apache.cassandra.io.util.SliceDescriptor;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.schema.CompressionParams;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
@@ -62,7 +62,8 @@ import org.apache.cassandra.utils.concurrent.Transactional;
  */
 public class CompressionMetadata implements AutoCloseable
 {
-    private static final AtomicLong NATIVE_MEMORY_USAGE = new AtomicLong(0);
+    public static final AtomicLong NATIVE_MEMORY_USAGE = new AtomicLong(0);
+
     /**
      * DataLength can represent either the true length of the file
      * or some shorter value, in the case we want to impose a shorter limit on readers
@@ -81,7 +82,7 @@ public class CompressionMetadata implements AutoCloseable
      * chunks. Each item is of Long type, thus 8 bytes long. Note that even if we deal with a partial data file (zero
      * copy metadata is present), we store offsets of all chunks for the original (compressed) data file.
      */
-    private final Memory.LongArray chunkOffsets;
+    private final CompressionChunkOffsets chunkOffsets;
 
     public final File indexFilePath;
 
@@ -130,7 +131,7 @@ public class CompressionMetadata implements AutoCloseable
         return read(dataFilePath, sliceDescription, skipOffsets, CompressionMetadataReaderType.READ_TIME);
     }
 
-    public static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets, CompressionMetadataReaderType readerType)
+    private static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets, CompressionMetadataReaderType readerType)
     {
         Descriptor descriptor = Descriptor.fromFilename(dataFilePath);
         return new CompressionMetadata(descriptor.fileFor(Component.COMPRESSION_INFO),
@@ -163,12 +164,11 @@ public class CompressionMetadata implements AutoCloseable
         long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
         long uncompressedLength = sliceDescriptor.exists() ? sliceDescriptor.dataEnd - sliceDescriptor.sliceStart : -1;
 
-
-
-        try (FileInputStreamPlus stream = readerType == CompressionMetadataReaderType.WRITE_TIME ?
+        try (FileInputStreamPlus inputStreamPlus = readerType == CompressionMetadataReaderType.WRITE_TIME ?
                                           new FileInputStreamPlus(StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath), indexFilePath.toPath()) :
                                           indexFilePath.newInputStream())
         {
+            TrackedDataInputPlus stream = new TrackedDataInputPlus(inputStreamPlus);
             String compressorName = stream.readUTF();
             int optionCount = stream.readInt();
             Map<String, String> options = new HashMap<>(optionCount);
@@ -198,7 +198,6 @@ public class CompressionMetadata implements AutoCloseable
 
             startChunkIndex = Math.toIntExact(uncompressedOffset >> chunkLengthBits);
 
-
             if (skipOffsets)
             {
                 chunkOffsets = null;
@@ -208,13 +207,22 @@ public class CompressionMetadata implements AutoCloseable
             {
                 assert uncompressedOffset == (long) startChunkIndex << chunkLengthBits;
                 int endChunkIndex = Math.toIntExact((uncompressedOffset + dataLength - 1) >> chunkLengthBits) + 1;
-                Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
-                chunkOffsets = offsetsAndLimit.left;
-                // We adjust the compressed file length to store the position after the last chunk just to be able to
-                // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
-                // Obvously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
-                // an empty chunk added to the end of the file thus we cannot rely on the file length.
-                compressedFileLength = offsetsAndLimit.right;
+
+                final int chunkCount;
+                try
+                {
+                    chunkCount = stream.readInt();
+                    if (chunkCount < 0)
+                        throw new IOException("Compressed file with 0 chunks encountered: " + indexFilePath);
+                }
+                catch (IOException e)
+                {
+                    throw new FSReadError(e, indexFilePath.toPath());
+                }
+
+                long offsetsStart = stream.getBytesRead();
+                chunkOffsets = CompressionChunkOffsetsFactory.instance.getInstance(indexFilePath, stream, offsetsStart, startChunkIndex, endChunkIndex, chunkCount, compressedLength, readerType);
+                compressedFileLength = chunkOffsets.compressedFileLength();
             }
         }
         catch (FileNotFoundException | NoSuchFileException e)
@@ -225,20 +233,18 @@ public class CompressionMetadata implements AutoCloseable
         {
             throw new CorruptSSTableException(e, indexFilePath);
         }
-
     }
 
     // do not call this constructor directly, unless used in testing
     @VisibleForTesting
-    private CompressionMetadata(File filePath, CompressionParams parameters, Memory.LongArray offsets, long dataLength, long compressedLength)
+    private CompressionMetadata(File filePath, CompressionParams parameters, CompressionChunkOffsets chunkOffsets, long dataLength, long compressedLength)
     {
         this.indexFilePath = filePath;
         this.parameters = parameters;
         assert Integer.bitCount(parameters.chunkLength()) == 1;
         this.chunkLengthBits = Integer.numberOfTrailingZeros(parameters.chunkLength());
         this.compressedFileLength = compressedLength;
-        assert offsets != null;
-        this.chunkOffsets = offsets;
+        this.chunkOffsets = chunkOffsets;
         this.dataLength = dataLength;
         this.startChunkIndex = 0;
     }
@@ -282,11 +288,12 @@ public class CompressionMetadata implements AutoCloseable
 
     /**
      * Returns the amount of memory in bytes used off heap.
+     *
      * @return the amount of memory in bytes used off heap
      */
     public long offHeapSize()
     {
-        return hasOffsets() ? chunkOffsets.memory.size() : 0;
+        return hasOffsets() ? chunkOffsets.offHeapMemoryUsed() : 0;
     }
 
     public boolean hasOffsets()
@@ -297,75 +304,7 @@ public class CompressionMetadata implements AutoCloseable
     public void addTo(Ref.IdentityCollection identities)
     {
         if (hasOffsets())
-            identities.add(chunkOffsets.memory);
-    }
-
-    /**
-     * Reads offsets of the individual chunks from the given input, filtering out non-relevant offsets (outside the
-     * specified range).
-     *
-     * @param input Source of the data
-     * @param startIndex Index of the first chunk to read, inclusive
-     * @param endIndex Index of the last chunk to read, exclusive
-     * @param compressedFileLength compressed file length
-     *
-     * @return A pair of chunk offsets array and the offset next to the last read chunk
-     */
-    private static Pair<Memory.LongArray, Long> readChunkOffsets(FileInputStreamPlus input, int startIndex, int endIndex, long compressedFileLength)
-    {
-        final Memory.LongArray offsets;
-        final int chunkCount;
-        try
-        {
-            chunkCount = input.readInt();
-            if (chunkCount < 0)
-                throw new IOException("Compressed file with 0 chunks encountered: " + input);
-        }
-        catch (IOException e)
-        {
-            throw new FSReadError(e, input.path);
-        }
-
-        if (chunkCount == 0)
-            return Pair.create(null, 0L);
-
-        Preconditions.checkState(startIndex < chunkCount, "The start index %s has to be < chunk count %s", startIndex, chunkCount);
-        Preconditions.checkState(endIndex <= chunkCount, "The end index %s has to be <= chunk count %s", endIndex, chunkCount);
-        Preconditions.checkState(startIndex <= endIndex, "The start index %s has to be < end index %s", startIndex, endIndex);
-
-        int chunksToRead = endIndex - startIndex;
-
-        if (chunksToRead == 0)
-            return Pair.create(new Memory.LongArray(0), 0L);
-
-        offsets = new Memory.LongArray(chunksToRead);
-        long i = 0;
-        try
-        {
-            input.skipBytes(startIndex * 8);
-            long lastOffset;
-            for (i = 0; i < chunksToRead; i++)
-            {
-                lastOffset = input.readLong();
-                offsets.set(i, lastOffset);
-            }
-
-            lastOffset = endIndex < chunkCount ? input.readLong() - offsets.get(0) : compressedFileLength;
-            NATIVE_MEMORY_USAGE.addAndGet(offsets.memoryUsed());
-            return Pair.create(offsets, lastOffset);
-        }
-        catch (EOFException e)
-        {
-            offsets.close();
-            String msg = String.format("Corrupted Index File %s: read %d but expected at least %d chunks.",
-                                       input, i, chunksToRead);
-            throw new CorruptSSTableException(new IOException(msg, e), input.path);
-        }
-        catch (IOException e)
-        {
-            offsets.close();
-            throw new FSReadError(e, input.path);
-        }
+            chunkOffsets.addTo(identities);
     }
 
     /**
@@ -471,7 +410,6 @@ public class CompressionMetadata implements AutoCloseable
     {
         if (hasOffsets())
         {
-            NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
             chunkOffsets.close();
         }
     }
@@ -482,6 +420,7 @@ public class CompressionMetadata implements AutoCloseable
         private final CompressionParams parameters;
         private final File filePath;
         private int maxCount = 100;
+        // this is used to store offsets in-memory before we know the final data length to write header info
         private SafeMemory offsets;
         private int count = 0;
 
@@ -501,6 +440,15 @@ public class CompressionMetadata implements AutoCloseable
             return new Writer(parameters, path);
         }
 
+        /**
+         * Adds the next chunk offset while writing compression metadata.
+         * <p>
+         * Offsets are buffered in off-heap memory during write-time even if a different
+         * {@link CompressionChunkOffsets} implementation is configured via {@link CompressionChunkOffsetsFactory}.
+         *
+         * The reason is that we only know about full data file length after receiving all offsets.
+         * The full data size has to be written in the header before writing all offsets.
+         */
         public void addOffset(long offset)
         {
             if (count == maxCount)
@@ -588,11 +536,6 @@ public class CompressionMetadata implements AutoCloseable
         @SuppressWarnings("resource")
         public CompressionMetadata open(long dataLength, long compressedLength)
         {
-            // we are overcounting for a while, but it's not worth the effort to fix
-            // the problem is that the offsets object is allocated by the Writer and `closed` when
-            // the Writer is closed, but the offsets object is used by the CompressionMetadata object
-            // that will survive for all the time the SSTableReader is open
-            NATIVE_MEMORY_USAGE.addAndGet(offsets.size());
             SafeMemory tOffsets = this.offsets.sharedCopy();
 
             // calculate how many entries we need, if our dataLength is truncated
@@ -605,7 +548,23 @@ public class CompressionMetadata implements AutoCloseable
             if (tCount < this.count)
                 compressedLength = tOffsets.getLong(tCount * 8L);
 
-            return new CompressionMetadata(filePath, parameters, new Memory.LongArray(tOffsets, tCount), dataLength, compressedLength);
+            Memory.LongArray memory = new Memory.LongArray(tOffsets, tCount);
+
+            long offsetsStart = filePath.length() - (long) this.count * Long.BYTES;
+            // Could be 0 for early open as file is not written yet
+            boolean isCompressionInfoWritten = filePath.length() > 0;
+            if (isCompressionInfoWritten)
+                Preconditions.checkArgument(offsetsStart >= 0, String.format("Expect non-negative offsets start but got " + offsetsStart));
+
+            try
+            {
+                CompressionChunkOffsets chunkOffsets = CompressionChunkOffsetsFactory.instance.getInstanceOnWriterComplete(filePath, memory, offsetsStart, 0, tCount, tCount, compressedLength, isCompressionInfoWritten);
+                return new CompressionMetadata(filePath, parameters, chunkOffsets, dataLength, compressedLength);
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
         }
 
         /**
