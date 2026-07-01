@@ -44,52 +44,72 @@ public class QueryContext
     /** The thread ID that the query is running on, used to verify single-threaded access. */
     private final long owningThreadId = Thread.currentThread().getId();
 
+    /** The query start time, in nanoseconds. Used to measure the query execution time. */
     private final long queryStartTimeNanos;
 
-    public final long executionQuotaNano;
+    /** How long the coordinator waits for SAI queries, in nanoseconds */
+    private final long executionQuotaNano;
 
+    /**
+     * Whether the query has timed out, checked at {@link #checkpoint()}.
+     */
+    private boolean queryTimedOut = false;
+
+    /** Number of sstables visited by the query. */
     private long sstablesHit = 0;
+
+    /** Number of index segments having results for the query. */
     private long segmentsHit = 0;
 
     /**
-     * The partition/row keys that will be used to fetch rows from the base table.
+     * Number of partition/row keys fetched from the indexes and that will be used to fetch rows from the base table.
      * They will be either partition keys in AA, or row keys in the later row-aware disk formats.
      */
     private long keysFetched = 0;
 
-    /** The number of live partitions fetched from the storage engine, before post-filtering. */
+    /** Number of live partitions fetched from the storage engine, before post-filtering. */
     private long partitionsFetched = 0;
 
-    /** The number of live partitions returned to the coordinator, after post-filtering. */
+    /** Number of live partitions returned to the coordinator, after post-filtering. */
     private long partitionsReturned = 0;
 
-    /** The number of deleted partitions that are fetched. */
+    /** Number of deleted partitions that have been fetched. */
     private long partitionTombstonesFetched = 0;
 
-    /** The number of live rows fetched from the storage engine, before post-filtering. */
+    /** Number of live rows fetched from the storage engine, before post-filtering. */
     private long rowsFetched = 0;
 
-    /** The number of live rows returned to the coordinator, after post-filtering. */
+    /** Number of live rows returned to the coordinator, after post-filtering. */
     private long rowsReturned = 0;
 
-    /** The number of deleted individual rows or ranges of rows that are fetched. */
+    /** Number of deleted individual rows or ranges of rows that have been fetched. */
     private long rowTombstonesFetched = 0;
 
+    /** Number of trie (literal or key) segments visited by the query. */
     private long trieSegmentsHit = 0;
 
-    private long bkdPostingListsHit = 0;
-    private long bkdSegmentsHit = 0;
-
-    private long bkdPostingsSkips = 0;
-    private long bkdPostingsDecodes = 0;
-
+    /** Number of times the query has jumped to the position of a row ID within a trie (literal or key) posting list. */
     private long triePostingsSkips = 0;
+
+    /** Number of times the query has advanced into a trie (literal or key) posting list. */
     private long triePostingsDecodes = 0;
 
-    private long queryTimeouts = 0;
+    /** Number of BKD (numeric) segments visited by the query. */
+    private long bkdSegmentsHit = 0;
 
+    /** Number of BKD (numeric) merged posting lists visited by the query. */
+    private long bkdPostingListsHit = 0;
+
+    /** Number of times the query has jumped to the position of a row ID within a BKD (numeric) posting list. */
+    private long bkdPostingsSkips = 0;
+
+    /** Number of times the query has advanced into a BKD (numeric) posting list. */
+    private long bkdPostingsDecodes = 0;
+
+    /** Cumulative time spent searching ANN graph, in nanoseconds. */
     private long annGraphSearchLatency = 0;
 
+    /** The worst approximate score observed in ANN. */
     private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
     private long postFilteringReadLatency = 0;
@@ -98,6 +118,7 @@ public class QueryContext
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
 
+    /** Metrics about the query plan. */
     private PlanInfo queryPlanInfo;
 
     @VisibleForTesting
@@ -118,7 +139,6 @@ public class QueryContext
         return MonotonicClock.Global.approxTime.now() - queryStartTimeNanos;
     }
 
-    // setters
     public void addSstablesHit(long val)
     {
         checkThreadOwnership();
@@ -179,16 +199,28 @@ public class QueryContext
         trieSegmentsHit += val;
     }
 
-    public void addBkdPostingListsHit(long val)
+    public void addTriePostingsSkips(long val)
     {
         checkThreadOwnership();
-        bkdPostingListsHit += val;
+        triePostingsSkips += val;
+    }
+
+    public void addTriePostingsDecodes(long val)
+    {
+        checkThreadOwnership();
+        triePostingsDecodes += val;
     }
 
     public void addBkdSegmentsHit(long val)
     {
         checkThreadOwnership();
         bkdSegmentsHit += val;
+    }
+
+    public void addBkdPostingListsHit(long val)
+    {
+        checkThreadOwnership();
+        bkdPostingListsHit += val;
     }
 
     public void addBkdPostingsSkips(long val)
@@ -203,24 +235,6 @@ public class QueryContext
         bkdPostingsDecodes += val;
     }
 
-    public void addTriePostingsSkips(long val)
-    {
-        checkThreadOwnership();
-        triePostingsSkips += val;
-    }
-
-    public void addTriePostingsDecodes(long val)
-    {
-        checkThreadOwnership();
-        triePostingsDecodes += val;
-    }
-
-    public void addQueryTimeouts(long val)
-    {
-        checkThreadOwnership();
-        queryTimeouts += val;
-    }
-
     public void addAnnGraphSearchLatency(long val)
     {
         checkThreadOwnership();
@@ -233,19 +247,18 @@ public class QueryContext
         postFilteringReadLatency += val;
     }
 
-    public void setFilterSortOrder(FilterSortOrder filterSortOrder)
-    {
-        checkThreadOwnership();
-        this.filterSortOrder = filterSortOrder;
-    }
-
+    /**
+     * Checks if the query has exceeded its execution quota and aborts it if it has timed out.
+     *
+     * @throws AbortedOperationException if the query has timed out
+     */
     public void checkpoint()
     {
         checkThreadOwnership();
 
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
         {
-            addQueryTimeouts(1);
+            queryTimedOut = true;
             throw new AbortedOperationException();
         }
     }
@@ -289,6 +302,9 @@ public class QueryContext
             this.queryPlanInfo = new PlanInfo(originalPlan, optimizedPlan);
     }
 
+    /**
+     * @return a {@link Snapshot} representing an immutable version of this query context.
+     */
     public Snapshot snapshot()
     {
         checkThreadOwnership();
@@ -329,13 +345,13 @@ public class QueryContext
         public final long rowsReturned;
         public final long rowTombstonesFetched;
         public final long trieSegmentsHit;
-        public final long bkdPostingListsHit;
-        public final long bkdSegmentsHit;
-        public final long bkdPostingsSkips;
-        public final long bkdPostingsDecodes;
         public final long triePostingsSkips;
         public final long triePostingsDecodes;
-        public final long queryTimeouts;
+        public final long bkdSegmentsHit;
+        public final long bkdPostingListsHit;
+        public final long bkdPostingsSkips;
+        public final long bkdPostingsDecodes;
+        public final boolean queryTimedOut;
         public final long annGraphSearchLatency;
         public final long postFilteringReadLatency;
         public final FilterSortOrder filterSortOrder;
@@ -361,13 +377,13 @@ public class QueryContext
             rowsReturned = context.rowsReturned;
             rowTombstonesFetched = context.rowTombstonesFetched;
             trieSegmentsHit = context.trieSegmentsHit;
-            bkdPostingListsHit = context.bkdPostingListsHit;
-            bkdSegmentsHit = context.bkdSegmentsHit;
-            bkdPostingsSkips = context.bkdPostingsSkips;
-            bkdPostingsDecodes = context.bkdPostingsDecodes;
             triePostingsSkips = context.triePostingsSkips;
             triePostingsDecodes = context.triePostingsDecodes;
-            queryTimeouts = context.queryTimeouts;
+            bkdSegmentsHit = context.bkdSegmentsHit;
+            bkdPostingListsHit = context.bkdPostingListsHit;
+            bkdPostingsSkips = context.bkdPostingsSkips;
+            bkdPostingsDecodes = context.bkdPostingsDecodes;
+            queryTimedOut = context.queryTimedOut;
             annGraphSearchLatency = context.annGraphSearchLatency;
             postFilteringReadLatency = context.postFilteringReadLatency;
             filterSortOrder = context.filterSortOrder;
