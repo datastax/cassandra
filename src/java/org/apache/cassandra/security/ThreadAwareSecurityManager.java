@@ -33,9 +33,13 @@ import java.util.Enumeration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLE_USER_DEFINED_FUNCTIONS;
 
 /**
  * Custom {@link SecurityManager} and {@link Policy} implementation that only performs access checks
@@ -86,6 +90,16 @@ public final class ThreadAwareSecurityManager extends SecurityManager
         if (installed)
             return;
 
+        // Skip SecurityManager installation if UDFs are disabled via system property.
+        // The SecurityManager is only used for sandboxing UDFs, so it's not needed when UDFs are disabled.
+        if (DISABLE_USER_DEFINED_FUNCTIONS.getBoolean())
+        {
+            logger.info("Skipping ThreadAwareSecurityManager installation because UDFs are disabled via system property {}",
+                        DISABLE_USER_DEFINED_FUNCTIONS.getKey());
+            installed = true; // Mark as installed to prevent re-entry
+            return;
+        }
+
         // this line is needed - we need to make sure AccessControlException is loaded before we install this SM
         // otherwise we may get into stackoverflow when javax.security is not allowed package, and ACE is tried to be
         // loaded when it is going to be thrown from SM (class loader triggers SM to verify javax.security,
@@ -96,6 +110,16 @@ public final class ThreadAwareSecurityManager extends SecurityManager
         System.setSecurityManager(new ThreadAwareSecurityManager());
         LoggingSupportFactory.getLoggingSupport().onStartup();
         installed = true;
+    }
+
+    /**
+     * Reset the installed flag for testing purposes only.
+     * This allows tests to verify the install() method behavior.
+     */
+    @VisibleForTesting
+    public static void resetInstalledFlagForTests()
+    {
+        installed = false;
     }
 
     static
