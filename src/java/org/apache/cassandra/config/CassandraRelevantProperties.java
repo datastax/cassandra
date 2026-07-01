@@ -393,6 +393,12 @@ public enum CassandraRelevantProperties
     DISABLE_STCS_IN_L0("cassandra.disable_stcs_in_l0"),
     DISABLE_TCACTIVE_OPENSSL("cassandra.disable_tcactive_openssl"),
     DISABLE_UNUSED_CONNECTION_MONITORING("cassandra.messagingService.disableUnusedConnectionMonitoring"),
+    /**
+     * Disables user-defined functions (UDFs). When set to true, UDF creation and execution are blocked.
+     * This property can be used to forcibly disable UDFs for security reasons, or when running on JDK
+     * versions where SecurityManager-based sandboxing may not be reliable or available.
+     */
+    DISABLE_USER_DEFINED_FUNCTIONS("cassandra.disable_user_defined_functions", "false"),
     /** property for the rate of the scheduled task that monitors disk usage */
     DISK_USAGE_MONITOR_INTERVAL_MS("cassandra.disk_usage.monitor_interval_ms", convertToString(TimeUnit.SECONDS.toMillis(30))),
     /** property for the interval on which the repeated client warnings and diagnostic events about disk usage are ignored */
