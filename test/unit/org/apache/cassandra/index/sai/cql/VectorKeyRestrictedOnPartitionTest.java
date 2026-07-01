@@ -25,6 +25,7 @@ import java.util.stream.IntStream;
 
 import org.junit.After;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -95,6 +96,11 @@ public class VectorKeyRestrictedOnPartitionTest extends VectorKeyRestrictedTeste
         partitionRestrictedWidePartitionTest(word2vec.dimension(), 0, 1000);
     }
 
+    // We do not test BQ because it is no longer implemented as of https://github.com/datastax/cassandra/pull/1580.
+    // Technically, the test was covering the case where we have large vectors, but it was taking a significant
+    // amount of time, so until we re-implement BQ, we can ignore this test. See for details
+    // https://github.com/riptano/cndb/issues/15985.
+    @Ignore
     @Test
     public void partitionRestrictedWidePartitionBqCompressedTest()
     {

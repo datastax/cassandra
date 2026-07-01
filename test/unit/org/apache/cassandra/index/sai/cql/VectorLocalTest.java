@@ -131,6 +131,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     // amount of time, so until we re-implement BQ, we can ignore this test. See for details
     // https://github.com/riptano/cndb/issues/15985.
     @Ignore
+    @Test
     public void randomizedBqCompressedTest()
     {
         randomizedTest(2048);
