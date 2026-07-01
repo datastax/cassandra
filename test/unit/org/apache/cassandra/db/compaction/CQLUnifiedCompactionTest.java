@@ -483,7 +483,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
     {
         createTable("create table %s (id int primary key, val blob) with compression = { 'enabled' : false } AND " +
                     "compaction = {'class':'UnifiedCompactionStrategy', 'adaptive' : 'false', " +
-                    "'target_sstable_size': '1MiB', 'scaling_parameters': 'T2 until 2s; T2'}");
+                    "'target_sstable_size': '1MiB', 'flush_size_override': '1MiB', 'scaling_parameters': 'T2 until 2s; T2'}");
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.disableAutoCompaction();

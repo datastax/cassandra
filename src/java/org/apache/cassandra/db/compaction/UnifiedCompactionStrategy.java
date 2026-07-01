@@ -596,6 +596,37 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.shardCountForDensity = shardCountForDensity;
             this.coveredShardCount = coveredShardCount;
         }
+
+        /**
+         * Clones this {@link ShardingStats} with an adjusted density, recomputing
+         * the shard counts based on the new density.
+         *
+         * @param density the new sharding density to apply, must be non-negative
+         * @param shardManager the {@link ShardManager} to calculate shard set coverage
+         * @param controller the {@link Controller} to determine the number of shards
+         * @return a new {@link ShardingStats} instance with the adjusted density
+         * @throws IllegalArgumentException if {@code density} is negative
+         * @throws NullPointerException if {@code shardManager} or {@code controller} is null
+         */
+        public ShardingStats cloneWithAdjustedDensity(double density, ShardManager shardManager, Controller controller)
+        {
+            Preconditions.checkArgument(density >= 0.0, "Density must be non-negative, but was %s", density);
+            Preconditions.checkNotNull(shardManager, "shardManager must not be null");
+            Preconditions.checkNotNull(controller, "controller must not be null");
+
+            int shardCountForDensity = controller.getNumShards(density * shardManager.shardSetCoverage());
+            int coveredShardCount = shardManager.coveredShardCount(this.min, this.max, shardCountForDensity);
+            return new ShardingStats(
+                this.min,
+                this.max,
+                this.totalOnDiskSize,
+                this.overheadToDataRatio,
+                this.uniqueKeyRatio,
+                density,
+                shardCountForDensity,
+                coveredShardCount
+            );
+        }
     }
 
     /// Get and store the sharding stats for a given aggregate
@@ -1256,6 +1287,27 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter);
         Map<Arena, List<Level>> ret = new LinkedHashMap<>(); // should preserve the order of arenas
 
+        List<TimeBucket> timeBuckets = controller.getTimeBuckets();
+        double[] maxDensityPerBucket = new double[timeBuckets.size() + 1];
+        double[] minDensityPerBucket = new double[timeBuckets.size() + 1];
+        Arrays.fill(minDensityPerBucket, Double.MAX_VALUE);
+
+        if (!timeBuckets.isEmpty())
+        {
+            Set<? extends CompactionSSTable> compacting = realm.getCompactingSSTables();
+            for (CompactionSSTable sstable : sstables)
+            {
+                if (compactionFilter.test(sstable, compacting.contains(sstable)))
+                {
+                    TimeBucket sstBucket = controller.getTimeBucketForSSTable(sstable, nowUs);
+                    int sstBucketIdx = sstBucket == null ? timeBuckets.size() : timeBuckets.indexOf(sstBucket);
+                    double density = currentShardManager.density(sstable);
+                    maxDensityPerBucket[sstBucketIdx] = Math.max(maxDensityPerBucket[sstBucketIdx], density);
+                    minDensityPerBucket[sstBucketIdx] = Math.min(minDensityPerBucket[sstBucketIdx], density);
+                }
+            }
+        }
+
         for (Arena arena : arenas)
         {
             TimeBucket bucket = arena.sstables.isEmpty() ? null : controller.getTimeBucketForSSTable(arena.sstables.get(0), nowUs);
@@ -1268,25 +1320,26 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             Collections.sort(ssTableWithDensityList);
 
             double youngerMaxDensity = 0;
-            List<TimeBucket> timeBuckets = controller.getTimeBuckets();
+            double olderMinDensity = 0;
             if (!timeBuckets.isEmpty())
             {
                 int bucketIdx = bucket == null ? timeBuckets.size() : timeBuckets.indexOf(bucket);
                 if (bucketIdx > 0)
                 {
-                    for (CompactionSSTable sstable : sstables)
+                    for (int i = 0; i < bucketIdx; i++)
                     {
-                        TimeBucket sstBucket = controller.getTimeBucketForSSTable(sstable, nowUs);
-                        int sstBucketIdx = sstBucket == null ? timeBuckets.size() : timeBuckets.indexOf(sstBucket);
-                        if (sstBucketIdx < bucketIdx)
-                        {
-                            youngerMaxDensity = Math.max(youngerMaxDensity, currentShardManager.density(sstable));
-                        }
+                        youngerMaxDensity = Math.max(youngerMaxDensity, maxDensityPerBucket[i]);
+                    }
+                    double minDensity = minDensityPerBucket[bucketIdx];
+                    if (minDensity != Double.MAX_VALUE)
+                    {
+                        olderMinDensity = minDensity;
                     }
                 }
             }
 
-            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0, bucket), youngerMaxDensity) / currentShardManager.localSpaceCoverage(), bucket);
+            double adjustedDensity = Math.max(youngerMaxDensity, olderMinDensity);
+            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0, bucket), adjustedDensity) / currentShardManager.localSpaceCoverage(), bucket);
             int index = 0;
             Level level = new Level(controller, bucket, index, 0, maxSize);
             for (SSTableWithDensity candidateWithDensity : ssTableWithDensityList)
