@@ -426,22 +426,69 @@ should be used with caution, only while the database is known to not receive any
 
 ## Time-driven levels
 
-To support time-partitioned workloads (similar to DateTieredCompactionStrategy or TimeWindowCompactionStrategy), UCS allows partitioning SSTables into separate compaction arenas based on the age of the data (determined by the SSTable's minimum timestamp). 
+To support time-partitioned workloads (similar to DateTieredCompactionStrategy or
+TimeWindowCompactionStrategy), UCS allows partitioning SSTables into separate compaction arenas
+based on the age of the data (determined by the SSTable's minimum timestamp).
 
-Time-driven levels are defined within the `scaling_parameters` option using semicolon-separated segments:
-1. **`until <duration>` (Transient young period)**: SSTables whose age (now - minimum timestamp) is less than the duration are matched by this segment. Multiple `until` segments can be defined; they must be ordered by strictly increasing duration.
-2. **`every <duration>` (Repeating time-window)**: Older SSTables (whose age is greater than all `until` segments) are partitioned into fixed-size repeating time windows of the specified duration. The window boundaries align to multiples of the duration since the Unix epoch.
-3. **Plain/unqualified scaling parameters**: The final segment in the list can also be plain scaling parameters, which act as the catch-all for all remaining (older) SSTables.
+Time-driven levels are defined within the `scaling_parameters` option using semicolon-separated
+segments:
+1. **`until <duration>` (Transient young period)**: SSTables whose age (now - minimum timestamp)
+   is less than the duration are matched by this segment. Multiple `until` segments can be
+   defined; they must be ordered by strictly increasing duration.
+2. **`every <duration>` (Repeating time-window)**: Older SSTables (whose age is greater than all
+   `until` segments) are partitioned into fixed-size repeating time windows of the specified
+   duration. The window boundaries align to multiples of the duration since the Unix epoch.
+3. **Plain/unqualified scaling parameters**: The final segment in the list can also be plain
+   scaling parameters, which act as the catch-all for all remaining (older) SSTables.
+
+### Configuration Examples
+
+- **`T4 until 1d; L1000000 every 1d`**:
+  - SSTables younger than 1 day fall into the transient `until 1d` bucket and use tiered compaction
+    with fanout 4 (`T4`).
+  - SSTables older than 1 day are partitioned into fixed 1-day windows starting from the Unix epoch,
+    and each window is compacted independently using aggressive leveling (`L1000000`) inside that
+    window to merge all data into a single run.
+- **`T4 until 1d; T2 until 1w; L10`**:
+  - SSTables younger than 1 day fall into the `until 1d` bucket and use `T4` tiered compaction.
+  - SSTables between 1 day and 1 week old fall into the `until 1w` bucket and use `T2` tiered
+    compaction.
+  - SSTables older than 1 week fall into the base bucket and use `L10` leveled compaction.
+- **`T4 every 1d`**:
+  - All SSTables are partitioned into fixed 1-day windows, and each window is compacted
+    independently using `T4` tiered compaction (similar to traditional TWCS).
 
 ### SSTable Size Adjustment (Stranded SSTable Prevention)
 
-In time-window systems, traffic fluctuations can cause some windows to contain much smaller SSTables than normal. For example, if a node is configured with `T4 until 1d; L4` (where older data uses leveled compaction $L4$), a typical day might produce $16\text{ GiB}$ SSTables that end up on Level 2 in the older arena. However, a lower-traffic day might result in a $5\text{ GiB}$ SSTable that falls on Level 1. Because subsequent days return to normal, this smaller SSTable remains on Level 1 and is never compacted, preventing tombstone clearance.
+In time-window systems, traffic fluctuations can cause some windows to contain much smaller
+SSTables than normal. For example, if a node is configured with `T4 until 1d; L4` (where older
+data uses leveled compaction $L4$), a typical day might produce $16\text{ GiB}$ SSTables that end
+up on Level 2 in the older arena. However, a lower-traffic day might result in a $5\text{ GiB}$
+SSTable that falls on Level 1. Because subsequent days return to normal, this smaller SSTable
+remains on Level 1 and is never compacted, preventing tombstone clearance.
 
-To prevent stranded SSTables, UCS dynamically adjusts the Level 0 boundary (base SSTable size) of each older bucket based on the actual size of SSTables currently present in the younger buckets. In the compaction planning phase, for each bucket $B$, UCS scans the active SSTables and finds the maximum density (size) among those that fall into buckets younger than $B$. The base SSTable size for bucket $B$ is then adjusted to be the maximum of the configured base size and this younger maximum density:
+To prevent stranded SSTables and avoid sudden base size fluctuations as large SSTables graduate to
+older buckets, UCS dynamically adjusts the Level 0 boundary (base SSTable size) of each older
+bucket.
 
-$$\text{baseSSTableSize}_B = \max(\text{baseSSTableSize}, \text{youngerMaxDensity})$$
+During the compaction planning phase, for each bucket $B$, UCS determines:
+1. **`youngerMaxDensity`**: The maximum density (size) among active SSTables currently present in
+   buckets younger than $B$.
+2. **`olderMinDensity`**: The minimum density (size) of any SSTable currently present in bucket $B$
+   itself.
 
-This ensures that any SSTable entering an older bucket that is smaller than or equal to the size of data produced by younger buckets starts at Level 0, allowing it to compact properly with other SSTables.
+The base SSTable size for bucket $B$ is then adjusted to be the maximum of the configured base
+size, the younger maximum density, and the older minimum density:
+
+$$\text{baseSSTableSize}_B = \max(\text{baseSSTableSize}, \text{youngerMaxDensity}, \text{olderMinDensity})$$
+
+This ensures that:
+- Any SSTable entering an older bucket that is smaller than or equal to the size of data produced
+  by younger buckets starts at Level 0, allowing it to compact properly.
+- As large SSTables graduate from the younger bucket to the older bucket, the base size of the older
+  bucket does not drop suddenly (which would otherwise strand the graduated SSTables on higher
+  levels), since `olderMinDensity` holds the base size steady at the size of the graduated
+  SSTables.
 
 ## Differences with STCS and LCS
 
