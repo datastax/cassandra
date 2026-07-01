@@ -20,7 +20,6 @@ package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 /**
@@ -36,6 +35,12 @@ public interface ByteComparable
      * Returns a source that generates the byte-comparable representation of the value byte by byte.
      */
     ByteSource asComparableBytes(Version version);
+
+    /// Returns a peekable version of the byte-source. This may require additional wrapping.
+    default ByteSource.Peekable asPeekableBytes(Version version)
+    {
+        return ByteSource.peekable(asComparableBytes(version));
+    }
 
     enum Version
     {
@@ -75,13 +80,6 @@ public interface ByteComparable
 
     // Simple factories used for testing
 
-    @VisibleForTesting
-    static ByteComparable of(String s)
-    {
-        // Note: This is not prefix-free
-        return v -> ByteSource.of(s, v);
-    }
-
     static ByteComparable of(long value)
     {
         return v -> ByteSource.of(value);
@@ -92,7 +90,7 @@ public interface ByteComparable
         return v -> ByteSource.of(value);
     }
 
-    interface Preencoded extends ByteComparable
+    interface Preencoded extends ByteComparable, Comparable<ByteComparable>
     {
         Version encodingVersion();
 
@@ -112,6 +110,11 @@ public interface ByteComparable
         default byte[] asByteComparableArray(Version version)
         {
             return asComparableBytes(version).remainingBytesToArray();
+        }
+
+        default int compareTo(ByteComparable other)
+        {
+            return compare(this, other, encodingVersion());
         }
     }
 
@@ -166,6 +169,17 @@ public interface ByteComparable
     static ByteComparable cut(ByteComparable src, int cutoff)
     {
         return version -> ByteSource.cut(src.asComparableBytes(version), cutoff);
+    }
+
+    static ByteComparable skipFirst(ByteComparable src, int bytesToSkip)
+    {
+        return version ->
+        {
+            ByteSource bsrc = src.asComparableBytes(version);
+            for (int i = 0; i < bytesToSkip; i++)
+                bsrc.next();
+            return bsrc;
+        };
     }
 
     /**

@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.partition;
 
 import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.RowUpdateBuilder;
@@ -57,8 +58,14 @@ public class PartitionUpdateTest extends CQLTester
         UpdateBuilder builder = UpdateBuilder.create(cfm, "key0");
         builder.newRow().add("s", 1);
         builder.newRow(1).add("a", 2);
-        int size1 = builder.build().dataSize();
-        Assert.assertEquals(94, size1);
+        PartitionUpdate update = builder.build();
+        int size1 = update.dataSize();
+
+        int rowSum = update.staticRow().dataSize();
+        for (Row row : update.rows())
+            rowSum += row.dataSize();
+
+        Assert.assertEquals(rowSum, size1);
 
         builder = UpdateBuilder.create(cfm, "key0");
         builder.newRow(1).add("a", 2);

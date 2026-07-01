@@ -429,13 +429,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                 keys,
                 key ->
                 {
-                    var partition = memtable.getPartition(key.partitionKey());
-                    if (partition == null)
-                        return null;
-                    var row = partition.getRow(key.clustering());
-                    if (row == null)
-                        return null;
-                    var cell = row.getCell(indexContext.getDefinition());
+                    var cell = getCellForKey(key);
                     if (cell == null)
                         return null;
 
@@ -469,13 +463,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     @Nullable
     private org.apache.cassandra.db.rows.Cell<?> getCellForKey(PrimaryKey key)
     {
-        var partition = memtable.getPartition(key.partitionKey());
-        if (partition == null)
-            return null;
-        var row = partition.getRow(key.clustering());
-        if (row == null)
-            return null;
-        return row.getCell(indexContext.getDefinition());
+        return memtable.getCellForKey(key.partitionKey(), key.clustering(), indexContext.getDefinition());
     }
 
     private ByteComparable encode(ByteBuffer input)

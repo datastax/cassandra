@@ -36,7 +36,6 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.EmptyIterators;
-import org.apache.cassandra.db.MutableDeletionInfo;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.ReadCommand;
@@ -660,10 +659,9 @@ public class DataResolverTest extends AbstractReadResponseTest
 
         // 1st "stream": a partition deletion and a range tombstone
         RangeTombstone rt1 = tombstone("0", true , "9", true, 11, nowInSec);
-        PartitionUpdate upd1 = new RowUpdateBuilder(cfm, nowInSec, 1L, dk)
+        PartitionUpdate upd1 = new RowUpdateBuilder(cfm, DeletionTime.build(10, nowInSec), nowInSec, 1L, dk)
                                .addRangeTombstone(rt1)
                                .buildUpdate();
-        ((MutableDeletionInfo)upd1.deletionInfo()).add(DeletionTime.build(10, nowInSec));
         UnfilteredPartitionIterator iter1 = iter(upd1);
 
         // 2nd "stream": a range tombstone that is covered by the other stream rt

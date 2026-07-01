@@ -37,9 +37,10 @@ public final class Filter extends Transformation
     @Override
     protected RowIterator applyToPartition(BaseRowIterator iterator)
     {
+        ((UnfilteredRowIterator) iterator).stopIssuingTombstones();
         return iterator instanceof UnfilteredRows
              ? new FilteredRows(this, (UnfilteredRows) iterator)
-             : new FilteredRows((UnfilteredRowIterator) iterator, this);
+             : new FilteredRows(((UnfilteredRowIterator) iterator), this);
     }
 
     @Override

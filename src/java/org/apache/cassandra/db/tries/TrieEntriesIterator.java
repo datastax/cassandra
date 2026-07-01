@@ -26,13 +26,14 @@ import com.google.common.base.Predicates;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-/**
- * Convertor of trie entries to iterator where each entry is passed through {@link #mapContent} (to be implemented by
- * descendants).
- */
+/// Convertor of trie entries to iterator where each entry is passed through [#mapContent] (to be implemented by
+/// descendants).
+///
+/// If [#mapContent] returns null, this version of the class will pass on that null upstream. If this is not the desired
+/// behaviour, see [WithNullFiltering].
 public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor implements Iterator<V>
 {
-    private final Trie.Cursor<T> cursor;
+    protected final Cursor<T> cursor;
     private final Predicate<T> predicate;
     T next;
     boolean gotNext;
@@ -42,11 +43,11 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
         this(trie.cursor(direction), predicate);
     }
 
-    TrieEntriesIterator(Trie.Cursor<T> cursor, Predicate<T> predicate)
+    TrieEntriesIterator(Cursor<T> cursor, Predicate<T> predicate)
     {
         this.cursor = cursor;
         this.predicate = predicate;
-        assert cursor.depth() == 0;
+        cursor.assertFresh();
         next = cursor.content();
         gotNext = next != null && predicate.test(next);
     }
@@ -81,6 +82,14 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
         return cursor.byteComparableVersion();
     }
 
+    Direction direction()
+    {
+        return cursor.direction();
+    }
+
+    /// To be implemented by descendants to map the content value and path to the required entry. If callers need to
+    /// save the path, they must copy the `bytes` array, which will be overwritten when the iteration continues.
+    /// If this method returns null, the null will be passed on as an entry in the iteration.
     protected abstract V mapContent(T content, byte[] bytes, int byteLength);
 
     /**
@@ -88,7 +97,7 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
      */
     static class AsEntries<T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable.Preencoded, T>>
     {
-        public AsEntries(Trie.Cursor<T> cursor)
+        public AsEntries(Cursor<T> cursor)
         {
             super(cursor, Predicates.alwaysTrue());
         }
@@ -105,7 +114,7 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
      */
     static class AsEntriesFilteredByType<T, U extends T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable.Preencoded, U>>
     {
-        public AsEntriesFilteredByType(Trie.Cursor<T> cursor, Class<U> clazz)
+        public AsEntriesFilteredByType(Cursor<T> cursor, Class<U> clazz)
         {
             super(cursor, clazz::isInstance);
         }
@@ -121,5 +130,77 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
     static <T> java.util.Map.Entry<ByteComparable.Preencoded, T> toEntry(ByteComparable.Version version, T content, byte[] bytes, int byteLength)
     {
         return new AbstractMap.SimpleImmutableEntry<>(toByteComparable(version, bytes, byteLength), content);
+    }
+
+    /// Convertor of trie entries to iterator where each entry is passed through [#mapContent] (to be implemented by
+    /// descendants). This is the same as [TrieEntriesIterator], but instead of accepting a predicate to filter out entries,
+    /// it skips over ones where [#mapContent] returns null.
+    public static abstract class WithNullFiltering<T, V> extends TriePathReconstructor implements Iterator<V>
+    {
+        protected final Cursor<T> cursor;
+        V next;
+        boolean gotNext;
+
+        protected WithNullFiltering(BaseTrie<T, ?, ?> trie, Direction direction)
+        {
+            this(trie.cursor(direction));
+        }
+
+        WithNullFiltering(Cursor<T> cursor)
+        {
+            this.cursor = cursor;
+            cursor.assertFresh();
+            T nextContent = cursor.content();
+            if (nextContent != null)
+            {
+                next = mapContent(nextContent, keyBytes, keyPos);
+                gotNext = next != null;
+            }
+            else
+                gotNext = false;
+        }
+
+        public boolean hasNext()
+        {
+            while (!gotNext)
+            {
+                T nextContent = cursor.advanceToContent(this);
+                if (nextContent != null)
+                {
+                    next = mapContent(nextContent, keyBytes, keyPos);
+                    gotNext = next != null;
+                }
+                else
+                    gotNext = true;
+            }
+
+            return next != null;
+        }
+
+        public V next()
+        {
+            if (!hasNext())
+                throw new IllegalStateException("next without hasNext");
+
+            return consumeNext();
+        }
+
+        protected V consumeNext()
+        {
+            gotNext = false;
+            V v = next;
+            next = null;
+            return v;
+        }
+
+        protected V peekNextIfAvailable()
+        {
+            return next;    // null if not prepared
+        }
+
+        /// To be implemented by descendants to map the content value and path to the required entry. If callers need to
+        /// save the path, they must copy the `bytes` array, which will be overwritten when the iteration continues.
+        /// If this method returns null, the iteration will skip over the current position.
+        protected abstract V mapContent(T content, byte[] bytes, int byteLength);
     }
 }
