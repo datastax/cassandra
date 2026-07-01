@@ -921,7 +921,7 @@ public enum CassandraRelevantProperties
 
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
-    SAI_VECTOR_USE_PRUNING_DEFAULT("cassandra.sai.jvector.use_pruning_default", "1000"),
+    SAI_VECTOR_USE_PRUNING_DEFAULT("cassandra.sai.jvector.use_pruning_default", "false"),
 
     /** The class to use for selecting the current version of the SAI on-disk index format on a per-keyspace basis. */
     SAI_VERSION_SELECTOR_CLASS("cassandra.sai.version.selector.class", ""),
