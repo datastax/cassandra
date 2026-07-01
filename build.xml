@@ -557,6 +557,9 @@
         <!-- without this, FieldUtils cannot overwrite static final fields, breaking some tests -->
         <!-- removed in 22 (JDK-8309635) so will need a proper fix for 25 -->
         <string>-Djdk.reflect.useDirectMethodHandle=false</string>
+
+        <!-- Enable vector incubator feature (simd support) -->
+        <string>--add-modules jdk.incubator.vector</string>
     </resources>
     <pathconvert property="_jvm21_test_arg_items_concat" refid="_jvm21_test_arg_items" pathsep=" "/>
 
@@ -585,6 +588,9 @@
         <string>--add-exports=java.base/jdk.internal.vm.annotation=ALL-UNNAMED</string>
         <!-- required for org.apache.cassandra.Util.getSupportedMTimeGranularity -->
         <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
+
+        <!-- Enable vector incubator feature (simd support) -->
+        <string>--add-modules jdk.incubator.vector</string>
 
         <!-- NOTE: -Dnet.bytebuddy.experimental is not set: byte-buddy is upgraded to a release with
              native JDK 25 support. -Djava.security.manager=allow is not set: SecurityManager install is
