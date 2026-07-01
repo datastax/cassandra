@@ -161,4 +161,8 @@
 # SecurityManager-free mechanism on JDK 25 (see the user_defined_functions security settings in
 # cassandra.yaml and the project JDK 25 design notes).
 
+### Enable vector incubator feature (simd support)
+
+--add-modules jdk.incubator.vector
+
 # The newline in the end of file is intentional

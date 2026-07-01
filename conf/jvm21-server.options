@@ -143,4 +143,8 @@
 # Need to explicitly allow security manager on JDK21; deprecated for removal
 -Djava.security.manager=allow
 
+### Enable vector incubator feature (simd support)
+
+--add-modules jdk.incubator.vector
+
 # The newline in the end of file is intentional
