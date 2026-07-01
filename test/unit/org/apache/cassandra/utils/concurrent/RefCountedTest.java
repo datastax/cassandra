@@ -38,7 +38,9 @@ import java.util.function.Function;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.JavaUtils;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -505,7 +507,16 @@ public class RefCountedTest
     public void testCycles()
     {
         assertThat(testCycles(LambdaTestClass::getRunOnCloseLambdaWithThis)).isNotEmpty(); // sanity test
-        assertThat(testCycles(LambdaTestClass::getRunOnCloseInner)).isNotEmpty(); // sanity test
+
+        // Behavior changed in JDK 21; anonymous inner classes that capture enclosing state became
+        // hidden classes, so their fields are no longer walkable by the leak detector.
+        // This sanity check is therefore only valid on JDK < 21.
+        int version = JavaUtils.parseJavaVersion(CassandraRelevantProperties.JAVA_VERSION.getString());
+        var result = testCycles(LambdaTestClass::getRunOnCloseInner);
+        if (version >= 21)
+            assertThat(result).isEmpty();
+        else
+            assertThat(result).isNotEmpty();
 
         assertThat(testCycles(LambdaTestClass::getRunOnCloseLambda)).isEmpty();
     }
