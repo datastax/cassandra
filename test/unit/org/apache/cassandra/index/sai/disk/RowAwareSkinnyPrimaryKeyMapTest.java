@@ -16,14 +16,10 @@
 
 package org.apache.cassandra.index.sai.disk;
 
-import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -31,10 +27,8 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -44,8 +38,7 @@ import static org.junit.Assert.assertEquals;
  * Skinny-table tests (no clustering columns) for
  * {@link PrimaryKeyMap} using the row-aware on-disk format.
  */
-@RunWith(Parameterized.class)
-public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
+public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester.Versioned.RowAware
 {
     private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
     private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
@@ -55,22 +48,9 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester
     private PrimaryKey.Factory pkFactory;
     private IPartitioner partitioner;
 
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "version={0}")
-    public static List<Object[]> data()
-    {
-        return Version.ALL.stream()
-                          .filter(v -> v.onDiskFormat().indexFeatureSet().isRowAware())
-                          .map(v -> new Object[]{ v })
-                          .collect(Collectors.toList());
-    }
-
     @Before
     public void setup() throws Throwable
     {
-        SAIUtil.setCurrentVersion(version);
 
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, int_value int, text_value text)");
         execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
