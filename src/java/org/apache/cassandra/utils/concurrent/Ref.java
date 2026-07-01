@@ -595,12 +595,20 @@ public final class Ref<T> implements RefCounted<T>
                     iterations = 0;
                     visited.add(globalState);
                     visiting = globalState;
-                    traverse(globalState.tidy);
+                    try
+                    {
+                        traverse(globalState.tidy);
+                    }
+                    catch (Throwable t)
+                    {
+                        // A failure walking one GlobalState's object graph must not abort the entire scan.
+                        // On JDK 25 some internal JDK classes (hidden classes, records, @Contended fields)
+                        // can cause unexpected exceptions during reflection-based traversal. Log and continue
+                        // so that all other GlobalState entries are still inspected. (CASSANDRA-21171)
+                        NoSpamLogger.log(logger, NoSpamLogger.Level.ERROR, 5, TimeUnit.MINUTES,
+                                         "Unexpected error traversing ref graph for {}; skipping", globalState, t);
+                    }
                 }
-            }
-            catch (Throwable t)
-            {
-                t.printStackTrace();
             }
             finally
             {
