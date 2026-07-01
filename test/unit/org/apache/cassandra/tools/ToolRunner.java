@@ -60,7 +60,9 @@ public class ToolRunner
                                                                                   "(?im)^.*Not generating a deterministic id for table.*\\R",
                                                                                   "(?im)^.*`USE <keyspace>` with prepared statements is.*\\R",
                                                                                   // jamm 0.4.0 prints this once on JDK 25 (the UseEmptySlotsInSupers flag was removed); the sizes are still correct
-                                                                                  "(?im)^WARNING: Jamm is starting with.*\\R");
+                                                                                  "(?im)^WARNING: Jamm is starting with.*\\R",
+                                                                                  // ARM64 JVM warning when SVE vector length is unavailable (e.g. in certain docker/VM environments)
+                                                                                  "(?im)^.*OpenJDK.*VM warning:.*SVE.*\\R");
 
     private static final ImmutableList<String> STDOUT_CLEANERS = ImmutableList.of("^DEBUG .*\\R");
 
@@ -233,7 +235,9 @@ public class ToolRunner
             pb.environment().putAll(env);
         String jvmOpts = pb.environment().getOrDefault("JVM_OPTS", "") + " -Dcassandra.disable_tcactive_openssl=true"
                          // Allow sun.misc.Unsafe memory-access without the JDK 23+ terminal-deprecation warning (JEP 471)
-                         + " --sun-misc-unsafe-memory-access=allow";
+                         + " --sun-misc-unsafe-memory-access=allow"
+                         // Allow native access (e.g. jffi) without the JDK 25 restricted-method warning
+                         + " --enable-native-access=ALL-UNNAMED";
         pb.environment().put("JVM_OPTS", jvmOpts);
 
         try
