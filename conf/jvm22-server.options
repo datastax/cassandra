@@ -59,6 +59,13 @@
 
 -Djdk.attach.allowAttachSelf=true
 -Djava.security.manager=allow
+
+# Grant native access to code on the class path (e.g. netty's System::loadLibrary) so the JDK does not
+# print the "restricted method called / Use --enable-native-access" warnings to stderr (JEP 472).
+# Future JDKs will block these calls without it.
+--enable-native-access=ALL-UNNAMED
+
+--add-exports java.base/java.lang.ref=ALL-UNNAMED
 --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
 --add-exports java.base/jdk.internal.ref=ALL-UNNAMED
 --add-exports java.base/jdk.internal.perf=ALL-UNNAMED
@@ -66,6 +73,7 @@
 --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED
 --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
 --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED
+--add-exports java.sql/java.sql=ALL-UNNAMED
 --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
 --add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming
 --add-exports jdk.unsupported/sun.misc=ALL-UNNAMED
@@ -97,6 +105,12 @@
 --add-opens java.base/java.nio.file.attribute=ALL-UNNAMED
 
 ### GC logging options -- uncomment to enable
+-Xlog:async
+
+# In async mode JVM writes logs into a circular memory buffer; if the buffer fills up
+# before it is drained, log records are silently dropped
+# the default buffer size can be adjusted using the next option if needed
+# -XX:AsyncLogBufferSize=2m
 
 # Java 11 (and newer) GC logging options:
 # See description of https://bugs.openjdk.java.net/browse/JDK-8046148 for details about the syntax
@@ -120,6 +134,10 @@
 # creation of direct buffers using Unsafe. Without it, this falls back to ByteBuffer.allocateDirect which has
 # inferior performance and risks exceeding MaxDirectMemory
 -Dio.netty.tryReflectionSetAccessible=true
+
+# Revert changes in defaults introduced in https://netty.io/news/2022/03/10/4-1-75-Final.html
+-Dio.netty.allocator.useCacheForAllThreads=true
+-Dio.netty.allocator.maxOrder=11
 
 ### Enable vector incubator feature (simd support)
 
