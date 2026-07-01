@@ -27,7 +27,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.exceptions.ReadFailureException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.index.sai.cql.BM25Test.*;
@@ -188,12 +189,12 @@ public class FeaturesVersionSupportTest extends VectorTester
     public void testBM25() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) " +
-                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                    "WITH OPTIONS = {" +
-                    "'index_analyzer': '{" +
-                    "\"tokenizer\" : {\"name\" : \"standard\"}, " +
-                    "\"filters\" : [{\"name\" : \"porterstem\"}]}'}");
+        String index = createIndex("CREATE CUSTOM INDEX ON %s(v) " +
+                                   "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                                   "WITH OPTIONS = {" +
+                                   "'index_analyzer': '{" +
+                                   "\"tokenizer\" : {\"name\" : \"standard\"}, " +
+                                   "\"filters\" : [{\"name\" : \"porterstem\"}]}'}");
         execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
         String query = "SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3";
         beforeAndAfterFlush(() -> {
@@ -204,8 +205,8 @@ public class FeaturesVersionSupportTest extends VectorTester
             else
             {
                 Assertions.assertThatThrownBy(() -> execute(query))
-                          .isInstanceOf(ReadFailureException.class)
-                          .hasMessageContaining(RequestFailureReason.FEATURE_NEEDS_INDEX_REBUILD.name());
+                          .isInstanceOf(InvalidRequestException.class)
+                          .hasMessageContaining(String.format(QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25, index));
             }
         });
     }

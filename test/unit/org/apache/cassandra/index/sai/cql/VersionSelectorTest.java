@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.assertj.core.api.Assertions;
 
 import static java.lang.String.format;
@@ -268,7 +269,7 @@ public class VersionSelectorTest extends SAITester
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (2, 'orange')");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (3, 'banana')");
             execute(keyspace, "INSERT INTO %s (k, v) VALUES (4, 'apple')");
-        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX bm25_skinny ON %s(v) USING 'StorageAttachedIndex' " +
                                                        "WITH OPTIONS = {" +
                                                        "'index_analyzer': '{" +
                                                        "\"tokenizer\" : {\"name\" : \"standard\"}, " +
@@ -277,7 +278,7 @@ public class VersionSelectorTest extends SAITester
               assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3", 2);
               assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'orange' LIMIT 3", 1);
               assertRowCount(keyspace, "SELECT k FROM %s ORDER BY v BM25 OF 'kiwi' LIMIT 3", 0);
-          }, Version.BM25_EARLIEST, "FEATURE_NEEDS_INDEX_REBUILD");
+          }, Version.BM25_EARLIEST, String.format(QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25, "bm25_skinny"));
     }
 
     @Test
@@ -293,7 +294,7 @@ public class VersionSelectorTest extends SAITester
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 2, 'orange')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 3, 'banana')");
             execute(keyspace, "INSERT INTO %s (k, c, v) VALUES (1, 4, 'apple')");
-        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX IF NOT EXISTS ON %s(v) USING 'StorageAttachedIndex' " +
+        }).withIndex(keyspace -> createIndex(keyspace, "CREATE CUSTOM INDEX bm25_wide ON %s(v) USING 'StorageAttachedIndex' " +
                                                        "WITH OPTIONS = {" +
                                                        "'index_analyzer': '{" +
                                                        "\"tokenizer\" : {\"name\" : \"standard\"}, " +
@@ -305,7 +306,7 @@ public class VersionSelectorTest extends SAITester
               assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v BM25 OF 'apple' LIMIT 3", 2);
               assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v BM25 OF 'orange' LIMIT 3", 1);
               assertRowCount(keyspace, "SELECT k FROM %s WHERE k=0 ORDER BY v BM25 OF 'kiwi' LIMIT 3", 0);
-          }, Version.BM25_EARLIEST, "FEATURE_NEEDS_INDEX_REBUILD");
+          }, Version.BM25_EARLIEST, String.format(QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25, "bm25_wide"));
     }
 
     @Override
