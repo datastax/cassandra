@@ -78,12 +78,12 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
         appendMetric(sb, "rowsReturned", metrics.rowsReturned);
         appendMetric(sb, "rowTombstonesFetched", metrics.rowTombstonesFetched);
         appendMetric(sb, "trieSegmentsHit", metrics.trieSegmentsHit);
-        appendMetric(sb, "bkdPostingListsHit", metrics.bkdPostingListsHit);
-        appendMetric(sb, "bkdSegmentsHit", metrics.bkdSegmentsHit);
-        appendMetric(sb, "bkdPostingsSkips", metrics.bkdPostingsSkips);
-        appendMetric(sb, "bkdPostingsDecodes", metrics.bkdPostingsDecodes);
         appendMetric(sb, "triePostingsSkips", metrics.triePostingsSkips);
         appendMetric(sb, "triePostingsDecodes", metrics.triePostingsDecodes);
+        appendMetric(sb, "bkdSegmentsHit", metrics.bkdSegmentsHit);
+        appendMetric(sb, "bkdPostingListsHit", metrics.bkdPostingListsHit);
+        appendMetric(sb, "bkdPostingsSkips", metrics.bkdPostingsSkips);
+        appendMetric(sb, "bkdPostingsDecodes", metrics.bkdPostingsDecodes);
         appendMetric(sb, "annGraphSearchLatencyNanos", metrics.annGraphSearchLatency);
 
         // append the plan
