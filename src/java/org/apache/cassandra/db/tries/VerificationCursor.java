@@ -219,7 +219,7 @@ interface VerificationCursor
                 {
                     assert ((getByte(newDepth) ^ direction.select(0x00, 0xFF)) << 1)
                            < undecodedTransition(newPosition) :
-                        String.format("Cursor went backwards to %s where it already visited byte %s\n%s",
+                        String.format("Cursor went backwards to %s where it already visited byte %02x\n%s",
                                       Cursor.toString(newPosition),
                                       getByte(newDepth),
                                       this);

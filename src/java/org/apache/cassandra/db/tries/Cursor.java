@@ -318,7 +318,7 @@ interface Cursor<T>
     /// visited position at that depth.
     static long positionForSkippingBranch(long encodedBranchPosition)
     {
-        return (encodedBranchPosition & ~FLAGS_MASK) + (1L << TRANSITION_SHIFT);
+        return (encodedBranchPosition & ~(FLAGS_MASK | ON_RETURN_PATH_BIT)) + (1L << TRANSITION_SHIFT);
     }
 
     /// Returns true if the given `currPosition` as returned by `advance`, `advanceMultiple` or `skipTo` is the result
