@@ -18,7 +18,9 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -45,6 +47,9 @@ import com.google.common.collect.Sets;
 import com.google.common.collect.Streams;
 import org.junit.Assert;
 
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.Pair;
@@ -54,6 +59,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.EMPTY;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class TrieUtil
@@ -634,13 +640,42 @@ public class TrieUtil
             }
     }
 
+    /// Assert two tries are equal, performing exactly the same walks in both cursor directions.
+    public static <T> void assertTriesEqual(Trie<T> expected, Trie<T> actual)
+    {
+        if (expected == null || actual == null)
+        {
+            assertEquals(expected, actual);
+            return;
+        }
+
+        for (Direction dir : Direction.values())
+            try
+            {
+                assertCursorWalksEqual(expected.cursor(dir), actual.cursor(dir));
+            }
+            catch (Throwable t)
+            {
+                try
+                {
+                    System.err.println("Expected\n" + expected.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                    System.err.println("Actual\n" + actual.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                }
+                catch (Throwable t2)
+                {
+                    t.addSuppressed(t2);
+                }
+                throw t;
+            }
+    }
+
     public static<T, D extends RangeState<D>> void assertCursorWalksEqual(DeletionAwareCursor<T, D> expected, DeletionAwareCursor<T, D> actual)
     {
         long expectedPos = expected.encodedPosition();
         long actualPos = actual.encodedPosition();
         while (true)
         {
-            assertEquals("Actual pos " + Cursor.toString(actualPos) + " != " + Cursor.toString(expectedPos), expectedPos, actualPos);
+            assertEquals("Actual pos " + cursorPositionAsString(actual, actualPos) + " != " + cursorPositionAsString(expected, expectedPos), expectedPos, actualPos);
             if (Cursor.isExhausted(actualPos))
                 return;
             T expectedContent = expected.content();
@@ -662,7 +697,7 @@ public class TrieUtil
         long actualPos = actual.encodedPosition();
         while (true)
         {
-            assertEquals("Actual pos " + Cursor.toString(actualPos) + " != " + Cursor.toString(expectedPos), expectedPos, actualPos);
+            assertEquals("Actual pos " + cursorPositionAsString(actual, actualPos) + " != " + cursorPositionAsString(expected, expectedPos), expectedPos, actualPos);
             if (Cursor.isExhausted(actualPos))
                 return;
             T expectedContent = expected.content();
@@ -671,6 +706,14 @@ public class TrieUtil
             expectedPos = expected.advance();
             actualPos = actual.advance();
         }
+    }
+
+    public static String cursorPositionAsString(Cursor<?> cursor, long pos)
+    {
+        if (cursor instanceof VerificationCursor.Plain)
+            return cursor.toString();
+        else
+            return Cursor.toString(pos);
     }
 
 
@@ -801,6 +844,112 @@ public class TrieUtil
             assertEquals("Content", expectedContent, actualContent);
             expectedContent = expected.advanceToContent(expectedPath);
             actualContent = actual.advanceToContent(actualPath);
+        }
+    }
+
+    static void testSkipOverBranch(String[] testsAsStrings, Function<String, Preencoded> mapping, Trie<String> trie)
+    {
+        testsAsStrings = Arrays.copyOf(testsAsStrings, testsAsStrings.length);
+        Arrays.sort(testsAsStrings, (x, y) -> mapping.apply(x).compareTo(mapping.apply(y)));
+        Preencoded[] tests = Arrays.stream(testsAsStrings).map(mapping).toArray(Preencoded[]::new);
+        for (int testIndex = 0; testIndex < tests.length; ++testIndex)
+        {
+            Preencoded key = tests[testIndex];
+            for (Direction d : Direction.values())
+            {
+                Cursor<String> c = trie.cursor(d);
+                assertTrue(c.descendAlong(key.getPreencodedBytes()) || d.isForward() == testsAsStrings[testIndex].endsWith("^"));
+
+                long skipBranch = Cursor.positionForSkippingBranch(c.encodedPosition());
+                long pos = c.skipTo(skipBranch);
+                boolean exhausted = Cursor.isExhausted(pos);
+
+                String next = exhausted ? null : c.content();
+                if (next == null && !exhausted)
+                    next = c.advanceToContent(null);
+                int nextIndex = testIndex + d.increase;
+                while (d.inLoop(nextIndex, 0, tests.length - 1) && isPrefix(key, tests[nextIndex]))
+                    nextIndex += d.increase;
+                String expected = d.inLoop(nextIndex, 0, tests.length - 1) ? testsAsStrings[nextIndex] : null;
+                assertEquals("Value after skipping branch at " + testsAsStrings[testIndex] + " " + d, expected, next);
+            }
+        }
+    }
+
+    static boolean isPrefix(Preencoded prefix, Preencoded value)
+    {
+        ByteSource ps = prefix.getPreencodedBytes();
+        ByteSource vs = value.getPreencodedBytes();
+        while (true)
+        {
+            int nextp = ps.next();
+            int nextv = vs.next();
+            if (nextp == ByteSource.END_OF_STREAM)
+                return true;
+            if (nextp != nextv)
+                return false;
+        }
+    }
+
+    static class IntegerSerDe implements FileWriter.DataSerializer<Integer>, OnDiskCursor.DataDeserializer<Integer>
+    {
+
+        @Override
+        public int serialize(DataOutputPlus out, Integer value) throws IOException
+        {
+            out.writeInt(value);
+            return 4;
+        }
+
+        @Override
+        public Integer deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            return rdr.readInt();
+        }
+    }
+    public static final IntegerSerDe INTEGER_SERDE = new IntegerSerDe();
+
+    static class StringSerDe implements FileWriter.DataSerializer<String>, OnDiskCursor.DataDeserializer<String>
+    {
+
+        @Override
+        public int serialize(DataOutputPlus out, String value) throws IOException
+        {
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            out.write(bytes);
+            return bytes.length;
+        }
+
+        @Override
+        public String deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            byte[] bytes = new byte[length];
+            rdr.readFully(bytes);
+            return new String(bytes, 0, length, StandardCharsets.UTF_8);
+        }
+    }
+    public static final StringSerDe STRING_SERDE = new StringSerDe();
+
+    public static OnDiskTrie<Integer> onDiskRoundtripIntegers(Trie<Integer> trie, boolean isOrdered)
+    {
+        return onDiskRoundtrip(trie, isOrdered, INTEGER_SERDE, INTEGER_SERDE);
+    }
+
+    public static OnDiskTrie<String> onDiskRoundtripStrings(Trie<String> trie, boolean isOrdered)
+    {
+        return onDiskRoundtrip(trie, isOrdered, STRING_SERDE, STRING_SERDE);
+    }
+
+    public static <T> OnDiskTrie<T> onDiskRoundtrip(Trie<T> trie, boolean isOrdered, FileWriter.DataSerializer<T> serializer, OnDiskCursor.DataDeserializer<T> deserializer)
+    {
+        try
+        {
+            File file = FileWriter.write(trie, serializer, new File(java.io.File.createTempFile("intersection", "trie")));
+            return OnDiskTrie.open(file, deserializer, VERSION,  isOrdered, -1);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
         }
     }
 
