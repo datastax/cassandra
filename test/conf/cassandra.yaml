@@ -73,6 +73,13 @@ write_request_timeout_in_ms: 20000
 counter_write_request_timeout_in_ms: 20000
 cas_contention_timeout_in_ms: 20000
 request_timeout_in_ms: 20000
+# Raise the native_transport_timeout well above write_request_timeout so that the
+# effective timeout for coordinator-path queries (which is min of these two) is
+# governed by the per-verb timeout rather than this client-side cap. Without this,
+# heavyweight coordinator-path writes (e.g., SAI vector tests with 2048-dim vectors
+# on JDK 25 with Panama SIMD) can time out after only 12 s even though
+# write_request_timeout_in_ms is 20 s.
+native_transport_timeout_in_ms: 300000
 aggregation_request_timeout_in_ms: 120000
 default_compaction:
     class_name: UnifiedCompactionStrategy
