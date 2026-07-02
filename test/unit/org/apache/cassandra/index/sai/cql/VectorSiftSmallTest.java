@@ -72,8 +72,8 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
         // Run a few queries with increasing rerank_k to validate that recall increases
         ensureIncreasingRerankKIncreasesRecall(queryVectors, groundTruth);
 
-        // Run queries with and without pruning to validate recall improves
-        ensureDisablingPruningIncreasesRecall(queryVectors, groundTruth);
+        // Test that use_pruning option works (even though JVector ignores it)
+        testUsePruningOptionCompatibility(queryVectors, groundTruth);
 
         flush();
         var diskRecall = testRecall(100, queryVectors, groundTruth);
@@ -114,19 +114,30 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
                    strictlyIncreasedCount > 3);
     }
 
-    private void ensureDisablingPruningIncreasesRecall(List<float[]> queryVectors, List<List<Integer>> groundTruth)
+    /**
+     * Tests that the use_pruning option is accepted and works without errors.
+     * <p>
+     * IMPORTANT: As of JVector PR #682, pruning is deprecated and always disabled.
+     * JVector's usePruning() method now always sets pruneSearch = false regardless of input.
+     * This test verifies API compatibility - the option is accepted but has no effect on recall
+     * since JVector ignores it for top-K queries.
+     */
+    private void testUsePruningOptionCompatibility(List<float[]> queryVectors, List<List<Integer>> groundTruth)
     {
         int limit = 10;
-        // Test with pruning enabled
-        double recallWithPruning = testRecall(limit, queryVectors, groundTruth, null, true);
+        
+        // Test with pruning "enabled" (actually disabled by JVector)
+        double recallWithPruningTrue = testRecall(limit, queryVectors, groundTruth, null, true);
 
-        // Test with pruning disabled
-        double recallWithoutPruning = testRecall(limit, queryVectors, groundTruth, null, false);
+        // Test with pruning explicitly disabled
+        double recallWithPruningFalse = testRecall(limit, queryVectors, groundTruth, null, false);
 
-        // Recall should be at least as good when pruning is disabled
-        assertTrue("Recall without pruning (" + recallWithoutPruning +
-                  ") should be at least as good as recall with pruning (" + recallWithPruning + ')',
-                  recallWithoutPruning >= recallWithPruning);
+        // Since JVector always disables pruning, recall should be identical
+        // (allowing for minor floating point differences)
+        assertTrue("Recall with use_pruning=true (" + recallWithPruningTrue +
+                  ") should equal recall with use_pruning=false (" + recallWithPruningFalse +
+                  ") since JVector always disables pruning for top-K queries",
+                  Math.abs(recallWithPruningTrue - recallWithPruningFalse) < 0.001);
     }
 
     // Note: test only fails when scores are sent from replica to coordinator.
