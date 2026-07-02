@@ -46,7 +46,8 @@ import org.apache.cassandra.io.sstable.Component;
  *       present in the controller configuration.</li>
  * </ul>
  *
- * <p>When time-driven levels are configured via the {@code scaling_parameters} option, a {@code TimeEquivClassSplitter}
+ * <p>When time-driven levels are configured via the {@code scaling_parameters} option (using
+ * {@code until <duration>} or {@code every <duration>} clauses), a {@code TimeEquivClassSplitter}
  * is appended to the equivalence-class chain. The splitter groups SSTables by their minimum timestamp:
  * <ul>
  *   <li>For {@link TimeBucket.Mode#UNTIL} buckets: SSTables whose age is less than the bucket's duration
@@ -103,6 +104,18 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
         return Arrays.stream(classSplitters)
                      .map(e -> e.name(t))
                      .collect(Collectors.joining("-"));
+    }
+
+    public boolean shareNonTimeAttributes(CompactionSSTable a, CompactionSSTable b)
+    {
+        for (EquivClassSplitter splitter : classSplitters)
+        {
+            if (splitter instanceof TimeEquivClassSplitter)
+                continue;
+            if (splitter.compare(a, b) != 0)
+                return false;
+        }
+        return true;
     }
 
     /**
@@ -265,7 +278,7 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
                                     sstable.getKeyspaceName(), sstable.getColumnFamilyName(),
                                     bucket, minTimestampUs, nowUs, wIdx);
                     }
-                    return (Long.MAX_VALUE / 2) + wIdx;
+                    return (Long.MAX_VALUE / 2) - wIdx;
                 }
             }
 
