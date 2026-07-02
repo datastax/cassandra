@@ -42,6 +42,8 @@ import org.apache.cassandra.utils.MerkleTree.TreeRange;
 import org.apache.cassandra.utils.MerkleTree.TreeRangeIterator;
 
 import static com.google.common.collect.Lists.newArrayList;
+import static org.apache.cassandra.config.CassandraRelevantProperties.JAVA_VERSION;
+import static org.apache.cassandra.utils.JavaUtils.parseJavaVersion;
 import static org.apache.cassandra.utils.MerkleTree.RECOMMENDED_DEPTH;
 import static org.junit.Assert.*;
 
@@ -608,8 +610,11 @@ public class MerkleTreeTest
         Assert.assertEquals(12, MerkleTree.estimatedMaxDepthForBytes(Murmur3Partitioner.instance,
                                                                      1048576, 32));
 
-        // With 100 mebibytes we should get a limit of 19
-        Assert.assertEquals(19, MerkleTree.estimatedMaxDepthForBytes(Murmur3Partitioner.instance,
+        // With 100 mebibytes we should get a limit of 19 on JDK < 21, 18 on JDK 21+.
+        // Object sizes change across JDK versions as object header and layout details differ.
+        int version = parseJavaVersion(JAVA_VERSION.getString());
+        int expectedLimit = version < 21 ? 19 : 18;
+        Assert.assertEquals(expectedLimit, MerkleTree.estimatedMaxDepthForBytes(Murmur3Partitioner.instance,
                                                                      100 * 1048576, 32));
 
         // With 300 mebibytes we should get the old limit of 20
