@@ -56,7 +56,6 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.tools.SystemExitException;
 import org.apache.cassandra.tools.SystemExitManager;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Isolated;
