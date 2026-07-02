@@ -236,6 +236,17 @@ public abstract class DataLimits
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * Whether this is for the continuation of a paged query, that is, whether it comes from
+     * {@link #forPaging(PageSize, ByteBuffer, int)} or {@link #forGroupByInternalPaging}.
+     *
+     * @return whether this is for the continuation of a paged query
+     */
+    public boolean isPagingContinuation()
+    {
+        return false;
+    }
+
     public abstract boolean hasEnoughLiveData(CachedPartition cached,
                                               long nowInSec,
                                               boolean countPartitionsWithOnlyStaticData,
@@ -336,6 +347,8 @@ public abstract class DataLimits
      * Estimate the number of results that a full scan of the provided cfs would yield.
      */
     public abstract float estimateTotalResults(ColumnFamilyStore cfs);
+
+    public abstract String toCQLString();
 
     public static abstract class Counter extends StoppingTransformation<BaseRowIterator<?>>
     {
@@ -707,6 +720,12 @@ public abstract class DataLimits
         @Override
         public String toString()
         {
+            return toCQLString();
+        }
+
+        @Override
+        public String toCQLString()
+        {
             List<String> limits = new ArrayList<>(3);
 
             if (bytesLimit != NO_LIMIT)
@@ -748,6 +767,12 @@ public abstract class DataLimits
         public DataLimits forPaging(PageSize pageSize, ByteBuffer lastReturnedKey, int lastReturnedKeyRemaining)
         {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean isPagingContinuation()
+        {
+            return true;
         }
 
         @Override
@@ -1339,6 +1364,12 @@ public abstract class DataLimits
         public DataLimits forGroupByInternalPaging(GroupingState state)
         {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean isPagingContinuation()
+        {
+            return true;
         }
 
         @Override

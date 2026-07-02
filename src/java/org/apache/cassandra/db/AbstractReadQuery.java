@@ -61,6 +61,7 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     }
 
     // Monitorable interface
+    @Override
     public String name()
     {
         return toCQLString(Redaction.REDACT);
@@ -135,7 +136,7 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
         appendCQLWhereClause(builder, redaction);
 
         if (limits() != DataLimits.NONE)
-            builder.append(' ').append(limits());
+            builder.append(' ').append(limits().toCQLString());
 
         // ALLOW FILTERING might not be strictly necessary
         builder.append(" ALLOW FILTERING");
@@ -148,6 +149,12 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
              .append(SelectOptions.EXCLUDED_INDEXES, excluded)
              .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toCQLString());
         });
+
+        // The limits used by the subsequent queries of paging don't have a clear direct translation into CQL.
+        // However, they change the meaning of the query, and it can be useful to identify them in logs.
+        // That's why here we append a fragment of invalid CQL syntanx, at the end of the query.
+        if (limits.isPagingContinuation())
+            builder.append(" [paging continuation]");
 
         return builder.toString();
     }
