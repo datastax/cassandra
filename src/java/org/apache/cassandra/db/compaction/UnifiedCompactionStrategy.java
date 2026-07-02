@@ -69,6 +69,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
@@ -1281,7 +1282,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public Map<Arena, List<Level>> getLevels(Collection<? extends CompactionSSTable> sstables,
                                              BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
-        long nowUs = java.util.concurrent.TimeUnit.MILLISECONDS.toMicros(controller.clock.translate().toMillisSinceEpoch(controller.clock.now()));
+        MonotonicClock clock = controller.clock != null ? controller.clock : MonotonicClock.preciseTime;
+        long nowUs = java.util.concurrent.TimeUnit.MILLISECONDS.toMicros(clock.translate().toMillisSinceEpoch(clock.now()));
         // Copy to avoid race condition
         var currentShardManager = getShardManager();
         Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter);
@@ -1386,7 +1388,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             }
 
             double adjustedDensity = Math.max(youngerMaxDensity, olderMinDensity);
-            double maxSize = controller.getMaxLevelDensity(0, controller.getBaseSstableSize(controller.getFanout(0, bucket), adjustedDensity) / currentShardManager.localSpaceCoverage(), bucket);
+            double baseSize = adjustedDensity > 0
+                              ? controller.getBaseSstableSize(bucket != null ? controller.getFanout(0, bucket) : controller.getFanout(0), adjustedDensity)
+                              : controller.getBaseSstableSize(controller.getFanout(0));
+
+            double maxSize = bucket != null
+                             ? controller.getMaxLevelDensity(0, baseSize / currentShardManager.localSpaceCoverage(), bucket)
+                             : controller.getMaxLevelDensity(0, baseSize / currentShardManager.localSpaceCoverage());
             int index = 0;
             Level level = new Level(controller, bucket, index, 0, maxSize);
             for (SSTableWithDensity candidateWithDensity : ssTableWithDensityList)
@@ -1406,7 +1414,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 {
                     ++index;
                     double minSize = maxSize;
-                    maxSize = controller.getMaxLevelDensity(index, minSize, bucket);
+                    maxSize = bucket != null
+                              ? controller.getMaxLevelDensity(index, minSize, bucket)
+                              : controller.getMaxLevelDensity(index, minSize);
                     level = new Level(controller, bucket, index, minSize, maxSize);
                     if (size < level.max)
                     {
@@ -1626,9 +1636,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         Level(Controller controller, @Nullable TimeBucket bucket, int index, double min, double max)
         {
             this(index,
-                 controller.getScalingParameter(index, bucket),
-                 controller.getFanout(index, bucket),
-                 controller.getThreshold(index, bucket),
+                 bucket != null ? controller.getScalingParameter(index, bucket) : controller.getScalingParameter(index),
+                 bucket != null ? controller.getFanout(index, bucket) : controller.getFanout(index),
+                 bucket != null ? controller.getThreshold(index, bucket) : controller.getThreshold(index),
                  controller.getSurvivalFactor(index),
                  min,
                  max,
@@ -1930,7 +1940,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             // number of sstables. This is not always true (we may, e.g. select alternately from different overlap
             // sections if the structure is complex enough), but is good enough heuristic that results in usable
             // compaction sets.
-            else if (count <= fanout * controller.getFanout(index + 1, level.bucket) || maxSSTablesToCompact == fanout)
+            else if (count <= fanout * (level.bucket != null ? controller.getFanout(index + 1, level.bucket) : controller.getFanout(index + 1)) || maxSSTablesToCompact == fanout)
             {
                 // Compaction is a bit late, but not enough to jump levels via layout compactions. We need a special
                 // case to cap compaction pick at maxSSTablesToCompact.
@@ -2010,8 +2020,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (step > maxOverlap || step > maxSSTablesToCompact)
                 return 0;
 
-            int w = controller.getScalingParameter(level, this.level.bucket);
-            int f = controller.getFanout(level, this.level.bucket);
+            int w = this.level.bucket != null ? controller.getScalingParameter(level, this.level.bucket) : controller.getScalingParameter(level);
+            int f = this.level.bucket != null ? controller.getFanout(level, this.level.bucket) : controller.getFanout(level);
             int pos = layoutCompactions(controller,
                                         level + 1,
                                         step * f,
