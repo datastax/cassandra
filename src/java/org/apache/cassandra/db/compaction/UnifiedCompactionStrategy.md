@@ -458,6 +458,25 @@ segments:
   - All SSTables are partitioned into fixed 1-day windows, and each window is compacted
     independently using `T4` tiered compaction (similar to traditional TWCS).
 
+### Regular Major Compaction of Closed Windows
+
+For time-series or time-partitioned workloads, it is often desirable to regularly perform a major
+compaction on older, closed windows. This merges all SSTables within each closed window into a single
+sorted run, which maximizes tombstone clearance and minimizes read amplification for historical data.
+
+This can be achieved under UCS by defining an older bucket with aggressive leveling (e.g., using `L1000000`
+as the scaling parameter). Because leveling with such a high fanout effectively limits the level structure
+to a single level (Level 0) with a massive capacity, UCS will automatically compact all SSTables that fall
+into that window into a single SSTable once the window is closed and no new data is being written to it.
+
+For example, with the configuration `T4 until 1d; L1000000 every 1d`:
+- During the first day, incoming data is compacted using `T4` (tiered compaction), which keeps write
+  amplification low.
+- Once the data becomes older than 1 day, it graduates to the repeating `every 1d` windows.
+- Each 1-day window is managed as a separate arena with `L1000000`. Once a window stops receiving new
+  writes, UCS triggers a compaction that merges all of its SSTables into a single file, effectively
+  performing a major compaction for that day's window.
+
 ### SSTable Size Adjustment (Stranded SSTable Prevention)
 
 In time-window systems, traffic fluctuations can cause some windows to contain much smaller
@@ -561,7 +580,11 @@ UCS accepts these compaction strategy parameters:
   compaction to be promoted to the next level) and a fan factor of 2. This can also be specified as T2 or L2.  
   The default value is T4, matching the default STCS behaviour with threshold 4. The default value in vector mode (see
   paragraph below) is L10, equivalent to LCS with its default fan factor 10.  
-  Time-driven levels can also be configured by suffixing scaling parameter segments with `until <duration>` or `every <duration>`, separated by semicolons. For example, `T4 until 1d; L1000000 every 1d` configures tiered compaction ($T4$) for data younger than 1 day, and repeating 1-day windows with aggressive leveling ($L1000000$) for older data. See the **Time-driven levels** section below for more details.
+  Time-driven levels can also be configured by suffixing scaling parameter segments with
+  `until <duration>` or `every <duration>`, separated by semicolons. For example,
+  `T4 until 1d; L1000000 every 1d` configures tiered compaction ($T4$) for data younger than 1 day,
+  and repeating 1-day windows with aggressive leveling ($L1000000$) for older data. See the
+  **Time-driven levels** section below for more details.
 * `target_sstable_size` The target sstable size $t$, specified as a human-friendly size in bytes (e.g. 100 MiB =
   $100\cdot 2^{20}$ B or (10 MB = 10,000,000 B)). The strategy will split data in shards that aim to produce sstables
   of size between $t / \sqrt 2$ and $t \cdot \sqrt 2$.  

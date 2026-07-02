@@ -1288,29 +1288,65 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         Map<Arena, List<Level>> ret = new LinkedHashMap<>(); // should preserve the order of arenas
 
         List<TimeBucket> timeBuckets = controller.getTimeBuckets();
-        double[] maxDensityPerBucket = new double[timeBuckets.size() + 1];
-        double[] minDensityPerBucket = new double[timeBuckets.size() + 1];
-        Arrays.fill(minDensityPerBucket, Double.MAX_VALUE);
+        ArenaSelector arenaSelector = getArenaSelector();
+
+        List<Arena> familyArenas = new ArrayList<>();
+        for (Arena arena : arenas)
+        {
+            if (familyArenas.isEmpty() || arenaSelector.shareNonTimeAttributes(familyArenas.get(0).sstables.get(0), arena.sstables.get(0)))
+            {
+                familyArenas.add(arena);
+            }
+            else
+            {
+                processFamily(familyArenas, ret, currentShardManager, nowUs, timeBuckets);
+                familyArenas.clear();
+                familyArenas.add(arena);
+            }
+        }
+        if (!familyArenas.isEmpty())
+        {
+            processFamily(familyArenas, ret, currentShardManager, nowUs, timeBuckets);
+        }
+
+        logger.trace("Found {} arenas with buckets for {}.{}", ret.size(), realm.getKeyspaceName(), realm.getTableName());
+        return ret;
+    }
+
+    private void processFamily(List<Arena> familyArenas,
+                               Map<Arena, List<Level>> ret,
+                               ShardManager currentShardManager,
+                               long nowUs,
+                               List<TimeBucket> timeBuckets)
+    {
+        double[] untilMaxDensity = new double[timeBuckets.size()];
+        double everyBaseMinDensity = Double.MAX_VALUE;
 
         if (!timeBuckets.isEmpty())
         {
-            Set<? extends CompactionSSTable> compacting = realm.getCompactingSSTables();
-            for (CompactionSSTable sstable : sstables)
+            for (Arena arena : familyArenas)
             {
-                if (compactionFilter.test(sstable, compacting.contains(sstable)))
+                CompactionSSTable representative = arena.sstables.get(0);
+                TimeBucket bucket = controller.getTimeBucketForSSTable(representative, nowUs);
+                if (bucket != null && bucket.mode == TimeBucket.Mode.UNTIL)
                 {
-                    TimeBucket sstBucket = controller.getTimeBucketForSSTable(sstable, nowUs);
-                    int sstBucketIdx = sstBucket == null ? timeBuckets.size() : timeBuckets.indexOf(sstBucket);
-                    double density = currentShardManager.density(sstable);
-                    maxDensityPerBucket[sstBucketIdx] = Math.max(maxDensityPerBucket[sstBucketIdx], density);
-                    minDensityPerBucket[sstBucketIdx] = Math.min(minDensityPerBucket[sstBucketIdx], density);
+                    int bucketIdx = timeBuckets.indexOf(bucket);
+                    double maxD = 0;
+                    for (CompactionSSTable sstable : arena.sstables)
+                        maxD = Math.max(maxD, currentShardManager.density(sstable));
+                    untilMaxDensity[bucketIdx] = maxD;
+                }
+                else
+                {
+                    for (CompactionSSTable sstable : arena.sstables)
+                        everyBaseMinDensity = Math.min(everyBaseMinDensity, currentShardManager.density(sstable));
                 }
             }
         }
 
-        for (Arena arena : arenas)
+        for (Arena arena : familyArenas)
         {
-            TimeBucket bucket = arena.sstables.isEmpty() ? null : controller.getTimeBucketForSSTable(arena.sstables.get(0), nowUs);
+            TimeBucket bucket = controller.getTimeBucketForSSTable(arena.sstables.get(0), nowUs);
             List<Level> levels = new ArrayList<>(MAX_LEVELS);
 
             // Precompute the density, then sort.
@@ -1323,17 +1359,28 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             double olderMinDensity = 0;
             if (!timeBuckets.isEmpty())
             {
-                int bucketIdx = bucket == null ? timeBuckets.size() : timeBuckets.indexOf(bucket);
-                if (bucketIdx > 0)
+                if (bucket != null && bucket.mode == TimeBucket.Mode.UNTIL)
                 {
+                    int bucketIdx = timeBuckets.indexOf(bucket);
                     for (int i = 0; i < bucketIdx; i++)
                     {
-                        youngerMaxDensity = Math.max(youngerMaxDensity, maxDensityPerBucket[i]);
+                        youngerMaxDensity = Math.max(youngerMaxDensity, untilMaxDensity[i]);
                     }
-                    double minDensity = minDensityPerBucket[bucketIdx];
-                    if (minDensity != Double.MAX_VALUE)
+                    if (!ssTableWithDensityList.isEmpty())
                     {
-                        olderMinDensity = minDensity;
+                        olderMinDensity = ssTableWithDensityList.get(0).density;
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < timeBuckets.size(); i++)
+                    {
+                        if (timeBuckets.get(i).mode == TimeBucket.Mode.UNTIL)
+                            youngerMaxDensity = Math.max(youngerMaxDensity, untilMaxDensity[i]);
+                    }
+                    if (everyBaseMinDensity != Double.MAX_VALUE)
+                    {
+                        olderMinDensity = everyBaseMinDensity;
                     }
                 }
             }
@@ -1385,9 +1432,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (logger.isTraceEnabled())
                 logger.trace("Arena {} has {} levels", arena, levels.size());
         }
-
         logger.trace("Found {} arenas with buckets for {}.{}", ret.size(), realm.getKeyspaceName(), realm.getTableName());
-        return ret;
     }
 
     /**
