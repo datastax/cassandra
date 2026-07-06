@@ -92,9 +92,9 @@ public final class TableAttributes extends PropertyDefinitions
         return droppedColumnRecords.values();
     }
 
-    TableParams asNewTableParams()
+    TableParams asNewTableParams(String keyspaceName)
     {
-        return build(TableParams.builder());
+        return build(TableParams.builder(keyspaceName));
     }
 
     TableParams asAlteredTableParams(TableParams previous)

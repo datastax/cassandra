@@ -112,6 +112,19 @@ public final class TableParams
         return new Builder();
     }
 
+    /**
+     * Creates a builder pre-seeded with keyspace-specific defaults. Use this when creating new tables via DDL
+     * so that any per-keyspace policy (e.g. a tenant-aware compression selector) takes effect when the
+     * corresponding option is not explicitly specified in the statement.
+     * <p>
+     * For contexts where no keyspace is available (schema loading, validation, metadata copy), use the
+     * no-arg {@link #builder()} instead.
+     */
+    public static Builder builder(String keyspace)
+    {
+        return new Builder().compression(CompressionParams.forNewTables(keyspace));
+    }
+
     public static Builder builder(TableParams params)
     {
         return new Builder().bloomFilterFpChance(params.bloomFilterFpChance)

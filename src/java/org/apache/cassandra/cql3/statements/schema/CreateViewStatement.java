@@ -329,7 +329,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
         if (attrs.hasProperty(TableAttributes.ID))
             builder.id(attrs.getId());
 
-        builder.params(attrs.asNewTableParams())
+        builder.params(attrs.asNewTableParams(keyspaceName))
                .kind(TableMetadata.Kind.VIEW);
 
         partitionKeyColumns.forEach(name -> builder.addPartitionKeyColumn(name, getType(table, name)));
