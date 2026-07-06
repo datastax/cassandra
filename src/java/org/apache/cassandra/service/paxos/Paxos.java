@@ -1132,6 +1132,7 @@ public class Paxos
 
     private static void mark(boolean isWrite, Function<ClientRequestMetrics, Meter> toMark, ConsistencyLevel consistency, ClientRequestsMetrics metrics)
     {
+        toMark.apply(metrics.allRequestsMetrics).mark();
         if (isWrite)
         {
             toMark.apply(metrics.casWriteMetrics).mark();
