@@ -630,6 +630,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         catch (CasWriteTimeoutException wte)
         {
+            metrics.allRequestsMetrics.timeouts.mark();
             metrics.casWriteMetrics.timeouts.mark();
             metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
             lwtTracker.onError(wte);
@@ -637,6 +638,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         catch (ReadTimeoutException e)
         {
+            metrics.allRequestsMetrics.timeouts.mark();
             metrics.casWriteMetrics.timeouts.mark();
             metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
             lwtTracker.onError(e);
@@ -644,12 +646,14 @@ public class StorageProxy implements StorageProxyMBean
         }
         catch (ReadAbortException e)
         {
+            metrics.allRequestsMetrics.markAbort(e);
             metrics.casWriteMetrics.markAbort(e);
             metrics.writeMetricsForLevel(consistencyForPaxos).markAbort(e);
             throw e;
         }
         catch (WriteFailureException | ReadFailureException e)
         {
+            metrics.allRequestsMetrics.failures.mark();
             metrics.casWriteMetrics.failures.mark();
             metrics.writeMetricsForLevel(consistencyForPaxos).failures.mark();
             lwtTracker.onError(e);
@@ -657,6 +661,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         catch (UnavailableException e)
         {
+            metrics.allRequestsMetrics.unavailables.mark();
             metrics.casWriteMetrics.unavailables.mark();
             metrics.writeMetricsForLevel(consistencyForPaxos).unavailables.mark();
             lwtTracker.onError(e);
@@ -2261,6 +2266,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         catch (ReadTimeoutException e)
         {
+            metrics.allRequestsMetrics.timeouts.mark();
             metrics.readMetrics.timeouts.mark();
             metrics.casReadMetrics.timeouts.mark();
             metrics.readMetricsForLevel(consistencyLevel).timeouts.mark();
@@ -2270,6 +2276,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         catch (ReadAbortException e)
         {
+            metrics.allRequestsMetrics.markAbort(e);
             metrics.readMetrics.markAbort(e);
             metrics.casReadMetrics.markAbort(e);
             metrics.readMetricsForLevel(consistencyLevel).markAbort(e);
@@ -2278,6 +2285,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         catch (ReadFailureException e)
         {
+            metrics.allRequestsMetrics.failures.mark();
             metrics.readMetrics.failures.mark();
             metrics.casReadMetrics.failures.mark();
             metrics.readMetricsForLevel(consistencyLevel).failures.mark();
