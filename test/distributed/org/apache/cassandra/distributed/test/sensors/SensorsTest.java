@@ -54,6 +54,7 @@ public class SensorsTest extends TestBaseImpl
 {
     private static final String EXPECTED_WRITE_BYTES_HEADER = "WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl";
     private static final String EXPECTED_READ_BYTES_HEADER = "READ_BYTES_REQUEST." + KEYSPACE + ".tbl";
+    private static final String EXPECTED_INDEX_WRITE_BYTES_HEADER = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl";
     /**
      * Using a combination of 2 nodes with ALL consistency level to ensure internode communication code paths are exercised in the test
      */
@@ -95,6 +96,7 @@ public class SensorsTest extends TestBaseImpl
     {
         String tableSchema = withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)");
         String counterTableSchema = withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, total counter)");
+        String createIndex = withKeyspace("CREATE INDEX ON %s.tbl (v1)");
 
         String write = withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')");
         String counter = withKeyspace("UPDATE %s.tbl SET total = total + 1 WHERE pk = 1");
@@ -120,6 +122,8 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ tableSchema, noPrep, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, noPrep, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, new String[]{ write }, range, new String[]{ EXPECTED_READ_BYTES_HEADER } });
+        // writes to an indexed table must propagate both WRITE_BYTES and INDEX_WRITE_BYTES
+        result.add(new Object[]{ tableSchema, new String[]{ createIndex }, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
         return result;
     }
 

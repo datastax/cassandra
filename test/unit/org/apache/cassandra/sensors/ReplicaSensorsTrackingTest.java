@@ -340,18 +340,24 @@ public class ReplicaSensorsTrackingTest
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor actualIndexWriteSensor = requestSensors.getSensor(context, Type.INDEX_WRITE_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
         // init callback
         AbstractWriteResponseHandler<?> callback = createWriteResponseHandler(ConsistencyLevel.ALL, ConsistencyLevel.ALL);
 
-        // mimic a sensor to be used in replica response
+        // mimic sensors to be used in replica response
         Sensor mockingWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
         mockingWriteSensor.increment(13.0);
+        Sensor mockingIndexWriteSensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
+        mockingIndexWriteSensor.increment(7.0);
 
-        assertReplicaSensorsTracked(writeRequest, callback, allowHints, Pair.create(actualWriteSensor, mockingWriteSensor));
+        assertReplicaSensorsTracked(writeRequest, callback, allowHints,
+                                    Pair.create(actualWriteSensor, mockingWriteSensor),
+                                    Pair.create(actualIndexWriteSensor, mockingIndexWriteSensor));
     }
 
     @SafeVarargs

@@ -98,7 +98,6 @@ import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -321,6 +320,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (pu.metadata().isIndex()) continue;
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
                 }
                 StorageProxy.WriteResponseHandlerWrapper wrapper = StorageProxy.wrapBatchResponseHandler(mutation,
                                                                                                          consistencyLevel,
@@ -1102,6 +1102,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (pu.metadata().isIndex()) continue;
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
                 }
 
                 if (mutation instanceof CounterMutation)

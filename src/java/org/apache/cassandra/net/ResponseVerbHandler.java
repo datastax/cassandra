@@ -89,6 +89,7 @@ public class ResponseVerbHandler implements IVerbHandler
                 Context context = Context.from(pu.metadata());
                 if (pu.metadata().isIndex()) continue;
                 incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+                incrementSensor(sensors, context, Type.INDEX_WRITE_BYTES, message);
             }
         }
         else if (callbackInfo.callback instanceof ReadCallback)
