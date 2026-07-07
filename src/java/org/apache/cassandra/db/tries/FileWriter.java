@@ -86,15 +86,17 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
 
     final DataOutputPlus out;
     final DataSerializer<T> dataSerializer;
+    final boolean swapAscentAndDescentSides;
 
     Node<T>[] nodesOnPath = new Node[32];
     int lastNodeOnPath = -1;
     boolean onAscentPath = false;
 
-    public FileWriter(DataOutputPlus out, DataSerializer<T> dataSerializer)
+    public FileWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
     {
         this.out = out;
         this.dataSerializer = dataSerializer;
+        this.swapAscentAndDescentSides = swapAscentAndDescentSides;
     }
 
     // on way down, only collect path (base class)
@@ -161,7 +163,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         int newLength = Math.max(Cursor.depth(newEncodedPosition) - 1, -1);
         // If we are returning to an ascent-path position that doesn't advance, prepare to add content to the node at
         // this depth rather than add a new child to parent.
-        if (Cursor.isOnReturnPath(newEncodedPosition) && (newLength == -1 || keyBytes[newLength] == Cursor.incomingTransition(newEncodedPosition)))
+        if (Cursor.isOnReturnPath(newEncodedPosition) && (newLength == -1 || (keyBytes[newLength] & 0xFF) == Cursor.incomingTransition(newEncodedPosition)))
             ++newLength;
 
         try
@@ -297,6 +299,11 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     private void writeAndRecycleNode(Node<T> node) throws IOException
     {
         boolean hasChildren = node.childCount() > 0;
+        if (swapAscentAndDescentSides)
+        {
+            T t = node.ascentPathContent; node.ascentPathContent = node.descentPathContent; node.descentPathContent = t;
+        }
+
         if (!hasChildren && node.ascentPathContent == null)
             writeLeaf(node.descentPathContent);
         else
@@ -339,6 +346,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     {
         int size = node.childCount();
         // last pointer is implicitly 0
+        assert node.child(size - 1) == basePos;
         for (int i = size - 2; i >= 0; --i)
             writeReversedSized(basePos - node.child(i), bytesPerPointer);
         for (int i = size - 1; i >= 0; --i)
@@ -350,6 +358,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     {
         int size = node.childCount();
         // last pointer is implicitly 0
+        assert node.child(size - 1) == basePos;
         for (int i = size - 2; i >= 0; --i)
             writeReversedSized(basePos - node.child(i), bytesPerPointer);
         BitSet bits = new BitSet(256);
@@ -368,7 +377,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         int bytesPerPointer = 8 - Long.numberOfLeadingZeros(maxDiff | 1L) / 8; // at least 1
         // last pointer is not implicit here
         int index = size - 1;
-        for (int i = 255; i >= 0; --i)
+        for (int i = 0; i <= 255; ++i)
         {
             if (index >= 0 && i == (node.childTransition(index)))
                 writeReversedSized(basePos - node.child(index--), bytesPerPointer);
@@ -435,13 +444,13 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         }
     }
 
-    public static <T> File write(Trie<T> trie, DataSerializer<T> serializer, File file)
+    public static <T> File write(Trie<T> trie, boolean isOrdered, DataSerializer<T> serializer, File file)
     {
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            FileWriter<T> fw = new FileWriter<>(writer, serializer);
+            FileWriter<T> fw = new FileWriter<>(writer, serializer, isOrdered);
 
-            Cursor<T> c = trie.cursor(Direction.FORWARD);
+            Cursor<T> c = trie.cursor(Direction.REVERSE);
             T content = c.content();   // handle content on the root node
             if (content != null)
                 fw.content(content);
