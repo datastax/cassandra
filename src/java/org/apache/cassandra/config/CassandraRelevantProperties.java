@@ -954,6 +954,12 @@ public enum CassandraRelevantProperties
     SIZE_RECORDER_INTERVAL("cassandra.size_recorder_interval", "300"),
 
     SKIP_DEFAULT_ROLE_SETUP("cassandra.skip_default_role_setup"),
+    /**
+     * Whether to skip secondary indexes when the query specifies full primary keys.
+     * In principle, there is no reason to prefer using the indexes in such queries,
+     * and this exists just as a feature gate.
+     */
+    SKIP_INDEXES_ON_FULL_PRIMARY_KEYS("cassandra.index.skip_on_full_primary_keys", "true"),
     SKIP_MUTATING_STATS_AFTER_ZCS("cassandra.skip_mutating_stats_after_zcs"),
     /**
      * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
