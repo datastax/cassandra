@@ -106,7 +106,18 @@ public class CompositeType extends AbstractCompositeType
 
     public static CompositeType getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
-        return getInstance(parser.getTypeParameters());
+        // Since toString doesn't add frozen to the subtypes when serializing,
+        // because it was historically considered redundant,
+        // and it is the way the types have been historically recorded in the sstable headers,
+        // we should freeze back the parsed subtypes.
+        // This prevents a log error about detected and automatically fixed corrupted subtypes in the super constructor.
+        List<AbstractType<?>> types = parser.getTypeParameters();
+        ImmutableList<AbstractType<?>> cleanedTypes =
+                hasMultiCell(types)
+                ? freeze(types)
+                : ImmutableList.copyOf(types);
+
+        return getInstance(cleanedTypes);
     }
 
     public static CompositeType getInstance(Iterable<AbstractType<?>> types)
@@ -523,6 +534,9 @@ public class CompositeType extends AbstractCompositeType
     {
         // Subtypes will always be frozen (since CompositeType always is), but we don't include it in the string
         // representation (so that we ignore our parameter).
+        // This is done this way because it was historically considered redundant,
+        // and used that way when writing sstable headers.
+        // We should be careful to freeze all the subtypes when parsing this back in getInstance(TypeParser).
         return getClass().getName() + TypeParser.stringifyTypeParameters(subTypes, true);
     }
 
