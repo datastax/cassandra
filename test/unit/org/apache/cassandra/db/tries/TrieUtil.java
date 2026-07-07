@@ -944,7 +944,7 @@ public class TrieUtil
     {
         try
         {
-            File file = FileWriter.write(trie, serializer, new File(java.io.File.createTempFile("intersection", "trie")));
+            File file = FileWriter.write(trie, isOrdered, serializer, new File(java.io.File.createTempFile("intersection", "trie")));
             return OnDiskTrie.open(file, deserializer, VERSION,  isOrdered, -1);
         }
         catch (IOException e)

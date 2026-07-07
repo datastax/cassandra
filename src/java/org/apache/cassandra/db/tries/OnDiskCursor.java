@@ -295,7 +295,12 @@ public class OnDiskCursor<T> implements Cursor<T>
 
     private long readSizedInt(long base, int index, int bytes)
     {
-        return readSizedInt(base - index * bytes, bytes);
+        return readSizedInt(base + (index + 1) * bytes, bytes);
+    }
+
+    private long readSizedIntImplicit0(long base, int index, int bytes)
+    {
+        return index > 0 ? readSizedInt(base + index * bytes, bytes) : 0;
     }
 
     private long readSizedInt(long pos, int bytes)
@@ -660,7 +665,7 @@ public class OnDiskCursor<T> implements Cursor<T>
             Direction direction = Cursor.direction(state.currentEncodedPosition);
             int currIndex = index(state.nodeImplData);
             int length = length(state.nodeCode);
-            long nextPosition = encodedPositionForChild(state, currIndex);
+            long nextPosition = encodedPositionForChild(state, currIndex, length);
 
             return descendToChild(state, currIndex, direction, length, nextPosition);
         }
@@ -673,17 +678,14 @@ public class OnDiskCursor<T> implements Cursor<T>
             if (direction.inLoop(nextIndex, 0, length - 1))
                 state.addBacktrack(postCodePos, nodeCode, nextIndex);
             int bytes = bytes(nodeCode);
-            long child = base(postCodePos, nodeCode) -
-                         (currIndex < length - 1 ? state.readSizedInt(postCodePos - length,
-                                                                      currIndex,
-                                                                      bytes)
-                                                 : 0);
-            return state.descendInto(nextPosition, child);
+            long base = base(postCodePos, nodeCode);
+            long childDelta = state.readSizedIntImplicit0(base, currIndex, bytes);
+            return state.descendInto(nextPosition, base - childDelta);
         }
 
-        private static long encodedPositionForChild(OnDiskCursor<?> state, int index)
+        private static long encodedPositionForChild(OnDiskCursor<?> state, int index, int length)
         {
-            int nextByte = state.readByteBefore(state.postCodePos - index);
+            int nextByte = state.readByteBefore(state.postCodePos - (length - 1 - index));
             return Cursor.positionForDescentWithByte(state.currentEncodedPosition, nextByte);
         }
 
@@ -693,13 +695,13 @@ public class OnDiskCursor<T> implements Cursor<T>
             Direction direction = Cursor.direction(state.currentEncodedPosition);
             int currIndex = index(state.nodeImplData);
             int length = length(state.nodeCode);
-            long nextPosition = encodedPositionForChild(state, currIndex);
+            long nextPosition = encodedPositionForChild(state, currIndex, length);
             while (Cursor.compare(nextPosition, encodedSkipPosition) < 0)
             {
                 currIndex += direction.increase;
                 if (!direction.inLoop(currIndex, 0, length - 1))
                     return state.exhausted;
-                nextPosition = encodedPositionForChild(state, currIndex);
+                nextPosition = encodedPositionForChild(state, currIndex, length);
             }
 
             return descendToChild(state, currIndex, direction, length, nextPosition);
@@ -710,12 +712,11 @@ public class OnDiskCursor<T> implements Cursor<T>
         {
             int length = length(state.nodeCode);
             long base = base(state.postCodePos, state.nodeCode);
-            long deltasBase = state.postCodePos - length;
             int bytes = bytes(state.nodeCode);
             String s = String.format("Sparse%d", bytes);
             for (int i = 0; i < length; ++i)
                 s += String.format("\n%02x --> %d", state.readByteBefore(state.postCodePos - i),
-                                   base - ((i < length - 1) ? state.readSizedInt(deltasBase, i, bytes) : 0));
+                                   base - state.readSizedIntImplicit0(base, i, bytes));
             return s;
         }
     }
@@ -791,7 +792,7 @@ public class OnDiskCursor<T> implements Cursor<T>
                 state.addBacktrack(postCodePos, state.nodeCode, encode(nextTransition, currIndex + direction.increase, length));
             int bytes = bytes(state.nodeCode);
             long base = postCodePos - 32 - (length - 1) * bytes;
-            long childDelta = currIndex != length - 1 ? state.readSizedInt(postCodePos - 32, currIndex, bytes) : 0;
+            long childDelta = state.readSizedIntImplicit0(base, currIndex, bytes);
             return state.descendInto(Cursor.positionForDescentWithByte(state.currentEncodedPosition, currTransition), base - childDelta);
         }
 
@@ -926,8 +927,8 @@ public class OnDiskCursor<T> implements Cursor<T>
                 state.addBacktrack(state.postCodePos, state.nodeCode, next);
             long nextPosition = Cursor.positionForDescentWithByte(state.currentEncodedPosition, transition);
             int bytes = bytes(state.nodeCode);
-            long childDelta = state.readSizedInt(state.postCodePos, transition, bytes);
             long base = state.postCodePos - 256 * bytes;
+            long childDelta = state.readSizedInt(base, transition, bytes);
             return state.descendInto(nextPosition, base - childDelta);
         }
 
@@ -947,10 +948,11 @@ public class OnDiskCursor<T> implements Cursor<T>
         private static int findNext(OnDiskCursor<?> state, Direction direction, int index)
         {
             int bytes = bytes(state.nodeCode);
+            long base = state.postCodePos - 256 * bytes;
             long notPresent = (1 << bytes * 8) - 1;
             do
             {
-                long child = state.readSizedInt(state.postCodePos, index, bytes);
+                long child = state.readSizedInt(base, index, bytes);
                 if (child != notPresent)
                     break;
 
