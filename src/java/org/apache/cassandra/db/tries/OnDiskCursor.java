@@ -132,6 +132,15 @@ public class OnDiskCursor<T> implements Cursor<T>
         return descendInto(encodedPosition, nodePos - 1, readByteBefore(nodePos));
     }
 
+    void descendPostPrefixOrRelay(long nodePos)
+    {
+        // leave content and encodedPosition unchanged
+        this.postCodePos = nodePos - 1;
+        this.nodeCode = readByteBefore(nodePos);
+        this.currentImpl = selectNodeImpl(nodeCode);
+        this.currentImpl.load(this); // may modify currentEncodedPosition
+    }
+
     public T content()
     {
         return content;
@@ -266,14 +275,14 @@ public class OnDiskCursor<T> implements Cursor<T>
     static final Node DENSE = new Dense();
     static final Node BITMAP = new Bitmap();
     static final Node PREFIX = new Prefix();
-    static final Node ASCENT_LEAF = new AscendLeaf();
+    static final Node RELAY = new Relay();
 
     static final Node[] IMPLEMENTATIONS = new Node[]
                                           {
                                           LEAF, LEAF, LEAF, LEAF, LEAF, LEAF, LEAF, LEAF,
                                           CHAIN, CHAIN, CHAIN, CHAIN, CHAIN, CHAIN, CHAIN, CHAIN,
                                           SPARSE, SPARSE, SPARSE, SPARSE, SPARSE, SPARSE, SPARSE, SPARSE,
-                                          SPARSE, SPARSE, SPARSE, SPARSE, PREFIX, BITMAP, DENSE, ASCENT_LEAF
+                                          SPARSE, SPARSE, SPARSE, SPARSE, BITMAP, DENSE, PREFIX, RELAY
                                           };
 
     Node selectNodeImpl(int nodeCode)
@@ -384,13 +393,23 @@ public class OnDiskCursor<T> implements Cursor<T>
         }
     }
 
-    static final int ASCENT_LEAF_CODE = FileWriter.BITS_RESERVED;
+    // prefix with no content and no child is used for backtrack entry to return ascent-side content
+    static final int ASCENT_LEAF_CODE = OnDiskNodeType.PREFIX.bits;
 
-    static class AscendLeaf implements Node
+    static class Relay implements Node
     {
+        private static int bytes(int nodeCode)
+        {
+            return (nodeCode & 0b111) + 1;
+        }
+
+        @Override
         public void load(OnDiskCursor<?> state)
         {
-            throw new AssertionError("Only as backtrack");
+
+            int bytes = bytes(state.nodeCode);
+            long base = state.postCodePos - bytes;
+            state.descendPostPrefixOrRelay(base - state.readSizedInt(state.postCodePos, bytes));
         }
 
         @Override
@@ -405,15 +424,13 @@ public class OnDiskCursor<T> implements Cursor<T>
         public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
         {
             assert Cursor.compare(encodedSkipPosition, state.nodeImplData) <= 0;
-                 return advance(state);
+            return advance(state);
         }
 
         @Override
         public String dump(OnDiskCursor<?> state)
         {
-            // this should be idempotent with the load on advance
-            state.getContentAtPos(state.postCodePos);
-            return "AscendLeaf: " + state.content;
+            return "Relay --> " + state.readSizedInt(state.postCodePos, bytes(state.nodeCode));
         }
     }
 
@@ -423,9 +440,9 @@ public class OnDiskCursor<T> implements Cursor<T>
         {
             long currentPos = state.postCodePos;
             int nodeCode = state.nodeCode;
-            boolean hasAscent = (nodeCode & FileWriter.PREFIX_HAS_ASCENT_CONTENT) != 0;
-            boolean hasDescent = (nodeCode & FileWriter.PREFIX_HAS_DESCENT_CONTENT) != 0;
-            boolean hasChild = (nodeCode & FileWriter.PREFIX_HAS_CHILD) != 0;
+            boolean hasAscent = (nodeCode & OnDiskNodeType.PREFIX_HAS_ASCENT_CONTENT) != 0;
+            boolean hasDescent = (nodeCode & OnDiskNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0;
+            boolean hasChild = (nodeCode & OnDiskNodeType.PREFIX_HAS_CHILD) != 0;
             boolean swap = state.swapContentSides;
             assert hasAscent | hasDescent;
             state.nodeImplData = -1;
@@ -433,6 +450,7 @@ public class OnDiskCursor<T> implements Cursor<T>
             // ascent or descent-only prefix is presented immediately, possibly by switching position to return path
             if (!hasChild && (hasDescent != hasAscent))
             {
+                state.currentImpl = LEAF; // no children
                 if (swap == hasDescent) // swap & descent | !swap & ascent
                 {
                     if (Cursor.isRootPosition(state.currentEncodedPosition))
@@ -489,44 +507,36 @@ public class OnDiskCursor<T> implements Cursor<T>
             }
 
             if (hasChild)
-                state.nodeImplData = currentPos;
+                state.descendPostPrefixOrRelay(currentPos);
+            else
+                state.currentImpl = LEAF; // no children
         }
+
+        // Node: Since we always change the impl, advance and skipTo are only called if this is on the backtrack path
+        // to present ascent-side content.
 
         @Override
         public long advance(OnDiskCursor<?> state)
         {
-            if (state.nodeImplData == -1)
-                return state.exhausted;
-            state.descendInto(state.currentEncodedPosition, state.nodeImplData);
-            return state.currentImpl.advance(state);
-        }
-
-        @Override
-        public long advanceMultiple(OnDiskCursor<?> state, TransitionsReceiver receiver)
-        {
-            if (state.nodeImplData == -1)
-                return state.exhausted;
-            state.descendInto(state.currentEncodedPosition, state.nodeImplData);
-            return state.currentImpl.advanceMultiple(state, receiver);
+            state.getContentAtPos(state.postCodePos);
+            state.currentImpl = LEAF; // no further children
+            return state.currentEncodedPosition = state.nodeImplData;
         }
 
         @Override
         public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
         {
-            if (state.nodeImplData == -1)
-                return state.exhausted;
-            state.descendInto(state.currentEncodedPosition, state.nodeImplData);
-            return state.currentImpl.skipTo(state, encodedSkipPosition);
+            assert Cursor.compare(encodedSkipPosition, state.nodeImplData) <= 0;
+            return advance(state);
         }
-
 
         @Override
         public String dump(OnDiskCursor state)
         {
             int nodeCode = state.nodeCode;
-            boolean hasAscent = (nodeCode & FileWriter.PREFIX_HAS_ASCENT_CONTENT) != 0;
-            boolean hasDescent = (nodeCode & FileWriter.PREFIX_HAS_DESCENT_CONTENT) != 0;
-            boolean hasChild = (nodeCode & FileWriter.PREFIX_HAS_CHILD) != 0;
+            boolean hasAscent = (nodeCode & OnDiskNodeType.PREFIX_HAS_ASCENT_CONTENT) != 0;
+            boolean hasDescent = (nodeCode & OnDiskNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0;
+            boolean hasChild = (nodeCode & OnDiskNodeType.PREFIX_HAS_CHILD) != 0;
             Object saved = state.content;
             String descentContent = "";
             long pos = state.postCodePos;
@@ -715,7 +725,7 @@ public class OnDiskCursor<T> implements Cursor<T>
             int bytes = bytes(state.nodeCode);
             String s = String.format("Sparse%d", bytes);
             for (int i = 0; i < length; ++i)
-                s += String.format("\n%02x --> %d", state.readByteBefore(state.postCodePos - i),
+                s += String.format("\n%02x --> %d", state.readByteBefore(state.postCodePos - length + i),
                                    base - state.readSizedIntImplicit0(base, i, bytes));
             return s;
         }
@@ -747,7 +757,6 @@ public class OnDiskCursor<T> implements Cursor<T>
         {
             return transition | (childIndex << 8) | (length << 16);
         }
-
 
         @Override
         public void load(OnDiskCursor<?> state)

@@ -21,11 +21,13 @@ package org.apache.cassandra.db.tries;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.NavigableSet;
+import java.util.TreeSet;
 
-import org.agrona.DirectBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
+import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 /// Written bottom-to-top, i.e. children first, with negative deltas for every pointer. Everything except value is
@@ -37,66 +39,48 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 ///   p - has child
 ///   d - has descent content
 ///   a - has ascent content
-///   `[ascent data bytes] [varint-encoded ascent data length] [descent data bytes] [varint-encoded descent data length] 01000adp`
-/// - link (epsilon transition)
-///   `[varint-encoded delta] 01000000`
+///   `[ascent data bytes] [varint-encoded ascent data length] [descent data bytes] [varint-encoded descent data length] 11100adp`
 /// - chain up to 64 bytes; child immediately before
-///   `[byte n-1] ... [byte 1] [byte 0] 10nnnnnn`
+///   `[byte n-1] ... [byte 1] [byte 0] 01nnnnnn`
 /// - sparse up to 25 children; last child immediately before
 ///   bb - bytes per pointer - 1
-///   nnnn - child count - 2
-///   `[byte n-1][child n-2][byte n-2] ... [child 1][byte 1][child 0][byte 0]11bbnnnn`
-/// - sparse generic
-///   `[byte n-1][child n-2][byte n-2] ... [child 1][byte 1][child 0][byte 0][child count n]01001bbb`
-/// - sparse bitmap
-///   `[child n-2] ... [child 1] [child 0] [32-byte bitmap] 01011bbb`
-/// - dense range
-///   `[child n-2] ... [child 1] [child 0] [to] [from] 01110bbb`
+///   nnnnn - child count - 2
+///   `[child n-2] ... [child 1] [child 0] [byte n-1] ... [byte 1][byte 0]1nnnnnbb`
+/// - bitmap
+///   `[child n-2] ... [child 1] [child 0] [32-byte bitmap] 11101bbb`
 /// - dense full
-///   `[child 254] ... [child 1] [child 0] 01111bbb`
+///   `[child 255] ... [child 1] [child 0] 11110bbb`
+/// - relay (epsilon transition)
+///   `[child] 11111bbb`
 
 public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walker<T, DataOutputPlus>
 {
-    static final int MAX_LEAF_LENGTH_INCLUSIVE = 63;
-    static final int BITS_LEAF = 0b00000000;    // Must be 00 so leaf nodecode reads correctly as varint
-
-    static final int MAX_CHAIN_LENGTH_INCLUSIVE = 64;
-    static final int BITS_CHAIN = 0b01000000;
-
-    // sparse: 0x80 - 0xE0 (96 positions) 1lllllbb, lllll is count - 2 and must be < 24, bb is bytes per pointer
-    static final int MAX_SPARSE_LENGTH_INCLUSIVE = 25;
-    static final int MAX_SPARSE_BYTES = 4;
-    static final int BITS_SPARSE = 0b10000000;
-    static final int SHIFT_SPARSE_LENGTH = 2;
-
-    static final int BITS_PREFIX = 0b11100000;
-    static final int PREFIX_HAS_CHILD = 0b00000001;
-    static final int PREFIX_HAS_ASCENT_CONTENT = 0b00000010;
-    static final int PREFIX_HAS_DESCENT_CONTENT = 0b00000100;
-
-    static final int BITS_BITMAP = 0b11101000;
-    static final int BITS_DENSE = 0b11110000;
-
-    static final int BITS_RESERVED = 0b11111000;
 
     interface DataSerializer<T>
     {
+        int serializedSize(T value);
         int serialize(DataOutputPlus out, T value) throws IOException;
     }
 
     final DataOutputPlus out;
     final DataSerializer<T> dataSerializer;
     final boolean swapAscentAndDescentSides;
+    final int maxBytesPerPage;
 
-    Node<T>[] nodesOnPath = new Node[32];
+    InProgressNode<T>[] nodesOnPath = new InProgressNode[32];
     int lastNodeOnPath = -1;
     boolean onAscentPath = false;
+
+    TreeSet<Node<T>> reusableTreeSet = new TreeSet<>();
+    Node<T> reusableBoundaryNode = new Node<T>(0, null, null, null, null);
+    NavigableSet<Node<T>> reusableHeadSet = reusableTreeSet.headSet(reusableBoundaryNode, true);
 
     public FileWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
     {
         this.out = out;
         this.dataSerializer = dataSerializer;
         this.swapAscentAndDescentSides = swapAscentAndDescentSides;
+        this.maxBytesPerPage = out.maxBytesInPage();
     }
 
     // on way down, only collect path (base class)
@@ -107,7 +91,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     {
         if (lastNodeOnPath >= 0)
         {
-            Node<T> lastNode = nodesOnPath[lastNodeOnPath];
+            InProgressNode<T> lastNode = nodesOnPath[lastNodeOnPath];
             if (lastNode.depth == keyPos)
             {
                 assert onAscentPath;
@@ -117,24 +101,23 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             assert lastNode.depth < keyPos;
         }
 
-        Node<T> node = addNewNode(keyPos);
+        InProgressNode<T> node = addNewNode(keyPos);
         if (onAscentPath)
             node.ascentPathContent = content;
         else
             node.descentPathContent = content;
     }
 
-    private Node<T> addNewNode(int depth)
+    private InProgressNode<T> addNewNode(int depth)
     {
         if (++lastNodeOnPath >= nodesOnPath.length)
             nodesOnPath = Arrays.copyOf(nodesOnPath, lastNodeOnPath * 2);
 
-        Node<T> node = nodesOnPath[lastNodeOnPath];
+        InProgressNode<T> node = nodesOnPath[lastNodeOnPath];
         if (node == null)
-            nodesOnPath[lastNodeOnPath] = node = new Node<T>();
+            nodesOnPath[lastNodeOnPath] = node = new InProgressNode<>();
 
         node.depth = depth;
-        node.reset();
         return node;
     }
 
@@ -156,7 +139,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         }
 
         // throw away any path that did not result in content
-        Node<T> node = nodesOnPath[lastNodeOnPath];
+        InProgressNode<T> node = nodesOnPath[lastNodeOnPath];
         assert node.depth <= keyPos;
         keyPos = node.depth;
 
@@ -171,26 +154,28 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             // repeat:
             while (newLength < node.depth)
             {
-                //   write node
-                writeAndRecycleNode(node);
                 --lastNodeOnPath;
-                Node<T> next = lastNodeOnPath >= 0 ? nodesOnPath[lastNodeOnPath] : null;
-                //   until there's node on path or we reach ascent depth - 1, write a byte, form chain and set child to be the chain
+                InProgressNode<T> next = lastNodeOnPath >= 0 ? nodesOnPath[lastNodeOnPath] : null;
+                //   the path to reach this node includes the key bytes until there's node on path or we reach ascent depth - 1
                 int stopDepth = (next != null ? Math.max(next.depth, newLength) : newLength);
-                popAndWriteChain(stopDepth + 1);
+                //   complete node, possibly write page
+                Node<T> completedNode = completeNode(node, stopDepth);
 
                 --keyPos;
 
                 //   if reached exhausted, child is root
                 if (keyPos < 0)
+                {
+                    writeNodeRecursively(completedNode);
                     return; // the current file position is the root position
+                }
 
                 //   if reached ascend depth, add node on path, add child and exit
                 if (next == null || next.depth < keyPos)
                     next = addNewNode(keyPos);
 
                 //   add child with last byte and pointer to child
-                next.addChild(keyBytes[keyPos], out.position());
+                next.addChild(completedNode);
 
                 node = next;
             }
@@ -201,18 +186,116 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         }
     }
 
-    private void popAndWriteChain(int stopDepth) throws IOException
+    private Node<T> completeNode(InProgressNode<T> node, int stopDepth) throws IOException
     {
-        while (keyPos > stopDepth)
+        byte[] otherBytes = keyPos > stopDepth + 1 ? Arrays.copyOfRange(keyBytes, stopDepth + 1, keyPos) : null;
+        keyPos = stopDepth + 1;
+        Node<T> completed = node.complete(stopDepth >= 0 ? keyBytes[stopDepth] & 0xFF : 0, otherBytes, swapAscentAndDescentSides);
+        long position = out.position();
+        long branchSize = completed.prepareBranchSize(dataSerializer, position);
+        if (branchSize > maxBytesPerPage)
+            layoutChildren(completed, branchSize, position);
+        return completed;
+    }
+
+    private long layoutChildren(Node<T> completed, long branchSize, long position) throws IOException
+    {
+        if (completed.children == null)
         {
-            int written = 0;
-            while (keyPos > stopDepth && written < MAX_CHAIN_LENGTH_INCLUSIVE)
-            {
-                out.writeByte(keyBytes[--keyPos]);
-                ++written;
-            }
-            out.writeByte(BITS_CHAIN | (written - 1));
+            // This node is large because it has a large payload. Just write it now.
+            // TODO: Maybe deal with this better?
+            return writeWithPadding(completed, branchSize);
         }
+
+        TreeSet<Node<T>> orderedChildren = reusableTreeSet;
+        for (Node<T> child : completed.children)
+        {
+            if (child.writtenFilePos >= 0)
+                continue;
+
+            child.getBranchSize(dataSerializer, position); // update currentBranchSize
+            orderedChildren.add(child);
+        }
+
+        if (orderedChildren.isEmpty())
+        {
+            // This node itself has become too big, likely due to combination of pointer sizes and data. Write it now.
+            return writeWithPadding(completed, branchSize);
+        }
+
+        // First make sure we don't have a child that itself has become larger than a page because of growing distance
+        // to children, and lay its children out instead.
+        boolean hadChildLargerThanAPage = false;
+        while (!orderedChildren.isEmpty() && orderedChildren.last().currentBranchSize > maxBytesPerPage)
+        {
+            hadChildLargerThanAPage = true;
+            Node<T> last = orderedChildren.pollLast();
+            position = layoutChildren(last, last.getBranchSize(dataSerializer, position), position);
+        }
+        if (hadChildLargerThanAPage)
+        {
+            // update size to reflect written children
+            branchSize = completed.prepareBranchSize(dataSerializer, position);
+            if (branchSize <= maxBytesPerPage)
+                return position; // This branch now fits a page, no need to do anything further
+        }
+
+        Node<T> boundary = reusableBoundaryNode;
+        // Note that this map's methods reflect changes in boundary on each pollLast call.
+        NavigableSet<Node<T>> fitting = reusableHeadSet;
+        while (!orderedChildren.isEmpty())
+        {
+            boundary.currentBranchSize = out.bytesLeftInPage();
+            Node<T> node = fitting.pollLast();
+            if (node == null)
+            {
+                position = out.padToPageBoundary();
+                continue;
+            }
+
+            // size may have grown because the position advanced
+            long nodeSize = node.getBranchSize(dataSerializer, position);
+            if (nodeSize <= boundary.currentBranchSize)
+            {
+                position = writeNodeRecursively(node); // most common path
+            }
+            else if (nodeSize <= maxBytesPerPage)
+            {
+                // Size changed. Put the node back and retry selection.
+                orderedChildren.add(node);
+            }
+            else
+            {
+                // This node became bigger than a page because of other sibling moving the writing position.
+                // This should be extremely rare and can't be easily avoided.
+                position = layoutChildren(node, nodeSize, position);
+                if (node.writtenFilePos < 0)
+                {
+                    nodeSize = node.getBranchSize(dataSerializer, position);
+                    // if leading node can fit, put it with its branch
+                    if (nodeSize <= out.bytesLeftInPage())
+                        position = writeNode(node); // no need for recursive call, children are already laid out
+                    else
+                        orderedChildren.add(node);
+                }
+                // else we're done, the parent was also written
+            }
+        }
+
+        // update the node size to reflect written children
+        branchSize = completed.prepareBranchSize(dataSerializer, position);
+        if (branchSize > maxBytesPerPage)  // if the node itself is large, place it now
+            position = writeWithPadding(completed, branchSize);
+        return position;
+    }
+
+    private long writeWithPadding(Node<T> completed, long branchSize) throws IOException
+    {
+        // If using the remainder of the page splits the node in one more page than necessary, advance to a new page.
+        if (out.bytesLeftInPage() < branchSize % maxBytesPerPage)
+            out.padToPageBoundary();
+
+        return writeNodeRecursively(completed);
     }
 
     @Override
@@ -221,56 +304,18 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         onAscentPath = true;
     }
 
-    @Override
     public DataOutputPlus complete()
     {
         return out;
     }
 
-    private void writeLeaf(T data) throws IOException
-    {
-        int length = dataSerializer.serialize(out, data);
-        if (length <= MAX_LEAF_LENGTH_INCLUSIVE)
-            out.writeByte(BITS_LEAF | length);
-        else
-        {
-            writeReversedVint(length);
-            // data-only prefix
-            out.writeByte(BITS_PREFIX | PREFIX_HAS_DESCENT_CONTENT);
-        }
-    }
-
-    private void writeContentPrefix(T descentPath, T ascentPath, boolean hasChildren) throws IOException
-    {
-        int code = BITS_PREFIX;
-        if (hasChildren)
-            code |= PREFIX_HAS_CHILD;
-        if (ascentPath != null)
-        {
-            writeContentWithSize(ascentPath);
-            code |= PREFIX_HAS_ASCENT_CONTENT;
-        }
-        if (descentPath != null)
-        {
-            writeContentWithSize(descentPath);
-            code |= PREFIX_HAS_DESCENT_CONTENT;
-        }
-        out.writeByte(code);
-    }
-
-    private void writeContentWithSize(T content) throws IOException
-    {
-        int length = dataSerializer.serialize(out, content);
-        writeReversedVint(length);
-    }
-
-    private void writeReversedSized(long value, int bytes) throws IOException
+    static void writeReversedSized(DataOutputPlus out, long value, int bytes) throws IOException
     {
         // since data is read back-to-front, big endian means writing the top byte last
         out.writeMostSignificantBytes(Long.reverseBytes(value), bytes);
     }
 
-    private void writeReversedVint(long value) throws IOException
+    static void writeReversedVint(DataOutputPlus out, long value) throws IOException
     {
         assert value >= 0;
         if (value < 128)
@@ -282,7 +327,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             {
                 int extraBytes = size - 1;
                 long mask = (long) VIntCoding.encodeExtraBytesToRead(extraBytes) << (extraBytes << 3);
-                writeReversedSized(value | mask, size);
+                writeReversedSized(out, value | mask, size);
             }
             else if (size == 9)
             {
@@ -296,122 +341,227 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         }
     }
 
-    private void writeAndRecycleNode(Node<T> node) throws IOException
+    private long writeNode(Node<T> node) throws IOException
     {
-        boolean hasChildren = node.childCount() > 0;
-        if (swapAscentAndDescentSides)
-        {
-            T t = node.ascentPathContent; node.ascentPathContent = node.descentPathContent; node.descentPathContent = t;
-        }
+        boolean hasChildren = node.children != null;
+        assert hasChildren || node.ascentPathContent != null || node.descentPathContent != null;
 
-        if (!hasChildren && node.ascentPathContent == null)
-            writeLeaf(node.descentPathContent);
-        else
-        {
-            boolean hasContent = node.descentPathContent != null || node.ascentPathContent != null;
-            assert hasContent || node.childCount() > 1;
-            if (hasChildren)
-                writeChildrenOfNode(node);
+        if (hasChildren)    // TODO: if child contains a chain and we are making a new one, join them
+            writeChildrenOfNode(node);
 
-            if (hasContent)
-                writeContentPrefix(node.descentPathContent, node.ascentPathContent, hasChildren);
-        }
+        if (node.ascentPathContent != null || node.descentPathContent != null)
+            OnDiskNodeType.writePayload(out, dataSerializer, node.descentPathContent, node.ascentPathContent, hasChildren);
 
-        node.reset();
+        if (node.otherTransitions != null)
+            OnDiskNodeType.writeChain(out, node.otherTransitions);
+
+        return node.finalizeWithPos(out.position());
     }
 
     private void writeChildrenOfNode(Node<T> node) throws IOException
     {
         int size = node.childCount();
-        if (size == 1)
-        {
-            out.writeByte(node.childTransition(0));
-            out.writeByte(BITS_CHAIN | 0);
-            return;
-        }
-
         long basePos = out.position();
-        assert node.child(size - 1) == basePos;
-        long maxDiff = basePos - node.child(0);
-        int bytesPerPointer = 8 - Long.numberOfLeadingZeros(maxDiff | 1L) / 8; // at least 1
-        if (size <= MAX_SPARSE_LENGTH_INCLUSIVE && bytesPerPointer <= MAX_SPARSE_BYTES)
-            writeSparse(node, basePos, bytesPerPointer);
-        else if (size < 256 - 32 / bytesPerPointer)
-            writeBitmap(node, basePos, bytesPerPointer);
-        else
-            writeDense(node, basePos);
+        long furthestChild = Long.MAX_VALUE;
+        for (Node<T> child : node.children)
+            furthestChild = Math.min(furthestChild, child.writtenFilePos);
+        assert furthestChild >= 0 && furthestChild <= basePos;
+        int bytesPerPointer = bytesFor(basePos - furthestChild);
+        OnDiskNodeType type = OnDiskNodeType.selectChildrenType(bytesPerPointer, size);
+        type.writeChildren(out, node.children, basePos, bytesPerPointer);
     }
 
-    private void writeSparse(Node<T> node, long basePos, int bytesPerPointer) throws IOException
+    private long writeNodeRecursively(Node<T> node) throws IOException
     {
-        int size = node.childCount();
-        // last pointer is implicitly 0
-        assert node.child(size - 1) == basePos;
-        for (int i = size - 2; i >= 0; --i)
-            writeReversedSized(basePos - node.child(i), bytesPerPointer);
-        for (int i = size - 1; i >= 0; --i)
-            out.writeByte(node.childTransition(i));
-        out.writeByte(BITS_SPARSE | ((size - 2) << SHIFT_SPARSE_LENGTH) | (bytesPerPointer - 1));
-    }
-
-    private void writeBitmap(Node<T> node, long basePos, int bytesPerPointer) throws IOException
-    {
-        int size = node.childCount();
-        // last pointer is implicitly 0
-        assert node.child(size - 1) == basePos;
-        for (int i = size - 2; i >= 0; --i)
-            writeReversedSized(basePos - node.child(i), bytesPerPointer);
-        BitSet bits = new BitSet(256);
-        for (int i = 0; i < size; ++i)
-            bits.set(node.childTransition(i));
-        long[] bitsAsLong = bits.toLongArray();
-        for (int i = 3; i >= 0; --i)
-            out.writeLong(bitsAsLong[i]);   // lowest-order bytes ends up last
-        out.writeByte(BITS_BITMAP | (bytesPerPointer - 1));
-    }
-
-    private void writeDense(Node<T> node, long basePos) throws IOException
-    {
-        int size = node.childCount();
-        long maxDiff = basePos - node.child(0) + 1; // accommodate null, written as -1 (all 0xFF)
-        int bytesPerPointer = 8 - Long.numberOfLeadingZeros(maxDiff | 1L) / 8; // at least 1
-        // last pointer is not implicit here
-        int index = size - 1;
-        for (int i = 0; i <= 255; ++i)
+        if (node.children != null)
         {
-            if (index >= 0 && i == (node.childTransition(index)))
-                writeReversedSized(basePos - node.child(index--), bytesPerPointer);
-            else
-                writeReversedSized(-1L, bytesPerPointer);
+            for (Node<T> child : node.children)
+                if (child.writtenFilePos < 0)
+                    writeNodeRecursively(child);
         }
-        assert index == -1;
-        out.writeByte(BITS_DENSE | (bytesPerPointer - 1));
+
+        return writeNode(node);
+    }
+
+    static int bytesFor(long delta)
+    {
+        return 8 - Long.numberOfLeadingZeros(delta | 1L) / 8; // at least 1
+    }
+
+    static class Node<T> implements Comparable<Node<T>>
+    {
+        // Values must be cleared when the node is written
+        int firstTransition;
+        byte[] otherTransitions;
+        Node[] children;
+        T descentPathContent;
+        T ascentPathContent;
+
+        long writtenFilePos;
+
+        long currentBranchSize;
+        long branchSizeValidUntilPosition;
+        // TODO: data items longer than (half a) page must be placed separately
+
+        public Node(int firstTransition, byte[] otherTransitions, Node[] children, T descentPathContent, T ascentPathContent)
+        {
+            this.firstTransition = firstTransition;
+            this.otherTransitions = otherTransitions;
+            this.children = children;
+            this.descentPathContent = descentPathContent;
+            this.ascentPathContent = ascentPathContent;
+            this.branchSizeValidUntilPosition = 0; // force preparation on first `getBranchSize`
+            this.writtenFilePos = -1;
+        }
+
+        private long addUnwrittenChildSizes(DataSerializer<T> serializer, long runningPos)
+        {
+            for (Node<T> child : children)
+            {
+                if (child.writtenFilePos >= 0)
+                    continue;
+
+                if (runningPos > child.branchSizeValidUntilPosition)
+                    child.prepareBranchSize(serializer, runningPos);
+
+                branchSizeValidUntilPosition = Math.min(branchSizeValidUntilPosition, child.branchSizeValidUntilPosition);
+                long childSize = child.currentBranchSize;
+                currentBranchSize += childSize;
+                runningPos += childSize;
+            }
+            return runningPos;
+        }
+
+        private void addWrittenChildPointerSizes(long unwrittenStart, long basePos)
+        {
+            long furthestWrittenChild = Long.MAX_VALUE;
+            for (Node<T> child : children)
+            {
+                long childPos = child.writtenFilePos;
+                if (childPos < 0)
+                    continue;
+                furthestWrittenChild = Math.min(furthestWrittenChild, childPos);
+            }
+
+            long furthestUnwrittenChild = unwrittenStart + children[0].currentBranchSize; // we don't need to seek inside the first child's branch
+            long furthestChild = Math.min(furthestWrittenChild, furthestUnwrittenChild);
+
+            int bytes = bytesFor(basePos - furthestChild);
+            long validUntil = bytes == 8 ? Long.MAX_VALUE : (furthestWrittenChild + (1L << (bytes * 8)));
+            branchSizeValidUntilPosition = Math.min(branchSizeValidUntilPosition, validUntil);
+
+            int size = children.length;
+            OnDiskNodeType type = OnDiskNodeType.selectChildrenType(bytes, size);
+            long childrenSize = type.sizeChildren(bytes, size, children[size - 1].writtenFilePos < 0);
+
+            currentBranchSize += childrenSize;
+        }
+
+        long prepareBranchSize(DataSerializer<T> serializer, long positionForSizeCalculations)
+        {
+            currentBranchSize = 0;
+            branchSizeValidUntilPosition = Long.MAX_VALUE;
+
+            if (children != null)
+            {
+                long basePos = addUnwrittenChildSizes(serializer, positionForSizeCalculations);
+                addWrittenChildPointerSizes(positionForSizeCalculations, basePos);
+            }
+
+            if (descentPathContent != null || ascentPathContent != null)
+                currentBranchSize += OnDiskNodeType.sizePayload(serializer, descentPathContent, ascentPathContent, children != null);
+
+            if (otherTransitions != null)
+                currentBranchSize += OnDiskNodeType.sizeChain(otherTransitions);
+
+            return currentBranchSize;
+        }
+
+        long getBranchSize(DataSerializer<T> serializer, long positionedAt)
+        {
+            if (positionedAt >= branchSizeValidUntilPosition)
+                prepareBranchSize(serializer, positionedAt);
+            return currentBranchSize;
+        }
+
+        long finalizeWithPos(long writtenFilePos)
+        {
+            this.writtenFilePos = writtenFilePos;
+            this.otherTransitions = null;
+            this.children = null;
+            this.descentPathContent = null;
+            this.ascentPathContent = null;
+            this.currentBranchSize = 0;
+            this.branchSizeValidUntilPosition = Long.MAX_VALUE;
+            return writtenFilePos;
+        }
+
+        public int childCount()
+        {
+            return children != null ? children.length : 0;
+        }
+
+        public int childTransition(int i)
+        {
+            return children[i].firstTransition;
+        }
+
+        public long child(int i)
+        {
+            return children[i].writtenFilePos;
+        }
+
+        @Override
+        public String toString()
+        {
+            if (writtenFilePos >= 0)
+                return String.format("Written at: %x", writtenFilePos);
+            String res = "";
+
+            if (otherTransitions != null)
+                res += Hex.bytesToHex(otherTransitions) + " ";
+
+            if (descentPathContent != null)
+                res += "D[" + descentPathContent + "] ";
+            if (ascentPathContent != null)
+                res += "A[" + ascentPathContent + "] ";
+
+            if (children != null)
+            {
+                for (int i = 0; i < children.length; ++i)
+                    res += String.format("%02x: %x ", children[i].firstTransition, children[i].writtenFilePos);
+            }
+
+            return res;
+        }
+
+        @Override
+        public int compareTo(Node<T> other)
+        {
+            int cmp = Long.compare(currentBranchSize, other.currentBranchSize);
+            if (cmp != 0)
+                return cmp;
+            return -Integer.compare(firstTransition, other.firstTransition);
+        }
     }
 
     // reusable
-    static class Node<T>
+    static class InProgressNode<T>
     {
         int depth;
 
         T descentPathContent;
         T ascentPathContent;
-        private long[] children = new long[256];
-        private byte[] childTransitions = new byte[256];
+        private Node[] children = new Node[256];
         private int childCount = 0;
 
-        int childTransition(int index)
+        private Node<T> complete(int firstTransition, byte[] otherTransitions, boolean swapAscentAndDescentSides)
         {
-            return childTransitions[index] & 0xFF;
-        }
-
-        long child(int index)
-        {
-            return children[index];
-        }
-
-        int childCount()
-        {
-            return childCount;
+            Node<T> completed = new Node(firstTransition, otherTransitions, childCount > 0 ? Arrays.copyOf(children, childCount) : null,
+                                         swapAscentAndDescentSides ? ascentPathContent : descentPathContent,
+                                         swapAscentAndDescentSides ? descentPathContent : ascentPathContent);
+            reset();
+            return completed;
         }
 
         void reset()
@@ -421,11 +571,9 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             ascentPathContent = null;
         }
 
-        void addChild(int transition, long target)
+        void addChild(Node target)
         {
-            children[childCount] = target;
-            childTransitions[childCount] = (byte) transition;
-            ++childCount;
+            children[childCount++] = target;
         }
 
         @Override
@@ -438,7 +586,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
                 res += "A[" + ascentPathContent + "] ";
 
             for (int i = 0; i < childCount; ++i)
-                res += String.format("%02x: %x ", childTransition(i), child(i));
+                res += String.format("%02x: %x ", children[i].firstTransition, children[i].writtenFilePos);
 
             return res;
         }
