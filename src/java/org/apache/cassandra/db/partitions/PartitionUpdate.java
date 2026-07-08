@@ -644,6 +644,8 @@ public interface PartitionUpdate extends Partition
 
     interface Factory
     {
+        Row.Builder unsortedRowBuilder(TableMetadata metadata, boolean isStatic);
+
         Builder builder(TableMetadata metadata, DecoratedKey partitionKey, RegularAndStaticColumns columns, int initialRowCapacity);
 
         /**

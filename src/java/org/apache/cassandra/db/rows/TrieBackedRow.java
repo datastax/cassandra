@@ -43,7 +43,6 @@ import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.MultiCellCapableType;
@@ -1113,14 +1112,14 @@ public class TrieBackedRow extends AbstractRow
 
     private static Builder builder(TableMetadata metadata, Clustering<?> clustering)
     {
-        Builder builder = new Builder(metadata.regularAndStaticColumns());
+        Builder builder = new Builder(clustering == Clustering.STATIC_CLUSTERING ? metadata.staticColumns() : metadata.regularColumns());
         builder.newRow(clustering);
         return builder;
     }
 
-    public static Row.Builder builder(RegularAndStaticColumns regularAndStaticColumns)
+    public static Row.Builder builder(Columns columns)
     {
-        return new Builder(regularAndStaticColumns);
+        return new Builder(columns);
     }
 
     private static Object mergeData(Object existing, Object update)
@@ -1220,27 +1219,22 @@ public class TrieBackedRow extends AbstractRow
 
     public static class Builder implements Row.Builder
     {
-        protected final RegularAndStaticColumns regularAndStaticColumns;
-        protected final Object2IntHashMap<ColumnIdentifier> regularColumnIds;
-        protected final Object2IntHashMap<ColumnIdentifier> staticColumnIds;
+        protected final Columns columns;
+        protected final Object2IntHashMap<ColumnIdentifier> columnIds;
         protected Clustering<?> clustering;
-        protected Object2IntHashMap<ColumnIdentifier> columnIds;
         private InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> data;
         private InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>.Mutator<Object, TrieTombstoneMarker> mutator;
 
-        protected Builder(RegularAndStaticColumns regularAndStaticColumns)
+        protected Builder(Columns columns)
         {
-            this.regularAndStaticColumns = regularAndStaticColumns;
-            regularColumnIds = columnsMapCache.computeIfAbsent(regularAndStaticColumns.regulars, TrieBackedRow::makeColumnIdsMap);
-            staticColumnIds = columnsMapCache.computeIfAbsent(regularAndStaticColumns.statics, TrieBackedRow::makeColumnIdsMap);
+            this.columns = columns;
+            columnIds = columnsMapCache.computeIfAbsent(columns, TrieBackedRow::makeColumnIdsMap);
             reset();
         }
 
         protected Builder(Builder builder)
         {
-            this.regularAndStaticColumns = builder.regularAndStaticColumns;
-            this.regularColumnIds = builder.regularColumnIds;
-            this.staticColumnIds = builder.staticColumnIds;
+            this.columns = builder.columns;
             this.clustering = builder.clustering;
             this.columnIds = builder.columnIds;
             reset();
@@ -1271,7 +1265,6 @@ public class TrieBackedRow extends AbstractRow
         {
             assert this.clustering == null; // Ensures we've properly called build() if we've use this builder before
             this.clustering = clustering;
-            this.columnIds = clustering == Clustering.STATIC_CLUSTERING ? staticColumnIds : regularColumnIds;
         }
 
         @Override
@@ -1377,7 +1370,7 @@ public class TrieBackedRow extends AbstractRow
         @Override
         public TrieBackedRow build()
         {
-            TrieBackedRow row = create(regularAndStaticColumns.columns(clustering == Clustering.STATIC_CLUSTERING),
+            TrieBackedRow row = create(columns,
                                        columnIds,
                                        clustering,
                                        data);

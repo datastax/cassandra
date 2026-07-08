@@ -710,6 +710,11 @@ public class TriePartitionUpdateStage3 extends TrieBackedPartitionStage3 impleme
 
     public static class TrieFactory implements Factory
     {
+        @Override
+        public Row.Builder unsortedRowBuilder(TableMetadata metadata, boolean isStatic)
+        {
+            return BTreeRow.unsortedBuilder();
+        }
 
         @Override
         public PartitionUpdate.Builder builder(TableMetadata metadata, DecoratedKey partitionKey, RegularAndStaticColumns columns, int initialRowCapacity)
