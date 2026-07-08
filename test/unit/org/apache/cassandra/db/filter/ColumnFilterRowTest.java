@@ -141,6 +141,9 @@ public class ColumnFilterRowTest
         assertEquals(100, ByteBufferUtil.toInt(filtered.getCell(v1).buffer()));
         assertNotNull(filtered.getCell(v2, cellPath(0)));
         assertNotNull(filtered.getCell(v2, cellPath(1)));
+
+        Row filtered2 = row.filter(null, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -372,6 +375,9 @@ public class ColumnFilterRowTest
         assertNull(filtered.getCell(v1));
         // But the row itself should still exist if it has liveness info
         assertNotNull(filtered);
+
+        Row filtered2 = row.filter(null, activeDeletion, false, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -393,6 +399,10 @@ public class ColumnFilterRowTest
 
         // Row becomes empty when all cells are shadowed
         assertNull(filtered);
+
+
+        Row filtered2 = row.filter(null, activeDeletion, false, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -415,6 +425,9 @@ public class ColumnFilterRowTest
         // Cell should still be present
         assertNotNull(filtered.getCell(v1));
         assertEquals(100, ByteBufferUtil.toInt(filtered.getCell(v1).buffer()));
+
+        Row filtered2 = row.filter(null, activeDeletion, false, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -439,6 +452,9 @@ public class ColumnFilterRowTest
         assertNotNull(filtered);
         assertNull(filtered.getCell(v2, cellPath(0)));
         assertNull(filtered.getCell(v2, cellPath(1)));
+
+        Row filtered2 = row.filter(null, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -467,6 +483,9 @@ public class ColumnFilterRowTest
         assertNotNull(filtered);
         assertNull(filtered.getCell(v1));
         assertNotNull(filtered.getCell(v2, cellPath(0)));
+
+        Row filtered2 = row.filter(null, metadataWithDropped);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -495,6 +514,9 @@ public class ColumnFilterRowTest
         assertNotNull(filtered);
         assertNotNull(filtered.getCell(v1));
         assertNotNull(filtered.getCell(v2, cellPath(0)));
+
+        Row filtered2 = row.filter(null, metadataWithDropped);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -580,6 +602,9 @@ public class ColumnFilterRowTest
         assertNotNull(filtered.getCell(v2, cellPath(2)));
         assertNull(filtered.getCell(v2, cellPath(1)));
         assertNull(filtered.getCell(v2, cellPath(0)));
+
+        Row filtered2 = row.filter(null, metadataWithDropped);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -665,6 +690,9 @@ public class ColumnFilterRowTest
         assertNotNull(filtered);
         assertNotNull(filtered.getCell(v1));
         assertEquals(100, ByteBufferUtil.toInt(filtered.getCell(v1).buffer()));
+
+        Row filtered2 = row.filter(null, metadataWithDropped);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -691,6 +719,9 @@ public class ColumnFilterRowTest
         assertNull(filtered.getCell(v2, cellPath(0)));
         // Row deletion should be preserved
         assertEquals(rowDeletionTimestamp, filtered.deletion().time().markedForDeleteAt());
+
+        Row filtered2 = row.filter(null, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -714,6 +745,9 @@ public class ColumnFilterRowTest
         assertNotNull(filtered);
         assertNotNull(filtered.getCell(v1));
         assertEquals(100, ByteBufferUtil.toInt(filtered.getCell(v1).buffer()));
+
+        Row filtered2 = row.filter(null, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -738,6 +772,9 @@ public class ColumnFilterRowTest
 
         // Cell, deletion and liveness should be removed by active deletion
         assertNull(filtered);
+
+        Row filtered2 = row.filter(null, activeDeletion, false, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -765,6 +802,9 @@ public class ColumnFilterRowTest
         assertNotNull(filtered.getCell(v1));
         // Row deletion should be removed because it's superseded by active deletion
         assertTrue(filtered.deletion().isLive());
+
+        Row filtered2 = row.filter(null, activeDeletion, false, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -792,6 +832,9 @@ public class ColumnFilterRowTest
         assertNotNull(filtered.getCell(v1));
         // Row deletion should not be removed because it's not superseded by active deletion
         assertEquals(rowDeletionTimestamp, filtered.deletion().time().markedForDeleteAt());
+
+        Row filtered2 = row.filter(null, activeDeletion, false, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -815,6 +858,9 @@ public class ColumnFilterRowTest
         // Row deletion should be set to active deletion
         assertNotNull(filtered);
         assertEquals(activeDeletionTimestamp, filtered.deletion().time().markedForDeleteAt());
+
+        Row filtered2 = row.filter(null, activeDeletion, true, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test
@@ -836,6 +882,9 @@ public class ColumnFilterRowTest
         // Row deletion should be set to active deletion
         assertNotNull(filtered);
         assertEquals(activeDeletionTimestamp, filtered.deletion().time().markedForDeleteAt());
+
+        Row filtered2 = row.filter(null, activeDeletion, true, metadata);
+        assertEquals(filtered, filtered2);
     }
 
     @Test

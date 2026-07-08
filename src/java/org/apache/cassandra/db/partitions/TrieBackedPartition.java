@@ -108,6 +108,7 @@ public class TrieBackedPartition implements Partition
     protected final EncodingStats stats;
     /// Number of rows in the partition. This will count only the rows that have live data.
     protected final int rowCountIncludingStatic;
+    protected final DeletionTime partitionLevelDeletion;
     /// Number of tombstone boundary pairs on the row-level or above: partition, range and row tombstones.
     protected final int tombstoneCount;
     boolean hasStaticRow;
@@ -128,6 +129,7 @@ public class TrieBackedPartition implements Partition
         this.rowCountIncludingStatic = rowCountIncludingStatic;
         this.tombstoneCount = tombstoneCount;
         this.hasStaticRow = trie.get(STATIC_CLUSTERING_PATH) != null;
+        this.partitionLevelDeletion = TrieTombstoneMarker.applicableDeletionOrLive(trie, ByteComparable.EMPTY);
         // There must always be a partition marker.
         assert trie.get(ByteComparable.EMPTY) != null;
         assert stats != null;
@@ -204,7 +206,7 @@ public class TrieBackedPartition implements Partition
 
     /// Conversion from row branch to [Row]. [WithCopyingToHeap] overrides this to do the necessary copying
     /// (hence the non-static method).
-    Row toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> rowContent, Clustering<?> clustering)
+    TrieBackedRow toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> rowContent, Clustering<?> clustering)
     {
         return rowContent != null ? TrieBackedRow.create(metadata, clustering, rowContent) : null;
     }
@@ -325,7 +327,7 @@ public class TrieBackedPartition implements Partition
     @Override
     public DeletionTime partitionLevelDeletion()
     {
-        return TrieTombstoneMarker.applicableDeletionOrLive(trie, ByteComparable.EMPTY);
+        return partitionLevelDeletion;
     }
 
     @Override
@@ -427,7 +429,7 @@ public class TrieBackedPartition implements Partition
     @Override
     public UnfilteredRowIterator unfilteredIterator()
     {
-        return unfilteredIterator(ColumnFilter.selection(columns()), Slices.ALL, false);
+        return new UnfilteredIterator(null, nonStaticSubtrie(), false);
     }
 
     private Clustering<?> getClustering(byte[] bytes, int byteLength)
@@ -486,14 +488,26 @@ public class TrieBackedPartition implements Partition
         final boolean reversed;
         final ColumnFilter selection;
         final Row staticRow;
+        final boolean mayFilterColumns;
 
         protected UnfilteredIterator(ColumnFilter selection, DeletionAwareTrie<Object, TrieTombstoneMarker> trie, boolean reversed)
         {
             super(trie, Direction.fromBoolean(reversed), TrieBackedPartition::combineDataAndDeletionForUnfilteredIterator, false);
             this.selection = selection;
             this.reversed = reversed;
-            Row staticRow = TrieBackedPartition.this.staticRow().filter(selection, droppedColumnsSource());
+            this.mayFilterColumns = !droppedColumnsSource().droppedColumns.isEmpty() ||
+                                    selection != null && (!selection.fetchesAllColumns(false) ||
+                                                          !selection.fetchesAllColumns(true) ||
+                                                          !selection.allFetchedColumnsAreQueried());
+            Row staticRow = filter(TrieBackedPartition.this.staticRow());
             this.staticRow = staticRow != null ? staticRow : Rows.EMPTY_STATIC_ROW;
+        }
+
+        Row filter(Row row)
+        {
+            if (!mayFilterColumns || row == null)
+                return row;
+            return row.filter(selection, droppedColumnsSource());
         }
 
         @Override
@@ -503,8 +517,7 @@ public class TrieBackedPartition implements Partition
             if (content instanceof LivenessInfo)
             {
                 // Row.
-                Row row = toRow(tailTrie, getClustering(bytes, byteLength));
-                return row != null ? row.filter(selection, droppedColumnsSource()) : null;
+                return filter(toRow(tailTrie, getClustering(bytes, byteLength)));
             }
             else
             {
@@ -520,7 +533,7 @@ public class TrieBackedPartition implements Partition
         @Override
         public DeletionTime partitionLevelDeletion()
         {
-            return TrieTombstoneMarker.applicableDeletionOrLive(trie, ByteComparable.EMPTY);
+            return TrieBackedPartition.this.partitionLevelDeletion;
         }
 
         @Override
@@ -544,7 +557,7 @@ public class TrieBackedPartition implements Partition
         @Override
         public RegularAndStaticColumns columns()
         {
-            return selection.fetchedColumns();
+            return selection != null ? selection.fetchedColumns() : metadata.regularAndStaticColumns();
         }
 
         @Override
@@ -652,9 +665,9 @@ public class TrieBackedPartition implements Partition
         }
 
         @Override
-        public Row toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> data, Clustering<?> clustering)
+        public TrieBackedRow toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> data, Clustering<?> clustering)
         {
-            Row row = super.toRow(data, clustering);
+            TrieBackedRow row = super.toRow(data, clustering);
             if (row == null || row == Rows.EMPTY_STATIC_ROW)
                 return row;
             return row.clone(HeapCloner.instance);
