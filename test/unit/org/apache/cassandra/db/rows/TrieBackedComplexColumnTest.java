@@ -78,7 +78,7 @@ public class TrieBackedComplexColumnTest
 
     private Row buildRowWithComplexColumn(long... cellTimestamps)
     {
-        Row.Builder builder = TrieBackedRow.builder(regularAndStaticColumns);
+        Row.Builder builder = TrieBackedRow.builder(regularAndStaticColumns.regulars);
         builder.newRow(clustering);
         for (int i = 0; i < cellTimestamps.length; i++)
         {
@@ -92,7 +92,7 @@ public class TrieBackedComplexColumnTest
 
     private Row buildRowWithComplexDeletion(long deletionTimestamp, long... cellTimestamps)
     {
-        Row.Builder builder = TrieBackedRow.builder(regularAndStaticColumns);
+        Row.Builder builder = TrieBackedRow.builder(regularAndStaticColumns.regulars);
         builder.newRow(clustering);
         builder.addComplexDeletion(v2, DeletionTime.build(deletionTimestamp, LOCAL_DELETION_TIME));
         for (int i = 0; i < cellTimestamps.length; i++)
