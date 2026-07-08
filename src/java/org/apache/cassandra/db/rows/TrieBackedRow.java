@@ -760,7 +760,7 @@ public class TrieBackedRow extends AbstractRow
     {
         Map<ByteBuffer, DroppedColumn> droppedColumns = droppedColumnsSource.droppedColumns;
 
-        boolean mayFilterColumns = !filter.fetchesAllColumns(isStatic()) || !filter.allFetchedColumnsAreQueried();
+        boolean mayFilterColumns = filter != null && (!filter.fetchesAllColumns(isStatic()) || !filter.allFetchedColumnsAreQueried());
         // When merging sstable data in Row.Merger#merge(), rowDeletion is removed if it doesn't supersede activeDeletion.
         boolean mayHaveDeleted = !activeDeletion.isLive() && activeDeletion.supersedes(deletion.time());
         if (!mayFilterColumns && !mayHaveDeleted && droppedColumns.isEmpty())
@@ -1026,7 +1026,7 @@ public class TrieBackedRow extends AbstractRow
     }
 
     @Override
-    public Row clone(Cloner cloner)
+    public TrieBackedRow clone(Cloner cloner)
     {
         InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> newTrie = newTrie();
         try
