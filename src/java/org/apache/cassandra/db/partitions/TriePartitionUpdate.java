@@ -730,6 +730,11 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
     public static class TrieFactory implements PartitionUpdate.Factory
     {
+        @Override
+        public Row.Builder unsortedRowBuilder(TableMetadata metadata, boolean isStatic)
+        {
+            return TrieBackedRow.builder(isStatic ? metadata.staticColumns() : metadata.regularColumns());
+        }
 
         @Override
         public PartitionUpdate.Builder builder(TableMetadata metadata, DecoratedKey partitionKey, RegularAndStaticColumns columns, int initialRowCapacity)

@@ -30,6 +30,7 @@ import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
@@ -69,8 +70,8 @@ public class ColumnFilterRowTest
     public static Collection<Object[]> data()
     {
         return Arrays.asList(new Object[][] {
-            { "BTreeRow", (Function<RegularAndStaticColumns, Row.Builder>) cols -> BTreeRow.unsortedBuilder() },
-            { "TrieBackedRow", (Function<RegularAndStaticColumns, Row.Builder>) cols -> TrieBackedRow.builder(cols) }
+            { "BTreeRow", (Function<Columns, Row.Builder>) cols -> BTreeRow.unsortedBuilder() },
+            { "TrieBackedRow", (Function<Columns, Row.Builder>) cols -> TrieBackedRow.builder(cols) }
         });
     }
 
@@ -78,7 +79,7 @@ public class ColumnFilterRowTest
     public String rowType;
 
     @Parameterized.Parameter(1)
-    public Function<RegularAndStaticColumns, Row.Builder> builderFactory;
+    public Function<Columns, Row.Builder> builderFactory;
 
     private TableMetadata metadata;
     private ColumnMetadata s1; // static simple
@@ -115,16 +116,16 @@ public class ColumnFilterRowTest
         regularAndStaticColumns = metadata.regularAndStaticColumns();
     }
 
-    private Row.Builder newBuilder()
+    private Row.Builder newBuilder(Clustering<?> clustering)
     {
-        return builderFactory.apply(regularAndStaticColumns);
+        return builderFactory.apply(regularAndStaticColumns.columns(clustering == Clustering.STATIC_CLUSTERING));
     }
 
     @Test
     public void testFilterAllColumns()
     {
         // Create a row with all column types
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(simpleCell(v1, 100));
         builder.addCell(complexCell(v2, 0, 200));
@@ -146,7 +147,7 @@ public class ColumnFilterRowTest
     public void testFilterSimpleColumn()
     {
         // Create a row with multiple simple columns
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(simpleCell(v1, 100));
         Row row = builder.build();
@@ -164,7 +165,7 @@ public class ColumnFilterRowTest
     public void testFilterExcludesUnselectedSimpleColumn()
     {
         // Create a row with v1
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(simpleCell(v1, 100));
         Row row = builder.build();
@@ -181,7 +182,7 @@ public class ColumnFilterRowTest
     public void testFilterComplexColumn()
     {
         // Create a row with complex column cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addComplexDeletion(v2, COMPLEX_DELETION);
         builder.addCell(complexCell(v2, 0, 200));
@@ -204,7 +205,7 @@ public class ColumnFilterRowTest
     public void testFilterComplexColumnWithCellSelection()
     {
         // Create a row with multiple cells in complex column
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addComplexDeletion(v2, COMPLEX_DELETION);
         builder.addCell(complexCell(v2, 0, 200));
@@ -234,7 +235,7 @@ public class ColumnFilterRowTest
     public void testFilterComplexColumnWithSlice()
     {
         // Create a row with multiple cells in complex column
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addComplexDeletion(v2, COMPLEX_DELETION);
         builder.addCell(complexCell(v2, 0, 200));
@@ -263,7 +264,7 @@ public class ColumnFilterRowTest
     public void testFilterStaticSimpleColumn()
     {
         // Create a static row
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(Clustering.STATIC_CLUSTERING);
         builder.newRow(Clustering.STATIC_CLUSTERING);
         builder.addCell(simpleCell(s1, 100));
         Row row = builder.build();
@@ -281,7 +282,7 @@ public class ColumnFilterRowTest
     public void testFilterStaticComplexColumn()
     {
         // Create a static row with complex column
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(Clustering.STATIC_CLUSTERING);
         builder.newRow(Clustering.STATIC_CLUSTERING);
         builder.addComplexDeletion(s2, COMPLEX_DELETION);
         builder.addCell(complexCell(s2, 0, 200));
@@ -304,7 +305,7 @@ public class ColumnFilterRowTest
     public void testFilterWithMetadataFetchesAllRegulars()
     {
         // Create a row with multiple columns
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(simpleCell(v1, 100));
         builder.addComplexDeletion(v2, COMPLEX_DELETION);
@@ -356,7 +357,7 @@ public class ColumnFilterRowTest
     public void testFilterWithRowDeletion()
     {
         // Create a row with cells and a row deletion
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(TIMESTAMP + 2, TTL, LOCAL_DELETION_TIME));
         builder.addCell(simpleCell(v1, 100));
@@ -380,7 +381,7 @@ public class ColumnFilterRowTest
         long deletionTimestamp = 2000L;
 
         // Create a row with a cell
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, cellTimestamp));
         Row row = builder.build();
@@ -401,7 +402,7 @@ public class ColumnFilterRowTest
         long deletionTimestamp = 1000L;
 
         // Create a row with a cell
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, cellTimestamp));
         Row row = builder.build();
@@ -423,7 +424,7 @@ public class ColumnFilterRowTest
         long deletionTimestamp = 2000L;
 
         // Create a row with complex column cells and a complex deletion
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v2, cellPath(0), 200, cellTimestamp));
         builder.addCell(cell(v2, cellPath(1), 201, cellTimestamp));
@@ -447,7 +448,7 @@ public class ColumnFilterRowTest
         long droppedTime = 2000L;
 
         // Create a row with cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, cellTimestamp));
         builder.addCell(cell(v2, cellPath(0), 200, cellTimestamp));
@@ -475,7 +476,7 @@ public class ColumnFilterRowTest
         long droppedTime = 2000L;
 
         // Create a row with cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, cellTimestamp));
         builder.addCell(cell(v2, cellPath(0), 200, cellTimestamp));
@@ -503,7 +504,7 @@ public class ColumnFilterRowTest
         long droppedTime = 2000L;
 
         // Create a row with cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, cellTimestamp));
         builder.addCell(cell(v2, cellPath(0), 200, cellTimestamp));
@@ -529,7 +530,7 @@ public class ColumnFilterRowTest
         long droppedTime = 2000L;
 
         // Create a row with cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, cellTimestamp));
         builder.addCell(cell(v2, cellPath(0), 200, cellTimestamp));
@@ -556,7 +557,7 @@ public class ColumnFilterRowTest
         long droppedTime = 2000L;
 
         // Create a row with cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, 1000));
         builder.addCell(cell(v2, cellPath(0), 200, 1000));
@@ -587,7 +588,7 @@ public class ColumnFilterRowTest
         long droppedTime = 2000L;
 
         // Create a row with cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, 1000));
         builder.addCell(cell(v2, cellPath(0), 200, 1000));
@@ -614,7 +615,7 @@ public class ColumnFilterRowTest
         long droppedTime = 2000L;
 
         // Create a row with cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, 1000));
         builder.addCell(cell(v2, cellPath(0), 200, 1000));
@@ -646,7 +647,7 @@ public class ColumnFilterRowTest
         long cellTimestamp = 2000L;
 
         // Create a row with a cell that has timestamp > droppedTime
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, cellTimestamp));
         Row row = builder.build();
@@ -673,7 +674,7 @@ public class ColumnFilterRowTest
         long rowDeletionTimestamp = 2000L;
 
         // Create a row with a row deletion and cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addRowDeletion(Row.Deletion.regular(DeletionTime.build(rowDeletionTimestamp, LOCAL_DELETION_TIME)));
         builder.addCell(cell(v1, 100, cellTimestamp));
@@ -699,7 +700,7 @@ public class ColumnFilterRowTest
         long cellTimestamp = 2000L;
 
         // Create a row with a row deletion and newer cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addRowDeletion(Row.Deletion.regular(DeletionTime.build(rowDeletionTimestamp, LOCAL_DELETION_TIME)));
         builder.addCell(cell(v1, 100, cellTimestamp));
@@ -723,7 +724,7 @@ public class ColumnFilterRowTest
         long cellTimestamp = 1500L;
 
         // Create a row with a row deletion and cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(cellTimestamp, TTL, LOCAL_DELETION_TIME));
         builder.addRowDeletion(Row.Deletion.regular(DeletionTime.build(rowDeletionTimestamp, LOCAL_DELETION_TIME)));
@@ -747,7 +748,7 @@ public class ColumnFilterRowTest
         long cellTimestamp = 1500L;
 
         // Create a row with a row deletion and cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(cellTimestamp, TTL, LOCAL_DELETION_TIME));
         builder.addRowDeletion(Row.Deletion.regular(DeletionTime.build(rowDeletionTimestamp, LOCAL_DELETION_TIME)));
@@ -774,7 +775,7 @@ public class ColumnFilterRowTest
         long cellTimestamp = 1500L;
 
         // Create a row with a row deletion and cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(cellTimestamp, TTL, LOCAL_DELETION_TIME));
         builder.addRowDeletion(Row.Deletion.regular(DeletionTime.build(rowDeletionTimestamp, LOCAL_DELETION_TIME)));
@@ -800,7 +801,7 @@ public class ColumnFilterRowTest
         long activeDeletionTimestamp = 2000L;
 
         // Create a row with a row deletion
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addRowDeletion(Row.Deletion.regular(DeletionTime.build(rowDeletionTimestamp, LOCAL_DELETION_TIME)));
         builder.addCell(cell(v1, 100, 1500L));
@@ -822,7 +823,7 @@ public class ColumnFilterRowTest
         long activeDeletionTimestamp = 2000L;
 
         // Create a row with a row deletion
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, 1500L));
         Row row = builder.build();
@@ -843,7 +844,7 @@ public class ColumnFilterRowTest
         long activeDeletionTimestamp = 2000L;
 
         // Create a row with a row deletion
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addRowDeletion(Row.Deletion.regular(DeletionTime.build(1000, LOCAL_DELETION_TIME)));
         builder.addCell(cell(v1, 100, 2500L));
@@ -866,7 +867,7 @@ public class ColumnFilterRowTest
         long activeDeletionTimestamp = 2000L;
 
         // Create a row with a row deletion
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(cell(v1, 100, 2500L));
         Row row = builder.build();
@@ -886,7 +887,7 @@ public class ColumnFilterRowTest
     public void testFilterMixedColumnsAndCells()
     {
         // Create a row with various column types
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(simpleCell(v1, 100));
         builder.addComplexDeletion(v2, COMPLEX_DELETION);
@@ -914,7 +915,7 @@ public class ColumnFilterRowTest
     public void testWithOnlyQueriedData()
     {
         // Create a row with cells
-        Row.Builder builder = newBuilder();
+        Row.Builder builder = newBuilder(clustering);
         builder.newRow(clustering);
         builder.addCell(simpleCell(v1, 100));
         builder.addComplexDeletion(v2, COMPLEX_DELETION);

@@ -103,13 +103,13 @@ public class UpdateParameters
         if (clustering == Clustering.STATIC_CLUSTERING)
         {
             if (staticBuilder == null)
-                staticBuilder = BTreeRow.unsortedBuilder();
+                staticBuilder = metadata.params.memtable.factory.partitionUpdateFactory().unsortedRowBuilder(metadata, true);
             builder = staticBuilder;
         }
         else
         {
             if (regularBuilder == null)
-                regularBuilder = BTreeRow.unsortedBuilder();
+                regularBuilder = metadata.params.memtable.factory.partitionUpdateFactory().unsortedRowBuilder(metadata, false);
             builder = regularBuilder;
         }
 

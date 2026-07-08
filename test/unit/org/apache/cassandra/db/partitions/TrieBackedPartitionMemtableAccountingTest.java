@@ -253,7 +253,7 @@ public class TrieBackedPartitionMemtableAccountingTest
             final ByteBuffer updateValueBB = ByteBufferUtil.bytes(222);
 
             // Create the initial row to populate the partition with
-            Row.Builder initialRowBuilder = TrieBackedRow.builder(metadata.regularAndStaticColumns());
+            Row.Builder initialRowBuilder = TrieBackedRow.builder(regular.isStatic() ? metadata.staticColumns() : metadata.regularColumns());
             initialRowBuilder.newRow(regular.isStatic() ? Clustering.STATIC_CLUSTERING : Clustering.EMPTY);
 
             initialRowBuilder.addCell(makeCell(regular, initialTS, initialTTL, initialLDT, initialValueBB, null));
@@ -267,7 +267,7 @@ public class TrieBackedPartitionMemtableAccountingTest
             Row initialRow = initialRowBuilder.build();
 
             // Create the update row to modify the partition with
-            Row.Builder updateRowBuilder = TrieBackedRow.builder(metadata.regularAndStaticColumns());
+            Row.Builder updateRowBuilder = TrieBackedRow.builder(regular.isStatic() ? metadata.staticColumns() : metadata.regularColumns());
             updateRowBuilder.newRow(regular.isStatic() ? Clustering.STATIC_CLUSTERING : Clustering.EMPTY);
 
             updateRowBuilder.addCell(makeCell(regular, updateTS, updateTTL, updateLDT, updateValueBB, null));

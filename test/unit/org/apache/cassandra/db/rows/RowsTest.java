@@ -238,7 +238,7 @@ public class RowsTest
         switch (implementation)
         {
             case TRIE_BACKED:
-                builder = TrieBackedRow.builder(kcvm.regularAndStaticColumns());
+                builder = TrieBackedRow.builder(kcvm.regularAndStaticColumns().columns(c == Clustering.STATIC_CLUSTERING));
                 break;
             case BTREE:
             default:

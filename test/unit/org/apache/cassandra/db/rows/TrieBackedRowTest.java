@@ -44,7 +44,7 @@ public class TrieBackedRowTest
 
     private TrieBackedRow.Builder row(int ck, Cell<?>... columns)
     {
-        TrieBackedRow.Builder builder = new TrieBackedRow.Builder(metadata.regularAndStaticColumns());
+        TrieBackedRow.Builder builder = new TrieBackedRow.Builder(metadata.regularColumns());
         builder.newRow(Util.clustering(metadata.comparator, ck));
         for (Cell<?> cell : columns)
             builder.addCell(cell);
