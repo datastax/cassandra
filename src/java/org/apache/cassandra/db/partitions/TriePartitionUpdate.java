@@ -714,7 +714,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         @Override
         public DeletionTime partitionLevelDeletion()
         {
-            return TrieTombstoneMarker.applicableDeletionOrLive(trie, ByteComparable.EMPTY);
+            return TrieTombstoneMarker.applicableDeletionOrLiveAtRoot(trie);
         }
 
         @Override

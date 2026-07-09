@@ -263,11 +263,28 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
         return marker != null ? marker.applicableToPointForward() : null;
     }
 
+    static Covering applicableDeletionAtRoot(DeletionAwareTrie<Object, TrieTombstoneMarker> data)
+    {
+        TrieTombstoneMarker marker = data.deletionAtRoot();
+        return marker != null ? marker.applicableToPointForward() : null;
+    }
+
     /// Get the deletion in the given deletion-aware trie that applies to the given key, returning DeletionTime.LIVE
     /// if none is found.
     static DeletionTime applicableDeletionOrLive(DeletionAwareTrie<Object, TrieTombstoneMarker> data, ByteComparable key)
     {
-        TrieTombstoneMarker marker = data.applicableDeletion(key);
+        return applicableOrLive(data.applicableDeletion(key));
+    }
+
+    /// Get the deletion in the given deletion-aware trie that applies to the root of the trie, returning DeletionTime.LIVE
+    /// if none is found.
+    static DeletionTime applicableDeletionOrLiveAtRoot(DeletionAwareTrie<Object, TrieTombstoneMarker> data)
+    {
+        return applicableOrLive(data.deletionAtRoot());
+    }
+
+    private static DeletionTime applicableOrLive(TrieTombstoneMarker marker)
+    {
         if (marker != null)
         {
             Covering deletion = marker.applicableToPointForward();

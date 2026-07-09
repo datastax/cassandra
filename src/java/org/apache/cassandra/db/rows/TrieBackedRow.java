@@ -178,7 +178,7 @@ public class TrieBackedRow extends AbstractRow
                                 Clustering<?> clustering,
                                 DeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
-        TrieTombstoneMarker deletionRoot = data.applicableDeletion(ByteComparable.EMPTY);
+        TrieTombstoneMarker deletionRoot = data.deletionAtRoot();
         Deletion deletion = Deletion.LIVE;
         long minLocalDeletionTime = CellData.MAX_DELETION_TIME;
         if (deletionRoot != null)
@@ -424,7 +424,7 @@ public class TrieBackedRow extends AbstractRow
         if (data instanceof InMemoryDeletionAwareTrie)
         {
             // the row deletion marker will only be present if there is a deletion present
-            return data.applicableDeletion(ByteComparable.EMPTY) == null;
+            return data.deletionAtRoot() == null;
         }
         else
         {
@@ -469,7 +469,7 @@ public class TrieBackedRow extends AbstractRow
 
     static Deletion getDeletion(DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
-        DeletionTime delTime = TrieTombstoneMarker.applicableDeletion(trie, ByteComparable.EMPTY);
+        DeletionTime delTime = TrieTombstoneMarker.applicableDeletionAtRoot(trie);
         if (delTime == null)
             return Deletion.LIVE;
         else
@@ -611,7 +611,7 @@ public class TrieBackedRow extends AbstractRow
         // We may be left with only a COMPLEX_COLUMN_MARKER after some transformation.
         if (tail instanceof InMemoryDeletionAwareTrie)
             return false; // in-memory trie will drop the marker
-        if (TrieTombstoneMarker.applicableDeletion(tail, ByteComparable.EMPTY) != null)
+        if (TrieTombstoneMarker.applicableDeletionAtRoot(tail) != null)
             return false;
         // otherwise it's empty if it has no cells
         return !tail.filteredValuesIterator(Direction.FORWARD, CellData.class).hasNext();
@@ -949,7 +949,7 @@ public class TrieBackedRow extends AbstractRow
             // when enforceStrictLiveness is set, a row is considered dead when it's PK liveness info is not present
             LivenessInfo primaryLiveness = primaryKeyLivenessInfo();
             primaryLiveness = purger.shouldPurge(primaryLiveness, nowInSec) ? LivenessInfo.EMPTY : primaryLiveness;
-            DeletionTime rowDeletion = TrieTombstoneMarker.applicableDeletion(data, ByteComparable.EMPTY);
+            DeletionTime rowDeletion = TrieTombstoneMarker.applicableDeletionAtRoot(data);
             rowDeletion = rowDeletion != null && !purger.shouldPurge(rowDeletion) ? rowDeletion : null;
             if (primaryLiveness.isEmpty() && rowDeletion == null)
                 return null;
@@ -965,7 +965,7 @@ public class TrieBackedRow extends AbstractRow
         if (enforceStrictLiveness)
         {
             // when enforceStrictLiveness is set, a row is considered dead when it's PK liveness info is not present
-            DeletionTime rowDeletion = TrieTombstoneMarker.applicableDeletion(data, ByteComparable.EMPTY);
+            DeletionTime rowDeletion = TrieTombstoneMarker.applicableDeletionAtRoot(data);
             if (primaryKeyLivenessInfo().timestamp() < timestamp && (rowDeletion == null || rowDeletion.markedForDeleteAt() < timestamp))
                 return null;
         }
@@ -1283,7 +1283,7 @@ public class TrieBackedRow extends AbstractRow
         @Override
         public void addPrimaryKeyLivenessInfo(LivenessInfo info)
         {
-            DeletionTime rowDeletion = TrieTombstoneMarker.applicableDeletion(data, ByteComparable.EMPTY);
+            DeletionTime rowDeletion = TrieTombstoneMarker.applicableDeletionAtRoot(data);
             if (rowDeletion != null && rowDeletion.deletes(info))
                 return;
 

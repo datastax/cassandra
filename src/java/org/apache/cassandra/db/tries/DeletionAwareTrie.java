@@ -556,6 +556,19 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
         };
     }
 
+    /// Return any deletion started at the root of the deletion trie. This is an
+    /// efficient alternative of `applicableDeletion(EMPTY)`, taking advantage of
+    /// the fact that the root cannot carry an applicable deletion from a previous
+    /// position.
+    default D deletionAtRoot()
+    {
+        DeletionAwareCursor<T, D> cursor = cursor(Direction.FORWARD);
+        RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(Direction.FORWARD);
+        if (deletionBranch == null)
+            return null;
+        return deletionBranch.content();
+    }
+
     /// Returns a view of the combination of the live data and deletions in this trie as a regular [Trie], using
     /// the provided mapping function to covert values to a common type.
     default <Z> Trie<Z> mergedTrie(BiFunction<T, D, Z> resolver)

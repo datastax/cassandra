@@ -116,7 +116,7 @@ public class TrieBackedComplexColumn extends ComplexColumnData
     @Override
     public DeletionTime complexDeletion()
     {
-        return TrieTombstoneMarker.applicableDeletionOrLive(data, ByteComparable.EMPTY);
+        return TrieTombstoneMarker.applicableDeletionOrLiveAtRoot(data);
     }
 
     class CellsWithPath extends TrieEntriesIterator.WithNullFiltering<Object, Cell<?>>
