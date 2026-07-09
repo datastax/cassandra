@@ -1229,7 +1229,6 @@ public class TrieBackedRow extends AbstractRow
         {
             this.columns = columns;
             columnIds = columnsMapCache.computeIfAbsent(columns, TrieBackedRow::makeColumnIdsMap);
-            reset();
         }
 
         protected Builder(Builder builder)
@@ -1237,7 +1236,6 @@ public class TrieBackedRow extends AbstractRow
             this.columns = builder.columns;
             this.clustering = builder.clustering;
             this.columnIds = builder.columnIds;
-            reset();
             try
             {
                 mutator.apply(builder.data);
@@ -1265,6 +1263,8 @@ public class TrieBackedRow extends AbstractRow
         {
             assert this.clustering == null; // Ensures we've properly called build() if we've use this builder before
             this.clustering = clustering;
+            data = newTrie();
+            mutator = makeMutator(data);
         }
 
         @Override
@@ -1276,8 +1276,8 @@ public class TrieBackedRow extends AbstractRow
         protected void reset()
         {
             this.clustering = null;
-            data = newTrie();
-            mutator = makeMutator(data);
+            data = null;
+            mutator = null;
         }
 
         @Override
