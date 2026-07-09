@@ -126,6 +126,8 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ tableSchema, new String[]{ createIndex }, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, new String[]{ createIndex }, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, new String[]{ createIndex }, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        // CAS writes to an indexed table must propagate WRITE_BYTES, READ_BYTES and INDEX_WRITE_BYTES
+        result.add(new Object[]{ tableSchema, new String[]{ createIndex, write }, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
         return result;
     }
 
