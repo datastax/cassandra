@@ -257,10 +257,15 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
     }
 
     /// Get the deletion in the given deletion-aware trie that applies to the given key.
-    static Covering applicableDeletion(DeletionAwareTrie<Object, TrieTombstoneMarker> data, ByteComparable key)
+    static Covering applicableDeletion(DeletionAwareTrie<Object, TrieTombstoneMarker> data, boolean deletionBranchMustBeAtRoot, ByteComparable key)
     {
-        TrieTombstoneMarker marker = data.applicableDeletion(key);
+        TrieTombstoneMarker marker = deletionMarker(data, deletionBranchMustBeAtRoot, key);
         return marker != null ? marker.applicableToPointForward() : null;
+    }
+
+    private static TrieTombstoneMarker deletionMarker(DeletionAwareTrie<Object, TrieTombstoneMarker> data, boolean deletionBranchMustBeAtRoot, ByteComparable key)
+    {
+        return deletionBranchMustBeAtRoot ? data.deletionBranchAtRoot().applicableRange(key) : data.applicableDeletion(key);
     }
 
     static Covering applicableDeletionAtRoot(DeletionAwareTrie<Object, TrieTombstoneMarker> data)
@@ -271,9 +276,9 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
 
     /// Get the deletion in the given deletion-aware trie that applies to the given key, returning DeletionTime.LIVE
     /// if none is found.
-    static DeletionTime applicableDeletionOrLive(DeletionAwareTrie<Object, TrieTombstoneMarker> data, ByteComparable key)
+    static DeletionTime applicableDeletionOrLive(DeletionAwareTrie<Object, TrieTombstoneMarker> data, boolean deletionBranchMustBeAtRoot, ByteComparable key)
     {
-        return applicableOrLive(data.applicableDeletion(key));
+        return applicableOrLive(deletionMarker(data, deletionBranchMustBeAtRoot, key));
     }
 
     /// Get the deletion in the given deletion-aware trie that applies to the root of the trie, returning DeletionTime.LIVE

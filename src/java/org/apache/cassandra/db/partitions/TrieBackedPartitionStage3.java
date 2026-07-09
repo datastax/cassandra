@@ -497,7 +497,7 @@ public class TrieBackedPartitionStage3 implements Partition
     public Row getRow(Clustering<?> clustering, ByteComparable path)
     {
         RowData data = (RowData) trie.get(path);
-        DeletionTime deletion = TrieTombstoneMarker.applicableDeletionOrLive(trie, path);
+        DeletionTime deletion = TrieTombstoneMarker.applicableDeletionOrLive(trie, true, path);
         if (data != null)
             return data.toRow(clustering, deletion);
         else if (!deletion.isLive())

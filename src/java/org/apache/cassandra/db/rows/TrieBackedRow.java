@@ -1330,7 +1330,7 @@ public class TrieBackedRow extends AbstractRow
             {
                 if (path == null || path.dataSize() <= MAX_RECURSIVE_LENGTH)
                 {
-                    DeletionTime cellDeletion = TrieTombstoneMarker.applicableDeletion(data, key);
+                    DeletionTime cellDeletion =  TrieTombstoneMarker.applicableDeletion(data, true, key);
                     if (cellDeletion != null && cellDeletion.deletes(cell))
                         return;
 
