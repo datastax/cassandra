@@ -694,7 +694,7 @@ public class TriePartitionUpdateStage3 extends TrieBackedPartitionStage3 impleme
         @Override
         public DeletionTime partitionLevelDeletion()
         {
-            return TrieTombstoneMarker.applicableDeletionOrLive(trie, ByteComparable.EMPTY);
+            return TrieTombstoneMarker.applicableDeletionOrLiveAtRoot(trie);
         }
 
         @Override

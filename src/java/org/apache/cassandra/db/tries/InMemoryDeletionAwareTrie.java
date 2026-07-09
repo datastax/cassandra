@@ -170,6 +170,23 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         return bufferManager.bufferType() == BufferType.ON_HEAP ? EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP;
     }
 
+    @Override
+    public RangeTrie<D> deletionBranchAtRoot()
+    {
+        int db = getAlternateBranch(root);
+        if (isNull(db))
+            return dir -> RangeCursor.empty(dir, byteComparableVersion);
+        else
+            return dir -> new InMemoryRangeTrie.InMemoryRangeCursor<>((InMemoryReadTrie<D>) this, dir, db);
+    }
+
+    @Override
+    public D deletionAtRoot()
+    {
+        // Both calls handle NONE gracefully.
+        return (D) getNodeContent(getAlternateBranch(root));
+    }
+
     static class ApplyState<T, D extends RangeState<D>> extends InMemoryBaseTrie.ApplyState<T>
     {
         int alternateBranchToAttach;

@@ -413,7 +413,7 @@ public class TrieBackedPartitionStage3 implements Partition
 
     public DeletionTime partitionLevelDeletion()
     {
-        return TrieTombstoneMarker.applicableDeletionOrLive(trie, ByteComparable.EMPTY);
+        return TrieTombstoneMarker.applicableDeletionOrLiveAtRoot(trie);
     }
 
     public RegularAndStaticColumns columns()
