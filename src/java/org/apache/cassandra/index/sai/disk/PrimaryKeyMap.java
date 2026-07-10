@@ -38,13 +38,12 @@ public interface PrimaryKeyMap extends Closeable
      * A factory for creating {@link PrimaryKeyMap} instances. Implementations of this
      * interface are expected to be threadsafe.
      */
-    public interface Factory extends Closeable
+    interface Factory extends Closeable
     {
         /**
          * Creates a new {@link PrimaryKeyMap} instance
          *
          * @return a {@link PrimaryKeyMap}
-         * @throws IOException
          */
         PrimaryKeyMap newPerSSTablePrimaryKeyMap();
 

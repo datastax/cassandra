@@ -19,13 +19,9 @@
 package org.apache.cassandra.index.sai.disk.v2;
 
 import java.io.IOException;
-import java.lang.invoke.MethodHandles;
 import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -49,8 +45,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
  */
 public class V2OnDiskFormat extends V1OnDiskFormat
 {
-    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-
     private static final Set<IndexComponentType> PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
                                                                                      IndexComponentType.GROUP_META,
                                                                                      IndexComponentType.TOKEN_VALUES,

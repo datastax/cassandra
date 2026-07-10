@@ -549,7 +549,7 @@ public class IndexDescriptor
         }
 
         @Override
-        public File tmpFileFor(String componentName) throws IOException
+        public File tmpFileFor(String componentName)
         {
             String name = context != null ? String.format("%s_%s_%s", buildId, context.getColumnName(), componentName)
                                           :  String.format("%s_%s", buildId, componentName);
