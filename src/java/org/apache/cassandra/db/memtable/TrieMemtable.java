@@ -727,6 +727,9 @@ public class TrieMemtable extends AbstractShardedMemtable
 
         public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
         {
+            // If the update is not TriePartitionUpdate, convert it to one before taking the lock.
+            DeletionAwareTrie<Object, TrieTombstoneMarker> mergableTrie = TriePartitionUpdate.asMergableTrie(update);
+
             boolean locked = writeLock.tryLock();
             if (locked)
             {
@@ -748,7 +751,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                     this.cellDataBufferManager.opOrderGroup = opGroup;
                     int partitionsAdded = mergeUpdate(data,
                                                       allocator,
-                                                      TriePartitionUpdate.asMergableTrie(update),
+                                                      mergableTrie,
                                                       indexer,
                                                       opGroup,
                                                       updater);
