@@ -896,7 +896,7 @@ public class TableMetadata implements SchemaElement
 
         private IPartitioner partitioner;
         private Kind kind = Kind.REGULAR;
-        private TableParams.Builder params = TableParams.builder();
+        private TableParams.Builder params;
 
         // See the comment on Flag.COMPOUND definition for why we (still) inconditionally add this flag.
         private Set<Flag> flags = EnumSet.of(Flag.COMPOUND);
@@ -914,12 +914,14 @@ public class TableMetadata implements SchemaElement
             this.keyspace = keyspace;
             this.name = name;
             this.id = id;
+            this.params = TableParams.builder(keyspace);
         }
 
         private Builder(String keyspace, String name)
         {
             this.keyspace = keyspace;
             this.name = name;
+            this.params = TableParams.builder(keyspace);
         }
 
         public TableMetadata build()

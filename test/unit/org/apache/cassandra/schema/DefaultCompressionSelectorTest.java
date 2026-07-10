@@ -67,7 +67,7 @@ public class DefaultCompressionSelectorTest
     public void testDefaultCompressionWhenNoPropertiesSet()
     {
         assertSame(CompressionParams.FAST, CompressionParams.forNewTables("any_keyspace"));
-        assertSame(CompressionParams.FAST, CompressionParams.forFlush("any_keyspace", CompressionParams.deflate()));
+        assertSame(CompressionParams.FAST, CompressionParams.deflate().forFlush("any_keyspace"));
     }
 
     @Test
@@ -75,7 +75,7 @@ public class DefaultCompressionSelectorTest
     {
         CassandraRelevantProperties.DEFAULT_SSTABLE_COMPRESSION.setString("adaptive");
         assertSame(CompressionParams.ADAPTIVE, CompressionParams.forNewTables("any_keyspace"));
-        assertSame(CompressionParams.FAST_ADAPTIVE, CompressionParams.forFlush("any_keyspace", CompressionParams.deflate()));
+        assertSame(CompressionParams.FAST_ADAPTIVE, CompressionParams.deflate().forFlush("any_keyspace"));
     }
 
     // --- Additional flushCompression tests ---
@@ -84,7 +84,7 @@ public class DefaultCompressionSelectorTest
     public void testFlushCompressionReturnsNoneIfNewTableCompressionNotSet()
     {
         assertEquals(CompressionParams.noCompression(),
-                     CompressionParams.forFlush("any_keyspace", CompressionParams.noCompression()));
+                     CompressionParams.noCompression().forFlush("any_keyspace"));
     }
 
     @Test
@@ -162,8 +162,8 @@ public class DefaultCompressionSelectorTest
     @Test
     public void testForCompactionDelegatesToSelector()
     {
-        assertSame(CompressionParams.FAST, CompressionParams.forCompaction("any_keyspace", CompressionParams.FAST));
-        assertSame(CompressionParams.ADAPTIVE, CompressionParams.forCompaction("any_keyspace", CompressionParams.ADAPTIVE));
+        assertSame(CompressionParams.FAST, CompressionParams.FAST.forCompaction("any_keyspace"));
+        assertSame(CompressionParams.ADAPTIVE, CompressionParams.ADAPTIVE.forCompaction("any_keyspace"));
     }
 
     /** A test-only selector that always returns NOOP compression. */

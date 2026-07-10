@@ -34,9 +34,9 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.openhft.chronicle.values.NotNull;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -47,6 +47,8 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.PageAware;
+
+import javax.annotation.Nullable;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.io.compress.EncryptionConfig.CIPHER_ALGORITHM;
@@ -89,12 +91,6 @@ public final class CompressionParams
                                                                        DEFAULT_MIN_COMPRESS_RATIO,
                                                                        Collections.emptyMap());
 
-    /**
-     * Default compression params, respecting the global {@link CassandraRelevantProperties#DEFAULT_SSTABLE_COMPRESSION}
-     * property. To get the keyspace-aware default, use {@link #forNewTables(String)}.
-     */
-    public static final CompressionParams DEFAULT = DatabaseDescriptor.shouldUseAdaptiveCompressionByDefault() ? ADAPTIVE : FAST;
-
     // This is volatile rather than final so that tests may use reflection to change it and safely publish across threads,
     // but it should not be changed outside of tests.
     @SuppressWarnings("FieldMayBeFinal")
@@ -105,6 +101,9 @@ public final class CompressionParams
      * as determined by the active {@link Selector}. This is the per-keyspace equivalent of {@link #DEFAULT}.
      *
      * @param keyspace the keyspace name, used by the selector to determine the appropriate default compression.
+     *                 May be {@code null} when no keyspace context is available (e.g. schema loading or
+     *                 {@link TableParams.Builder} default construction); selectors should treat {@code null}
+     *                 as a request for the global default.
      * @return the default compression params for the given keyspace.
      */
     public static CompressionParams forNewTables(String keyspace)
@@ -114,28 +113,26 @@ public final class CompressionParams
 
     /**
      * Returns the {@link CompressionParams} to use when flushing a memtable for the given keyspace, as determined
-     * by the active {@link Selector}.
+     * by the active {@link Selector}. Equivalent to calling {@link #forFlush(String)} on this instance.
      *
-     * @param keyspace    the keyspace whose memtable is being flushed.
-     * @param tableParams the compression params configured on the table being flushed.
+     * @param keyspace the keyspace whose memtable is being flushed.
      * @return the compression params that should be used for the flush SSTable.
      */
-    public static CompressionParams forFlush(String keyspace, CompressionParams tableParams)
+    public CompressionParams forFlush(String keyspace)
     {
-        return SELECTOR.flushCompression(keyspace, tableParams);
+        return SELECTOR.flushCompression(keyspace, this);
     }
 
     /**
      * Returns the {@link CompressionParams} to use when compacting SSTables for the given keyspace, as determined
-     * by the active {@link Selector}.
+     * by the active {@link Selector}. Equivalent to calling {@link #forCompaction(String)} on this instance.
      *
-     * @param keyspace    the keyspace being compacted.
-     * @param tableParams the compression params configured on the table being compacted.
+     * @param keyspace the keyspace being compacted.
      * @return the compression params that should be used for the compaction output SSTable.
      */
-    public static CompressionParams forCompaction(String keyspace, CompressionParams tableParams)
+    public CompressionParams forCompaction(String keyspace)
     {
-        return SELECTOR.compactionCompression(keyspace, tableParams);
+        return SELECTOR.compactionCompression(keyspace, this);
     }
 
     /**

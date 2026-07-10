@@ -146,11 +146,12 @@ public abstract class SortedTableWriter extends SSTableWriter
                 // especially of large tables, can queue up and potentially block writes.
                 // This optimization allows us to fall back to a faster compressor if a particular
                 // compression algorithm indicates we should. See CASSANDRA-15379 for more details.
-                compressionParams = CompressionParams.forFlush(metadata.getLocal().keyspace, compressionParams);
+                compressionParams = compressionParams.forFlush(metadata.getLocal().keyspace);
             }
             else
             {
-                compressionParams = CompressionParams.forCompaction(metadata.getLocal().keyspace, compressionParams);
+                // Allows to plugin custom per-keyspace resolution of compressionParams
+                compressionParams = compressionParams.forCompaction(metadata.getLocal().keyspace);
             }
         }
         return compressionParams;

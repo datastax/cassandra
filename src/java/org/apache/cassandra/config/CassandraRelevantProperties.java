@@ -783,6 +783,8 @@ public enum CassandraRelevantProperties
      * When set, the selector takes precedence over {@link #DEFAULT_SSTABLE_COMPRESSION}.
      * If not set, {@link org.apache.cassandra.schema.DefaultCompressionSelector} is used, which falls back to
      * {@link #DEFAULT_SSTABLE_COMPRESSION}.
+     * <p>
+     * This property is read once at startup and cannot be changed dynamically.
      */
     SSTABLE_COMPRESSION_SELECTOR_CLASS("cassandra.sstable.compression.selector.class", ""),
 

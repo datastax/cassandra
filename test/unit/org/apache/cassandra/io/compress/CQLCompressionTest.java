@@ -18,21 +18,25 @@
 
 package org.apache.cassandra.io.compress;
 
+import java.lang.reflect.Field;
 import java.util.Set;
+
+import org.mockito.Mockito;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.CompressionParams;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class CQLCompressionTest extends CQLTester
@@ -293,6 +297,33 @@ public class CQLCompressionTest extends CQLTester
         store.getLiveSSTables().forEach(sstable -> {
             assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof ZstdCompressor);
         });
+    }
+
+    @Test
+    public void testCompressionSelectorAppliedToNewTable() throws Throwable
+    {
+        CompressionParams.Selector selector = Mockito.mock(CompressionParams.Selector.class);
+
+        Field selectorField = CompressionParams.class.getDeclaredField("SELECTOR");
+        selectorField.setAccessible(true);
+        CompressionParams.Selector original = (CompressionParams.Selector) selectorField.get(null);
+        try
+        {
+            selectorField.set(null, selector);
+            Mockito.when(selector.newTableCompression(Mockito.any())).thenReturn(CompressionParams.NOOP);
+            createTable("CREATE TABLE %s (k text PRIMARY KEY, v text)");
+            assertSame(CompressionParams.NOOP,
+                       getCurrentColumnFamilyStore().metadata().params.compression);
+
+            var compression = CompressionParams.snappy(8 * 1024);
+            Mockito.when(selector.newTableCompression(Mockito.any())).thenReturn(compression);
+            createTable("CREATE TABLE %s (k text PRIMARY KEY, v text)");
+            assertEquals(compression, getCurrentColumnFamilyStore().metadata().params.compression);
+        }
+        finally
+        {
+            selectorField.set(null, original);
+        }
     }
 
     private ColumnFamilyStore flushTwice() throws Throwable
