@@ -117,7 +117,7 @@ public class VectorCompactionBench extends SAITester
      * index from scratch each time.
      */
     @Benchmark
-    public void compactVectorIndex() throws Throwable
+    public void compactVectorIndex()
     {
         compact();
     }

@@ -361,7 +361,6 @@ public interface IndexComponents
          * componentName will produce the same file.
          * @param componentName - unique name within the per index components
          * @return a temprory file for use during index construction
-         * @throws IOException
          */
         File tmpFileFor(String componentName) throws IOException;
     }
