@@ -39,8 +39,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.google.common.collect.*;
 
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -83,7 +82,6 @@ import static org.apache.cassandra.schema.SchemaConstants.isValidCharsName;
 @Unmetered
 public class TableMetadata implements SchemaElement
 {
-    private static final Logger logger = LoggerFactory.getLogger(TableMetadata.class);
 
     // Please note that currently the only one truly useful flag is COUNTER, as the rest of the flags were about
     // differencing between CQL tables and the various types of COMPACT STORAGE tables (pre-4.0). As those "compact"

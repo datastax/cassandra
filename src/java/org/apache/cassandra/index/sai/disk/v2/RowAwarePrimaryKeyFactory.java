@@ -219,9 +219,9 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
                                  token,
                                  partitionKey,
                                  clustering == null ? null : clustering.kind(),
-                                 clustering == null ? null :String.join(",", Arrays.stream(clustering.getBufferArray())
-                                                                                   .map(ByteBufferUtil::bytesToHex)
-                                                                                   .collect(Collectors.toList())));
+                                 clustering == null ? null : Arrays.stream(clustering.getBufferArray())
+                                                                   .map(ByteBufferUtil::bytesToHex)
+                                                                   .collect(Collectors.joining(",")));
         }
 
         @Override
