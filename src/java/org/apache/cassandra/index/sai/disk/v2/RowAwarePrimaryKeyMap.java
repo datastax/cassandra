@@ -140,7 +140,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             }
             catch (IOException e)
             {
-                throw new UncheckedIOException(e);
+                throw new UncheckedIOException("Failed to load PrimaryKeyMap for sstable: " + sstableId, e);
             }
         }
 

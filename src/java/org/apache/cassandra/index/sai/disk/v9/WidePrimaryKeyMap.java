@@ -128,7 +128,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             }
             catch (IOException e)
             {
-                throw new UncheckedIOException(e);
+                throw new UncheckedIOException("Failed to load PrimaryKeyMap for sstable: " + sstableId, e);
             }
         }
 
