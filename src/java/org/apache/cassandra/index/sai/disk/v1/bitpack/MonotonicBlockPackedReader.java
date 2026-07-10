@@ -45,7 +45,6 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
     private final PackedLongValues minValues;
     private final float[] averages;
 
-    @SuppressWarnings("resource")
     public MonotonicBlockPackedReader(FileHandle file, NumericValuesMeta meta) throws IOException
     {
         this.valueCount = meta.valueCount;
@@ -83,7 +82,6 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
     }
 
     @Override
-    @SuppressWarnings("resource")
     public LongArray open()
     {
         var indexInput = IndexFileUtils.instance.openInput(file);
@@ -96,7 +94,7 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
             }
 
             @Override
-            public void close() throws IOException
+            public void close()
             {
                 indexInput.close();
             }
