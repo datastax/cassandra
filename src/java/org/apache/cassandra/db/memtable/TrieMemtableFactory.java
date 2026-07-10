@@ -25,12 +25,12 @@ import com.google.common.collect.ImmutableMap;
 
 import org.apache.cassandra.config.InheritingClass;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
-import org.apache.cassandra.db.partitions.TriePartitionUpdate;
+import org.apache.cassandra.db.partitions.TriePartitionUpdateStage2;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadataRef;
 
-import static org.apache.cassandra.db.partitions.PartitionUpdate.*;
+import static org.apache.cassandra.db.partitions.PartitionUpdate.Factory;
 
 /**
  * This class makes better sense as an inner class to TrieMemtable (which could be as simple as
@@ -61,7 +61,10 @@ public class TrieMemtableFactory implements Memtable.Factory
     @Override
     public Factory partitionUpdateFactory()
     {
-        return TriePartitionUpdate.FACTORY;
+        // For the time being, use a partition update that has legacy DeletionInfo and Row implementations to keep
+        // serialization and statistics collection efficient.
+        // To be changed when we implement trie serialization.
+        return TriePartitionUpdateStage2.FACTORY;
     }
 
     @Override
