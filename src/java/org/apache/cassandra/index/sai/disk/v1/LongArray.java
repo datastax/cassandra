@@ -59,7 +59,7 @@ public interface LongArray extends Closeable
 
     class DeferredLongArray implements LongArray
     {
-        private Supplier<LongArray> supplier;
+        private final Supplier<LongArray> supplier;
         private LongArray longArray;
         private boolean opened = false;
 
