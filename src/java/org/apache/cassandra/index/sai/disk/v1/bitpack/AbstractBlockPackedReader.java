@@ -78,14 +78,14 @@ public abstract class AbstractBlockPackedReader implements LongArray
     }
 
     @Override
-    public long ceilingRowId(long targetValue)
+    public long ceilingIndex(long targetValue)
     {
         // already out of range
         if (isOutOfRangeState())
             return -1;
 
-        long rowId = findBlockRowId(targetValue);
-        lastIndex = rowId >= 0 ? rowId : -rowId - 1;
+        long index = findBlockIndex(targetValue);
+        lastIndex = index >= 0 ? index : -index - 1;
         return isOutOfRangeState() ? -1 : lastIndex;
     }
 
@@ -96,9 +96,9 @@ public abstract class AbstractBlockPackedReader implements LongArray
         if (isOutOfRangeState())
             return Long.MIN_VALUE;
 
-        long rowId = findBlockRowId(targetValue);
-        lastIndex = rowId >= 0 ? rowId : -rowId - 1;
-        return isOutOfRangeState() ? Long.MIN_VALUE : rowId;
+        long index = findBlockIndex(targetValue);
+        lastIndex = index >= 0 ? index : -index - 1;
+        return isOutOfRangeState() ? Long.MIN_VALUE : index;
     }
 
     private boolean isOutOfRangeState()
@@ -106,7 +106,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
         return lastIndex >= valueCount;
     }
 
-    private long findBlockRowId(long targetValue)
+    private long findBlockIndex(long targetValue)
     {
         // We keep track previous returned value in lastIndex, so searching backward will not return correct result.
         // Also it's logically wrong to search backward during token iteration in PostingListKeyRangeIterator.
@@ -136,7 +136,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
         }
 
         // Find the global (not block-specific) index of the target token, which is equivalent to its row ID:
-        return findBlockRowID(targetValue, blockIndex, exactMatch);
+        return findBlockIndex(targetValue, blockIndex, exactMatch);
     }
 
     /**
@@ -206,7 +206,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
         return -low; // no exact match found
     }
 
-    private long findBlockRowID(long targetValue, long blockIdx, boolean exactMatch)
+    private long findBlockIndex(long targetValue, long blockIdx, boolean exactMatch)
     {
         // Calculate the global offset for the selected block:
         long offset = blockIdx << blockShift;
