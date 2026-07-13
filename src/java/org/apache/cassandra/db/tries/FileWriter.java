@@ -20,7 +20,6 @@ package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.BitSet;
 import java.util.NavigableSet;
 import java.util.TreeSet;
 
@@ -72,7 +71,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     boolean onAscentPath = false;
 
     TreeSet<Node<T>> reusableTreeSet = new TreeSet<>();
-    Node<T> reusableBoundaryNode = new Node<T>(0, null, null, null, null);
+    Node<T> reusableBoundaryNode = Node.make(0, null, null, null, null);
     NavigableSet<Node<T>> reusableHeadSet = reusableTreeSet.headSet(reusableBoundaryNode, true);
 
     public FileWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
@@ -403,15 +402,42 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         long branchSizeValidUntilPosition;
         // TODO: data items longer than (half a) page must be placed separately
 
-        public Node(int firstTransition, byte[] otherTransitions, Node[] children, T descentPathContent, T ascentPathContent)
+        public static <T> Node<T> make(int firstTransition, byte[] otherTransitions, Node[] children, T descentPathContent, T ascentPathContent)
+        {
+            if (children != null && children.length == 1 && children[0].otherTransitions != null)
+            {
+                // If we have only one child, and that child starts with a chain prefix, put our transition in its chain.
+                children[0] = children[0].copyWithAttachedPrefixByte();
+            }
+            // Use 0 for "valid until" to force preparation on first `getBranchSize`
+            return new Node<>(firstTransition, otherTransitions, children, descentPathContent, ascentPathContent, 0, 0);
+        }
+
+        private Node(int firstTransition, byte[] otherTransitions, Node[] children, T descentPathContent, T ascentPathContent, long currentBranchSize, long branchSizeValidUntilPosition)
         {
             this.firstTransition = firstTransition;
             this.otherTransitions = otherTransitions;
             this.children = children;
             this.descentPathContent = descentPathContent;
             this.ascentPathContent = ascentPathContent;
-            this.branchSizeValidUntilPosition = 0; // force preparation on first `getBranchSize`
+            this.branchSizeValidUntilPosition = branchSizeValidUntilPosition;
+            this.currentBranchSize = currentBranchSize;
             this.writtenFilePos = -1;
+        }
+
+        private Node<T> copyWithAttachedPrefixByte()
+        {
+            assert writtenFilePos < 0;
+            assert firstTransition != -1;
+            return new Node<>(-1, insertFirst(otherTransitions, firstTransition), children, descentPathContent, ascentPathContent, currentBranchSize + 1, branchSizeValidUntilPosition);
+        }
+
+        private static byte[] insertFirst(byte[] transitions, int firstByte)
+        {
+            byte[] copy = new byte[transitions.length + 1];
+            copy[0] = (byte) firstByte;
+            System.arraycopy(transitions, 0, copy, 1, transitions.length);
+            return copy;
         }
 
         private long addUnwrittenChildSizes(DataSerializer<T> serializer, long runningPos)
@@ -450,9 +476,8 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             long validUntil = bytes == 8 ? Long.MAX_VALUE : (furthestWrittenChild + (1L << (bytes * 8)));
             branchSizeValidUntilPosition = Math.min(branchSizeValidUntilPosition, validUntil);
 
-            int size = children.length;
-            OnDiskNodeType type = OnDiskNodeType.selectChildrenType(bytes, size);
-            long childrenSize = type.sizeChildren(bytes, size, children[size - 1].writtenFilePos < 0);
+            OnDiskNodeType type = OnDiskNodeType.selectChildrenType(bytes, children.length);
+            long childrenSize = type.sizeChildren(bytes, children);
 
             currentBranchSize += childrenSize;
         }
@@ -557,9 +582,9 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
 
         private Node<T> complete(int firstTransition, byte[] otherTransitions, boolean swapAscentAndDescentSides)
         {
-            Node<T> completed = new Node(firstTransition, otherTransitions, childCount > 0 ? Arrays.copyOf(children, childCount) : null,
-                                         swapAscentAndDescentSides ? ascentPathContent : descentPathContent,
-                                         swapAscentAndDescentSides ? descentPathContent : ascentPathContent);
+            Node<T> completed = Node.make(firstTransition, otherTransitions, childCount > 0 ? Arrays.copyOf(children, childCount) : null,
+                                          swapAscentAndDescentSides ? ascentPathContent : descentPathContent,
+                                          swapAscentAndDescentSides ? descentPathContent : ascentPathContent);
             reset();
             return completed;
         }
