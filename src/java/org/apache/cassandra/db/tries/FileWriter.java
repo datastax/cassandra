@@ -372,6 +372,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
 
     private long writeNodeRecursively(Node<T> node) throws IOException
     {
+        long expectedPos = out.position() + node.currentBranchSize;
         if (node.children != null)
         {
             for (Node<T> child : node.children)
@@ -379,7 +380,11 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
                     writeNodeRecursively(child);
         }
 
-        return writeNode(node);
+        long pos = writeNode(node);
+        // The evaluation can be slightly wrong, especially in the presence of relays (because we may use a smaller
+        // size for them or skip them altogether) but can't be smaller than what we actually end up with.
+        assert pos <= expectedPos;
+        return pos;
     }
 
     static int bytesFor(long delta)

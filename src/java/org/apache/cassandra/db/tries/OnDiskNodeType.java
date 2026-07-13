@@ -42,7 +42,7 @@ public enum OnDiskNodeType
         void writeChildren(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
         {
             assert children.length == 1;
-            maybeWriteRelay(out, children, basePos, bytesPerPointer, 1);
+            maybeWriteRelay(out, children, basePos, 1);
             // Node may have moved its transition into the leading chain of its child. If so, there's no node to write
             // here.
             if (children[0].firstTransition != -1)
@@ -260,10 +260,10 @@ public enum OnDiskNodeType
         return bytesPerPointer + 1;
     }
 
-    static long writeRelay(DataOutputPlus out, long filePos, long base, int bytesPerPointer) throws IOException
+    static long writeRelay(DataOutputPlus out, long filePos, long base) throws IOException
     {
-        // TODO: calculate own bytesPerPointer
         assert filePos >= 0;
+        int bytesPerPointer = FileWriter.bytesFor(base - filePos);
         FileWriter.writeReversedSized(out, base - filePos, bytesPerPointer);
         out.writeByte(RELAY.bits | (bytesPerPointer - 1));
         return base + bytesPerPointer + 1;
@@ -284,17 +284,17 @@ public enum OnDiskNodeType
     static int writePointers(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
     {
         int size = children.length;
-        basePos = maybeWriteRelay(out, children, basePos, bytesPerPointer, size);
+        basePos = maybeWriteRelay(out, children, basePos, size);
         for (int i = size - 2; i >= 0; --i)
             FileWriter.writeReversedSized(out, basePos - children[i].writtenFilePos, bytesPerPointer);
         return size;
     }
 
-    private static long maybeWriteRelay(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int bytesPerPointer, int size) throws IOException
+    private static long maybeWriteRelay(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int size) throws IOException
     {
         long firstNodePos = children[size - 1].writtenFilePos;
         if (firstNodePos != basePos)
-            basePos = writeRelay(out, firstNodePos, basePos, bytesPerPointer);
+            basePos = writeRelay(out, firstNodePos, basePos);
         return basePos;
     }
 }
