@@ -39,6 +39,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.sensors.ActiveSensorsFactory;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -55,6 +56,8 @@ public class SensorsTest extends TestBaseImpl
     private static final String EXPECTED_WRITE_BYTES_HEADER = "WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl";
     private static final String EXPECTED_READ_BYTES_HEADER = "READ_BYTES_REQUEST." + KEYSPACE + ".tbl";
     private static final String EXPECTED_INDEX_WRITE_BYTES_HEADER = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl";
+    private static final String EXPECTED_COL_WRITE_BYTES_HEADER = "WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl_col";
+    private static final String EXPECTED_COL_INDEX_WRITE_BYTES_HEADER = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl_col";
     /**
      * Using a combination of 2 nodes with ALL consistency level to ensure internode communication code paths are exercised in the test
      */
@@ -96,12 +99,24 @@ public class SensorsTest extends TestBaseImpl
     {
         String tableSchema = withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)");
         String counterTableSchema = withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, total counter)");
-        String createIndex = withKeyspace("CREATE INDEX ON %s.tbl (v1)");
+        // Exercise both legacy 2i and SAI so that both index write paths are covered
+        String createLegacyIndex = withKeyspace("CREATE INDEX ON %s.tbl (v1)");
+        String createSAIIndex = withKeyspace("CREATE CUSTOM INDEX ON %s.tbl (v1) USING '" + StorageAttachedIndex.class.getName() + "'");
+
+        // Table with a non-frozen set column: exercises the TrieMemtableIndex.update(Iterator<ByteBuffer>, Iterator<ByteBuffer>)
+        // overload (the collection update path), which is distinct from the scalar update(ByteBuffer, ByteBuffer) overload
+        String collectionTableSchema = withKeyspace("CREATE TABLE %s.tbl_col (pk int PRIMARY KEY, tags set<text>)");
+        String createCollectionSAIIndex = withKeyspace("CREATE CUSTOM INDEX ON %s.tbl_col (tags) USING '" + StorageAttachedIndex.class.getName() + "'");
+        String collectionWrite = withKeyspace("INSERT INTO %s.tbl_col(pk, tags) VALUES (1, {'a', 'b'})");
+        // Overwrites the existing set value for pk=1, triggering the updateRow → update(Iterator, Iterator) path
+        String collectionUpdate = withKeyspace("INSERT INTO %s.tbl_col(pk, tags) VALUES (1, {'c', 'd'})");
 
         String write = withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')");
         String counter = withKeyspace("UPDATE %s.tbl SET total = total + 1 WHERE pk = 1");
         String read = withKeyspace("SELECT * FROM %s.tbl WHERE pk=1");
         String cas = withKeyspace("UPDATE %s.tbl SET v1 = 'cas update' WHERE pk = 1 IF v1 = 'read me'");
+        // CAS insert: IF NOT EXISTS on a new row exercises the insertRow index path via Paxos commit
+        String casInsert = withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (5, 'cas insert') IF NOT EXISTS");
         String loggedBatch = String.format("BEGIN BATCH\n" +
                                            "INSERT INTO %s.tbl(pk, v1) VALUES (2, 'read me 2');\n" +
                                            "INSERT INTO %s.tbl(pk, v1) VALUES (3, 'read me 3');\n" +
@@ -110,24 +125,52 @@ public class SensorsTest extends TestBaseImpl
                                              "INSERT INTO %s.tbl(pk, v1) VALUES (4, 'read me 2');\n" +
                                              "INSERT INTO %s.tbl(pk, v1) VALUES (4, 'read me 3');\n" +
                                              "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        // Batch variants that overwrite already-existing rows (pk=2,3 / pk=4) to exercise the updateRow index path
+        String loggedBatchUpdate = String.format("BEGIN BATCH\n" +
+                                                 "INSERT INTO %s.tbl(pk, v1) VALUES (2, 'updated 2');\n" +
+                                                 "INSERT INTO %s.tbl(pk, v1) VALUES (3, 'updated 3');\n" +
+                                                 "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        String unloggedBatchUpdate = String.format("BEGIN UNLOGGED BATCH\n" +
+                                                   "INSERT INTO %s.tbl(pk, v1) VALUES (4, 'updated 2');\n" +
+                                                   "INSERT INTO %s.tbl(pk, v1) VALUES (4, 'updated 3');\n" +
+                                                   "APPLY BATCH;", KEYSPACE, KEYSPACE);
         String range = withKeyspace("SELECT * FROM %s.tbl");
 
         List<Object[]> result = new ArrayList<>();
         String[] noPrep = new String[0];
+
+        // baseline: non-indexed writes, reads and CAS
         result.add(new Object[]{ tableSchema, noPrep, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ counterTableSchema, noPrep, counter, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, new String[]{ write }, read, new String[]{ EXPECTED_READ_BYTES_HEADER } });
-        // CAS requests incorporate read (and write) bytes from the paxos (and user) tables
         result.add(new Object[]{ tableSchema, noPrep, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, noPrep, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, noPrep, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, new String[]{ write }, range, new String[]{ EXPECTED_READ_BYTES_HEADER } });
-        // writes to an indexed table must propagate both WRITE_BYTES and INDEX_WRITE_BYTES
-        result.add(new Object[]{ tableSchema, new String[]{ createIndex }, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
-        result.add(new Object[]{ tableSchema, new String[]{ createIndex }, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
-        result.add(new Object[]{ tableSchema, new String[]{ createIndex }, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
-        // CAS writes to an indexed table must propagate WRITE_BYTES, READ_BYTES and INDEX_WRITE_BYTES
-        result.add(new Object[]{ tableSchema, new String[]{ createIndex, write }, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+
+        // legacy index: inserts (insertRow path), updates (updateRow path), and CAS (insert via IF NOT EXISTS / update via IF condition)
+        result.add(new Object[]{ tableSchema, new String[]{ createLegacyIndex }, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createLegacyIndex }, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createLegacyIndex }, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createLegacyIndex, write }, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createLegacyIndex, loggedBatch }, loggedBatchUpdate, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createLegacyIndex, unloggedBatch }, unloggedBatchUpdate, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createLegacyIndex }, casInsert, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createLegacyIndex, write }, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+
+        // SAI on a scalar column: inserts (insertRow path), updates (updateRow path), and CAS (insert via IF NOT EXISTS / update via IF condition)
+        result.add(new Object[]{ tableSchema, new String[]{ createSAIIndex }, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createSAIIndex }, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createSAIIndex }, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createSAIIndex, write }, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createSAIIndex, loggedBatch }, loggedBatchUpdate, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createSAIIndex, unloggedBatch }, unloggedBatchUpdate, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createSAIIndex }, casInsert, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, new String[]{ createSAIIndex, write }, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER, EXPECTED_INDEX_WRITE_BYTES_HEADER } });
+
+        // SAI on a non-frozen collection column: inserts and updates (exercises the TrieMemtableIndex.update(Iterator, Iterator) overload)
+        result.add(new Object[]{ collectionTableSchema, new String[]{ createCollectionSAIIndex }, collectionWrite, new String[]{ EXPECTED_COL_WRITE_BYTES_HEADER, EXPECTED_COL_INDEX_WRITE_BYTES_HEADER } });
+        result.add(new Object[]{ collectionTableSchema, new String[]{ createCollectionSAIIndex, collectionWrite }, collectionUpdate, new String[]{ EXPECTED_COL_WRITE_BYTES_HEADER, EXPECTED_COL_INDEX_WRITE_BYTES_HEADER } });
         return result;
     }
 
