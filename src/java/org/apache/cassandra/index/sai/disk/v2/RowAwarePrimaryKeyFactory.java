@@ -186,14 +186,16 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int compareTo(PrimaryKey o)
         {
-            if (o.isTokenOnly())
-                return token().compareTo(o.token());
+            // Always start comparison with token, since comparing parition key requires loading it
+            int cmp = token().compareTo(o.token());
+            if (cmp != 0 || o.isTokenOnly())
+                return cmp;
 
             // Compare the partition keys. If they are not equal or
             // this is a single row partition key or there are no
             // clusterings, then return the result of this without
             // needing to compare the clusterings.
-            int cmp = partitionKey().compareTo(o.partitionKey());
+            cmp = partitionKey().compareTo(o.partitionKey());
             if (cmp != 0 || !hasClustering() || !o.hasClustering())
                 return cmp;
             return clusteringComparator.compare(clustering(), o.clustering());
