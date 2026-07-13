@@ -203,13 +203,13 @@ public class PostingsReader implements OrdinalPostingList
             }
 
             @Override
-            public long ceilingRowId(long value)
+            public long ceilingIndex(long targetValue)
             {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public long indexOf(long targetToken)
+            public long indexOf(long targetValue)
             {
                 throw new UnsupportedOperationException();
             }
