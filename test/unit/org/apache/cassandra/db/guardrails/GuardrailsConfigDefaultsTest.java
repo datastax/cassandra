@@ -131,7 +131,7 @@ public class GuardrailsConfigDefaultsTest
 
     private void verifyFeatureDefaults(Config config, ProfileType profileType)
     {
-        assertEquals("secondary_indexes_enabled", profileType != ProfileType.HCD, config.secondary_indexes_enabled);
+        assertEquals("secondary_indexes_enabled", true, config.secondary_indexes_enabled);
         assertEquals("sasi_indexes_enabled", false, config.sasi_indexes_enabled);
         assertEquals("materialized_views_enabled", profileType != ProfileType.HCD, config.materialized_views_enabled);
     }

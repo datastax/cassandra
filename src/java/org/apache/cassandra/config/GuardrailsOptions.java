@@ -185,7 +185,7 @@ public class GuardrailsOptions implements GuardrailsConfig
         enforceDefault("columns_per_table_fail_threshold", v -> config.columns_per_table_fail_threshold = v, -1, 50, 200);
 
         // For secondary indexes: use node-level flag to control feature blocking
-        enforceDefault("secondary_indexes_enabled", v -> config.secondary_indexes_enabled = v, true, true, false);
+        enforceDefault("secondary_indexes_enabled", v -> config.secondary_indexes_enabled = v, true, true, true);
         enforceDefault("secondary_indexes_per_table_fail_threshold", v -> config.secondary_indexes_per_table_fail_threshold = v, NO_LIMIT, 1, NO_LIMIT);
 
         // For SASI indexes: use node-level flag (deprecated in CC5, will throw startup exception if enabled)

@@ -102,26 +102,6 @@ public class GuardrailTrustedIndexesPerTableTest extends ThresholdTester
     }
 
     @Test
-    public void testAppliesWhenSecondaryIndexesDisabled() throws Throwable
-    {
-        // trusted implementations bypass the secondary_indexes_enabled guardrail, but not this threshold
-        guardrails().setSecondaryIndexesEnabled(false);
-        try
-        {
-            createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int, v4 int)");
-            assertCreateIndexSucceeds("v1", "");
-            assertCreateIndexWarns("v2", "");
-            assertCreateIndexWarns("v3", "");
-            assertCreateIndexFails("v4", "");
-            assertCurrentValue(3);
-        }
-        finally
-        {
-            guardrails().setSecondaryIndexesEnabled(true);
-        }
-    }
-
-    @Test
     public void testExcludedUsers() throws Throwable
     {
         createTable("CREATE TABLE %s (k int primary key, v1 int, v2 int)");

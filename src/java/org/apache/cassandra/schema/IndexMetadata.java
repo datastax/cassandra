@@ -240,8 +240,7 @@ public final class IndexMetadata
     /**
      * Tells whether the given index class name, either fully qualified or an alias, is one of the custom index
      * implementations trusted through the {@link CassandraRelevantProperties#TRUSTED_INDEX_IMPLEMENTATIONS} system
-     * property. Trusted implementations can be created even when the {@code secondary_indexes_enabled} guardrail
-     * disables the creation of secondary indexes.
+     * property. Trusted implementations are limited by the {@code trusted_indexes_per_table} guardrail.
      */
     public static boolean isTrustedIndexImplementation(String className)
     {

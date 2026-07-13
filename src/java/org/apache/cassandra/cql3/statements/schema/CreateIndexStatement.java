@@ -168,9 +168,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         attrs.maybeApplyDefaultIndex();
         attrs.validate();
 
-        // Trusted custom index implementations can be created even when secondary indexes are disabled
-        if (!(attrs.isCustom && IndexMetadata.isTrustedIndexImplementation(attrs.customClass)))
-            Guardrails.createSecondaryIndexesEnabled.ensureEnabled("Creating secondary indexes", state);
+        Guardrails.createSecondaryIndexesEnabled.ensureEnabled("Creating secondary indexes", state);
 
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
         if (null == keyspace)

@@ -1111,8 +1111,8 @@ public enum CassandraRelevantProperties
     /**
      * Comma-separated list of fully qualified class names of custom index implementations that are trusted by the
      * operator. Each listed class can be referenced in {@code CREATE CUSTOM INDEX ... USING} by its simple class
-     * name (case-insensitively), like it is possible for {@code StorageAttachedIndex}, and its creation is allowed
-     * even when the {@code secondary_indexes_enabled} guardrail is disabled.
+     * name (case-insensitively), like it is possible for {@code StorageAttachedIndex}, and is limited by the
+     * {@code trusted_indexes_per_table} guardrail.
      */
     TRUSTED_INDEX_IMPLEMENTATIONS("cassandra.trusted_index_implementations"),
     TYPE_UDT_CONFLICT_BEHAVIOR("cassandra.type.udt.conflict_behavior"),
