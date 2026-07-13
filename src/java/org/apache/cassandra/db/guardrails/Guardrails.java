@@ -142,6 +142,20 @@ public final class Guardrails implements GuardrailsMBean
                                         threshold, what));
 
     /**
+     * Guardrail on the number of trusted custom secondary indexes per table, counted per implementation class.
+     */
+    public static final MaxThreshold trustedIndexesPerTable =
+    new MaxThreshold("trusted_indexes_per_table",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getTrustedIndexesPerTableWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getTrustedIndexesPerTableFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating trusted custom secondary index %s, current number of indexes of the same class %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Tables cannot have more than %s trusted custom secondary indexes of the same class, aborting the creation of secondary index %s",
+                                        threshold, what));
+
+    /**
      * Guardrail disabling user's ability to create secondary indexes
      */
     public static final EnableFlag createSecondaryIndexesEnabled =
@@ -801,6 +815,24 @@ public final class Guardrails implements GuardrailsMBean
     public void setStorageAttachedIndexesTotalThreshold(int warn, int fail)
     {
         DEFAULT_CONFIG.setStorageAttachedIndexesTotalThreshold(warn, fail);
+    }
+
+    @Override
+    public int getTrustedIndexesPerTableWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getTrustedIndexesPerTableWarnThreshold();
+    }
+
+    @Override
+    public int getTrustedIndexesPerTableFailThreshold()
+    {
+        return DEFAULT_CONFIG.getTrustedIndexesPerTableFailThreshold();
+    }
+
+    @Override
+    public void setTrustedIndexesPerTableThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setTrustedIndexesPerTableThreshold(warn, fail);
     }
 
     @Override

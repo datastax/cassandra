@@ -91,6 +91,7 @@ public class GuardrailsOptions implements GuardrailsConfig
         validateMaxIntThreshold(config.secondary_indexes_per_table_warn_threshold, config.secondary_indexes_per_table_fail_threshold, "secondary_indexes_per_table");
         validateMaxIntThreshold(config.sai_indexes_per_table_warn_threshold, config.sai_indexes_per_table_fail_threshold, "sai_indexes_per_table");
         validateMaxIntThreshold(config.sai_indexes_total_warn_threshold, config.sai_indexes_total_fail_threshold, "sai_indexes_total");
+        validateMaxIntThreshold(config.trusted_indexes_per_table_warn_threshold, config.trusted_indexes_per_table_fail_threshold, "trusted_indexes_per_table");
         validateMaxIntThreshold(config.sasi_indexes_per_table_warn_threshold, config.sasi_indexes_per_table_fail_threshold, "sasi_indexes_per_table");
         validateMaxIntThreshold(config.materialized_views_per_table_warn_threshold, config.materialized_views_per_table_fail_threshold, "materialized_views_per_table");
         config.table_properties_warned = validateTableProperties(config.table_properties_warned, "table_properties_warned");
@@ -234,6 +235,9 @@ public class GuardrailsOptions implements GuardrailsConfig
             config.sai_indexes_total_fail_threshold = overrideTotalFailureThreshold;
         else
             enforceDefault("sai_indexes_total_fail_threshold", v -> config.sai_indexes_total_fail_threshold = v, DEFAULT_INDEXES_TOTAL_THRESHOLD, DEFAULT_INDEXES_TOTAL_THRESHOLD, DEFAULT_INDEXES_TOTAL_THRESHOLD);
+
+        // For trusted custom index implementations (cassandra.trusted_index_implementations)
+        enforceDefault("trusted_indexes_per_table_fail_threshold", v -> config.trusted_indexes_per_table_fail_threshold = v, NO_LIMIT, NO_LIMIT, DEFAULT_INDEXES_PER_TABLE_THRESHOLD);
 
         enforceDefault("offset_rows_warn_threshold", v -> config.offset_rows_warn_threshold = v, 10000, 10000, 10000);
         enforceDefault("offset_rows_fail_threshold", v -> config.offset_rows_fail_threshold = v, 20000, 20000, 20000);
@@ -480,6 +484,31 @@ public class GuardrailsOptions implements GuardrailsConfig
                                   fail,
                                   () -> config.sai_indexes_total_fail_threshold,
                                   x -> config.sai_indexes_total_fail_threshold = x);
+    }
+
+    @Override
+    public int getTrustedIndexesPerTableWarnThreshold()
+    {
+        return config.trusted_indexes_per_table_warn_threshold;
+    }
+
+    @Override
+    public int getTrustedIndexesPerTableFailThreshold()
+    {
+        return config.trusted_indexes_per_table_fail_threshold;
+    }
+
+    public void setTrustedIndexesPerTableThreshold(int warn, int fail)
+    {
+        validateMaxIntThreshold(warn, fail, "trusted_indexes_per_table");
+        updatePropertyWithLogging("trusted_indexes_per_table_warn_threshold",
+                                  warn,
+                                  () -> config.trusted_indexes_per_table_warn_threshold,
+                                  x -> config.trusted_indexes_per_table_warn_threshold = x);
+        updatePropertyWithLogging("trusted_indexes_per_table_fail_threshold",
+                                  fail,
+                                  () -> config.trusted_indexes_per_table_fail_threshold,
+                                  x -> config.trusted_indexes_per_table_fail_threshold = x);
     }
 
     @Override

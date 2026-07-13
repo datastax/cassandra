@@ -1108,6 +1108,13 @@ public enum CassandraRelevantProperties
      * To provide a provider to a different implementation of the truncate statement.
      */
     TRUNCATE_STATEMENT_PROVIDER("cassandra.truncate_statement_provider"),
+    /**
+     * Comma-separated list of fully qualified class names of custom index implementations that are trusted by the
+     * operator. Each listed class can be referenced in {@code CREATE CUSTOM INDEX ... USING} by its simple class
+     * name (case-insensitively), like it is possible for {@code StorageAttachedIndex}, and its creation is allowed
+     * even when the {@code secondary_indexes_enabled} guardrail is disabled.
+     */
+    TRUSTED_INDEX_IMPLEMENTATIONS("cassandra.trusted_index_implementations"),
     TYPE_UDT_CONFLICT_BEHAVIOR("cassandra.type.udt.conflict_behavior"),
     // See org.apache.cassandra.db.compaction.unified.Controller for the definition of the UCS parameters
     UCS_ADAPTIVE_COSTS_READ_MULTIPLIER("unified_compaction.costs_read_multiplier", "0.1"),
