@@ -90,20 +90,20 @@ public abstract class AbstractBlockPackedReader implements LongArray
     }
 
     /**
-     * Find the row ID of the largest value less than or equal to the target value.
-     * This is the floor operation, complementary to ceilingRowId.
+     * Find the index of the largest value less than or equal to the target value.
+     * This is the floor operation, complementary to ceilingIndex.
      *
      * @param targetValue Value to search for
-     * @return The row ID of the floor value, or -1 if the target is smaller than all values
+     * @return The index of the floor value, or -1 if the target is smaller than all values
      */
     @Override
-    public long floorRowId(long targetValue)
+    public long floorIndex(long targetValue)
     {
         // Check if we're before the start of the array
         if (targetValue < get(0))
             return -1;
 
-        return findBlockRowIdForFloor(targetValue);
+        return findBlockIndexForFloor(targetValue);
     }
 
     @Override
@@ -157,16 +157,16 @@ public abstract class AbstractBlockPackedReader implements LongArray
     }
 
     /**
-     * Find the block and row ID for floor operation.
-     * Similar to findBlockRowId but searches for the largest value <= target.
+     * Find the block and index for floor operation.
+     * Similar to findBlockIndex but searches for the largest value <= target.
      */
-    private long findBlockRowIdForFloor(long targetValue)
+    private long findBlockIndexForFloor(long targetValue)
     {
         int blockIndex = binarySearchBlockMaxValues(targetValue);
 
         // blockIndex is now the block that might contain our floor value
         // Search for the floor value within the identified block
-        return findBlockRowIdForFloor(targetValue, blockIndex);
+        return findBlockIndexForFloor(targetValue, blockIndex);
     }
 
     /**
@@ -279,9 +279,9 @@ public abstract class AbstractBlockPackedReader implements LongArray
     }
 
     /**
-     * Find the floor row ID within the specific block.
+     * Find the floor index within the specific block.
      */
-    private long findBlockRowIdForFloor(long targetValue, int blockIdx)
+    private long findBlockIndexForFloor(long targetValue, int blockIdx)
     {
         assert blockIdx >= 0 : "Block index cannot be negative";
 

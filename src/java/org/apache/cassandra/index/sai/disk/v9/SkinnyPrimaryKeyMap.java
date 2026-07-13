@@ -246,7 +246,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long floor(PrimaryKey key)
     {
-        return lookupRowId(key, rowIdToTokenArray::floorRowId, this::tokenFloorCollisionDetection);
+        return lookupRowId(key, rowIdToTokenArray::floorIndex, this::tokenFloorCollisionDetection);
     }
 
     @Override
