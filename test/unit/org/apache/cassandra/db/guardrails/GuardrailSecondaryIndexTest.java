@@ -21,6 +21,10 @@ package org.apache.cassandra.db.guardrails;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.index.StubIndex;
+import org.apache.cassandra.index.internal.CustomCassandraIndex;
+import org.apache.cassandra.schema.IndexMetadata;
+
 import static java.lang.String.format;
 
 /**
@@ -66,6 +70,29 @@ public class GuardrailSecondaryIndexTest extends GuardrailTester
 
         setGuardrail(true);
         dropIndex(format("DROP INDEX %s.%s", keyspace(), "v2_idx"));
+    }
+
+    @Test
+    public void testTrustedCustomIndex() throws Throwable
+    {
+        IndexMetadata.loadTrustedIndexImplementations(StubIndex.class.getName());
+        try
+        {
+            setGuardrail(false);
+
+            // trusted implementations can be created by simple name or fully qualified name
+            assertValid(format("CREATE CUSTOM INDEX ON %%s (%s) USING 'StubIndex'", "v1"));
+            assertValid(format("CREATE CUSTOM INDEX ON %%s (%s) USING '%s'", "v2", StubIndex.class.getName()));
+
+            // any other index is still guarded
+            assertFails(format("CREATE INDEX ON %%s (%s)", "v3"), "Creating secondary indexes");
+            assertFails(format("CREATE CUSTOM INDEX ON %%s (%s) USING '%s'", "v4", CustomCassandraIndex.class.getName()),
+                        "Creating secondary indexes");
+        }
+        finally
+        {
+            IndexMetadata.loadTrustedIndexImplementations(null);
+        }
     }
 
     @Test

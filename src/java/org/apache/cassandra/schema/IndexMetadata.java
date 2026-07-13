@@ -30,6 +30,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -37,6 +38,7 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -71,10 +73,17 @@ public final class IndexMetadata
      */
     private static final Map<String, String> indexNameAliases = new ConcurrentHashMap<>();
 
+    /**
+     * The fully qualified class names of the custom index implementations listed in the
+     * {@link CassandraRelevantProperties#TRUSTED_INDEX_IMPLEMENTATIONS} system property.
+     */
+    private static final Set<String> trustedIndexImplementations = ConcurrentHashMap.newKeySet();
+
     static
     {
         indexNameAliases.put(StorageAttachedIndex.NAME, StorageAttachedIndex.class.getCanonicalName());
         indexNameAliases.put(StorageAttachedIndex.class.getSimpleName().toLowerCase(), StorageAttachedIndex.class.getCanonicalName());
+        loadTrustedIndexImplementations(CassandraRelevantProperties.TRUSTED_INDEX_IMPLEMENTATIONS.getString());
     }
 
     public enum Kind
@@ -191,6 +200,57 @@ public final class IndexMetadata
     public static String expandAliases(String className)
     {
         return indexNameAliases.getOrDefault(className.toLowerCase(), className);
+    }
+
+    /**
+     * (Re)loads the trusted custom index implementations from the given comma-separated list of fully qualified
+     * class names, registering for each of them an alias by its simple class name so that users can reference it
+     * in {@code CREATE CUSTOM INDEX ... USING} without the package name.
+     */
+    @VisibleForTesting
+    public static void loadTrustedIndexImplementations(String classNames)
+    {
+        for (String className : trustedIndexImplementations)
+            indexNameAliases.remove(simpleClassName(className).toLowerCase(), className);
+        trustedIndexImplementations.clear();
+
+        if (classNames == null)
+            return;
+
+        for (String className : classNames.split(","))
+        {
+            className = className.trim();
+            if (className.isEmpty())
+                continue;
+
+            String simpleName = simpleClassName(className);
+            if (simpleName.equals(className))
+            {
+                logger.warn("Ignoring trusted index implementation '{}' declared in the {} system property: " +
+                            "a fully qualified class name is required",
+                            className, CassandraRelevantProperties.TRUSTED_INDEX_IMPLEMENTATIONS.getKey());
+                continue;
+            }
+
+            trustedIndexImplementations.add(className);
+            indexNameAliases.put(simpleName.toLowerCase(), className);
+        }
+    }
+
+    /**
+     * Tells whether the given index class name, either fully qualified or an alias, is one of the custom index
+     * implementations trusted through the {@link CassandraRelevantProperties#TRUSTED_INDEX_IMPLEMENTATIONS} system
+     * property. Trusted implementations can be created even when the {@code secondary_indexes_enabled} guardrail
+     * disables the creation of secondary indexes.
+     */
+    public static boolean isTrustedIndexImplementation(String className)
+    {
+        return className != null && trustedIndexImplementations.contains(expandAliases(className));
+    }
+
+    private static String simpleClassName(String className)
+    {
+        return className.substring(className.lastIndexOf('.') + 1);
     }
 
     private void validateCustomIndexOptions(TableMetadata table, Class<? extends Index> indexerClass, Map<String, String> options)
