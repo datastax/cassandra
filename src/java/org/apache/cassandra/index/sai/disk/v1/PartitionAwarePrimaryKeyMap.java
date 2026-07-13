@@ -170,7 +170,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long ceiling(PrimaryKey key)
     {
-        return rowIdToToken.ceilingRowId(key.token().getLongValue());
+        return rowIdToToken.ceilingIndex(key.token().getLongValue());
     }
 
     @Override

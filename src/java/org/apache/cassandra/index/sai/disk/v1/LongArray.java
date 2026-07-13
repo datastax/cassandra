@@ -37,27 +37,29 @@ public interface LongArray extends Closeable
     long length();
 
     /**
-     * @param targetToken Token to look up.  Must not be smaller than previous value queried
+     * @param targetValue Value to look up.  Must not be smaller than previous value queried
      *                    (the method is stateful)
-     * @return The row ID of the first token equal to or greater than the target,
-     *         or negative value if target token is greater than all tokens
+     * @return The index of the first value equal to or greater than the target,
+     *         or negative value if target value is greater than all values
      */
-    long ceilingRowId(long targetToken);
+    long ceilingIndex(long targetValue);
 
     /**
-     * Using the given value returns the first index corresponding to the value.
+     * Using the target value returns the first index corresponding to the value.
      *
-     * @param value Value to lookup, and it must not be smaller than previous value
-     * @return The index of the given value or negative value if target value is greater than all values
+     * @param targetValue Value to lookup, and it must not be smaller than previous value
+     * @return The index of the target value,
+     *         or negative index for a bigger value closest to the target,
+     *         or Long.MIN_VALUE if target value is greater than all values
      */
-    long indexOf(long value);
+    long indexOf(long targetValue);
 
     @Override
     default void close() throws IOException { }
 
     class DeferredLongArray implements LongArray
     {
-        private Supplier<LongArray> supplier;
+        private final Supplier<LongArray> supplier;
         private LongArray longArray;
         private boolean opened = false;
 
@@ -81,17 +83,17 @@ public interface LongArray extends Closeable
         }
 
         @Override
-        public long ceilingRowId(long targetToken)
+        public long ceilingIndex(long targetValue)
         {
             open();
-            return longArray.ceilingRowId(targetToken);
+            return longArray.ceilingIndex(targetValue);
         }
 
         @Override
-        public long indexOf(long targetToken)
+        public long indexOf(long targetValue)
         {
             open();
-            return longArray.indexOf(targetToken);
+            return longArray.indexOf(targetValue);
         }
 
         @Override
