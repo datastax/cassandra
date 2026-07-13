@@ -31,11 +31,11 @@ public enum OnDiskNodeType
     CHAIN(0b01000000, 0b11000000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, int pointerCount, boolean implicitFirstChild)
+        long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
         {
-            assert pointerCount == 1;
-            return 1 + 1 +
-                   (implicitFirstChild ? 0 : sizeRelay(bytesPerPointer));
+            assert children.length == 1;
+            return (children[0].firstTransition != -1 ? 1 + 1 : 0) +
+                   maybeSizeRelay(children, bytesPerPointer);
         }
 
         @Override
@@ -43,8 +43,13 @@ public enum OnDiskNodeType
         {
             assert children.length == 1;
             maybeWriteRelay(out, children, basePos, bytesPerPointer, 1);
-            out.writeByte(children[0].firstTransition);
-            out.writeByte(bits);    // length 1
+            // Node may have moved its transition into the leading chain of its child. If so, there's no node to write
+            // here.
+            if (children[0].firstTransition != -1)
+            {
+                out.writeByte(children[0].firstTransition);
+                out.writeByte(bits);    // length 1
+            }
         }
     },
 
@@ -55,7 +60,7 @@ public enum OnDiskNodeType
     DENSE(0b11101000, 0b11111000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, int pointerCount, boolean implicitFirstChild)
+        long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
         {
             // last pointer is not implicit here
             return 256 * bytesPerPointer + 1;
@@ -82,10 +87,10 @@ public enum OnDiskNodeType
     BITMAP(0b11100000, 0b11111000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, int pointerCount, boolean implicitFirstChild)
+        long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
         {
-            return (pointerCount - 1) * bytesPerPointer + 32 + 1 +
-                   (implicitFirstChild ? 0 : sizeRelay(bytesPerPointer));
+            return (children.length - 1) * bytesPerPointer + 32 + 1 +
+                   maybeSizeRelay(children, bytesPerPointer);
         }
 
         @Override
@@ -105,10 +110,10 @@ public enum OnDiskNodeType
     SPARSE(0b10000000, 0b10000000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, int pointerCount, boolean implicitFirstChild)
+        long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
         {
-            return (pointerCount - 1) * bytesPerPointer + pointerCount + 1 +
-                   (implicitFirstChild ? 0 : sizeRelay(bytesPerPointer));
+            return (children.length - 1) * bytesPerPointer + children.length + 1 +
+                   maybeSizeRelay(children, bytesPerPointer);
         }
 
         @Override
@@ -156,18 +161,15 @@ public enum OnDiskNodeType
         if (hasChild || ascentData != null || descentDataSize > MAX_LEAF_LENGTH_INCLUSIVE)
         {
             long size = 1;
-            int dataSize = 0;
             if (descentDataSize >= 0)
             {
                 size += descentDataSize + VIntCoding.computeUnsignedVIntSize(descentDataSize);
-                dataSize += descentDataSize;
             }
 
             if (ascentData != null)
             {
                 int ascentDataSize = serializer.serializedSize(ascentData);
                 size += ascentDataSize + VIntCoding.computeUnsignedVIntSize(ascentDataSize);
-                dataSize += descentDataSize;
             }
 
             return size;
@@ -220,7 +222,7 @@ public enum OnDiskNodeType
             return DENSE;
     }
 
-    long sizeChildren(int bytesPerPointer, int pointerCount, boolean implicitFirstChild)
+    long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
     {
         // Throw by default, only applies to RELAY, SPARSE, BITMAP and DENSE
         throw new AssertionError();
@@ -265,6 +267,18 @@ public enum OnDiskNodeType
         FileWriter.writeReversedSized(out, base - filePos, bytesPerPointer);
         out.writeByte(RELAY.bits | (bytesPerPointer - 1));
         return base + bytesPerPointer + 1;
+    }
+
+
+    private static boolean implicitFirstChild(FileWriter.Node<?>[] children)
+    {
+        // If the last child is not written yet, it will be written immediately before parent and won't need a relay.
+        return children[children.length - 1].writtenFilePos < 0;
+    }
+
+    static long maybeSizeRelay(FileWriter.Node<?>[] children, int bytesPerPointer)
+    {
+        return implicitFirstChild(children) ? 0 : sizeRelay(bytesPerPointer);
     }
 
     static int writePointers(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
