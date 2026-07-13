@@ -335,7 +335,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             return rowIdToPartitionIdArray.length();
 
         // Find the first row of this partition, then add partition size
-        long firstRowOfPartition = rowIdToPartitionIdArray.ceilingRowId(partitionId);
+        long firstRowOfPartition = rowIdToPartitionIdArray.ceilingIndex(partitionId);
         return firstRowOfPartition + partitionSize;
     }
 }

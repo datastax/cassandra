@@ -45,12 +45,12 @@ public interface LongArray extends Closeable
     long ceilingIndex(long targetValue);
 
     /**
-     * @param targetToken Token to look up.  Must not be bigger than the next value queried
+     * @param targetValue Value to look up.  Must not be bigger than the next value queried
      *                    (the method is stateful)
-     * @return The row ID of the first token equal to or smaller than the target,
-     * or negative value if the target token is smaller than all tokens
+     * @return The index of the largest value equal to or smaller than the target,
+     *         or negative value if the target value is smaller than all values
      */
-    long floorRowId(long targetToken);
+    long floorIndex(long targetValue);
 
     /**
      * Using the target value returns the first index corresponding to the value.
@@ -98,10 +98,10 @@ public interface LongArray extends Closeable
         }
 
         @Override
-        public long floorRowId(long targetToken)
+        public long floorIndex(long targetValue)
         {
             open();
-            return longArray.floorRowId(targetToken);
+            return longArray.floorIndex(targetValue);
         }
 
         @Override
