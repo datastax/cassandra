@@ -24,11 +24,11 @@ import java.util.BitSet;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
-public enum OnDiskNodeType
+public enum OnDiskWriteNodeType
 {
-    LEAF(0b00000000, 0b11000000),
+    LEAF(0b00000000),
 
-    CHAIN(0b01000000, 0b11000000)
+    CHAIN(0b01000000)
     {
         @Override
         long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
@@ -53,11 +53,11 @@ public enum OnDiskNodeType
         }
     },
 
-    PREFIX(0b11110000, 0b11111000),
+    PREFIX(0b11110000),
 
-    RELAY(0b11111000, 0b11111000),
+    RELAY(0b11111000),
 
-    DENSE(0b11101000, 0b11111000)
+    DENSE(0b11101000)
     {
         @Override
         long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
@@ -84,7 +84,7 @@ public enum OnDiskNodeType
         }
     },
 
-    BITMAP(0b11100000, 0b11111000)
+    BITMAP(0b11100000)
     {
         @Override
         long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
@@ -107,7 +107,7 @@ public enum OnDiskNodeType
         }
     },
 
-    SPARSE(0b10000000, 0b10000000)
+    SPARSE(0b10000000)
     {
         @Override
         long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
@@ -127,8 +127,6 @@ public enum OnDiskNodeType
     };
 
     final int bits;
-    // The first one whose code & identificationMask == bits is the node's type.
-    final int identificationMask;
 
     static final int MAX_LEAF_LENGTH_INCLUSIVE = 63;
 
@@ -143,10 +141,9 @@ public enum OnDiskNodeType
     static final int PREFIX_HAS_ASCENT_CONTENT = 0b00000010;
     static final int PREFIX_HAS_DESCENT_CONTENT = 0b00000100;
 
-    OnDiskNodeType(int bits, int identificationMask)
+    OnDiskWriteNodeType(int bits)
     {
         this.bits = bits;
-        this.identificationMask = identificationMask;
     }
 
     static <T> long sizePayload(FileWriter.DataSerializer<T> serializer, T descentData, T ascentData, boolean hasChild)
@@ -210,7 +207,7 @@ public enum OnDiskNodeType
             out.writeByte(LEAF.bits | descentDataSize);
     }
 
-    static OnDiskNodeType selectChildrenType(int bytesPerPointer, int pointerCount)
+    static OnDiskWriteNodeType selectChildrenType(int bytesPerPointer, int pointerCount)
     {
         if (pointerCount == 1)
             return CHAIN;
