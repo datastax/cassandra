@@ -30,6 +30,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.util.IOUtils;
 
 /**
@@ -79,6 +80,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     public void abort(Throwable accumulator)
     {
         logger.debug(perSSTableComponents.logMessage("Aborting token/offset writer for {}..."), perSSTableComponents.descriptor());
+        Throwables.close(accumulator, tokenWriter, offsetWriter, metadataWriter);
         perSSTableComponents.forceDeleteAllComponents();
     }
 

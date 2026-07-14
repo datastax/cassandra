@@ -32,6 +32,7 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.util.IOUtils;
 
 public class SSTableComponentsWriter implements PerSSTableWriter
@@ -77,6 +78,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     public void abort(Throwable accumulator)
     {
         logger.debug(perSSTableComponents.logMessage("Aborting per-SSTable index component writer for {}..."), perSSTableComponents.descriptor());
+        Throwables.close(accumulator, tokenWriter, sortedTermsWriter, metadataWriter);
         perSSTableComponents.forceDeleteAllComponents();
     }
 }
