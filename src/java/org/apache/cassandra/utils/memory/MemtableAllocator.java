@@ -29,6 +29,28 @@ import org.github.jamm.Unmetered;
 
 public abstract class MemtableAllocator
 {
+    /**
+     * Being defensive against programmatic errors, 
+     * set while the current thread performs allocations under a memtable-internal lock
+     * (e.g. TrieMemtable's shard write lock). Such allocations must never park waiting
+     * for pool room: a thread parked in allocate() while holding the lock cannot be
+     * released by OpOrder.Barrier.markBlocking(), and pre-barrier writers queued on the
+     * lock deadlock the flush's writeBarrier. Back-pressure for these writers is applied
+     * by SubAllocator.throttle() before the lock is taken; under the lock, allocations
+     * overshoot the limit instead -- the same overshoot markBlocking() grants.
+     */
+    private static final ThreadLocal<Boolean> MUST_NOT_BLOCK_FOR_ROOM = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+    public static void setMustNotBlockForRoom(boolean value)
+    {
+        MUST_NOT_BLOCK_FOR_ROOM.set(value);
+    }
+
+    static boolean mustNotBlockForRoom()
+    {
+        return MUST_NOT_BLOCK_FOR_ROOM.get();
+    }
+
     private static final Logger logger = LoggerFactory.getLogger(MemtableAllocator.class);
 
     private final SubAllocator onHeap;
@@ -182,7 +204,7 @@ public abstract class MemtableAllocator
                     acquired(size);
                     return;
                 }
-                if (opGroup.isBlocking())
+                if (opGroup.isBlocking() || mustNotBlockForRoom())
                 {
                     allocated(size);
                     return;
@@ -200,6 +222,32 @@ public abstract class MemtableAllocator
                 }
                 else
                     signal.awaitUninterruptibly();
+            }
+        }
+
+        /**
+         * Wait, if necessary, until the parent pool is below its limit, without reserving
+         * any memory. This is the back-pressure point for writers that will subsequently
+         * allocate while holding a memtable-internal lock: parked here, a pre-barrier op
+         * is released by Barrier.markBlocking() exactly as in allocate(); parked inside
+         * the lock it cannot be, and the flush writeBarrier deadlocks behind the lock queue.
+         */
+        public void throttle(OpOrder.Group opGroup)
+        {
+            while (true)
+            {
+                if (parent.belowLimit() || opGroup.isBlocking())
+                    return;
+
+                WaitQueue.Signal signal = opGroup
+                    .isBlockingSignal(parent.hasRoom().register(parent.markMemoryBlockedOnAllocating()));
+
+                if (parent.belowLimit() || opGroup.isBlocking())
+                {
+                    signal.cancel();
+                    return;
+                }
+                signal.awaitUninterruptibly();
             }
         }
 

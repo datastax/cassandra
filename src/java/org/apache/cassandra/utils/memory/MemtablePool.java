@@ -154,6 +154,12 @@ public abstract class MemtablePool
 
         /** Methods to allocate space **/
 
+        /** True if the pool is under its limit; reserves nothing. See SubAllocator.throttle(). */
+        boolean belowLimit()
+        {
+            return allocated < limit;
+        }
+
         boolean tryAllocate(long size)
         {
             while (true)

@@ -639,6 +639,13 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
         public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
         {
+            // Apply memory back-pressure BEFORE taking the shard lock. A thread parked for
+            // pool room while holding the lock cannot be released by Barrier.markBlocking(),
+            // and pre-barrier writers queued behind the lock then deadlock the flush's
+            // writeBarrier (shard-lock / flush-barrier deadlock). Parked here, this op is
+            // releasable by markBlocking() exactly like an allocate() waiter.
+            allocator.onHeap().throttle(opGroup);
+            allocator.offHeap().throttle(opGroup);
             TriePartitionUpdater updater = new TriePartitionUpdater(allocator.cloner(opGroup), indexer, metadata.get(), this);
             boolean locked = writeLock.tryLock();
             if (locked)
@@ -654,6 +661,10 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             }
             try
             {
+                // While holding the shard lock, allocations overshoot rather than park
+                // (see MemtableAllocator.setMustNotBlockForRoom): back-pressure was
+                // applied above, before the lock. this is a thread-local state.
+                MemtableAllocator.setMustNotBlockForRoom(true);
                 try
                 {
                     indexer.start();
@@ -691,6 +702,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             }
             finally
             {
+                MemtableAllocator.setMustNotBlockForRoom(false);
                 writeLock.unlock();
             }
             return updater.colUpdateTimeDelta;
