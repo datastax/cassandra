@@ -135,8 +135,8 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         @Override
         public void close()
         {
-            super.close();
             FileUtils.closeQuietly(Arrays.asList(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile, partitionToSizeFile));
+            super.close();
         }
     }
 
