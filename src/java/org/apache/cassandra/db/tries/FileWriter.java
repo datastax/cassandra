@@ -349,10 +349,10 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             writeChildrenOfNode(node);
 
         if (node.ascentPathContent != null || node.descentPathContent != null)
-            OnDiskNodeType.writePayload(out, dataSerializer, node.descentPathContent, node.ascentPathContent, hasChildren);
+            OnDiskWriteNodeType.writePayload(out, dataSerializer, node.descentPathContent, node.ascentPathContent, hasChildren);
 
         if (node.otherTransitions != null)
-            OnDiskNodeType.writeChain(out, node.otherTransitions);
+            OnDiskWriteNodeType.writeChain(out, node.otherTransitions);
 
         return node.finalizeWithPos(out.position());
     }
@@ -366,7 +366,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             furthestChild = Math.min(furthestChild, child.writtenFilePos);
         assert furthestChild >= 0 && furthestChild <= basePos;
         int bytesPerPointer = bytesFor(basePos - furthestChild);
-        OnDiskNodeType type = OnDiskNodeType.selectChildrenType(bytesPerPointer, size);
+        OnDiskWriteNodeType type = OnDiskWriteNodeType.selectChildrenType(bytesPerPointer, size);
         type.writeChildren(out, node.children, basePos, bytesPerPointer);
     }
 
@@ -481,7 +481,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             long validUntil = bytes == 8 ? Long.MAX_VALUE : (furthestWrittenChild + (1L << (bytes * 8)));
             branchSizeValidUntilPosition = Math.min(branchSizeValidUntilPosition, validUntil);
 
-            OnDiskNodeType type = OnDiskNodeType.selectChildrenType(bytes, children.length);
+            OnDiskWriteNodeType type = OnDiskWriteNodeType.selectChildrenType(bytes, children.length);
             long childrenSize = type.sizeChildren(bytes, children);
 
             currentBranchSize += childrenSize;
@@ -499,10 +499,10 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             }
 
             if (descentPathContent != null || ascentPathContent != null)
-                currentBranchSize += OnDiskNodeType.sizePayload(serializer, descentPathContent, ascentPathContent, children != null);
+                currentBranchSize += OnDiskWriteNodeType.sizePayload(serializer, descentPathContent, ascentPathContent, children != null);
 
             if (otherTransitions != null)
-                currentBranchSize += OnDiskNodeType.sizeChain(otherTransitions);
+                currentBranchSize += OnDiskWriteNodeType.sizeChain(otherTransitions);
 
             return currentBranchSize;
         }
