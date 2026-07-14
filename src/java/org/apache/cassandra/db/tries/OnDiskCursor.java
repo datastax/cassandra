@@ -43,6 +43,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.currentBufferOffset = 0;
         this.rdr = new SharedStream(deserializer);
         this.byteComparableVersion = byteComparableVersion;
+        this.isOrdered = isOrdered;
         this.swapContentSides = direction.select(false, isOrdered);
         this.exhausted = Cursor.exhaustedPosition(direction);
         descendInto(Cursor.rootPosition(direction), root);
@@ -95,6 +96,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     final Rebufferer rebufferer;
     final ByteComparable.Version byteComparableVersion;
     final boolean swapContentSides;
+    final boolean isOrdered; // determines swapContentSides above; needed if tailTrie switches direction
 
 
     Rebufferer.BufferHolder currentBH;
@@ -115,6 +117,12 @@ public class OnDiskCursor<T> implements Cursor<T>
 
     long currentFullNode;   // for tails
 
+    long descendInto(long encodedPosition, long nodePos)
+    {
+        currentFullNode = nodePos;
+        return descendInto(encodedPosition, nodePos - 1, readByteBefore(nodePos));
+    }
+
     long descendInto(long encodedPosition, long postCodePos, int nodeCode)
     {
         this.content = null;
@@ -126,12 +134,6 @@ public class OnDiskCursor<T> implements Cursor<T>
         return currentEncodedPosition;
     }
 
-    long descendInto(long encodedPosition, long nodePos)
-    {
-        currentFullNode = nodePos;
-        return descendInto(encodedPosition, nodePos - 1, readByteBefore(nodePos));
-    }
-
     void descendPostPrefixOrRelay(long nodePos)
     {
         // leave content and encodedPosition unchanged
@@ -139,6 +141,11 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.nodeCode = readByteBefore(nodePos);
         this.currentImpl = selectNodeImpl(nodeCode);
         this.currentImpl.load(this); // may modify currentEncodedPosition
+    }
+
+    void descendPostPrefixToEmpty()
+    {
+        this.currentImpl = OnDiskReadNodeType.LEAF;
     }
 
     public T content()
@@ -214,7 +221,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     @Override
     public Cursor<T> tailCursor(Direction direction)
     {
-        return null;
+        return new OnDiskCursor<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, isOrdered, currentFullNode);
     }
 
     long getContentAtPos(long currentPos)
@@ -274,35 +281,46 @@ public class OnDiskCursor<T> implements Cursor<T>
         return OnDiskReadNodeType.selectNodeImpl(nodeCode);
     }
 
-    int readVIntLength(long currentPos)
+    /// Read the first byte of a variable-length-encoded unsigned integer, positioned immediately before position `pos`
+    /// in the file, and return the length of the encoded int.
+    int readVIntLength(long pos)
     {
-        seekTo(currentPos);
-        return VIntCoding.computeUnsignedVIntSize(currentBuffer, (int) (currentPos - 1 - currentBufferOffset));
+        seekTo(pos);
+        return VIntCoding.computeUnsignedVIntSize(currentBuffer, (int) (pos - 1 - currentBufferOffset));
     }
 
+    /// Read a variable-length-encoded unsigned integer with the given length (obtained using [#readVIntLength]),
+    /// positioned immediately before position `pos` in the file.
     long readVInt(long pos, int vintLength)
     {
         long withMask = readSizedInt(pos, vintLength);
-        return withMask & ((1 << vintLength * 7) - 1);
+        // vintLength * 7 + vintLength / 8 is 64 for vintLength == 8 and vintLength * 7 otherwise
+        return withMask & ((1 << vintLength * 7 + vintLength / 8) - 1);
     }
 
+    /// Reads a long int from an int array with the given number of bytes per item.
+    /// Unlike other read methods, this accepts the position _before_ the array in `base`.
     long readSizedInt(long base, int index, int bytes)
     {
         return readSizedInt(base + (index + 1) * bytes, bytes);
     }
 
+    /// Reads a long int from an int array with the given number of bytes per item, where the first element of the
+    /// array is an implicit 0.
+    /// Unlike other read methods, this accepts the position _before_ the array in `base`.
     long readSizedIntImplicit0(long base, int index, int bytes)
     {
         return index > 0 ? readSizedInt(base + index * bytes, bytes) : 0;
     }
 
+    /// Read `bytes` many bytes preceding position `pos` in the file into a long unsigned integer.
     long readSizedInt(long pos, int bytes)
     {
         seekTo(pos);
         if (pos - currentBufferOffset >= 8)
         {
             long l = currentBuffer.getLong((int) (pos - 8 -  currentBufferOffset));
-            return (Long.reverseBytes(l) >> (64 - bytes * 8)) & ((1 << bytes * 8) - 1);
+            return (Long.reverseBytes(l) >>> (64 - bytes * 8));
         }
         else
         {
@@ -313,23 +331,14 @@ public class OnDiskCursor<T> implements Cursor<T>
         }
     }
 
-    String dumpNode()
-    {
-        return currentImpl.dump(this);
-    }
-
-    String dumpNode(long node)
-    {
-        return new OnDiskCursor<>(rdr.deserializer, rebufferer, byteComparableVersion, direction(), swapContentSides, node).dumpNode();
-    }
-
+    /// Read one byte positioned immediately before `filePos`.
     int readByteBefore(long filePos)
     {
         seekTo(filePos);
         return currentBuffer.get((int) (filePos - 1 - currentBufferOffset)) & 0xFF;
     }
 
-    // pos is _after_ the byte we want to read
+    /// Seek in the file to make the data preceding `pos` available in `currentBuffer`.
     void seekTo(long filePos)
     {
         long ofs = filePos - currentBufferOffset;
@@ -340,5 +349,17 @@ public class OnDiskCursor<T> implements Cursor<T>
         currentBH = rebufferer.rebuffer(filePos - 1);
         currentBuffer = currentBH.buffer();
         currentBufferOffset = currentBH.offset();
+    }
+
+    /// Used for debugging.
+    String dumpNode()
+    {
+        return currentImpl.dump(this);
+    }
+
+    /// Used for debugging.
+    String dumpNode(long node)
+    {
+        return new OnDiskCursor<>(rdr.deserializer, rebufferer, byteComparableVersion, direction(), swapContentSides, node).dumpNode();
     }
 }

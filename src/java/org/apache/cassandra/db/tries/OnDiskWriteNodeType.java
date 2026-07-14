@@ -26,6 +26,8 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 
 public enum OnDiskWriteNodeType
 {
+    // Note: Any changes to bits must be reflected in OnDiskReadNodeType.IMPLEMENTATIONS.
+
     LEAF(0b00000000),
 
     CHAIN(0b01000000)

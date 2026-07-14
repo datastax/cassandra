@@ -311,7 +311,17 @@ public enum OnDiskReadNodeType
         @Override
         public String dump(OnDiskCursor<?> state)
         {
-            return "Dense";
+            int bytes = bytes(state.nodeCode);
+            long base = state.postCodePos - 256 * bytes;
+            long notPresent = (1L << bytes * 8) - 1;
+            StringBuilder s = new StringBuilder(String.format("Dense%d", bytes));
+            for (int i = 0; i < 256; ++i)
+            {
+                long child = state.readSizedInt(base, i, bytes);
+                if (child != notPresent)
+                    s.append(String.format("\n%02x --> %d", i, base - child));
+            }
+            return s.toString();
         }
     },
 
@@ -485,7 +495,30 @@ public enum OnDiskReadNodeType
         @Override
         public String dump(OnDiskCursor<?> state)
         {
-            return "Bitmap";
+            int bytes = bytes(state.nodeCode);
+            long postCodePos = state.postCodePos;
+            int length = cardinality(state);
+            long base = postCodePos - 32 - (length - 1) * bytes;
+            StringBuilder s = new StringBuilder(String.format("Bitmap%d", bytes));
+            
+            // Read the bitmap (32 bytes = 256 bits)
+            state.seekTo(postCodePos);
+            int childIndex = 0;
+            for (int byteIdx = 0; byteIdx < 32; ++byteIdx)
+            {
+                int bitmapByte = state.readByteBefore(postCodePos - byteIdx);
+                for (int bitIdx = 0; bitIdx < 8; ++bitIdx)
+                {
+                    if ((bitmapByte & (1 << bitIdx)) != 0)
+                    {
+                        int transition = byteIdx * 8 + bitIdx;
+                        long childDelta = state.readSizedIntImplicit0(base, childIndex, bytes);
+                        s.append(String.format("\n%02x --> %d", transition, base - childDelta));
+                        childIndex++;
+                    }
+                }
+            }
+            return s.toString();
         }
     },
 
@@ -526,53 +559,46 @@ public enum OnDiskReadNodeType
             if (!swap)
             {
                 if (hasDescent)
-                {
                     currentPos = state.getContentAtPos(currentPos);
-                }
                 if (hasAscent)
-                {
-                    // Make up a node on the return path; its advance or skipTo will be called
-                    state.addBacktrack(currentPos, ASCENT_LEAF_CODE, state.currentEncodedPosition | Cursor.ON_RETURN_PATH_BIT);
-
-                    if (hasChild)
-                    {
-                        int vintlen = state.readVIntLength(currentPos);
-                        int len = (int) state.readVInt(currentPos, vintlen);
-                        currentPos -= vintlen + len;
-                    }
-                }
+                    currentPos = addBacktrackAndMaybeAdvanceOver(state, currentPos, hasChild);
             }
             else
             {
                 if (hasDescent)
-                {
-                    // Make up a node on the return path; its advance or skipTo will be called
-                    state.addBacktrack(currentPos, ASCENT_LEAF_CODE, state.currentEncodedPosition | Cursor.ON_RETURN_PATH_BIT);
-
-                    if (hasChild || hasAscent)
-                    {
-                        int vintlen = state.readVIntLength(currentPos);
-                        int len = (int) state.readVInt(currentPos, vintlen);
-                        currentPos -= vintlen + len;
-                    }
-                }
+                    currentPos = addBacktrackAndMaybeAdvanceOver(state, currentPos, hasChild || hasAscent);
                 if (hasAscent)
-                {
                     currentPos = state.getContentAtPos(currentPos);
-                }
             }
 
             if (hasChild)
                 state.descendPostPrefixOrRelay(currentPos);
             else
-                state.currentImpl = LEAF; // no children
+                state.descendPostPrefixToEmpty(); // no children
         }
+
+        private long addBacktrackAndMaybeAdvanceOver(OnDiskCursor<?> state, long currentPos, boolean shouldAdvanceOverContent)
+        {
+            // Make up a node on the return path; its advance or skipTo will be called
+            state.addBacktrack(currentPos, ASCENT_LEAF_CODE, state.currentEncodedPosition | Cursor.ON_RETURN_PATH_BIT);
+
+            if (shouldAdvanceOverContent)
+            {
+                int vintlen = state.readVIntLength(currentPos);
+                int len = (int) state.readVInt(currentPos, vintlen);
+                currentPos -= vintlen + len;
+            }
+            return currentPos;
+        }
+
+        // Because load() always moves on to the post-prefix part, the advance and skipTo methods below are only called
+        // by backtracking to present return-path content.
 
         @Override
         public long advance(OnDiskCursor<?> state)
         {
             state.getContentAtPos(state.postCodePos);
-            state.currentImpl = LEAF; // no further children
+            state.descendPostPrefixToEmpty(); // no further children
             return state.currentEncodedPosition = state.nodeImplData;
         }
 
@@ -665,6 +691,7 @@ public enum OnDiskReadNodeType
 
     /**
      * Array mapping node codes to their corresponding OnDiskReadNodeType enum constants.
+     * Note: Any changes to OnDiskWriteNodeType.bits must be reflected here.
      */
     static final OnDiskReadNodeType[] IMPLEMENTATIONS = new OnDiskReadNodeType[]
     {
