@@ -216,9 +216,6 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             // Deletion ranges active at entry and exit must be presented by the tail at its root. To do this, get
             // the closest content in both forward and reverse direction and adjust the content that the tail reports
             // for them.
-            if (content == null)
-                setActiveState(); // prepare and store activeRange if it is needed
-
             S rootDescentContent = getTailRootContent(this.direction, content, activeIsSet, activeRange);
             S rootAscentContent = getTailRootContent(this.direction.opposite(), getAscentPathContent(), false, null);
             if (this.direction != direction)
@@ -277,6 +274,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             long rootPos = encodedPosition();
             if (rootDescentContent != null)
                 setNodeState(rootPos | MAY_HAVE_CONTENT_BIT, rootDescentContent, root, root);
+            // The superclass constructor has already run updateActiveAndReturn, which may have left
+            // prevContent set from the root's own content. Clear it so the re-run below, which sees
+            // the branch content installed above, starts from the same state a fresh cursor would.
+            prevContent = null;
             updateActiveAndReturn(rootPos);
         }
 

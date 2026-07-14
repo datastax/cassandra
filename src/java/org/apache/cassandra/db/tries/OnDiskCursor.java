@@ -236,6 +236,14 @@ public class OnDiskCursor<T> implements Cursor<T>
         return currentPos;
     }
 
+    T readContentAtPos(long currentPos)
+    {
+        int vintlen = readVIntLength(currentPos);
+        int len = (int) readVInt(currentPos, vintlen);
+        currentPos -= vintlen + len;
+        return rdr.deserialize(rdr, currentPos, len);
+    }
+
     void getContentAtPosWithLength(long currentPos, int len)
     {
         content = rdr.deserialize(rdr, currentPos - len, len);
@@ -367,4 +375,180 @@ public class OnDiskCursor<T> implements Cursor<T>
     {
         return new OnDiskCursor<>(rdr.deserializer, rebufferer, byteComparableVersion, direction(), swapContentSides, node).dumpNode();
     }
+
+    static class Range<S extends RangeState<S>> extends OnDiskCursor<S> implements RangeCursor<S>
+    {
+
+        boolean activeIsSet;
+        S activeRange;  // only non-null if activeIsSet
+        S prevContent;  // can only be non-null if activeIsSet
+
+        public Range(DataDeserializer<S> deserializer, Rebufferer rebufferer, ByteComparable.Version byteComparableVersion, Direction direction, long root)
+        {
+            super(deserializer, rebufferer, byteComparableVersion, direction, true, root);
+
+            activeIsSet = true;
+            activeRange = null;
+            prevContent = null;
+            updateActiveAndReturn(encodedPosition());
+        }
+
+        @Override
+        public long advance()
+        {
+            return updateActiveAndReturn(super.advance());
+        }
+
+        @Override
+        public long advanceMultiple(TransitionsReceiver receiver)
+        {
+            return updateActiveAndReturn(super.advanceMultiple(receiver));
+        }
+
+        @Override
+        public long skipTo(long encodedSkipPosition)
+        {
+            activeIsSet = false;    // since we are skipping, we have no idea where we will end up
+            activeRange = null;
+            prevContent = null;
+            return updateActiveAndReturn(super.skipTo(encodedSkipPosition));
+        }
+
+        @Override
+        public S state()
+        {
+            if (!activeIsSet)
+                setActiveState();
+            return activeRange;
+        }
+
+        long updateActiveAndReturn(long position)
+        {
+            if (!Cursor.isExhausted(position))
+            {
+                // Always check if we are seeing new content; if we do, that's an easy state update.
+                S content = content();
+                if (content != null)
+                {
+                    activeRange = content;
+                    prevContent = content;
+                    activeIsSet = true;
+                }
+                else if (prevContent != null)
+                {
+                    // If the previous state was exact, its right side is what we now have.
+                    activeRange = prevContent.succedingState(direction());
+                    prevContent = null;
+                    assert activeIsSet;
+                }
+                // otherwise the active state is either not set or still valid.
+            }
+            else
+            {
+                // exhausted
+                activeIsSet = true;
+                activeRange = null;
+                prevContent = null;
+            }
+            return position;
+        }
+
+        private void setActiveState()
+        {
+            assert content() == null;
+            S nearestContent = getNearestContent(direction());
+            // Note: the nearest content may change between the time we fetch it and when we reach that node, e.g.
+            // if someone deletes aa-cd where there existed an abc-acd deletion, and we fetched the latter while at "a".
+            // This, though, should only be possible if the preceding state of the nearest content is null.
+            activeRange = nearestContent != null ? nearestContent.precedingState(direction()) : null;
+            prevContent = null;
+            activeIsSet = true;
+        }
+
+        private S getNearestContent(Direction direction)
+        {
+//            return tailCursor(direction).advanceToContent(null);
+
+            long node = currentFullNode;
+            while (true)
+            {
+                int code = readByteBefore(node);
+                OnDiskReadNodeType type = OnDiskReadNodeType.selectNodeImpl(code);
+                S content = type.getContent(this, type == OnDiskReadNodeType.LEAF ? null : direction, code, node - 1);
+                if (content != null)
+                    return content;
+                long next = type.getFirstChild(this, direction, code, node - 1);
+                assert next > 0;
+            }
+        }
+
+        S getTailRootContent(Direction direction, S contentAtRoot, boolean activeRangeKnown, S activeRange)
+        {
+            if (contentAtRoot != null)
+                return contentAtRoot.restrict(!direction.isForward(), direction.isForward());
+            if (!activeRangeKnown)
+                activeRange = getNearestContent(direction);
+            if (activeRange == null)
+                return null;
+            activeRange = activeRange.precedingState(direction);
+            if (activeRange == null)
+                return null;
+            return activeRange.asBoundary(direction);
+        }
+
+        @Override
+        public RangeCursor<S> tailCursor(Direction direction)
+        {
+            // Deletion ranges active at entry and exit must be presented by the tail at its root. To do this, get
+            // the closest content in both forward and reverse direction and adjust the content that the tail reports
+            // for them.
+            Direction ourDirection = direction();
+            S rootDescentContent = getTailRootContent(ourDirection, content, activeIsSet, activeRange);
+            S rootAscentContent = getTailRootContent(ourDirection.opposite(),
+                                                     currentImpl.getContent(this, ourDirection.opposite(), nodeCode, postCodePos),
+                                                     false, null);
+            if (ourDirection != direction)
+            {
+                S swap = rootDescentContent;
+                rootDescentContent = rootAscentContent;
+                rootAscentContent = swap;
+            }
+
+            if (rootAscentContent == null && rootDescentContent == null)
+                return new Range<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, currentFullNode);
+            else // skip over prefix
+                return new RangeBranch<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, currentFullNode, rootDescentContent, rootAscentContent);
+        }
+    }
+
+    static class RangeBranch<S extends RangeState<S>> extends Range<S>
+    {
+        final S rootAscentContent;
+
+        public RangeBranch(DataDeserializer<S> deserializer, Rebufferer rebufferer, ByteComparable.Version byteComparableVersion, Direction direction, long root, S rootDescentContent, S rootAscentContent)
+        {
+            super(deserializer, rebufferer, byteComparableVersion, direction, root);
+            // LEAF or PREFIX may have put a backtrack entry, remove if so
+            this.stackLength = 0;
+            this.content = rootDescentContent;
+            this.rootAscentContent = rootAscentContent;
+            if (rootAscentContent != null)
+                addBacktrack(0, OnDiskReadNodeType.ASCENT_LEAF_CODE, currentEncodedPosition | ON_RETURN_PATH_BIT);
+
+            // Redo this as we now have different content() value
+            prevContent = null;
+            updateActiveAndReturn(encodedPosition());
+        }
+
+        @Override
+        long getContentAtPos(long currentPos)
+        {
+            if (currentPos > 0)
+                return super.getContentAtPos(currentPos);
+
+            content = rootAscentContent;
+            return currentPos;
+        }
+    }
+
 }
