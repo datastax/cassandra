@@ -50,7 +50,7 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         RequestTracker.instance.set(sensors);
 
-        PaxosState.commitDirect(message.payload, p -> MutatorProvider.getCustomOrDefault().onAppliedProposal(p));
+        PaxosState.commitDirect(message.payload, p -> MutatorProvider.instance.onAppliedProposal(p));
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();

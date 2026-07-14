@@ -93,6 +93,9 @@ import org.apache.cassandra.metrics.ClientRequestMetrics;
 import org.apache.cassandra.service.CASRequest;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.FailureRecordingCallback.AsMap;
+import org.apache.cassandra.service.Mutator;
+import org.apache.cassandra.service.MutatorProvider;
+import org.apache.cassandra.service.paxos.Commit.Agreed;
 import org.apache.cassandra.service.paxos.Commit.Proposal;
 import org.apache.cassandra.service.paxos.cleanup.PaxosRepairState;
 import org.apache.cassandra.service.reads.DataResolver;
@@ -682,6 +685,7 @@ public class Paxos
         try (PaxosOperationLock lock = PaxosState.lock(partitionKey, metadata, proposeDeadline, consistencyForConsensus, true))
         {
             Paxos.Async<PaxosCommit.Status> commit = null;
+            Agreed committedAgreed = null; // the value behind 'commit', for the onCasCommitApplied notification
             done: while (true)
             {
                 // read the current values and check they validate the conditions
@@ -774,7 +778,12 @@ public class Paxos
                         //   1) reached a majority, in which case it was agreed, had no effect and we can do nothing; or
                         //   2) did not reach a majority, was not agreed, and was not user visible as a result so we can ignore it
                         if (!proposal.update.isEmpty())
-                            commit = commit(proposal.agreed(), participants, consistencyForConsensus, consistencyForCommit, true);
+                        {
+                            Agreed agreed = proposal.agreed();
+                            MutatorProvider.notifyCasCommit(agreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
+                            commit = commit(agreed, participants, consistencyForConsensus, consistencyForCommit, true);
+                            committedAgreed = agreed;
+                        }
 
                         break done;
                     }
@@ -809,6 +818,8 @@ public class Paxos
                 PaxosCommit.Status result = commit.awaitUntil(commitDeadline);
                 if (!result.isSuccess())
                     throw result.maybeFailure().markAndThrowAsTimeoutOrFailure(true, consistencyForCommit, failedAttemptsDueToContention, metrics);
+                // the commit reached a consistencyForCommit quorum: the value is now readable at that CL
+                MutatorProvider.notifyCasCommitApplied(committedAgreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
             }
             Tracing.trace("CAS successful");
             return null;
@@ -1009,6 +1020,7 @@ public class Paxos
                 {
                     FoundIncompleteCommitted incomplete = prepare.incompleteCommitted();
                     Tracing.trace("Repairing replicas that missed the most recent commit");
+                    MutatorProvider.notifyCasCommit(incomplete.committed, consistencyForConsensus, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
                     retry = commitAndPrepare(incomplete.committed, incomplete.participants, query, isWrite, acceptEarlyReadPermission);
                     break;
                 }
@@ -1037,8 +1049,12 @@ public class Paxos
                             throw proposeResult.maybeFailure().markAndThrowAsTimeoutOrFailure(isWrite, consistencyForConsensus, failedAttemptsDueToContention, metrics);
 
                         case SUCCESS:
-                            retry = commitAndPrepare(repropose.agreed(), inProgress.participants, query, isWrite, acceptEarlyReadPermission);
+                        {
+                            Agreed reproposeAgreed = repropose.agreed();
+                            MutatorProvider.notifyCasCommit(reproposeAgreed, consistencyForConsensus, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+                            retry = commitAndPrepare(reproposeAgreed, inProgress.participants, query, isWrite, acceptEarlyReadPermission);
                             break retry;
+                        }
 
                         case SUPERSEDED:
                             // since we are proposing a previous value that was maybe superseded by us before completion

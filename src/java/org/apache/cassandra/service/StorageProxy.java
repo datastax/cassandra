@@ -521,9 +521,12 @@ public class StorageProxy implements StorageProxyMBean
                                                             key.toString(), keyspaceName, cfName));
         }
 
-        return Paxos.useV2()
-                ? Paxos.cas(key, request, consistencyForPaxos, consistencyForCommit, clientState)
-                : legacyCas(keyspaceName, cfName, key, request, consistencyForPaxos, consistencyForCommit, clientState, nowInSeconds, requestTime);
+        // Delegate the whole operation through the Mutator SPI so a custom Mutator observes the
+        // begin and the completion of every CAS operation, whichever paxos_variant is configured
+        // (the default implementation dispatches to Paxos.cas or legacyCas).
+        TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+        return mutator.mutateCas(metadata, key, request, consistencyForPaxos, consistencyForCommit,
+                                 clientState, nowInSeconds, requestTime);
     }
 
     public static RowIterator legacyCas(String keyspaceName,
@@ -771,7 +774,14 @@ public class StorageProxy implements StorageProxyMBean
                     // comment there). As empty update are somewhat common (serial reads and non-applying CAS propose
                     // them), this is worth bothering.
                     if (!proposal.update.isEmpty())
+                    {
+                        MutatorProvider.notifyCasCommit(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
                         commitPaxos(proposal, consistencyForCommit, true, requestTime, casMetrics);
+                        // commitPaxos blocks until a consistencyForCommit quorum acknowledged the commit
+                        // (unless CL=ANY); reaching here means the value is now readable at that CL.
+                        if (consistencyForCommit != ConsistencyLevel.ANY)
+                            MutatorProvider.notifyCasCommitApplied(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
+                    }
                     RowIterator result = proposalPair.right;
                     if (result != null)
                         Tracing.trace("CAS did not apply");
@@ -881,7 +891,12 @@ public class StorageProxy implements StorageProxyMBean
                     Commit refreshedInProgress = Commit.newProposal(ballot, inProgress.update);
                     if (proposePaxos(refreshedInProgress, paxosPlan, false, requestTime, casMetrics))
                     {
+                        MutatorProvider.notifyCasCommit(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
                         commitPaxos(refreshedInProgress, consistencyForCommit, false, requestTime, casMetrics);
+                        // commitPaxos blocks until a consistencyForCommit quorum acknowledged the commit
+                        // (unless CL=ANY); reaching here means the recovered value is now readable at that CL.
+                        if (consistencyForCommit != ConsistencyLevel.ANY)
+                            MutatorProvider.notifyCasCommitApplied(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
                     }
                     else
                     {
@@ -903,6 +918,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     Tracing.trace("Repairing replicas that missed the most recent commit");
                     casMetrics.missingMostRecentCommit.inc(missingMRCSize);
+                    MutatorProvider.notifyCasCommit(mostRecent, consistencyForCommit, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
                     sendCommit(mostRecent, missingMRC);
                     // TODO: provided commits don't invalid the prepare we just did above (which they don't), we could just wait
                     // for all the missingMRC to acknowledge this commit and then move on with proposing our value. But that means
