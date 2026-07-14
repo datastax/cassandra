@@ -22,9 +22,11 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 public class JVectorVersionUtil
 {
     /**
+     * Whether to fuse quantized vectors into the graph when writing indexes, assuming all other conditions are met.
      * Variables are volatile to allow for changing in unit tests. They are only accessed on flush and compaction,
      * so their access is infrequent.
      */
+    public static volatile boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
     public static volatile boolean ENABLE_NVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean();
     public static final int NUM_SUB_VECTORS = CassandraRelevantProperties.SAI_VECTOR_NVQ_NUM_SUB_VECTORS.getInt();
 
@@ -51,16 +53,18 @@ public class JVectorVersionUtil
      * does not take into account whether the graph has enough information to build a quantization, as that depends on
      * external factors.
      * <p>
-     * FusedPQ is automatically enabled for all indexes using version FA or later (jvector file format version 6+).
-     * The deprecated ENABLE_FUSED property is ignored for these versions.
+     * For version FA, FusedPQ is always enabled regardless of {@code ENABLE_FUSED}.
+     * For version FB and later, FusedPQ is opt-in via {@code cassandra.sai.vector.enable_fused}.
      *
      * @param version the SAI on disk format to use when writing to disk
      * @return true if conditions are met, false otherwise
      */
     public static boolean shouldWriteFused(Version version)
     {
-        // For FA version and later, FusedPQ is always enabled (tied to the version)
-        return versionSupportsFused(version);
+        if (!versionSupportsFused(version))
+            return false;
+        // FA always uses FusedPQ; FB+ requires the flag to be set
+        return version.equals(Version.FA) || ENABLE_FUSED;
     }
 
     public static boolean versionSupportsFused(Version version)
