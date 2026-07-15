@@ -64,11 +64,11 @@ public enum OnDiskReadNodeType
         }
 
         @Override
-        public <T> T getContent(OnDiskCursor<T> state, Direction direction, int nodeCode, long postCodePos)
+        public <T> T getContent(OnDiskCursor<T> state, Direction direction, boolean returnOtherDirectionIfNoChildren, int nodeCode, long postCodePos)
         {
-            if (direction == Direction.REVERSE) // direction may be null
+            if (direction == Direction.REVERSE && !returnOtherDirectionIfNoChildren) // direction may be null
                 return null;
-            return state.readContentAtPos(state.postCodePos + 1);
+            return state.readContentAtPos(postCodePos + 1);
         }
 
         @Override
@@ -685,23 +685,28 @@ public enum OnDiskReadNodeType
         }
 
         @Override
-        public <T> T getContent(OnDiskCursor<T> state, Direction direction, int nodeCode, long postCodePos)
+        public <T> T getContent(OnDiskCursor<T> state, Direction direction, boolean returnOtherDirectionIfNoChildren, int nodeCode, long postCodePos)
         {
             boolean hasDescent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0;
+            boolean hasChild = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_CHILD) != 0;
+            boolean hasAscent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) != 0;
             long pos = postCodePos;
             if (direction.isForward())
             {
-                if (!hasDescent)
-                    return null;
+                if (hasDescent || returnOtherDirectionIfNoChildren && hasAscent && !hasChild)
+                    return state.readContentAtPos(pos);
             }
             else
             {
-                boolean hasAscent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) != 0;
-                if (!hasAscent)
-                    return null;
-                pos = maybeSkipOverContent(state, pos, hasDescent);
+                if (hasAscent)
+                {
+                    pos = maybeSkipOverContent(state, pos, hasDescent);
+                    return state.readContentAtPos(pos);
+                }
+                else if (returnOtherDirectionIfNoChildren && hasDescent && !hasChild)
+                    return state.readContentAtPos(pos);
             }
-            return state.readContentAtPos(pos);
+            return null;
         }
 
         @Override
@@ -795,7 +800,7 @@ public enum OnDiskReadNodeType
     public abstract long skipTo(OnDiskCursor<?> state, long encodedSkipPosition);
     public abstract String dump(OnDiskCursor<?> state);
 
-    public <T> T getContent(OnDiskCursor<T> state, Direction direction, int nodeCode, long postCodePos)
+    public <T> T getContent(OnDiskCursor<T> state, Direction direction, boolean returnOtherDirectionIfNoChildren, int nodeCode, long postCodePos)
     {
         return null; // overridden by leaf and prefix
     }

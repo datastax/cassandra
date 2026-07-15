@@ -55,6 +55,7 @@ import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.EMPTY;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
@@ -641,7 +642,7 @@ public class TrieUtil
     }
 
     /// Assert two tries are equal, performing exactly the same walks in both cursor directions.
-    public static <T> void assertTriesEqual(Trie<T> expected, Trie<T> actual)
+    public static <T> void assertTriesEqual(BaseTrie<T, ?, ?> expected, BaseTrie<T, ?, ?> actual)
     {
         if (expected == null || actual == null)
         {
@@ -940,6 +941,42 @@ public class TrieUtil
     }
     public static final StringSerDe STRING_SERDE = new StringSerDe();
 
+    static class RangeSerDe implements FileWriter.DataSerializer<TestRangeState>, OnDiskCursor.DataDeserializer<TestRangeState>
+    {
+        @Override
+        public int serializedSize(TestRangeState value)
+        {
+            return VIntCoding.computeVIntSize(value.leftSide) + VIntCoding.computeVIntSize(value.rightSide) + 1 + ByteComparable.length(value.position, VERSION);
+        }
+
+        @Override
+        public int serialize(DataOutputPlus out, TestRangeState value) throws IOException
+        {
+            long start = out.position();
+            out.writeVInt32(value.leftSide);
+            out.writeVInt32(value.rightSide);
+            out.writeBoolean(value.appliesAfter);
+            byte[] bytes = value.position.asByteComparableArray(VERSION);
+            out.write(bytes);
+            return (int) (out.position() - start);
+        }
+
+        @Override
+        public TestRangeState deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            int leftSide = rdr.readVInt32();
+            int rightSide = rdr.readVInt32();
+            boolean appliesAfter = rdr.readBoolean();
+            length -= VIntCoding.computeVIntSize(leftSide) + VIntCoding.computeVIntSize(rightSide) + 1;
+
+            byte[] bytes = new byte[length];
+            rdr.readFully(bytes);
+
+            return new TestRangeState(ByteComparable.preencoded(VERSION, bytes), appliesAfter, leftSide, rightSide);
+        }
+    }
+    public static final RangeSerDe RANGE_SERDE = new RangeSerDe();
+
     public static OnDiskTrie<Integer> onDiskRoundtripIntegers(Trie<Integer> trie, boolean isOrdered)
     {
         return onDiskRoundtrip(trie, isOrdered, INTEGER_SERDE, INTEGER_SERDE);
@@ -954,8 +991,26 @@ public class TrieUtil
     {
         try
         {
-            File file = FileWriter.write(trie, isOrdered, serializer, new File(java.io.File.createTempFile("intersection", "trie")));
+            File file = FileWriter.write(trie, isOrdered, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
             return OnDiskTrie.open(file, deserializer, VERSION,  isOrdered, -1);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static OnDiskRangeTrie<TestRangeState> onDiskRoundtrip(RangeTrie<TestRangeState> trie)
+    {
+        return onDiskRoundtrip(trie, RANGE_SERDE, RANGE_SERDE);
+    }
+
+    public static <S extends RangeState<S>> OnDiskRangeTrie<S> onDiskRoundtrip(RangeTrie<S> trie, FileWriter.DataSerializer<S> serializer, OnDiskCursor.DataDeserializer<S> deserializer)
+    {
+        try
+        {
+            File file = FileWriter.write(trie, true, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
+            return OnDiskRangeTrie.open(file, deserializer, VERSION, -1);
         }
         catch (IOException e)
         {

@@ -474,11 +474,11 @@ public class OnDiskCursor<T> implements Cursor<T>
             {
                 int code = readByteBefore(node);
                 OnDiskReadNodeType type = OnDiskReadNodeType.selectNodeImpl(code);
-                S content = type.getContent(this, type == OnDiskReadNodeType.LEAF ? null : direction, code, node - 1);
+                S content = type.getContent(this, direction, true, code, node - 1);
                 if (content != null)
                     return content;
-                long next = type.getFirstChild(this, direction, code, node - 1);
-                assert next > 0;
+                node = type.getFirstChild(this, direction, code, node - 1);
+                assert node > 0;
             }
         }
 
@@ -505,7 +505,7 @@ public class OnDiskCursor<T> implements Cursor<T>
             Direction ourDirection = direction();
             S rootDescentContent = getTailRootContent(ourDirection, content, activeIsSet, activeRange);
             S rootAscentContent = getTailRootContent(ourDirection.opposite(),
-                                                     currentImpl.getContent(this, ourDirection.opposite(), nodeCode, postCodePos),
+                                                     currentImpl.getContent(this, ourDirection.opposite(), false, nodeCode, postCodePos),
                                                      false, null);
             if (ourDirection != direction)
             {

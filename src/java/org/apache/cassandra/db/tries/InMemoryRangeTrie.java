@@ -26,7 +26,7 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
-public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie<S> implements RangeTrie<S>
+public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie<S, RangeCursor<S>, RangeTrie<S>> implements RangeTrie<S>
 {
     // constants for space calculations
     private static final long EMPTY_SIZE_ON_HEAP;
@@ -34,7 +34,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
     static
     {
         // Measuring the empty size of long-lived tries, because these are the ones for which we want to track size.
-        InMemoryBaseTrie<?> empty = new InMemoryRangeTrie<>(ByteComparable.Version.OSS50, BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
+        InMemoryRangeTrie<?> empty = new InMemoryRangeTrie<>(ByteComparable.Version.OSS50, BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
         EMPTY_SIZE_ON_HEAP = ObjectSizes.measureDeep(empty);
         empty = new InMemoryRangeTrie<>(ByteComparable.Version.OSS50, BufferType.OFF_HEAP, ExpectedLifetime.LONG, null);
         EMPTY_SIZE_OFF_HEAP = ObjectSizes.measureDeep(empty);
@@ -343,7 +343,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
     static class ApplyState<S extends RangeState<S>> extends InMemoryBaseTrie.ApplyState<S>
     {
-        ApplyState(InMemoryBaseTrie<S> trie)
+        ApplyState(InMemoryBaseTrie<S, ?, ?> trie)
         {
             super(trie);
         }
