@@ -61,44 +61,48 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final LongArray.Factory offsetReaderFactory;
-        private final MetadataSource metadata;
         private final SSTableReader sstable;
         private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
         private final SSTableId<?> sstableId;
         private final long count;
 
-        private FileHandle token = null;
-        private FileHandle offset = null;
+        private final FileHandle token;
+        private final FileHandle offset;
 
         public PartitionAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, SSTableReader sstable, PrimaryKey.Factory primaryKeyFactory)
         {
+            FileHandle token = null;
+            FileHandle offset = null;
+
+            IndexComponent.ForRead offsetsComponent = perSSTableComponents.get(IndexComponentType.OFFSETS_VALUES);
+            IndexComponent.ForRead tokensComponent = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES);
+
             try
             {
-                this.perSSTableComponents = perSSTableComponents;
-                this.metadata = MetadataSource.loadMetadata(perSSTableComponents);
+                MetadataSource metadata = MetadataSource.loadMetadata(perSSTableComponents);
 
-                IndexComponent.ForRead offsetsComponent = perSSTableComponents.get(IndexComponentType.OFFSETS_VALUES);
-                IndexComponent.ForRead tokensComponent = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES);
+                NumericValuesMeta offsetsMeta = new NumericValuesMeta(metadata.get(offsetsComponent));
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadata.get(tokensComponent));
+                this.count = tokensMeta.valueCount;
 
-                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(offsetsComponent));
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(tokensComponent));
-
-                count = tokensMeta.valueCount;
                 token = tokensComponent.createFileHandle();
                 offset = offsetsComponent.createFileHandle();
 
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
                 this.offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta);
-                this.partitioner = sstable.metadata().partitioner;
-                this.sstable = sstable;
-                this.primaryKeyFactory = primaryKeyFactory;
-                this.sstableId = sstable.getId();
             }
             catch (Throwable t)
             {
                 throw Throwables.unchecked(Throwables.close(t, token, offset));
             }
+            this.perSSTableComponents = perSSTableComponents;
+            this.token = token;
+            this.offset = offset;
+            this.partitioner = sstable.metadata().partitioner;
+            this.sstable = sstable;
+            this.primaryKeyFactory = primaryKeyFactory;
+            this.sstableId = sstable.getId();
         }
 
         @Override
