@@ -219,6 +219,23 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource, CellSo
     long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup);
 
     /**
+     * Put variant for writes performed inside an already-started mutation on the same
+     * thread, e.g. legacy 2i applying to its index table's memtable from
+     * indexer.onInserted(), which runs under the base table's memtable-internal locks
+     * (CassandraIndex.insert -> CassandraTableWriteHandler.write, updateIndexes=false).
+     *
+     * Such writes must not wait for memtable pool room: parking there would hold the
+     * enclosing locks and deadlock the flush writeBarrier (CASSANDRA-21019). The memory
+     * limit was already enforced when the enclosing mutation started, we don't need to check again.
+     *
+     * Implementations without a room gate may keep this default.
+     */
+    default long putNested(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    {
+        return put(update, indexer, opGroup);
+    }
+
+    /**
      * Get the partition for the specified key. Returns null if no such partition is present.
      */
     Partition getPartition(DecoratedKey key);
