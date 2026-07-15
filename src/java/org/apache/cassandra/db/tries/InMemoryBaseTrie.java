@@ -34,7 +34,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /// Base class for mutable in-memory tries, providing the common infrastructure for plain, range and deletion-aware
 /// in-memory tries.
-public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
+public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> extends InMemoryReadTrie<T> implements BaseTrie<T, C, Q>
 {
     // See the trie format description in InMemoryReadTrie.
 
@@ -971,9 +971,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             return data[stackDepth * STATE_SIZE + 4];
         }
 
-        protected final InMemoryBaseTrie<T> trie;
+        protected final InMemoryBaseTrie<T, ?, ?> trie;
 
-        ApplyState(InMemoryBaseTrie<T> trie)
+        ApplyState(InMemoryBaseTrie<T, ?, ?> trie)
         {
             this.trie = trie;
         }
@@ -1349,7 +1349,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             return sb.toString();
         }
 
-        public InMemoryBaseTrie<T> trie()
+        public InMemoryBaseTrie<T, ?, ?> trie()
         {
             return trie;
         }
