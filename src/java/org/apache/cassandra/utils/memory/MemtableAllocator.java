@@ -75,6 +75,18 @@ public abstract class MemtableAllocator
         return offHeap;
     }
 
+    /**
+     * Enforce the memtable memory limits once, before a mutation starts.
+     * 
+     * Called by AbstractAllocatorMemtable.put() before a mutation starts, prior to any
+     * memtable-internal locks; individual allocations no longer wait for room.
+     */
+    public void awaitRoomToStart(OpOrder.Group opGroup)
+    {
+        onHeap.awaitRoom(opGroup);
+        offHeap.awaitRoom(opGroup);
+    }
+
     public long unusedReservedOnHeapMemory()
     {
         return 0; // only slabbed allocators would have non-zero here
@@ -170,36 +182,53 @@ public abstract class MemtableAllocator
                 allocate(size, opGroup);
         }
 
-        // allocate memory in the tracker, and mark ourselves as owning it
+        // account memory in the tracker, and mark ourselves as owning it
         public void allocate(long size, OpOrder.Group opGroup)
         {
             assert size >= 0;
 
+            // CASSANDRA-21019: individual allocations only track usage (which still drives
+            // cleaner/flush triggering via maybeClean); the memory limit is enforced once,
+            // in awaitRoom(), before a mutation starts. Blocking here mid-mutation,
+            // potentially while holding memtable-internal locks such as TrieMemtable's
+            // shard write lock, can deadlock the flush writeBarrier: a pre-barrier
+            // writer queued behind such a lock cannot be released by Barrier.markBlocking(),
+            // which only reaches threads parked in this allocator. Letting a started
+            // mutation run to completion also retains less memory than parking it with a
+            // partial copy already written and locks held.
+            allocated(size);
+        }
+
+        /**
+         * Wait, if necessary, until the parent pool is below its limit, without reserving
+         * any memory.
+         * 
+         * This is the single point at which the memory limit
+         * pauses writes, memtables call it before starting to apply a mutation, before
+         * any internal locks are taken. Groups marked blocking by Barrier.markBlocking()
+         * skip or are released from this wait, exactly as they were from allocate(), so a
+         * flush can always drain the ops its barrier awaits.
+         */
+        public void awaitRoom(OpOrder.Group opGroup)
+        {
+            // A pool with no limit configured is never allocated from and never signalled
+            // (e.g. the off-heap pool under heap_buffers / unslabbed_heap_buffers, both
+            // created with an off-heap limit of 0)
+            if (parent.limit <= 0)
+                return;
+
             while (true)
             {
-                if (parent.tryAllocate(size))
-                {
-                    acquired(size);
+                if (parent.belowLimit() || opGroup.isBlocking())
                     return;
-                }
-                if (opGroup.isBlocking())
-                {
-                    allocated(size);
-                    return;
-                }
+
                 WaitQueue.Signal signal = opGroup.isBlockingSignal(parent.hasRoom().register(parent.markMemoryBlockedOnAllocating()));
-                boolean allocated = parent.tryAllocate(size);
-                if (allocated || opGroup.isBlocking())
+                if (parent.belowLimit() || opGroup.isBlocking())
                 {
                     signal.cancel();
-                    if (allocated) // if we allocated, take ownership
-                        acquired(size);
-                    else // otherwise we're blocking so we're permitted to overshoot our constraints, to just allocate without blocking
-                        allocated(size);
                     return;
                 }
-                else
-                    signal.awaitUninterruptibly();
+                signal.awaitUninterruptibly();
             }
         }
 
@@ -211,24 +240,6 @@ public abstract class MemtableAllocator
         private void allocated(long size)
         {
             parent.allocated(size);
-            ownsUpdater.addAndGet(this, size);
-
-            if (state == LifeCycle.DISCARDING)
-            {
-                if (logger.isTraceEnabled())
-                    logger.trace("Allocated {} bytes whilst discarding", size);
-                updateReclaiming();
-            }
-        }
-
-        /**
-         * Retroactively mark an amount acquired in the tracker, and owned by us. If the state is discarding,
-         * then also update reclaiming since the flush operation is waiting at the barrier for in-flight writes,
-         * and it will flush this memory too.
-         */
-        private void acquired(long size)
-        {
-            parent.acquired();
             ownsUpdater.addAndGet(this, size);
 
             if (state == LifeCycle.DISCARDING)
