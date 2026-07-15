@@ -622,7 +622,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         }
     }
 
-    public static <T> File write(Trie<T> trie, boolean isOrdered, DataSerializer<T> serializer, File file)
+    public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file)
     {
         try (SequentialWriter writer = new SequentialWriter(file))
         {

@@ -29,28 +29,14 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.io.util.RandomAccessReader.DEFAULT_BUFFER_SIZE;
 
-public class OnDiskTrie<T> implements Trie<T>, Closeable
+public abstract class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>> implements Trie<T>, Closeable
 {
-    final Rebufferer rebufferer;
-    final OnDiskCursor.DataDeserializer<T> deserializer;
-    final ByteComparable.Version byteComparableVersion;
     final boolean isOrdered;
-    final long root;
 
     public OnDiskTrie(Rebufferer rebufferer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
     {
-        this.rebufferer = rebufferer;
-        this.deserializer = deserializer;
-        this.byteComparableVersion = byteComparableVersion;
+        super(rebufferer, deserializer, byteComparableVersion, root);
         this.isOrdered = isOrdered;
-        this.root = root;
-    }
-
-    @Override
-    public void close()
-    {
-        // Cursors aren't closeable. User must control that they are no longer in use.
-        rebufferer.closeReader();
     }
 
     @Override
@@ -62,32 +48,19 @@ public class OnDiskTrie<T> implements Trie<T>, Closeable
             return new Cursor.Empty<>(direction, byteComparableVersion);
     }
 
-
-    private static class WithOwnChannel<T> extends OnDiskTrie<T>
+    static class WithoutChannel<T> extends OnDiskTrie<T> implements OnDiskBaseTrie.WithoutChannel
     {
-        public WithOwnChannel(Rebufferer rebufferer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version version, boolean isOrdered, long root)
+        public WithoutChannel(Rebufferer rebufferer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
         {
-            super(rebufferer, deserializer, version, isOrdered, root);
+            super(rebufferer, deserializer, byteComparableVersion, isOrdered, root);
         }
+    }
 
-        @Override
-        public void close()
+    static class WithOwnChannel<T> extends OnDiskTrie<T> implements OnDiskBaseTrie.WithOwnChannel
+    {
+        public WithOwnChannel(Rebufferer rebufferer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
         {
-            try
-            {
-                super.close();
-            }
-            finally
-            {
-                try
-                {
-                    rebufferer.close();
-                }
-                finally
-                {
-                    rebufferer.channel().close();
-                }
-            }
+            super(rebufferer, deserializer, byteComparableVersion, isOrdered, root);
         }
     }
 
