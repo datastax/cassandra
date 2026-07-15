@@ -34,8 +34,10 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
@@ -164,6 +166,34 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         return estimatedAverageRowSize.rowSize;
     }
     
+    /**
+     * CASSANDRA-21019: the memory limit is enforced once here, before a mutation starts
+     * and before any memtable-internal locks are taken; once started, a mutation runs to
+     * completion and individual allocations only track usage. Implemented here so every
+     * allocator-backed memtable (TrieMemtable, TrieMemtableStage1, SkipListMemtable, and
+     * future implementations) gets the gate; subclasses implement performPut().
+     */
+    @Override
+    public final long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    {
+        allocator.awaitRoomToStart(opGroup);
+        return performPut(update, indexer, opGroup);
+    }
+
+    /**
+     * CASSANDRA-21019: nested writes skip the room gate, as the enclosing mutation was
+     * gated when it started. (waiting for room here would run under the base table's
+     * memtable-internal locks where Barrier.markBlocking() cannot release a queued
+     * pre-barrier writer)
+     */
+    @Override
+    public final long putNested(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    {
+        return performPut(update, indexer, opGroup);
+    }
+
+    protected abstract long performPut(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup);
+
     @Override
     public boolean shouldSwitch(ColumnFamilyStore.FlushReason reason)
     {
