@@ -3,7 +3,7 @@
 - [ ] Make sure there is a PR and ticket in the CNDB project updating the Converged Cassandra version
 - [ ] Use `NoSpamLogger` for log lines that may appear frequently in the logs
 - [ ] Verify test results on Butler
-- [ ] Test coverage for new/modified code is > 80%, check at https://sonarcloud.io/summary/new_code?id=cassandra-stargazer&pullRequest={{PR_NUMBER}}
+- [ ] Test coverage for new/modified code is > 80%, check manually at [SonarCloud page](https://sonarcloud.io/summary/new_code?id=cassandra-stargazer&pullRequest={{PR_NUMBER}})
 - [ ] Proper code formatting
 - [ ] Proper title for each commit staring with the project-issue number, like CNDB-1234
 - [ ] Each commit has a meaningful description
