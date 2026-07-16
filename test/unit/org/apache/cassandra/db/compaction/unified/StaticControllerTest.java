@@ -530,7 +530,7 @@ public class StaticControllerTest extends ControllerTest
         org.apache.cassandra.db.DiskBoundaries diskBoundaries = Mockito.mock(org.apache.cassandra.db.DiskBoundaries.class);
         when(diskBoundaries.getNumBoundaries()).thenReturn(1);
 
-        ArenaSelector selector = new ArenaSelector(controller, diskBoundaries);
+        ArenaSelector selector = new ArenaSelector(controller, diskBoundaries).withTimeBuckets(nowUs);
 
         // Define SSTables with different timestamps:
         // Recent 1: 2 minutes old (same UNTIL 10m bucket: 100h 2m - 2m = 100h)

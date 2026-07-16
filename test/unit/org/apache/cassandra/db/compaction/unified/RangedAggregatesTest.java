@@ -93,6 +93,11 @@ public class RangedAggregatesTest extends ShardingTestBase
         Controller mockController = Mockito.mock(Controller.class);
         Mockito.when(mockController.getNumShards(Mockito.anyDouble())).thenReturn(numShards);
         Mockito.when(mockController.parallelizeOutputShards()).thenReturn(true);
+        Mockito.when(mockController.getScalingParameter(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
+        Mockito.when(mockController.getFanout(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
+        Mockito.when(mockController.getThreshold(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
+        Mockito.when(mockController.getMaxLevelDensity(Mockito.anyInt(), Mockito.anyDouble(), Mockito.any())).thenCallRealMethod();
+        Mockito.when(mockController.getBaseSstableSize(Mockito.anyInt(), Mockito.anyDouble())).thenCallRealMethod();
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(new CompactionStrategyFactory(cfs), mockController);
         ShardManager shardManager = strategy.getShardManager();

@@ -78,6 +78,17 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(realm.getMaximumCompactionThreshold()).thenReturn(maxCompactionThreshold);
     }
 
+    private Controller mockController()
+    {
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getScalingParameter(anyInt(), Mockito.any())).thenCallRealMethod();
+        when(controller.getFanout(anyInt(), Mockito.any())).thenCallRealMethod();
+        when(controller.getThreshold(anyInt(), Mockito.any())).thenCallRealMethod();
+        when(controller.getMaxLevelDensity(anyInt(), anyDouble(), Mockito.any())).thenCallRealMethod();
+        when(controller.getBaseSstableSize(anyInt(), anyDouble())).thenCallRealMethod();
+        return controller;
+    }
+
     /**
      * Creates 5 buckets with T sorted runs in each using W = 2 and o = 1 (the default)
      */
@@ -90,7 +101,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         final long minSstableSizeBytes = 2L << 20; // 2 MB
         final int numBuckets = 5;
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getScalingParameter(anyInt())).thenReturn(W);
         when(controller.getFanout(anyInt())).thenReturn(F);
         when(controller.getThreshold(anyInt())).thenReturn(T);
@@ -155,7 +166,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         int m = 2; // m = 2 MB
         long minSize = m << 20; // MB to bytes
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getScalingParameter(anyInt())).thenReturn(W);
         when(controller.getFanout(anyInt())).thenReturn(F);
         when(controller.getThreshold(anyInt())).thenReturn(T);
