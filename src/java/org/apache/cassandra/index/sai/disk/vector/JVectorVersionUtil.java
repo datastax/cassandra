@@ -21,11 +21,12 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 
 public class JVectorVersionUtil
 {
-    /**
-     * Whether to fuse quantized vectors into the graph when writing indexes, assuming all other conditions are met.
-     * Variables are volatile to allow for changing in unit tests. They are only accessed on flush and compaction,
+    /*
+     * Some attributes are volatile to allow for changing in unit tests. Thery are only accessed on flush and compaction,
      * so their access is infrequent.
      */
+
+    /** Whether to fuse quantized vectors into the graph when writing indexes, assuming all other conditions are met. */
     public static volatile boolean ENABLE_FUSED = CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getBoolean();
     public static volatile boolean ENABLE_NVQ = CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getBoolean();
     public static final int NUM_SUB_VECTORS = CassandraRelevantProperties.SAI_VECTOR_NVQ_NUM_SUB_VECTORS.getInt();
@@ -53,6 +54,7 @@ public class JVectorVersionUtil
      * does not take into account whether the graph has enough information to build a quantization, as that depends on
      * external factors.
      * <p>
+     * FusedPQ is not supported in versions before FA, so it is not enabled regardless of any config.
      * For version FA, FusedPQ is always enabled regardless of {@code ENABLE_FUSED}.
      * For version FB and later, FusedPQ is opt-in via {@code cassandra.sai.vector.enable_fused}.
      *

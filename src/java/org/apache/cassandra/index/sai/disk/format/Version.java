@@ -76,7 +76,7 @@ public class Version implements Comparable<Version>
     public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
     // total terms count serialization in index metadata, enables ANN_USE_SYNTHETIC_SCORE by default
     public static final Version ED = new Version("ed", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ed"));
-    // jvector file format version 6 (skipped 5)
+    // jvector file format version 6 (skipped 5). FusedPQ is always enabled regardless of cassandra.sai.vector.enable_fused. cassandra.sai.vector.enable_fused is ignored
     public static final Version FA = new Version("fa", V8OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "fa"));
     // FB format: same jvector file format version 6 as FA, but FusedPQ is opt-in via cassandra.sai.vector.enable_fused
     public static final Version FB = new Version("fb", V8OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "fb"));
