@@ -149,6 +149,22 @@ public interface GuardrailsMBean
     void setStorageAttachedIndexesTotalThreshold(int warn, int fail);
 
     /**
+     * @return The threshold to warn when creating more trusted custom indexes per table than threshold. -1 means disabled.
+     */
+    int getTrustedIndexesPerTableWarnThreshold();
+
+    /**
+     * @return The threshold to prevent creating more trusted custom indexes per table than threshold. -1 means disabled.
+     */
+    int getTrustedIndexesPerTableFailThreshold();
+
+    /**
+     * @param warn The threshold to warn when creating more trusted custom indexes per table than threshold. -1 means disabled.
+     * @param fail The threshold to prevent creating more trusted custom indexes per table than threshold. -1 means disabled.
+     */
+    void setTrustedIndexesPerTableThreshold(int warn, int fail);
+
+    /**
      * @return The threshold to warn when creating more materialized views per table than threshold.
      * -1 means disabled.
      */

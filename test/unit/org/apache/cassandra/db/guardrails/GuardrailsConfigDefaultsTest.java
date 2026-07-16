@@ -131,7 +131,7 @@ public class GuardrailsConfigDefaultsTest
 
     private void verifyFeatureDefaults(Config config, ProfileType profileType)
     {
-        assertEquals("secondary_indexes_enabled", profileType != ProfileType.HCD, config.secondary_indexes_enabled);
+        assertEquals("secondary_indexes_enabled", true, config.secondary_indexes_enabled);
         assertEquals("sasi_indexes_enabled", false, config.sasi_indexes_enabled);
         assertEquals("materialized_views_enabled", profileType != ProfileType.HCD, config.materialized_views_enabled);
     }
@@ -186,6 +186,10 @@ public class GuardrailsConfigDefaultsTest
         // SAI indexes guardrails
         assertEquals("sai_indexes_per_table_fail_threshold", GuardrailsOptions.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, guardrails.getStorageAttachedIndexesPerTableFailThreshold());
         assertEquals("sai_indexes_total_fail_threshold", GuardrailsOptions.DEFAULT_INDEXES_TOTAL_THRESHOLD, guardrails.getStorageAttachedIndexesTotalFailThreshold());
+
+        // Trusted custom indexes guardrail
+        assertEquals("trusted_indexes_per_table_warn_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getTrustedIndexesPerTableWarnThreshold());
+        assertEquals("trusted_indexes_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getTrustedIndexesPerTableFailThreshold());
 
         // Offset guardrails
         assertEquals("offset_rows_warn_threshold", 10000, guardrails.getOffsetRowsWarnThreshold());
@@ -250,6 +254,10 @@ public class GuardrailsConfigDefaultsTest
         assertEquals("sai_indexes_per_table_fail_threshold", GuardrailsOptions.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, guardrails.getStorageAttachedIndexesPerTableFailThreshold());
         assertEquals("sai_indexes_total_fail_threshold", GuardrailsOptions.DEFAULT_INDEXES_TOTAL_THRESHOLD, guardrails.getStorageAttachedIndexesTotalFailThreshold());
 
+        // Trusted custom indexes guardrail
+        assertEquals("trusted_indexes_per_table_warn_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getTrustedIndexesPerTableWarnThreshold());
+        assertEquals("trusted_indexes_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getTrustedIndexesPerTableFailThreshold());
+
         // Offset guardrails
         assertEquals("offset_rows_warn_threshold", 10000, guardrails.getOffsetRowsWarnThreshold());
         assertEquals("offset_rows_fail_threshold", 20000, guardrails.getOffsetRowsFailThreshold());
@@ -310,6 +318,10 @@ public class GuardrailsConfigDefaultsTest
         // SAI indexes guardrails
         assertEquals("sai_indexes_per_table_fail_threshold", GuardrailsOptions.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, guardrails.getStorageAttachedIndexesPerTableFailThreshold());
         assertEquals("sai_indexes_total_fail_threshold", GuardrailsOptions.DEFAULT_INDEXES_TOTAL_THRESHOLD, guardrails.getStorageAttachedIndexesTotalFailThreshold());
+
+        // Trusted custom indexes guardrail
+        assertEquals("trusted_indexes_per_table_warn_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getTrustedIndexesPerTableWarnThreshold());
+        assertEquals("trusted_indexes_per_table_fail_threshold", GuardrailsOptions.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, guardrails.getTrustedIndexesPerTableFailThreshold());
 
         // Offset guardrails
         assertEquals("offset_rows_warn_threshold", 10000, guardrails.getOffsetRowsWarnThreshold());

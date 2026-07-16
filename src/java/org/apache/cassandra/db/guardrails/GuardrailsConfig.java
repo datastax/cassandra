@@ -125,6 +125,16 @@ public interface GuardrailsConfig
     int getStorageAttachedIndexesTotalFailThreshold();
 
     /**
+     * @return The threshold to warn when creating more trusted custom indexes per table than threshold.
+     */
+    int getTrustedIndexesPerTableWarnThreshold();
+
+    /**
+     * @return The threshold to fail when creating more trusted custom indexes per table than threshold.
+     */
+    int getTrustedIndexesPerTableFailThreshold();
+
+    /**
      * @return The threshold to warn when creating more materialized views per table than threshold.
      */
     int getMaterializedViewsPerTableWarnThreshold();
