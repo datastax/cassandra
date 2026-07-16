@@ -99,7 +99,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     private final Controller controller;
 
-    private volatile ArenaSelector currentArenaSelector;
+    private volatile ArenaSelector baseArenaSelector;
     private volatile ShardManager currentShardManager;
 
     private long lastExpiredCheck;
@@ -225,7 +225,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     public synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates(Collection<? extends CompactionSSTable> sstables)
     {
-        maybeUpdateSelector(); // must be called before computing compaction arenas
+        maybeUpdateBaseSelector(); // must be called before computing compaction arenas
         return getMaximalAggregatesWithArenas(getCompactionArenas(sstables, UnifiedCompactionStrategy::isSuitableForCompaction));
     }
 
@@ -817,14 +817,14 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return new ExpirationTask(realm, transaction);
     }
 
-    private void maybeUpdateSelector()
+    private void maybeUpdateBaseSelector()
     {
-        if (currentArenaSelector != null && !currentArenaSelector.diskBoundaries.isOutOfDate())
+        if (baseArenaSelector != null && !baseArenaSelector.diskBoundaries.isOutOfDate())
             return; // the disk boundaries (and thus the local ranges too) have not changed since the last time we calculated
 
         synchronized (this)
         {
-            if (currentArenaSelector != null && !currentArenaSelector.diskBoundaries.isOutOfDate())
+            if (baseArenaSelector != null && !baseArenaSelector.diskBoundaries.isOutOfDate())
                 return; // another thread beat us to the update
 
             DiskBoundaries currentBoundaries = realm.getDiskBoundaries();
@@ -832,7 +832,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             currentShardManager = maybeShardManager != null
                            ? maybeShardManager
                            : ShardManager.create(currentBoundaries, realm.getKeyspaceReplicationStrategy(), controller.isReplicaAware());
-            currentArenaSelector = new ArenaSelector(controller, currentBoundaries);
+            baseArenaSelector = new ArenaSelector(controller, currentBoundaries);
             // Note: this can just as well be done without the synchronization (races would be benign, just doing some
             // redundant work). For the current usages of this blocking is fine and expected to perform no worse.
         }
@@ -841,14 +841,22 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// Get the current shard manager. Used internally, in tests and by CNDB.
     public ShardManager getShardManager()
     {
-        maybeUpdateSelector();
+        maybeUpdateBaseSelector();
         return currentShardManager;
     }
 
     ArenaSelector getArenaSelector()
     {
-        maybeUpdateSelector();
-        return new ArenaSelector(controller, currentArenaSelector.diskBoundaries);
+        maybeUpdateBaseSelector();
+        MonotonicClock clock = controller.clock != null ? controller.clock : MonotonicClock.preciseTime;
+        long nowUs = java.util.concurrent.TimeUnit.MILLISECONDS.toMicros(clock.translate().toMillisSinceEpoch(clock.now()));
+        return getArenaSelector(nowUs);
+    }
+
+    ArenaSelector getArenaSelector(long nowUs)
+    {
+        maybeUpdateBaseSelector();
+        return baseArenaSelector.withTimeBuckets(nowUs);
     }
 
     private CompactionLimits getCurrentLimits(int maxConcurrentCompactions)
@@ -995,7 +1003,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                        int maxConcurrentCompactions)
     {
         final CompactionLimits limits = getCurrentLimits(maxConcurrentCompactions);
-        maybeUpdateSelector();
+        maybeUpdateBaseSelector();
         return updateLevelCountWithParentAndGetSelection(limits, new ArrayList<>(aggregates));
     }
 
@@ -1029,7 +1037,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     private List<CompactionAggregate.UnifiedAggregate> getPendingCompactionAggregates(long spaceAvailable)
     {
-        maybeUpdateSelector();
+        maybeUpdateBaseSelector();
 
         List<CompactionAggregate.UnifiedAggregate> pending = new ArrayList<>();
 
@@ -1286,11 +1294,11 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         long nowUs = java.util.concurrent.TimeUnit.MILLISECONDS.toMicros(clock.translate().toMillisSinceEpoch(clock.now()));
         // Copy to avoid race condition
         var currentShardManager = getShardManager();
-        Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter);
+        ArenaSelector arenaSelector = getArenaSelector(nowUs);
+        Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter, arenaSelector);
         Map<Arena, List<Level>> ret = new LinkedHashMap<>(); // should preserve the order of arenas
 
         List<TimeBucket> timeBuckets = controller.getTimeBuckets();
-        ArenaSelector arenaSelector = getArenaSelector();
 
         List<Arena> familyArenas = new ArrayList<>();
         for (Arena arena : arenas)
@@ -1344,6 +1352,20 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                         everyBaseMinDensity = Math.min(everyBaseMinDensity, currentShardManager.density(sstable));
                 }
             }
+
+            // Guard needed to avoid StringBuilder allocation and prettyPrintMemory calls when debug is off
+            if (logger.isDebugEnabled())
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.append("Time bucket densities for ").append(familyArenas.get(0).name());
+                for (int i = 0; i < timeBuckets.size(); i++)
+                {
+                    if (timeBuckets.get(i).mode == TimeBucket.Mode.UNTIL)
+                        sb.append(", ").append(timeBuckets.get(i)).append(": maxDensity=").append(FBUtilities.prettyPrintMemory((long) untilMaxDensity[i]));
+                }
+                sb.append(", base: minDensity=").append(everyBaseMinDensity == Double.MAX_VALUE ? "none" : FBUtilities.prettyPrintMemory((long) everyBaseMinDensity));
+                logger.debug(sb.toString());
+            }
         }
 
         for (Arena arena : familyArenas)
@@ -1388,13 +1410,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             }
 
             double adjustedDensity = Math.max(youngerMaxDensity, olderMinDensity);
-            double baseSize = adjustedDensity > 0
-                              ? controller.getBaseSstableSize(bucket != null ? controller.getFanout(0, bucket) : controller.getFanout(0), adjustedDensity)
-                              : controller.getBaseSstableSize(controller.getFanout(0));
+            double defaultBaseSize = controller.getBaseSstableSize(controller.getFanout(0));
+            double baseSize = controller.getBaseSstableSize(controller.getFanout(0, bucket), adjustedDensity);
 
-            double maxSize = bucket != null
-                             ? controller.getMaxLevelDensity(0, baseSize / currentShardManager.localSpaceCoverage(), bucket)
-                             : controller.getMaxLevelDensity(0, baseSize / currentShardManager.localSpaceCoverage());
+            // Guard needed to avoid prettyPrintMemory calls when debug is off or no adjustment occurs
+            if (baseSize > defaultBaseSize && logger.isDebugEnabled())
+                logger.debug("Dynamic base size adjustment for arena {}: default={}, adjusted={}, youngerMaxDensity={}, olderMinDensity={}",
+                             arena, FBUtilities.prettyPrintMemory((long) defaultBaseSize),
+                             FBUtilities.prettyPrintMemory((long) baseSize),
+                             FBUtilities.prettyPrintMemory((long) youngerMaxDensity),
+                             FBUtilities.prettyPrintMemory((long) olderMinDensity));
+
+            double maxSize = controller.getMaxLevelDensity(0, baseSize / currentShardManager.localSpaceCoverage(), bucket);
             int index = 0;
             Level level = new Level(controller, bucket, index, 0, maxSize);
             for (SSTableWithDensity candidateWithDensity : ssTableWithDensityList)
@@ -1414,9 +1441,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 {
                     ++index;
                     double minSize = maxSize;
-                    maxSize = bucket != null
-                              ? controller.getMaxLevelDensity(index, minSize, bucket)
-                              : controller.getMaxLevelDensity(index, minSize);
+                    maxSize = controller.getMaxLevelDensity(index, minSize, bucket);
                     level = new Level(controller, bucket, index, minSize, maxSize);
                     if (size < level.max)
                     {
@@ -1552,6 +1577,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     {
         final List<CompactionSSTable> sstables;
         final ArenaSelector selector;
+        private String name;
 
         Arena(ArenaSelector selector)
         {
@@ -1566,8 +1592,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
         public String name()
         {
-            CompactionSSTable t = sstables.get(0);
-            return selector.name(t);
+            if (name == null)
+            {
+                CompactionSSTable t = sstables.get(0);
+                name = selector.name(t);
+            }
+            return name;
         }
 
         @Override
@@ -1636,9 +1666,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         Level(Controller controller, @Nullable TimeBucket bucket, int index, double min, double max)
         {
             this(index,
-                 bucket != null ? controller.getScalingParameter(index, bucket) : controller.getScalingParameter(index),
-                 bucket != null ? controller.getFanout(index, bucket) : controller.getFanout(index),
-                 bucket != null ? controller.getThreshold(index, bucket) : controller.getThreshold(index),
+                 controller.getScalingParameter(index, bucket),
+                 controller.getFanout(index, bucket),
+                 controller.getThreshold(index, bucket),
                  controller.getSurvivalFactor(index),
                  min,
                  max,
@@ -1940,7 +1970,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             // number of sstables. This is not always true (we may, e.g. select alternately from different overlap
             // sections if the structure is complex enough), but is good enough heuristic that results in usable
             // compaction sets.
-            else if (count <= fanout * (level.bucket != null ? controller.getFanout(index + 1, level.bucket) : controller.getFanout(index + 1)) || maxSSTablesToCompact == fanout)
+            else if (count <= fanout * controller.getFanout(index + 1, level.bucket) || maxSSTablesToCompact == fanout)
             {
                 // Compaction is a bit late, but not enough to jump levels via layout compactions. We need a special
                 // case to cap compaction pick at maxSSTablesToCompact.
@@ -2020,8 +2050,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (step > maxOverlap || step > maxSSTablesToCompact)
                 return 0;
 
-            int w = this.level.bucket != null ? controller.getScalingParameter(level, this.level.bucket) : controller.getScalingParameter(level);
-            int f = this.level.bucket != null ? controller.getFanout(level, this.level.bucket) : controller.getFanout(level);
+            int w = controller.getScalingParameter(level, this.level.bucket);
+            int f = controller.getFanout(level, this.level.bucket);
             int pos = layoutCompactions(controller,
                                         level + 1,
                                         step * f,
