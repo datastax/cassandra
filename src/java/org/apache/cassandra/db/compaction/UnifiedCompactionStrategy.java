@@ -847,7 +847,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     ArenaSelector getArenaSelector()
     {
-        maybeUpdateBaseSelector();
         MonotonicClock clock = controller.clock != null ? controller.clock : MonotonicClock.preciseTime;
         long nowUs = java.util.concurrent.TimeUnit.MILLISECONDS.toMicros(clock.translate().toMillisSinceEpoch(clock.now()));
         return getArenaSelector(nowUs);
