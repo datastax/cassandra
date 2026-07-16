@@ -424,6 +424,11 @@ compaction thread count by default. Using a jobs of 0 will let the compaction us
 as quickly as possible, but this will prevent other compaction operations from running until it completes and thus
 should be used with caution, only while the database is known to not receive any writes.
 
+When [time-driven levels](#time-driven-levels) are configured, major compaction applies **within** each time bucket
+independently. SSTables from different time buckets are never compacted together, even during a
+user-triggered major compaction (e.g. via `nodetool compact`). Each bucket's SSTables are
+major-compacted separately, producing distinct output files per bucket.
+
 ## Time-driven levels
 
 To support time-partitioned workloads (similar to DateTieredCompactionStrategy or
@@ -584,7 +589,7 @@ UCS accepts these compaction strategy parameters:
   `until <duration>` or `every <duration>`, separated by semicolons. For example,
   `T4 until 1d; L1000000 every 1d` configures tiered compaction ($T4$) for data younger than 1 day,
   and repeating 1-day windows with aggressive leveling ($L1000000$) for older data. See the
-  **Time-driven levels** section below for more details.
+  [Time-driven levels](#time-driven-levels) section above for more details.
 * `target_sstable_size` The target sstable size $t$, specified as a human-friendly size in bytes (e.g. 100 MiB =
   $100\cdot 2^{20}$ B or (10 MB = 10,000,000 B)). The strategy will split data in shards that aim to produce sstables
   of size between $t / \sqrt 2$ and $t \cdot \sqrt 2$.  

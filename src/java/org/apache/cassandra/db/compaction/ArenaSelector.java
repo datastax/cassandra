@@ -21,9 +21,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -56,9 +53,16 @@ import org.apache.cassandra.io.sstable.Component;
  *       (aligned to multiples of the window duration since the epoch).</li>
  * </ul>
  *
- * <p>The current wall-clock time for {@link TimeBucket.Mode#UNTIL} evaluation is captured once at
- * construction time, so that the arena boundaries remain stable during a single compaction planning
- * cycle.
+ * <p>The base selector (constructed via {@link #ArenaSelector(Controller, DiskBoundaries)}) contains only
+ * the permanent equivalence classes (repair status and disk index). It is stored as a long-lived field in
+ * {@link UnifiedCompactionStrategy} and rebuilt only when disk boundaries change. To obtain a per-cycle
+ * selector that also includes time-bucket splitting, call {@link #withTimeBuckets(long)} which returns a
+ * new selector with a {@code TimeEquivClassSplitter} appended, using a consistent wall-clock snapshot.
+ *
+ * <p><b>Major compaction scope:</b> Because time-driven arenas are treated as independent compaction
+ * units, major compaction applies <em>within</em> each time bucket. SSTables from different time
+ * buckets are never compacted together, even during a user-triggered major compaction. Each bucket's
+ * SSTables are major-compacted independently, producing separate output files per bucket.
  */
 public class ArenaSelector implements Comparator<CompactionSSTable>
 {
@@ -66,6 +70,11 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
     final Controller controller;
     final DiskBoundaries diskBoundaries;
 
+    /**
+     * Constructs a base selector with only permanent equivalence classes (repair status and disk index).
+     * This selector does not include time-bucket splitting; use {@link #withTimeBuckets(long)} to create
+     * a per-cycle selector that includes time-driven arena partitioning.
+     */
     public ArenaSelector(Controller controller, DiskBoundaries diskBoundaries)
     {
         this.controller = controller;
@@ -78,16 +87,38 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
         if (diskBoundaries.getNumBoundaries() > 1)
             ret.add(new DiskIndexEquivClassSplitter());
 
-        // Add time-based splitting when time-bucket definitions are present.
-        List<TimeBucket> timeBuckets = controller.getTimeBuckets();
-        if (!timeBuckets.isEmpty())
-        {
-            // Capture now() once so the 'each' thresholds are evaluated consistently within this cycle.
-            long nowUs = TimeUnit.MILLISECONDS.toMicros(controller.clock.translate().toMillisSinceEpoch(controller.clock.now()));
-            ret.add(new TimeEquivClassSplitter(timeBuckets, nowUs));
-        }
-
         classSplitters = ret.toArray(new EquivClassSplitter[0]);
+    }
+
+    /**
+     * Private constructor for creating a selector with an extended set of splitters (base + time buckets).
+     */
+    private ArenaSelector(Controller controller, DiskBoundaries diskBoundaries, EquivClassSplitter[] classSplitters)
+    {
+        this.controller = controller;
+        this.diskBoundaries = diskBoundaries;
+        this.classSplitters = classSplitters;
+    }
+
+    /**
+     * Returns a new {@code ArenaSelector} that includes time-bucket splitting in addition to the
+     * permanent equivalence classes. The returned selector captures the given wall-clock time for
+     * consistent {@link TimeBucket.Mode#UNTIL} evaluation within a single compaction planning cycle.
+     *
+     * <p>If no time buckets are configured, returns {@code this} (the base selector) unchanged.
+     *
+     * @param nowUs the current wall-clock time in microseconds since epoch, captured once per cycle
+     * @return a new selector with time-bucket splitting, or {@code this} if no time buckets are configured
+     */
+    public ArenaSelector withTimeBuckets(long nowUs)
+    {
+        List<TimeBucket> timeBuckets = controller.getTimeBuckets();
+        if (timeBuckets.isEmpty())
+            return this;
+
+        EquivClassSplitter[] extended = Arrays.copyOf(classSplitters, classSplitters.length + 1);
+        extended[classSplitters.length] = new TimeEquivClassSplitter(timeBuckets, nowUs);
+        return new ArenaSelector(controller, diskBoundaries, extended);
     }
 
     @Override
@@ -227,19 +258,10 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
          */
         private final long nowUs;
 
-        private final Function<CompactionSSTable, Long> computeTimeKeyRef;
-        private final Function<CompactionSSTable, String> computeNameRef;
-
-        /** Thread-safe caches to avoid redundant computations and logging during sorting and grouping. */
-        private final ConcurrentHashMap<CompactionSSTable, Long> keyCache = new ConcurrentHashMap<>();
-        private final ConcurrentHashMap<CompactionSSTable, String> nameCache = new ConcurrentHashMap<>();
-
         TimeEquivClassSplitter(List<TimeBucket> timeBuckets, long nowUs)
         {
             this.timeBuckets = timeBuckets;
             this.nowUs = nowUs;
-            this.computeTimeKeyRef = this::computeTimeKey;
-            this.computeNameRef = this::computeName;
             if (logger.isTraceEnabled())
             {
                 logger.trace("TimeEquivClassSplitter initialized with nowUs = {} (time={}), buckets = {}",
@@ -247,7 +269,7 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
             }
         }
 
-        private long computeTimeKey(CompactionSSTable sstable)
+        private long timeKey(CompactionSSTable sstable)
         {
             long minTimestampUs = sstable.getMinTimestamp();
 
@@ -291,18 +313,14 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
             return Long.MAX_VALUE;
         }
 
-        private long timeKey(CompactionSSTable sstable)
-        {
-            return keyCache.computeIfAbsent(sstable, computeTimeKeyRef);
-        }
-
         @Override
         public int compare(CompactionSSTable a, CompactionSSTable b)
         {
             return Long.compare(timeKey(a), timeKey(b));
         }
 
-        private String computeName(CompactionSSTable sstable)
+        @Override
+        public String name(CompactionSSTable sstable)
         {
             long minTimestampUs = sstable.getMinTimestamp();
             for (TimeBucket bucket : timeBuckets)
@@ -318,12 +336,6 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
                 }
             }
             return "base";
-        }
-
-        @Override
-        public String name(CompactionSSTable sstable)
-        {
-            return nameCache.computeIfAbsent(sstable, computeNameRef);
         }
     }
 }
