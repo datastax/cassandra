@@ -2059,6 +2059,12 @@ drop_compact_storage_enabled: false
 # sai_indexes_total_warn_threshold: -1
 # sai_indexes_total_fail_threshold: 100
 #
+# Guardrail to warn or fail when creating more trusted custom indexes (cassandra.trusted_index_implementations)
+# per table than threshold, counted per implementation class.
+# The two thresholds default to -1 to disable.
+# trusted_indexes_per_table_warn_threshold: -1
+# trusted_indexes_per_table_fail_threshold: -1
+#
 # Guardrail to warn or fail when creating more materialized views per table than threshold.
 # The two thresholds default to -1 to disable.
 # materialized_views_per_table_warn_threshold: -1

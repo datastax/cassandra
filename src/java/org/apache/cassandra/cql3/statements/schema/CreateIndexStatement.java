@@ -295,7 +295,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         {
             // mimic what IndexMetadata.validate(..) does
             if (attrs.isCustom)
-                FBUtilities.classForName(attrs.customClass, "custom indexer");
+                FBUtilities.classForName(IndexMetadata.expandAliases(attrs.customClass), "custom indexer");
             return false;
         }
         catch (ConfigurationException ex)
@@ -450,6 +450,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     {
         LEGACY(Guardrails.secondaryIndexesPerTable, null),
         SAI(Guardrails.saiIndexesPerTable, Guardrails.saiIndexesTotal),
+        TRUSTED(Guardrails.trustedIndexesPerTable, null),
         UNKNOWN(null, null);
 
         final Threshold perTableThreshold;
@@ -480,7 +481,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                 case "org.apache.cassandra.index.sai.StorageAttachedIndex":
                     return IndexGuardrails.SAI;
                 default:
-                    return IndexGuardrails.UNKNOWN;
+                    return IndexMetadata.isTrustedIndexImplementation(className) ? IndexGuardrails.TRUSTED : IndexGuardrails.UNKNOWN;
             }
         }
 
