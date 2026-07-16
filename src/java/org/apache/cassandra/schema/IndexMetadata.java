@@ -234,6 +234,7 @@ public final class IndexMetadata
 
             trustedIndexImplementations.add(className);
             indexNameAliases.put(simpleName.toLowerCase(), className);
+            logger.info("Registered a trusted secondary implementation {}", className);
         }
     }
 
