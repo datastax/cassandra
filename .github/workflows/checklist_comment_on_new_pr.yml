@@ -10,8 +10,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
       - name: Add comment
-        run:
-          gh pr comment $PRNUM --body-file .github/workflows/pr_checklist.md
+        run: |
+          sed "s/{{PR_NUMBER}}/$PRNUM/" .github/workflows/pr_checklist.md | gh pr comment $PRNUM --body-file -
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
