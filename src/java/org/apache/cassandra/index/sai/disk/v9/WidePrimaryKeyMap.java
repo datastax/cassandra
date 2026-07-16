@@ -72,9 +72,9 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         private final ClusteringComparator clusteringComparator;
         private final KeyLookup clusteringKeyReader;
         private final LongArray.Factory partitionToSizeReaderFactory;
-        private FileHandle clusteringKeyBlockOffsetsFile = null;
-        private FileHandle clustingingKeyBlocksFile = null;
-        private FileHandle partitionToSizeFile = null;
+        private final FileHandle clusteringKeyBlockOffsetsFile;
+        private final FileHandle clustingingKeyBlocksFile;
+        private final FileHandle partitionToSizeFile;
 
         public Factory(IndexComponents.ForRead perSSTableComponents,
                        ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory,
@@ -82,15 +82,17 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         {
             super(perSSTableComponents, primaryKeyFactory, sstable);
 
+            FileHandle clusteringKeyBlockOffsetsFile = null;
+            FileHandle clustingingKeyBlocksFile = null;
+            FileHandle partitionToSizeFile = null;
+
             try
             {
-                this.perSSTableComponents = perSSTableComponents;
-                this.clusteringKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle();
-                this.clustingingKeyBlocksFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle();
-                this.clusteringComparator = sstable.metadata().comparator;
+                clusteringKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle();
+                clustingingKeyBlocksFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle();
 
                 NumericValuesMeta partitionSizeMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_TO_SIZE)));
-                this.partitionToSizeFile = perSSTableComponents.get(IndexComponentType.PARTITION_TO_SIZE).createFileHandle();
+                partitionToSizeFile = perSSTableComponents.get(IndexComponentType.PARTITION_TO_SIZE).createFileHandle();
                 this.partitionToSizeReaderFactory = new BlockPackedReader(partitionToSizeFile, partitionSizeMeta);
 
                 NumericValuesMeta clusteringKeyBlockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)));
@@ -102,6 +104,12 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             {
                 throw Throwables.unchecked(Throwables.close(t, clusteringKeyBlockOffsetsFile, clustingingKeyBlocksFile, partitionToSizeFile));
             }
+            this.perSSTableComponents = perSSTableComponents;
+            this.clusteringComparator = sstable.metadata().comparator;
+
+            this.clusteringKeyBlockOffsetsFile = clusteringKeyBlockOffsetsFile;
+            this.clustingingKeyBlocksFile = clustingingKeyBlocksFile;
+            this.partitionToSizeFile = partitionToSizeFile;
         }
 
         @Override
