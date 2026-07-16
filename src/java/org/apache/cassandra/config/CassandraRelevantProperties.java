@@ -477,7 +477,7 @@ public enum CassandraRelevantProperties
      * Whether compaction should build vector indexes using a fused graph, i.e. a graph where the quantized vectors
      * are stored inline with the graph nodes (FusedPQ). This is an experimental feature that significantly increases
      * disk usage and should only be enabled where it makes sense.
-     * See: https://github.com/riptano/cndb/issues/17471
+     * See: <a href="https://github.com/riptano/cndb/issues/17471">CNDB-17471</a>
      * <p>
      * Note: for indexes using version FA (jvector file format version 6), FusedPQ is always enabled regardless
      * of this property. For version FB and later, this property controls whether FusedPQ is used.
