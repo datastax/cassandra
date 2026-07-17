@@ -53,7 +53,6 @@ import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryTrie;
@@ -77,28 +76,23 @@ import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
 
-import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
-
-/**
- * Previous TrieMemtable implementation, provided for two reasons:
- * <ul>
- * <li> to easily compare current and earlier implementations of the trie memtable
- * <li> to have an option to change a database back to the older implementation if we find a bug or a performance problem
- *   with the new code.
- *   </ul>
- * <p>
- * To switch a table to this version, use
- * <code><pre>
- *   ALTER TABLE ... WITH memtable = {'class': 'TrieMemtableStage1'}
- * </pre></code>
- * or add
- * <code><pre>
- *   memtable:
- *     class: TrieMemtableStage1
- * </pre></code>
- * in <code>cassandra.yaml</code> to switch a node to it as default.
- *
- */
+/// Previous TrieMemtable implementation, provided for two reasons:
+///
+///   -  to easily compare current and earlier implementations of the trie memtable
+///   -  to have an option to change a database back to the older implementation if we find a bug or a performance
+///      problem with the new code.
+///
+///
+/// To switch a table to this version, use
+/// ```
+///   ALTER TABLE ... WITH memtable = {'class': 'TrieMemtableStage1'}
+/// ```
+/// or add
+/// ```
+///   memtable:
+///     class: TrieMemtableStage1
+/// ```
+/// in `cassandra.yaml` to switch a node to it as default.
 public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtableStage1.class);
@@ -137,14 +131,6 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 
     @Unmetered
     private final TrieMemtableMetricsView metrics;
-
-    /**
-     * Keeps an estimate of the average row size in this memtable, computed from a small sample of rows.
-     * Because computing this estimate is potentially costly, as it requires iterating the rows,
-     * the estimate is updated only whenever the number of operations on the memtable increases significantly from the
-     * last update. This estimate is not very accurate but should be ok for planning or diagnostic purposes.
-     */
-    private volatile MemtableAverageRowSize estimatedAverageRowSize;
 
     // only to be used by init(), to setup the very first memtable for the cfs
     TrieMemtableStage1(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
@@ -291,30 +277,6 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         return shards.length;
     }
 
-    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
-    {
-        int total = 0;
-        for (MemtableUnfilteredPartitionIterator iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
-        {
-            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
-            {
-                Unfiltered uRow = it.next();
-                if (uRow.isRow())
-                    total++;
-            }
-        }
-
-        return total;
-    }
-
-    @Override
-    public long getEstimatedAverageRowSize()
-    {
-        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
-            estimatedAverageRowSize = new MemtableAverageRowSize(this);
-        return estimatedAverageRowSize.rowSize;
-    }
-
     @Override
     public UnfilteredRowIterator rowIterator(DecoratedKey key, Slices slices, ColumnFilter columnFilter, boolean reversed, SSTableReadsListener listener)
     {
@@ -406,13 +368,19 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
 
-        Trie<BTreePartitionData> subMap = mergedTrie.subtrie(left, includeStart, right, includeStop);
+        Trie<BTreePartitionData> subMap = mergedTrie.subtrie(toComparableBound(left, includeStart),
+                                                             toComparableBound(right, !includeStop));
 
         return new MemtableUnfilteredPartitionIterator(metadata(),
                                                        allocator.ensureOnHeap(),
                                                        subMap,
                                                        columnFilter,
                                                        dataRange);
+    }
+
+    private static ByteComparable toComparableBound(PartitionPosition position, boolean before)
+    {
+        return position == null || position.isMinimum() ? null : position.asComparableBound(before);
     }
 
     public Partition getPartition(DecoratedKey key)
@@ -445,7 +413,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 
     public FlushablePartitionSet<MemtablePartition> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
-        Trie<BTreePartitionData> toFlush = mergedTrie.subtrie(from, true, to, false);
+        Trie<BTreePartitionData> toFlush = mergedTrie.subtrie(toComparableBound(from, true), toComparableBound(to, true));
         long keySize = 0;
         int keyCount = 0;
 
@@ -530,9 +498,9 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         @VisibleForTesting
         final InMemoryTrie<BTreePartitionData> data;
 
-        RegularAndStaticColumns columns;
+        volatile RegularAndStaticColumns columns;
 
-        EncodingStats stats;
+        volatile EncodingStats stats;
 
         private final MemtableAllocator allocator;
 
@@ -575,42 +543,40 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
             }
             try
             {
+                // Add the initial trie size on the first operation. This technically isn't correct (other shards
+                // do take their memory share even if they are empty) but doing it during construction may cause
+                // the allocator to block while we are trying to flush a memtable and become a deadlock.
+                long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
+                long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
+                // Use the fast recursive put if we know the key is small enough to not cause a stack overflow.
                 try
                 {
-                    // Add the initial trie size on the first operation. This technically isn't correct (other shards
-                    // do take their memory share even if they are empty) but doing it during construction may cause
-                    // the allocator to block while we are trying to flush a memtable and become a deadlock.
-                    long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
-                    long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
-                    // Use the fast recursive put if we know the key is small enough to not cause a stack overflow.
-                    try
-                    {
-                        data.putSingleton(key,
-                                          BTreePartitionUpdate.asBTreeUpdate(update),
-                                          updater::mergePartitions,
-                                          key.getKeyLength() < MAX_RECURSIVE_KEY_LENGTH);
-                    }
-                    catch (TrieSpaceExhaustedException e)
-                    {
-                        // This should never really happen as a flush would be triggered long before this limit is reached.
-                        throw Throwables.propagate(e);
-                    }
+                    data.putSingleton(key,
+                                      BTreePartitionUpdate.asBTreeUpdate(update),
+                                      updater::mergePartitions,
+                                      key.getKeyLength() < MAX_RECURSIVE_KEY_LENGTH);
+                }
+                catch (TrieSpaceExhaustedException e)
+                {
+                    // This should never really happen as a flush would be triggered long before this limit is reached.
+                    throw Throwables.propagate(e);
+                }
+                finally
+                {
                     allocator.offHeap().adjust(data.usedSizeOffHeap() - offHeap, opGroup);
                     allocator.onHeap().adjust(data.usedSizeOnHeap() - onHeap, opGroup);
                     partitionCount += updater.partitionsAdded;
                 }
-                finally
-                {
-                    updateMinTimestamp(update.stats().minTimestamp);
-                    updateLiveDataSize(updater.dataSize);
-                    updateCurrentOperations(update.operationCount());
-
-                    columns = columns.mergeTo(update.columns());
-                    stats = stats.mergeWith(update.stats());
-                }
             }
             finally
             {
+                updateMinTimestamp(update.stats().minTimestamp);
+                updateLiveDataSize(updater.dataSize);
+                updateCurrentOperations(update.operationCount());
+
+                columns = columns.mergeTo(update.columns());
+                stats = stats.mergeWith(update.stats());
+
                 writeLock.unlock();
             }
             return updater.colUpdateTimeDelta;

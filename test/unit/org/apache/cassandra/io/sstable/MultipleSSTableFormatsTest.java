@@ -68,7 +68,7 @@ public class MultipleSSTableFormatsTest extends CQLTester
         DatabaseDescriptor.setSelectedSSTableFormat(savedSSTableFormat);
     }
 
-    private Map<Integer, Integer> createSSTables() 
+    private Map<Integer, Integer> createSSTables()
     {
         Map<Integer, Integer> content = Maps.newHashMap();
 

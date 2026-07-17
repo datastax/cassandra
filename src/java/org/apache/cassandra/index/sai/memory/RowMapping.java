@@ -22,6 +22,8 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
+import com.google.common.base.Predicates;
+
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
@@ -66,7 +68,8 @@ public class RowMapping
         }
     };
 
-    private final InMemoryTrie<Integer> rowMapping = InMemoryTrie.shortLived(TypeUtil.BYTE_COMPARABLE_VERSION);
+    private final InMemoryTrie<Integer> rowMapping = InMemoryTrie.shortLivedOrdered(TypeUtil.BYTE_COMPARABLE_VERSION);
+    private final InMemoryTrie<Integer>.Mutator<Integer> rowMappingMutator = rowMapping.mutator((ex, ne) -> ne, Predicates.alwaysFalse());
 
     private volatile boolean complete = false;
 
@@ -168,7 +171,7 @@ public class RowMapping
         int segmentRowId = (int) sstableRowId;
 
         ByteComparable byteComparable = v -> key.asComparableBytes(v);
-        rowMapping.putSingleton(byteComparable, segmentRowId, (existing, neww) -> neww);
+        rowMappingMutator.putSingleton(byteComparable, segmentRowId);
 
         maxSegmentRowId = Math.max(maxSegmentRowId, segmentRowId);
 

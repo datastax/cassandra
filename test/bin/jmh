@@ -127,8 +127,8 @@ cassandra_parms="$cassandra_parms -XX:+PreserveFramePointer"
 # Create log directory, some tests require that
 mkdir -p $CASSANDRA_HOME/logs
 
-if [ ! -f $CASSANDRA_HOME/build/apache-cassandra-*.jar ] ; then
-    echo "$CASSANDRA_HOME/build/apache-cassandra-*.jar does not exist - execute 'ant jar' first"
+if [ ! -f $CASSANDRA_HOME/build/dse-db-*.jar ] ; then
+    echo "$CASSANDRA_HOME/build/dse-db-*.jar does not exist - execute 'ant jar' first"
     exit 1
 fi
 

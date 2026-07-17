@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.db.rows;
 
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.DeletionTime;
 
 /**
  * An iterator over the rows of a given partition that also includes deletion informations.
@@ -65,5 +65,14 @@ public interface UnfilteredRowIterator extends BaseRowIterator<Unfiltered>
         return partitionLevelDeletion().isLive()
             && staticRow().isEmpty()
             && !hasNext();
+    }
+
+    /// Ask the iterator to stop issuing tombstones because they are no longer useful to the consumer.
+    /// Usually done just before filtering out tombstones in [FilteredRows].
+    /// If the iterator will not gain efficiency from dropping tombstones, it can reject this call by returning false.
+    public default boolean stopIssuingTombstones()
+    {
+        // ignored in base class
+        return false;
     }
 }

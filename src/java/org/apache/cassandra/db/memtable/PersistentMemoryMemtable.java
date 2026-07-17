@@ -216,6 +216,12 @@ extends SkipListMemtable        // to test framework
         // we don't track this
     }
 
+    @Override
+    public void overwriteAllData()
+    {
+        // we don't support this as we don't flush
+    }
+
     public static Factory factory(Map<String, String> furtherOptions)
     {
         Boolean skipOption = Boolean.parseBoolean(furtherOptions.remove("skipCommitLog"));

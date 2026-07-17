@@ -19,10 +19,12 @@ package org.apache.cassandra.service.pager;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +33,6 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CompositeType;
-import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -43,7 +44,14 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
-import static org.apache.cassandra.utils.ByteBufferUtil.*;
+import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BYTE_BUFFER;
+import static org.apache.cassandra.utils.ByteBufferUtil.bytesToHex;
+import static org.apache.cassandra.utils.ByteBufferUtil.readWithShortLength;
+import static org.apache.cassandra.utils.ByteBufferUtil.readWithVIntLength;
+import static org.apache.cassandra.utils.ByteBufferUtil.serializedSizeWithShortLength;
+import static org.apache.cassandra.utils.ByteBufferUtil.serializedSizeWithVIntLength;
+import static org.apache.cassandra.utils.ByteBufferUtil.writeWithShortLength;
+import static org.apache.cassandra.utils.ByteBufferUtil.writeWithVIntLength;
 import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
 import static org.apache.cassandra.utils.vint.VIntCoding.getUnsignedVInt;
 
@@ -386,22 +394,10 @@ public class PagingState
             ByteBuffer mark;
             if (protocolVersion.isSmallerOrEqualTo(ProtocolVersion.V3))
             {
-                // We need to be backward compatible with 2.1/2.2 nodes paging states. Which means we have to send
-                // the full cellname of the "last" cell in the row we get (since that's how 2.1/2.2 nodes will start after
-                // that last row if they get that paging state).
-                Iterator<Cell<?>> cells = row.cellsInLegacyOrder(metadata, true).iterator();
-                if (!cells.hasNext())
-                {
-                    // If the last returned row has no cell, this means in 2.1/2.2 terms that we stopped on the row
-                    // marker.  Note that this shouldn't happen if the table is COMPACT STORAGE tables.
-                    assert !metadata.isCompactTable();
-                    mark = encodeCellName(metadata, row.clustering(), EMPTY_BYTE_BUFFER, null);
-                }
-                else
-                {
-                    Cell<?> cell = cells.next();
-                    mark = encodeCellName(metadata, row.clustering(), cell.column().name.bytes, cell.column().isComplex() ? cell.path().get(0) : null);
-                }
+                // In order to be backwards compatible with 2.x, protocol version 3 writes a cell name and path into
+                // the mark. However, Cassandra 3.0 and later never read the cell information.
+                // Since we are no longer compatible with 2.x, it siffices to use an empty cell info.
+                mark = encodeCellName(metadata, row.clustering(), EMPTY_BYTE_BUFFER, null);
             }
             else
             {

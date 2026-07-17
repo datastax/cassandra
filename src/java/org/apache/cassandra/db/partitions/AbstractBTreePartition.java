@@ -370,6 +370,12 @@ public abstract class AbstractBTreePartition implements Partition
                && Iterators.elementsEqual(rowIterator(), that.rowIterator());
     }
 
+    @Override
+    public int hashCode()
+    {
+        throw new UnsupportedOperationException();
+    }
+
     public int rowCount()
     {
         return BTree.size(holder().tree);

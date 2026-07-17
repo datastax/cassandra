@@ -37,9 +37,10 @@ public abstract class AbstractShardedMemtable extends AbstractAllocatorMemtable
 
     public static final String SHARDS_OPTION = "shards";
     public static final String SHARDED_MEMTABLE_CONFIG_OBJECT_NAME = "org.apache.cassandra.db:type=ShardedMemtableConfig";
+    public static final ShardedMemtableConfigMXBean SHARDED_MEMTABLE_CONFIG = new ShardedMemtableConfig();
     static
     {
-        MBeanWrapper.instance.registerMBean(new ShardedMemtableConfig(), SHARDED_MEMTABLE_CONFIG_OBJECT_NAME, MBeanWrapper.OnException.LOG);
+        MBeanWrapper.instance.registerMBean(SHARDED_MEMTABLE_CONFIG, SHARDED_MEMTABLE_CONFIG_OBJECT_NAME, MBeanWrapper.OnException.LOG);
     }
 
     // default shard count, used when a specific number of shards is not specified in the options

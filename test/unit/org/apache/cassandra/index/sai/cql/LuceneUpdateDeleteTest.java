@@ -605,9 +605,20 @@ public class LuceneUpdateDeleteTest extends SAITester
         // delete range
         execute("DELETE FROM %s WHERE pk = 0");
 
-        // Still expect both rows to be in the index because range deletion doesn't remove from index
-        searchMemtable(indexName, "indexed", 0);
-        searchMemtable(indexName, "random", 1, 0);
+        if (version.equals(Version.AA))
+        {
+            // Still expect both rows to be in the index because range deletion doesn't remove from index
+            searchMemtable(indexName, "indexed", 0);
+            searchMemtable(indexName, "random", 1, 0);
+            searchMemtable(indexName, "something", 0); // range deleted, but not yet removed
+        }
+        else
+        {
+            // The range deletion causes an update since trie memtable stage 3
+            searchMemtable(indexName, "indexed");
+            searchMemtable(indexName, "random", 1);
+            searchMemtable(indexName, "something");
+        }
 
         // Overwrite the value for the first of the 2 rows in partition 0
         execute("INSERT INTO %s (pk, x, val) VALUES (0, 0, 'random')");
@@ -619,15 +630,15 @@ public class LuceneUpdateDeleteTest extends SAITester
             searchMemtable(indexName, "phrase", 1, 0);
             // random is in all 3 memtable index rows, but only 2 partitions, and AA indexes partition keys
             searchMemtable(indexName, "random", 1, 0);
+            searchMemtable(indexName, "something", 0); // range deleted, but not yet removed
         }
         else
         {
             searchMemtable(indexName, "indexed"); // overwritten, and the update removes the value
             searchMemtable(indexName, "phrase", 1); // was deleted/overwritten in 0, so just in 1 now
-            searchMemtable(indexName, "random", 1, 0, 0); // random is in all 3 memtable index rows
+            searchMemtable(indexName, "random", 1, 0); // random is in all 3 memtable index rows
+            searchMemtable(indexName, "something");
         }
-        // True for all versions
-        searchMemtable(indexName, "something", 0); // range deleted, but not yet removed
     }
 
     @Test
