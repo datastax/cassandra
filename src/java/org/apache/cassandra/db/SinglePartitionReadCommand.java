@@ -36,6 +36,7 @@ import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
@@ -230,7 +231,22 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                       limits,
                       partitionKey,
                       clusteringIndexFilter,
-                      findIndexQueryPlan(metadata, rowFilter));
+                      findIndexQueryPlan(metadata, rowFilter, clusteringIndexFilter));
+    }
+
+    private static Index.QueryPlan findIndexQueryPlan(TableMetadata table,
+                                                      RowFilter rowFilter,
+                                                      ClusteringIndexFilter clusteringIndexFilter)
+    {
+        // We can skip the indexes if the query is for a specific set of primary keys, there is no ordering,
+        // and there are no hints telling us otherwise.
+        if (CassandraRelevantProperties.SKIP_INDEXES_ON_FULL_PRIMARY_KEYS.getBoolean()
+            && clusteringIndexFilter instanceof ClusteringIndexNamesFilter
+            && rowFilter.indexHints.included.isEmpty()
+            && !rowFilter.hasOrdering())
+            return null;
+
+        return findIndexQueryPlan(table, rowFilter);
     }
 
     /**
