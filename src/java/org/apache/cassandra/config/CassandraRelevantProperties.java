@@ -288,6 +288,11 @@ public enum CassandraRelevantProperties
     COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
     COUNTER_LOCK_NUM_STRIPES_PER_THREAD("cassandra.counter_lock.num_stripes_per_thread", "1024"),
     CRYPTO_PROVIDER_CLASS_NAME("cassandra.crypto_provider_class_name"),
+    /**
+     * Name of a custom implementation of {@link org.apache.cassandra.batchlog.BatchlogManagerInterceptor}
+     * that observes every mutation replayed by batchlog recovery.
+     */
+    CUSTOM_BATCHLOG_MANAGER_INTERCEPTOR_CLASS("cassandra.custom_batchlog_manager_interceptor_class"),
     /** Which class to use for coordinator client request metrics */
     CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY("cassandra.custom_client_request_metrics_provider_class"),
     /** Which class to use for failure detection */
