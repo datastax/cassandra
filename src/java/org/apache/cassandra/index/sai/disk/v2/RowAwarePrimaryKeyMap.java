@@ -75,10 +75,10 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final LongArray.Factory tokenReaderFactory;
         private final SortedTermsReader sortedTermsReader;
         private final long count;
-        private FileHandle token = null;
-        private FileHandle termsDataBlockOffsets = null;
-        private FileHandle termsData = null;
-        private FileHandle termsTrie = null;
+        private final FileHandle token;
+        private final FileHandle termsDataBlockOffsets;
+        private final FileHandle termsData;
+        private final FileHandle termsTrie;
         private final IPartitioner partitioner;
         private final ClusteringComparator clusteringComparator;
         private final RowAwarePrimaryKeyFactory primaryKeyFactory;
@@ -87,31 +87,42 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
 
         public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, RowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
+            FileHandle token = null;
+            FileHandle termsDataBlockOffsets = null;
+            FileHandle termsData = null;
+            FileHandle termsTrie = null;
+
             try
             {
-                this.perSSTableComponents = perSSTableComponents;
                 MetadataSource metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
-                count = tokensMeta.valueCount;
+                this.count = tokensMeta.valueCount;
+
                 SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS)));
                 NumericValuesMeta blockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)));
 
                 token = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES).createFileHandle();
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
-                this.termsDataBlockOffsets = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS).createFileHandle();
-                this.termsData = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS).createFileHandle();
-                this.termsTrie = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
+
+                termsDataBlockOffsets = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS).createFileHandle();
+                termsData = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS).createFileHandle();
+                termsTrie = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
                 this.sortedTermsReader = new SortedTermsReader(termsData, termsDataBlockOffsets, termsTrie, sortedTermsMeta, blockOffsetsMeta);
-                this.partitioner = sstable.metadata().partitioner;
-                this.primaryKeyFactory = primaryKeyFactory;
-                this.clusteringComparator = sstable.metadata().comparator;
-                this.sstableId = sstable.getId();
-                this.hasStaticColumns = sstable.metadata().hasStaticColumns();
             }
             catch (Throwable t)
             {
                 throw Throwables.unchecked(Throwables.close(t, token, termsData, termsDataBlockOffsets, termsTrie));
             }
+            this.perSSTableComponents = perSSTableComponents;
+            this.token = token;
+            this.termsDataBlockOffsets = termsDataBlockOffsets;
+            this.termsData = termsData;
+            this.termsTrie = termsTrie;
+            this.partitioner = sstable.metadata().partitioner;
+            this.primaryKeyFactory = primaryKeyFactory;
+            this.clusteringComparator = sstable.metadata().comparator;
+            this.sstableId = sstable.getId();
+            this.hasStaticColumns = sstable.metadata().hasStaticColumns();
         }
 
         @Override
