@@ -22,8 +22,10 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -76,7 +78,9 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.WriteResponseHandler;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -100,6 +104,15 @@ public class BatchlogManager implements BatchlogManagerMBean
     private volatile long totalBatchesReplayed = 0; // no concurrency protection necessary as only written by replay thread.
     private volatile TimeUUID lastReplayedUuid = TimeUUID.minAtUnixMillis(0);
 
+    // Batches whose mutations have completed (applied locally, acknowledged by remote replicas, or
+    // hinted) in an earlier replay cycle but whose interceptor callback failed, mapped to the hosts
+    // hinted for them. On later cycles only the callback is retried, via a point read of the batch:
+    // the mutations are not re-sent and no new hints are written for them, and the hinted hosts are
+    // fsynced again before the batch is finally deleted. Only accessed by the replay thread. Lost
+    // on restart, in which case the batch (whose row sits behind lastReplayedUuid, itself reset by
+    // the restart) is replayed from scratch, which the at-least-once contract already tolerates.
+    private final Map<TimeUUID, Set<UUID>> batchesAwaitingInterceptor = new HashMap<>();
+
     // Single-thread executor service for scheduling and serializing log replay.
     private final ScheduledExecutorPlus batchlogTasks;
 
@@ -113,6 +126,11 @@ public class BatchlogManager implements BatchlogManagerMBean
     public void start()
     {
         MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
+
+        // Resolve the interceptor eagerly: a misconfigured custom class fails the node at
+        // startup rather than at the first replay, and operators can see what is installed.
+        BatchlogManagerInterceptor interceptor = BatchlogManagerInterceptor.instance;
+        logger.info("Batchlog interceptor: {}", interceptor.getClass().getName());
 
         batchlogTasks.scheduleWithFixedDelay(this::replayFailedBatches,
                                              StorageService.RING_DELAY_MILLIS,
@@ -188,6 +206,23 @@ public class BatchlogManager implements BatchlogManagerMBean
         return totalBatchesReplayed;
     }
 
+    @VisibleForTesting
+    int countBatchesAwaitingInterceptor()
+    {
+        return batchesAwaitingInterceptor.size();
+    }
+
+    /**
+     * Simulates the effect of a replay cycle that aborted before advancing the scan lower bound:
+     * the next scan covers already-processed rows again, including those of batches awaiting their
+     * interceptor.
+     */
+    @VisibleForTesting
+    void resetLastReplayedUuid()
+    {
+        lastReplayedUuid = TimeUUID.minAtUnixMillis(0);
+    }
+
     public void forceBatchlogReplay() throws Exception
     {
         startBatchlogReplay().get();
@@ -222,15 +257,21 @@ public class BatchlogManager implements BatchlogManagerMBean
         TimeUUID limitUuid = TimeUUID.maxAtUnixMillis(currentTimeMillis() - getBatchlogTimeout());
         ColumnFamilyStore store = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES);
         int pageSize = calculatePageSize(store);
-        // There cannot be any live content where token(id) <= token(lastReplayedUuid) as every processed batch is
-        // deleted, but the tombstoned content may still be present in the tables. To avoid walking over it we specify
-        // token(id) > token(lastReplayedUuid) as part of the query.
+        // The only live content where token(id) <= token(lastReplayedUuid) are batches retained because
+        // their interceptor callback failed, and those are retried through point reads, not through this
+        // scan; every other processed batch is deleted, but the tombstoned content may still be present
+        // in the tables. To avoid walking over it we specify token(id) > token(lastReplayedUuid) as part
+        // of the query.
         String query = String.format("SELECT id, mutations, version FROM %s.%s WHERE token(id) > token(?) AND token(id) <= token(?)",
                                      SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                      SystemKeyspace.BATCHES);
         UntypedResultSet batches = executeInternalWithPaging(query, PageSize.inRows(pageSize), lastReplayedUuid, limitUuid);
         processBatchlogEntries(batches, pageSize, rateLimiter);
         lastReplayedUuid = limitUuid;
+        if (!batchesAwaitingInterceptor.isEmpty())
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                             "{} batches whose mutations were replayed are retained in the batchlog awaiting successful interceptor callbacks",
+                             batchesAwaitingInterceptor.size());
         logger.trace("Finished replayFailedBatches");
     }
 
@@ -275,15 +316,27 @@ public class BatchlogManager implements BatchlogManagerMBean
         Exception caughtException = null;
         int skipped = 0;
 
+        // Snapshot before the scan: only batches memoized by EARLIER cycles get their callbacks
+        // retried in this cycle. A callback failing during this cycle's scan is retried on the
+        // next cycle, per the interceptor contract, not immediately.
+        List<Map.Entry<TimeUUID, Set<UUID>>> awaitingInterceptorRetry = new ArrayList<>(batchesAwaitingInterceptor.entrySet());
+
         // Sending out batches for replay without waiting for them, so that one stuck batch doesn't affect others
         for (UntypedResultSet.Row row : batches)
         {
             TimeUUID id = row.getTimeUUID("id");
             int version = row.getInt("version");
+
+            // If a cycle aborts before advancing lastReplayedUuid, the next scan still covers the
+            // batches it left awaiting their interceptor; those are handled by
+            // retryBatchesAwaitingInterceptor later in this cycle, so don't replay them here.
+            if (batchesAwaitingInterceptor.containsKey(id))
+                continue;
+
             try
             {
                 ReplayingBatch batch = new ReplayingBatch(id, version, row.getList("mutations", BytesType.instance));
-                if (batch.replay(rateLimiter, hintedNodes) > 0)
+                if (batch.replay(rateLimiter) > 0)
                 {
                     unfinishedBatches.add(batch);
                 }
@@ -314,14 +367,94 @@ public class BatchlogManager implements BatchlogManagerMBean
         if (positionInPage > 0)
             finishAndClearBatches(unfinishedBatches, hintedNodes, replayedBatches);
 
+        // Retry the callbacks of batches retained by earlier cycles. This runs after the scan, so
+        // replay of new content is not starved by retries, and before the hint fsync barrier below,
+        // which the deferred deletion of the retried batches must share.
+        retryBatchesAwaitingInterceptor(awaitingInterceptorRetry, rateLimiter, hintedNodes, replayedBatches);
+
         if (caughtException != null)
             logger.warn(String.format("Encountered %d unexpected exceptions while sending out batches", skipped), caughtException);
 
         // to preserve batch guarantees, we must ensure that hints (if any) have made it to disk, before deleting the batches
         HintsService.instance.flushAndFsyncBlockingly(hintedNodes);
 
-        // once all generated hints are fsynced, actually delete the batches
-        replayedBatches.forEach(BatchlogManager::remove);
+        // Once all generated hints are fsynced, actually delete the batches. A batch awaiting its
+        // interceptor is forgotten right when its row is deleted (and only counts as replayed now):
+        // had the cycle aborted before its deletion, the batch must go through the callback-only
+        // retry again — not through a full (mutation re-sending, hint re-writing) replay, and
+        // without being counted twice.
+        for (TimeUUID id : replayedBatches)
+        {
+            remove(id);
+            if (batchesAwaitingInterceptor.remove(id) != null)
+                ++totalBatchesReplayed;
+        }
+    }
+
+    /**
+     * Retries the interceptor callbacks of batches whose mutations completed in an earlier cycle.
+     * Batches are looked up individually — their rows sit behind {@code lastReplayedUuid}, outside
+     * the ranges scanned by {@link #replayFailedBatches} — and their mutations are not re-delivered:
+     * on callback success the batch joins {@code replayedBatches}, its previously hinted hosts join
+     * {@code hintedNodes} so the hints are fsynced (again) before the caller deletes the batch, and
+     * the memoized entry itself is dropped (and the batch counted as replayed) by the caller once
+     * the deletion has happened. Re-reads are throttled by the replay rate limiter.
+     */
+    private void retryBatchesAwaitingInterceptor(List<Map.Entry<TimeUUID, Set<UUID>>> awaitingRetry,
+                                                 RateLimiter rateLimiter,
+                                                 Set<UUID> hintedNodes,
+                                                 Set<TimeUUID> replayedBatches)
+    {
+        if (awaitingRetry.isEmpty())
+            return;
+
+        String query = String.format("SELECT id, mutations, version FROM %s.%s WHERE id = ?",
+                                     SchemaConstants.SYSTEM_KEYSPACE_NAME,
+                                     SystemKeyspace.BATCHES);
+        for (Map.Entry<TimeUUID, Set<UUID>> entry : awaitingRetry)
+        {
+            TimeUUID id = entry.getKey();
+            try
+            {
+                UntypedResultSet result = executeInternal(query, id);
+                if (result == null || result.isEmpty())
+                {
+                    // The batch was removed from the batchlog by another path (e.g. its coordinator
+                    // completing the batch): there is no row left to retry the callbacks from.
+                    logger.warn("Batch {} was removed from the batchlog before its interceptor callbacks completed; dropping them", id);
+                    batchesAwaitingInterceptor.remove(id);
+                    ++totalBatchesReplayed;
+                    continue;
+                }
+
+                UntypedResultSet.Row row = result.one();
+                ReplayingBatch batch = new ReplayingBatch(id, row.getInt("version"), row.getList("mutations", BytesType.instance));
+                rateLimiter.acquire(batch.replayedBytes);
+                if (tryNotifyInterceptor(batch))
+                {
+                    hintedNodes.addAll(entry.getValue());
+                    replayedBatches.add(id);
+                }
+            }
+            catch (IOException e)
+            {
+                logger.error("Batch {} was replayed but can no longer be deserialized; its remaining interceptor callbacks are dropped", id, e);
+                // let the deletion share the hint fsync barrier below, like any other replayed batch
+                hintedNodes.addAll(entry.getValue());
+                replayedBatches.add(id);
+            }
+            catch (Throwable t)
+            {
+                // Failing to read one batch back (e.g. a transient local read error) must wedge
+                // neither the other retries nor the scan of new batchlog content: keep the entry
+                // and let a later cycle retry the read. Deliberately, an error we cannot classify
+                // is never grounds for deleting the batch (a corrupt row that keeps failing with
+                // a RuntimeException is retried, and warned about, indefinitely).
+                JVMStabilityInspector.inspectThrowable(t);
+                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                                 "Failed to read batch {} back for its interceptor retry; it will be retried", id, t);
+            }
+        }
     }
 
     private void finishAndClearBatches(ArrayList<ReplayingBatch> batches, Set<UUID> hintedNodes, Set<TimeUUID> replayedBatches)
@@ -329,12 +462,46 @@ public class BatchlogManager implements BatchlogManagerMBean
         // schedule hints for timed out deliveries
         for (ReplayingBatch batch : batches)
         {
-            batch.finish(hintedNodes);
-            replayedBatches.add(batch.id);
+            batch.finish();
+            hintedNodes.addAll(batch.hintedNodes());
+            if (tryNotifyInterceptor(batch))
+            {
+                replayedBatches.add(batch.id);
+                ++totalBatchesReplayed;
+            }
+            else
+            {
+                // Don't mark the batch replayed: its batchlog row survives. Its mutations have
+                // completed though, so remember that (along with the hosts hinted for it) and let
+                // later cycles retry the callback alone instead of replaying the whole batch
+                // (and writing another round of hints).
+                batchesAwaitingInterceptor.put(batch.id, batch.hintedNodes());
+            }
         }
 
-        totalBatchesReplayed += batches.size();
         batches.clear();
+    }
+
+    /**
+     * Invokes {@link BatchlogManagerInterceptor#instance} with the batch and all of its mutations.
+     *
+     * @return true if the callback completed, false if the interceptor threw and the batch must be
+     *         retained in the batchlog so the callback is retried on the next replay cycle
+     */
+    private static boolean tryNotifyInterceptor(ReplayingBatch batch)
+    {
+        try
+        {
+            batch.notifyInterceptor();
+            return true;
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                             "Batchlog interceptor failed for batch {}; the callback will be retried", batch.id, t);
+            return false;
+        }
     }
 
     public static long getBatchlogTimeout()
@@ -348,6 +515,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         private final long writtenAt;
         private final List<Mutation> mutations;
         private final int replayedBytes;
+        private final Set<UUID> hintedNodes = new HashSet<>();
 
         private List<ReplayWriteResponseHandler<Mutation>> replayHandlers;
 
@@ -359,7 +527,16 @@ public class BatchlogManager implements BatchlogManagerMBean
             this.replayedBytes = addMutations(version, serializedMutations);
         }
 
-        public int replay(RateLimiter rateLimiter, Set<UUID> hintedNodes) throws IOException
+        /**
+         * @return the hosts hinted while replaying this batch, both for replicas that were down when
+         *         the mutations were sent and for replicas that did not acknowledge them in time
+         */
+        Set<UUID> hintedNodes()
+        {
+            return hintedNodes;
+        }
+
+        public int replay(RateLimiter rateLimiter) throws IOException
         {
             logger.trace("Replaying batch {}", id);
 
@@ -377,7 +554,7 @@ public class BatchlogManager implements BatchlogManagerMBean
             return replayHandlers.size();
         }
 
-        public void finish(Set<UUID> hintedNodes)
+        public void finish()
         {
             for (int i = 0; i < replayHandlers.size(); i++)
             {
@@ -391,10 +568,20 @@ public class BatchlogManager implements BatchlogManagerMBean
                     logger.trace("Failed replaying a batched mutation to a node, will write a hint");
                     logger.trace("Failure was : {}", e.getMessage());
                     // writing hints for the rest to hints, starting from i
-                    writeHintsForUndeliveredEndpoints(i, hintedNodes);
+                    writeHintsForUndeliveredEndpoints(i);
                     return;
                 }
             }
+        }
+
+        /**
+         * Notifies {@link BatchlogManagerInterceptor#instance} of the replayed batch, with all of
+         * its mutations. Exceptions propagate to the caller, which keeps the batch in the batchlog
+         * so its recovery is retried.
+         */
+        void notifyInterceptor()
+        {
+            BatchlogManagerInterceptor.instance.onReplayedBatch(id, writtenAt, Collections.unmodifiableList(mutations));
         }
 
         private int addMutations(int version, List<ByteBuffer> serializedMutations) throws IOException
@@ -425,7 +612,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 mutations.add(mutation);
         }
 
-        private void writeHintsForUndeliveredEndpoints(int startFrom, Set<UUID> hintedNodes)
+        private void writeHintsForUndeliveredEndpoints(int startFrom)
         {
             int gcgs = gcgs(mutations);
 
