@@ -47,6 +47,8 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
+import static org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyMap.invertRowId;
+
 /**
  * An extension of the {@link SkinnyPrimaryKeyMap} for wide tables (those with clustering columns).
  * <p>
@@ -215,19 +217,19 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         // If clusteringRowId points to the next partition, it means the search key is greater
         // than all keys in the current partition. Return the inverted ceiling.
         if (clusteringRowId >= nextPartitionStart)
-            return -clusteringRowId - 1;
+            return invertRowId(clusteringRowId);
 
         Clustering<?> foundClustering = readClusteringKey(clusteringRowId);
         // If STATIC CLUSTERING, then no clustering key is present.
         if (foundClustering.isEmpty())
-            return -clusteringRowId - 1;
+            return invertRowId(clusteringRowId);
 
         // Check if this is an exact match by comparing the clustering key
         int cmp = clusteringComparator.compare(foundClustering, key.clustering());
         if (cmp == 0)
             return clusteringRowId;
         else
-            return -clusteringRowId - 1;
+            return invertRowId(clusteringRowId);
     }
 
     /**
@@ -249,7 +251,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         else if (rowId == Long.MIN_VALUE)
             return -1;
         else
-            return -rowId - 1;
+            return invertRowId(rowId);
     }
 
     /**

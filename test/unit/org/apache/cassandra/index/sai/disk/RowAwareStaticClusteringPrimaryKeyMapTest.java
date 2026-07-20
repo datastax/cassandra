@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
+import static org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyMap.invertRowId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -123,7 +124,7 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
     public void testExactRowIdOrInvertedCeiling()
     {
         assertThat(map.exactRowIdOrInvertedCeiling(beforeFirst(map))).as("before first expects the inverted first")
-                                                                     .isEqualTo(invert(0));
+                                                                     .isEqualTo(invertRowId(0));
 
         assertThat(map.exactRowIdOrInvertedCeiling(exactFirstRow(map))).as("exact first row")
                                                                        .isEqualTo(0);
@@ -134,7 +135,7 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
 
         // Test between static and first clustering row
         assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 0))).as("between static and ck=1 expects inverted ck=1")
-                                                                  .isEqualTo(invert(idPk1Static + 1));
+                                                                  .isEqualTo(invertRowId(idPk1Static + 1));
 
         // Test regular clustering rows
         assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 1))).as("exact pk=1, ck=1, which is next after the static row")
@@ -148,7 +149,7 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
 
         // Test after last clustering in partition
         assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, Integer.MAX_VALUE))).as("after pk=1 ck=3 expects inverted next partition first row or out of range if the last partition")
-                                                                                  .isEqualTo(idPk1Static < map.count() ? invert(idPk1Static + 4) : Long.MIN_VALUE);
+                                                                                  .isEqualTo(idPk1Static < map.count() ? invertRowId(idPk1Static + 4) : Long.MIN_VALUE);
 
         assertThat(map.exactRowIdOrInvertedCeiling(buildStaticPk(2))).as("exact pk=2 static row").
                                                                      isEqualTo(idPk2Static);
@@ -284,10 +285,5 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
         PrimaryKey lastPk = map.primaryKeyFromRowId(map.count() - 1);
         long lastToken = lastPk.token().getLongValue();
         return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(lastToken + 1));
-    }
-
-    private long invert(long rowId)
-    {
-        return -rowId - 1;
     }
 }
