@@ -353,15 +353,19 @@ public class MetadataSerializer implements IMetadataSerializer
         try
         {
             // Read the compression metadata from file
-            // We pass a small compressedLength as we only need the parameters, not the actual chunk offsets
-            CompressionMetadata cm = CompressionMetadata.open(compressionFile, 1024, false);
-            // Note: we use only the encryption component, without any compression. The reason for doing this is to
-            // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
-            // serialization on reads.
-            ICompressor compressor = cm.parameters.getSstableCompressor();
-            if (compressor != null)
-                return compressor.encryptionOnly();
-            return null;
+            // We pass a small compressedLength as we only need the parameters, not the actual chunk offsets.
+            // CompressionMetadata is ref-counted and holds the chunk offsets in off-heap Memory, so it must be
+            // closed once the parameters have been extracted.
+            try (CompressionMetadata cm = CompressionMetadata.open(compressionFile, 1024, false))
+            {
+                // Note: we use only the encryption component, without any compression. The reason for doing this is to
+                // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
+                // serialization on reads.
+                ICompressor compressor = cm.parameters.getSstableCompressor();
+                if (compressor != null)
+                    return compressor.encryptionOnly();
+                return null;
+            }
         }
         catch (Throwable t)
         {
