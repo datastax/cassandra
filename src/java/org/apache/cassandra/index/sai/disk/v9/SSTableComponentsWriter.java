@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
@@ -75,6 +76,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     private final KeyStoreWriter partitionKeysWriter;
     private final KeyStoreWriter clusteringKeysWriter;
 
+    private Token prevToken = null;
     private long partitionId = -1;
     // This is used to record the number of rows in each partition
     private long partitionRowCount = 0;
@@ -135,7 +137,13 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     public void startPartition(DecoratedKey partitionKey, long position) throws IOException
     {
         if (partitionId >= 0)
+        {
+            if (prevToken.compareTo(partitionKey.getToken()) >= 0)
+                throw new IllegalArgumentException("Partition keys must be in ascending token order");
+
             partitionSizeWriter.add(partitionRowCount);
+        }
+        prevToken = partitionKey.getToken();
 
         partitionId++;
         partitionRowCount = 0;
