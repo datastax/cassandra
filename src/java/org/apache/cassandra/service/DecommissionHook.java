@@ -109,8 +109,10 @@ package org.apache.cassandra.service;
  *       the usual idiom for a method that cannot throw -- returns normally and counts as success.
  *       The caller clears the flag (logging a warning) before invoking the next hook, so a restored
  *       interrupt never leaks into a later hook, into the shutdown sequence, or onto the pooled JMX
- *       handler thread that the decommission borrowed. The flag is cleared again after the last
- *       hook, so it can never outlive the chain.</li>
+ *       handler thread that the decommission borrowed. The same clearing happens when a hook
+ *       restores the flag and then throws something else, so the failure path leaks it no more than
+ *       the success path does, and the flag is cleared once more after the last hook, so it can
+ *       never outlive the chain.</li>
  * </ul>
  *
  * The practical consequences for a hook author: the interrupt flag is always clear on entry, so a

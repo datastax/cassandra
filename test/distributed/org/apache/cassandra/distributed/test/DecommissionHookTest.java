@@ -65,13 +65,15 @@ public class DecommissionHookTest extends TestBaseImpl
     public static class Observed
     {
         static final List<String> order = Collections.synchronizedList(new ArrayList<>());
+        /** Names of the hooks that were entered with the interrupt flag already set. Must stay empty. */
+        static final List<String> enteredInterrupted = Collections.synchronizedList(new ArrayList<>());
         static volatile boolean stillRingMember = true;
         static volatile boolean nativeTransportRunning = false;
         static volatile int rowsReadByHook = -1;
         static volatile String queryError = null;
     }
 
-    /** Records that it ran, under its own name. */
+    /** Records that it ran, under its own name, and how it found the interrupt flag on entry. */
     public static class RecordingHook implements DecommissionHook
     {
         private final String name;
@@ -88,6 +90,10 @@ public class DecommissionHookTest extends TestBaseImpl
 
         public void onDecommission()
         {
+            // A hook is entitled to a clear flag: it may block, and a leaked interrupt would fail
+            // its very first blocking call. Checked without consuming, so a leak stays visible.
+            if (Thread.currentThread().isInterrupted())
+                Observed.enteredInterrupted.add(name);
             Observed.order.add(name);
         }
     }
@@ -141,6 +147,27 @@ public class DecommissionHookTest extends TestBaseImpl
         {
             Observed.order.add("interrupt-restoring");
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Restores the interrupt flag and then throws something else -- the other way a hook can leave
+     * with the flag set, e.g. {@code catch (InterruptedException e) { Thread.currentThread()
+     * .interrupt(); throw new RuntimeException(e); }}. The flag has to be consumed on this path too,
+     * or it leaks into the next hook.
+     */
+    public static class InterruptRestoringExplodingHook implements DecommissionHook
+    {
+        public String name()
+        {
+            return "interrupt-restoring-exploding";
+        }
+
+        public void onDecommission()
+        {
+            Observed.order.add("interrupt-restoring-exploding");
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("simulated hook failure with the interrupt flag restored");
         }
     }
 
@@ -215,6 +242,7 @@ public class DecommissionHookTest extends TestBaseImpl
         {
             cluster.get(3).runOnInstance(() -> {
                 Observed.order.clear();
+                Observed.enteredInterrupted.clear();
                 StorageService.instance.registerDecommissionHook(new InterruptRestoringHook());
                 StorageService.instance.registerDecommissionHook(new RecordingHook("after-the-interrupt"));
 
@@ -229,6 +257,51 @@ public class DecommissionHookTest extends TestBaseImpl
 
                 assertEquals("a restored interrupt flag must not skip the hooks behind it",
                              Arrays.asList("interrupt-restoring", "after-the-interrupt"), Observed.order);
+                assertEquals("a restored interrupt flag must not leak into the next hook",
+                             Collections.emptyList(), Observed.enteredInterrupted);
+                assertEquals(DECOMMISSIONED.name(), StorageService.instance.getOperationMode());
+                assertFalse("the interrupt flag must not outlive the hook run",
+                            Thread.currentThread().isInterrupted());
+            });
+        }
+    }
+
+    /**
+     * The same, for a hook that restores the flag and then throws. The interrupt must be consumed on
+     * the failure path too: the next hook is entitled to a clear flag, and would otherwise fail on
+     * its first blocking call for a reason that has nothing to do with it.
+     */
+    @Test
+    public void testHookThrowingWithTheInterruptFlagSetDoesNotLeakItToTheNextHook() throws Throwable
+    {
+        try (Cluster cluster = init(Cluster.build(3)
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                           .start(), 2))
+        {
+            cluster.get(3).runOnInstance(() -> {
+                Observed.order.clear();
+                Observed.enteredInterrupted.clear();
+                StorageService.instance.registerDecommissionHook(new InterruptRestoringExplodingHook());
+                StorageService.instance.registerDecommissionHook(new RecordingHook("after-the-interrupting-explosion"));
+
+                Throwable thrown = null;
+                try
+                {
+                    StorageService.instance.decommission(true);
+                }
+                catch (Throwable t)
+                {
+                    thrown = t;
+                }
+                assertNotNull("a failing hook must be reported to the caller", thrown);
+                assertTrue("the failure must name the offending hook, was: " + thrown,
+                           String.valueOf(thrown.getMessage()).contains("interrupt-restoring-exploding"));
+
+                assertEquals("a hook that throws must not skip the hooks behind it",
+                             Arrays.asList("interrupt-restoring-exploding", "after-the-interrupting-explosion"),
+                             Observed.order);
+                assertEquals("an interrupt restored before throwing must not leak into the next hook",
+                             Collections.emptyList(), Observed.enteredInterrupted);
                 assertEquals(DECOMMISSIONED.name(), StorageService.instance.getOperationMode());
                 assertFalse("the interrupt flag must not outlive the hook run",
                             Thread.currentThread().isInterrupted());
@@ -278,6 +351,7 @@ public class DecommissionHookTest extends TestBaseImpl
         {
             cluster.get(3).runOnInstance(() -> {
                 Observed.order.clear();
+                Observed.enteredInterrupted.clear();
                 StorageService.instance.registerDecommissionHook(new ExplodingHook());
                 StorageService.instance.registerDecommissionHook(new RecordingHook("after-the-explosion"));
 

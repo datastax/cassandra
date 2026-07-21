@@ -5454,13 +5454,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             {
                 hook.onDecommission();
                 logger.info("Decommission hook {} completed in {} ms", name, elapsedMillis(startedAt));
-
-                // A hook that catches InterruptedException and restores the flag before returning
-                // -- the standard idiom -- hands us back an interrupted thread. Consume it: the
-                // decommission cannot be abandoned this late, and the shutdown below waits on
-                // futures that would fail instantly with the flag still set.
-                if (Thread.interrupted())
-                    logger.warn("Decommission hook {} returned with the interrupt flag set; clearing it", name);
             }
             catch (InterruptedException e)
             {
@@ -5483,6 +5476,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 // reported, not escalated into a JVM-stability event.
                 logger.error("Decommission hook {} failed after {} ms", name, elapsedMillis(startedAt), t);
                 failed.add(name);
+            }
+            finally
+            {
+                // A hook can hand us back an interrupted thread whichever way it leaves: by catching
+                // InterruptedException and restoring the flag before returning (the standard idiom),
+                // or by restoring it and then throwing something else. Consume it here, on every
+                // path, so it can never reach the next hook -- which is entitled to a clear flag and
+                // would otherwise fail the moment it blocked -- nor the shutdown below, which waits
+                // on futures that fail instantly with the flag set. The decommission cannot be
+                // abandoned this late, so there is nothing the flag could usefully signal.
+                if (Thread.interrupted())
+                    logger.warn("Decommission hook {} left the interrupt flag set; clearing it", name);
             }
         }
 
