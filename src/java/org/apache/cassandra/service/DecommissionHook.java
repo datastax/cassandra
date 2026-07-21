@@ -85,6 +85,38 @@ package org.apache.cassandra.service;
  *
  * Anything a hook throws is reported this way, including an {@link Error}: escalating it to the JVM
  * failure policy from here would strand the node in the window this design exists to avoid.
+ *
+ * <h2>Interruption</h2>
+ *
+ * A hook is not interrupted by the decommission itself: nothing in {@code decommission()} cancels a
+ * running hook, and there is no timeout, so an interrupt can only come from whoever holds the
+ * decommission thread -- typically the JMX client disconnecting or a caller cancelling the JMX
+ * invocation. A hook that blocks should therefore treat interruption as "the operator gave up on
+ * this call", not as "the decommission was aborted": the node has already left the ring and the
+ * decommission will finish regardless.
+ *
+ * Both standard responses to interruption are handled, and neither is a no-op:
+ *
+ * <ul>
+ *   <li><b>Propagating {@link InterruptedException}</b> aborts the hook chain. The hook is recorded
+ *       as failed ({@code "<name> (interrupted)"}), every hook after it is recorded as not run, and
+ *       the decommission proceeds to its shutdown steps. The interrupt is <i>not</i> re-asserted:
+ *       throwing {@code InterruptedException} already cleared the flag, and restoring it would fail
+ *       the shutdown's blocking waits, so the remaining hooks are skipped rather than run against an
+ *       interrupted thread. A hook that wants the rest of the chain to run must not let an
+ *       {@code InterruptedException} escape.</li>
+ *   <li><b>Catching it and restoring the flag</b> -- {@code Thread.currentThread().interrupt()},
+ *       the usual idiom for a method that cannot throw -- returns normally and counts as success.
+ *       The caller clears the flag (logging a warning) before invoking the next hook, so a restored
+ *       interrupt never leaks into a later hook, into the shutdown sequence, or onto the pooled JMX
+ *       handler thread that the decommission borrowed. The flag is cleared again after the last
+ *       hook, so it can never outlive the chain.</li>
+ * </ul>
+ *
+ * The practical consequences for a hook author: the interrupt flag is always clear on entry, so a
+ * hook may block without first draining a stale interrupt; and setting the flag on the way out is
+ * harmless but pointless, because it is consumed immediately and cannot be used to signal anything
+ * to the decommission. A hook that wants to report a problem should throw instead.
  */
 public interface DecommissionHook
 {
@@ -96,6 +128,11 @@ public interface DecommissionHook
     /**
      * Runs the work. May block indefinitely; may run CQL queries. Throwing is reported and fails
      * {@code nodetool decommission}, but does not stop the node from finishing its decommission.
+     *
+     * The interrupt flag is clear on entry and is cleared again after this returns. Letting an
+     * {@link InterruptedException} escape marks this hook as interrupted and skips the hooks
+     * registered after it; catching it and restoring the flag counts as success and does not
+     * affect the hooks that follow. See the class javadoc.
      */
     void onDecommission() throws Exception;
 }
