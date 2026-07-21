@@ -482,6 +482,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private final List<IEndpointLifecycleSubscriber> lifecycleSubscribers = new CopyOnWriteArrayList<>();
 
+    /** Hooks run by {@link #decommission(boolean)} once this node has left the ring; see {@link DecommissionHook}. */
+    private final List<DecommissionHook> decommissionHooks = new CopyOnWriteArrayList<>();
+
     private final String jmxObjectName;
 
     private Collection<Token> bootstrapTokens = null;
@@ -560,6 +563,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public void unregister(IEndpointLifecycleSubscriber subscriber)
     {
         lifecycleSubscribers.remove(subscriber);
+    }
+
+    /**
+     * Registers work to run on this node while it is being decommissioned, after it has left the
+     * ring and before anything is shut down. Hooks run in registration order; see
+     * {@link DecommissionHook} for the full contract.
+     */
+    public void registerDecommissionHook(DecommissionHook hook)
+    {
+        // Fail the caller now rather than during the decommission: CopyOnWriteArrayList accepts
+        // nulls, and by the time hooks run there is no safe way to fail.
+        decommissionHooks.add(Objects.requireNonNull(hook, "decommission hook must not be null"));
+    }
+
+    /** @return true if {@code hook} was registered. */
+    public boolean unregisterDecommissionHook(DecommissionHook hook)
+    {
+        return decommissionHooks.remove(hook);
     }
 
     // should only be called via JMX
@@ -5289,6 +5310,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (logger.isDebugEnabled())
             logger.debug("DECOMMISSIONING");
 
+        List<String> failedHooks = Collections.emptyList();
         try
         {
             PendingRangeCalculatorService.instance.blockUntilFinished();
@@ -5341,6 +5363,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             unbootstrap();
 
+            // Hooks run here, in the window unbootstrap() opens and the shutdown below closes:
+            // this node has left the ring (so no coordinator routes mutations to it) and the batch
+            // log has finished its final replay, but messaging, the native transport and the stages
+            // are all still up, so a hook can still run queries. Hooks may block for hours; nothing
+            // below this line runs until they are all done. A failing hook is collected rather than
+            // thrown -- see the report after the finally block.
+            failedHooks = runDecommissionHooks();
+
             // shutdown cql, gossip, messaging, Stage and set state to DECOMMISSIONED
 
             shutdownClientServers();
@@ -5381,6 +5411,119 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             isDecommissioning.set(false);
         }
+
+        // Reported only now that the node is DECOMMISSIONED, and deliberately not by failing the
+        // decommission: hooks run after unbootstrap(), so the data has already streamed away and
+        // leaveRing() has run. There is nothing to roll back to, and stopping at
+        // DECOMMISSION_FAILED here would strand the node -- a retry is rejected by the ring
+        // membership check above (leaveRing() removed us from TokenMetadata), and leaveRing() has
+        // persisted NEEDS_BOOTSTRAP, so a restart would bootstrap the node back into the ring.
+        // Finishing and then throwing still fails `nodetool decommission` loudly.
+        if (!failedHooks.isEmpty())
+            throw new RuntimeException("Node decommissioned, but decommission hook(s) failed: "
+                                       + String.join(", ", failedHooks) + "; see the log for details");
+    }
+
+    /**
+     * Runs the registered {@link DecommissionHook}s in registration order, on the decommission
+     * thread, blocking for as long as they take.
+     *
+     * Never throws. That is the whole point: this runs past leaveRing(), the one window where
+     * NEEDS_BOOTSTRAP is already persisted but DECOMMISSIONED is not, so anything escaping here
+     * strands the node (see the caller). Every hook runs even if an earlier one fails, so one
+     * broken hook cannot silently skip the rest.
+     *
+     * @return the names of the hooks that did not complete, in order; empty if all succeeded.
+     */
+    private List<String> runDecommissionHooks()
+    {
+        // Snapshot: a hook is free to unregister itself (or another) while we are iterating.
+        List<DecommissionHook> hooks = new ArrayList<>(decommissionHooks);
+        if (hooks.isEmpty())
+            return Collections.emptyList();
+
+        logger.info("Running {} decommission hook(s)", hooks.size());
+        List<String> failed = new ArrayList<>();
+        for (int i = 0; i < hooks.size(); i++)
+        {
+            DecommissionHook hook = hooks.get(i);
+            String name = hookName(hook);
+            setMode(Mode.LEAVING, "running decommission hook " + name, true);
+            long startedAt = nanoTime();
+            try
+            {
+                hook.onDecommission();
+                logger.info("Decommission hook {} completed in {} ms", name, elapsedMillis(startedAt));
+            }
+            catch (InterruptedException e)
+            {
+                // Report and stop, without re-asserting the interrupt (throwing InterruptedException
+                // already cleared it). Re-asserting would fail every remaining hook the moment it
+                // blocked, and this runs on a pooled JMX handler thread, so the flag would leak onto
+                // whatever that thread ran next.
+                logger.error("Decommission hook {} was interrupted after {} ms; skipping the remaining hook(s)",
+                             name, elapsedMillis(startedAt), e);
+                failed.add(name + " (interrupted)");
+                for (int j = i + 1; j < hooks.size(); j++)
+                    failed.add(hookName(hooks.get(j)) + " (not run)");
+                break;
+            }
+            catch (Throwable t)
+            {
+                // Deliberately no JVMStabilityInspector.inspectThrowable(t): it rethrows an
+                // OutOfMemoryError found anywhere in the cause chain, and acts on FSError, either of
+                // which would escape and strand the node here. A hook is plugin code; its failure is
+                // reported, not escalated into a JVM-stability event.
+                logger.error("Decommission hook {} failed after {} ms", name, elapsedMillis(startedAt), t);
+                failed.add(name);
+            }
+            finally
+            {
+                // A hook can hand us back an interrupted thread whichever way it leaves: by catching
+                // InterruptedException and restoring the flag before returning (the standard idiom),
+                // or by restoring it and then throwing something else. Consume it here, on every
+                // path, so it can never reach the next hook -- which is entitled to a clear flag and
+                // would otherwise fail the moment it blocked -- nor the shutdown below, which waits
+                // on futures that fail instantly with the flag set. The decommission cannot be
+                // abandoned this late, so there is nothing the flag could usefully signal.
+                if (Thread.interrupted())
+                    logger.warn("Decommission hook {} left the interrupt flag set; clearing it", name);
+            }
+        }
+
+        // Logged here as well as reported by the caller: if the shutdown sequence after this point
+        // throws, the caller never gets to report, and a hook failure must not be silent.
+        if (!failed.isEmpty())
+            logger.error("{} of {} decommission hook(s) did not complete: {}",
+                         failed.size(), hooks.size(), String.join(", ", failed));
+
+        // The flag must not outlive this method: the shutdown below, and the JMX thread we borrow,
+        // both misbehave with an interrupted thread.
+        if (Thread.interrupted())
+            logger.warn("Decommission thread was left interrupted by the hooks; clearing the flag");
+
+        return failed;
+    }
+
+    /** A hook is third-party code: even name() may misbehave, and must not abort the run. */
+    private static String hookName(DecommissionHook hook)
+    {
+        if (hook == null)
+            return "null";
+        try
+        {
+            String name = hook.name();
+            return name == null ? hook.getClass().getName() : name;
+        }
+        catch (Throwable t)
+        {
+            return hook.getClass().getName();
+        }
+    }
+
+    private static long elapsedMillis(long startedAtNanos)
+    {
+        return TimeUnit.NANOSECONDS.toMillis(nanoTime() - startedAtNanos);
     }
 
     private void leaveRing()
