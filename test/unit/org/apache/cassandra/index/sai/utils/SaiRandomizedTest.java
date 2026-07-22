@@ -104,8 +104,8 @@ public class SaiRandomizedTest extends RandomizedTest
                                                                         randomSimpleString(5, 13),
                                                                         randomSimpleString(3, 17),
                                                                         new SequenceBasedSSTableId(randomIntBetween(0, 128))),
-                                                         metadata,
-                                                         IndexFileUtils.defaultWriterOption);
+                                                         IndexFileUtils.defaultWriterOption,
+                                                         metadata.comparator);
     }
 
     public String newIndex()

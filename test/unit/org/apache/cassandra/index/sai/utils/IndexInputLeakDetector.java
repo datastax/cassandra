@@ -24,12 +24,12 @@ import java.util.Map;
 import java.util.Set;
 
 import com.carrotsearch.randomizedtesting.rules.TestRuleAdapter;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.TrackingIndexFileUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.SequentialWriterOption;
-import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertTrue;
 
@@ -39,18 +39,15 @@ public class IndexInputLeakDetector extends TestRuleAdapter
 
     public IndexDescriptor newIndexDescriptor(Descriptor descriptor, SequentialWriterOption sequentialWriterOption)
     {
-        TrackingIndexFileUtils trackingIndexFileUtils = new TrackingIndexFileUtils(sequentialWriterOption);
-        trackedIndexFileUtils.add(trackingIndexFileUtils);
-        IndexFileUtils.instance = trackingIndexFileUtils;
-        return IndexDescriptor.empty(descriptor);
+        return newIndexDescriptor(descriptor, sequentialWriterOption, new ClusteringComparator());
     }
 
-    public IndexDescriptor newIndexDescriptor(Descriptor descriptor, TableMetadata metadata, SequentialWriterOption sequentialWriterOption)
+    public IndexDescriptor newIndexDescriptor(Descriptor descriptor, SequentialWriterOption sequentialWriterOption, ClusteringComparator comparator)
     {
         TrackingIndexFileUtils trackingIndexFileUtils = new TrackingIndexFileUtils(sequentialWriterOption);
         trackedIndexFileUtils.add(trackingIndexFileUtils);
         IndexFileUtils.instance = trackingIndexFileUtils;
-        return IndexDescriptor.empty(descriptor, metadata.comparator);
+        return IndexDescriptor.empty(descriptor, comparator);
     }
 
     @Override
