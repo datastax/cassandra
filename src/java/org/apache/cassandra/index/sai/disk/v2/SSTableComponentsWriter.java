@@ -75,6 +75,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     }
 
     @Override
+    @SuppressWarnings("ThrowableNotThrown")
     public void abort(Throwable accumulator)
     {
         logger.debug(perSSTableComponents.logMessage("Aborting per-SSTable index component writer for {}..."), perSSTableComponents.descriptor());
