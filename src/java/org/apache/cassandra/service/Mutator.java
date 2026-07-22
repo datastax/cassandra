@@ -202,7 +202,7 @@ public interface Mutator
 
     /**
      * Callback invoked AFTER a Paxos commit dispatched by this coordinator has been ACKNOWLEDGED by
-     * a {@code consistencyLevel} quorum of replicas — i.e. that many replicas have applied the
+     * a {@code consistencyLevel} of replicas — i.e. that many replicas have applied the
      * committed {@code PartitionUpdate} to their base table and replied. Unlike {@link #onCasCommit}
      * (which fires <em>before</em> the commit is dispatched, for every <em>decided</em> value), this
      * fires only once the value is durably visible: a read at {@code consistencyLevel} (or stronger)
