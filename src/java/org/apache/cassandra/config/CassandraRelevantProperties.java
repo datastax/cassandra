@@ -100,7 +100,6 @@ public enum CassandraRelevantProperties
      * the node is restarted - the bloom filter can get rebuilt if this property jest set to true.
      */
     BF_RECREATE_ON_FP_CHANCE_CHANGE("cassandra.bf.recreate_on_fp_chance_change", "false"),
-
     // bloom filter lazy loading
     /**
      * true if non-local table's bloom filter should be deserialized on read instead of when opening sstable
@@ -888,11 +887,14 @@ public enum CassandraRelevantProperties
     SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
 
     /**
-     * @deprecated This property is deprecated and no longer has any effect. FusedPQ is now automatically enabled
-     * for all indexes using version FA or later (jvector file format version 6+). The property cannot be used to
-     * disable FusedPQ for FA+ versions.
+     * Whether compaction should build vector indexes using a fused graph, i.e. a graph where the quantized vectors
+     * are stored inline with the graph nodes (FusedPQ). This is an experimental feature that significantly increases
+     * disk usage and should only be enabled where it makes sense.
+     * See: <a href="https://github.com/riptano/cndb/issues/17471">CNDB-17471</a>
+     * <p>
+     * Note: for indexes using version FA (jvector file format version 6), FusedPQ is always enabled regardless
+     * of this property. For version FB and later, this property controls whether FusedPQ is used.
      */
-    @Deprecated(since = "cc4")
     SAI_VECTOR_ENABLE_FUSED("cassandra.sai.vector.enable_fused", "false"),
 
     // Use nvq when building graphs in compaction. Disabled by default for now. Enabling will reduce recall slightly
