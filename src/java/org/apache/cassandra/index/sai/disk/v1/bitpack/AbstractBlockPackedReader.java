@@ -113,9 +113,9 @@ public abstract class AbstractBlockPackedReader implements LongArray
         if (isOutOfRangeState())
             return Long.MIN_VALUE;
 
-        long rowId = findBlockIndex(targetValue);
-        lastIndex = rowId >= 0 ? rowId : -rowId - 1;
-        return isOutOfRangeState() ? Long.MIN_VALUE : rowId;
+        long index = findBlockIndex(targetValue);
+        lastIndex = index >= 0 ? index : -index - 1;
+        return isOutOfRangeState() ? Long.MIN_VALUE : index;
     }
 
     private boolean isOutOfRangeState()
