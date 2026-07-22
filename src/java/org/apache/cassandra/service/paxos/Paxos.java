@@ -818,7 +818,12 @@ public class Paxos
                 PaxosCommit.Status result = commit.awaitUntil(commitDeadline);
                 if (!result.isSuccess())
                     throw result.maybeFailure().markAndThrowAsTimeoutOrFailure(true, consistencyForCommit, failedAttemptsDueToContention, metrics);
-                // the commit reached a consistencyForCommit quorum: the value is now readable at that CL
+                // the commit reached a consistencyForCommit quorum: the value is now readable at that CL.
+                // Note that, unlike the v1 path in StorageProxy, we do not need to special case CL=ANY here:
+                // v1 does not block at all for ANY (it fires the commits off and returns), so it must suppress
+                // this notification; here we always await PaxosCommit, which requires blockForWrite(ANY) == 1
+                // genuine replica acknowledgement (hints are not counted as accepts), so reaching this point
+                // means the commit really was applied on at least the replicas that consistencyForCommit requires.
                 MutatorProvider.notifyCasCommitApplied(committedAgreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
             }
             Tracing.trace("CAS successful");
