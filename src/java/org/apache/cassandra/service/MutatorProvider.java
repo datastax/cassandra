@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.service;
 
+import java.util.concurrent.TimeUnit;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,6 +27,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_MUTATOR_CLASS;
 
@@ -38,6 +41,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_MUT
 public abstract class MutatorProvider
 {
     private static final Logger logger = LoggerFactory.getLogger(MutatorProvider.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     // public so that the paxos engines (org.apache.cassandra.service.paxos) can reach the
     // installed singleton for Mutator.onCasCommit notifications without re-constructing it
@@ -58,12 +62,12 @@ public abstract class MutatorProvider
         {
             // Let fatal errors (OOM etc.) reach the JVM failure policy before we swallow.
             JVMStabilityInspector.inspectThrowable(t);
-            logger.warn("Custom mutator onCasCommit({}) failed; ignoring", origin, t);
+            noSpamLogger.warn("Custom mutator onCasCommit({}) failed; ignoring", origin, t);
         }
     }
 
     /**
-     * Notifies the installed Mutator that a commit has been acknowledged by a quorum (see
+     * Notifies the installed Mutator that a commit has been acknowledged by given consistency level (see
      * {@link Mutator#onCasCommitApplied}), containing any exception a misbehaving implementation
      * throws: a notification failure must never abort the paxos operation, serial read or repair.
      */
@@ -77,7 +81,7 @@ public abstract class MutatorProvider
         {
             // Let fatal errors (OOM etc.) reach the JVM failure policy before we swallow.
             JVMStabilityInspector.inspectThrowable(t);
-            logger.warn("Custom mutator onCasCommitApplied({}) failed; ignoring", origin, t);
+            noSpamLogger.warn("Custom mutator onCasCommitApplied({}) failed; ignoring", origin, t);
         }
     }
 

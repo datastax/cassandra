@@ -54,6 +54,29 @@ import org.apache.cassandra.utils.TimeUUID;
  */
 public interface Mutator
 {
+    /**
+     * Where a Paxos commit dispatch originated. Passed to {@link #onCasCommit}.
+     */
+    enum CasCommitOrigin
+    {
+        /**
+         * The coordinator's own CAS operation reached the commit phase: the proposal carries the
+         * update this coordinator built and successfully proposed. At most one per
+         * {@link #mutateCas} invocation.
+         */
+        CLIENT_OPERATION,
+        /**
+         * The coordinator witnessed another proposer's accepted-but-uncommitted round and is
+         * completing it on their behalf. The payload is the foreign in-progress update, not
+         * anything this coordinator's client asked for; a SERIAL/LOCAL_SERIAL read can trigger it.
+         */
+        REPAIR_IN_PROGRESS,
+        /**
+         * Re-transmission of an already-committed value to replicas that have not witnessed it
+         * (most-recent-commit refresh). Carries no new decision; the value was agreed earlier.
+         */
+        REFRESH_COMMITTED
+    }
 
     /**
      * Used for handling the given {@code mutations} as a logged batch.
@@ -98,30 +121,6 @@ public interface Mutator
      */
     @Nullable
     AbstractWriteResponseHandler<Commit> mutatePaxos(Commit proposal, ConsistencyLevel consistencyLevel, boolean allowHints, Dispatcher.RequestTime requestTime);
-
-    /**
-     * Where a Paxos commit dispatch originated. Passed to {@link #onCasCommit}.
-     */
-    enum CasCommitOrigin
-    {
-        /**
-         * The coordinator's own CAS operation reached the commit phase: the proposal carries the
-         * update this coordinator built and successfully proposed. At most one per
-         * {@link #mutateCas} invocation.
-         */
-        CLIENT_OPERATION,
-        /**
-         * The coordinator witnessed another proposer's accepted-but-uncommitted round and is
-         * completing it on their behalf. The payload is the foreign in-progress update, not
-         * anything this coordinator's client asked for; a SERIAL/LOCAL_SERIAL read can trigger it.
-         */
-        REPAIR_IN_PROGRESS,
-        /**
-         * Re-transmission of an already-committed value to replicas that have not witnessed it
-         * (most-recent-commit refresh). Carries no new decision; the value was agreed earlier.
-         */
-        REFRESH_COMMITTED
-    }
 
     /**
      * Used for handling a whole CAS (LWT) operation: a single conditional statement or a
@@ -207,7 +206,9 @@ public interface Mutator
      * committed {@code PartitionUpdate} to their base table and replied. Unlike {@link #onCasCommit}
      * (which fires <em>before</em> the commit is dispatched, for every <em>decided</em> value), this
      * fires only once the value is durably visible: a read at {@code consistencyLevel} (or stronger)
-     * issued after this callback returns will observe the committed value.
+     * issued after this callback returns will observe the committed value. Note that if
+     * {@code consistencyLevel} is {@code ONE}, reading at ONE or QUORUM may still not return the
+     * committed value if the acknowledging replica is not the one serving the read.
      * <p>
      * Relationship to {@link #onCasCommit}: every delivery of this callback is preceded by a
      * matching {@link #onCasCommit} for the same ballot, and it fires only on the success path (the

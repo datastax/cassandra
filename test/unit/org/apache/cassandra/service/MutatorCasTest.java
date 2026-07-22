@@ -497,7 +497,7 @@ public class MutatorCasTest
         assertThat(RecordingMutator.casBegun.get()).isEqualTo(1);
         assertThat(RecordingMutator.casCompleted.get()).isEqualTo(1);
         List<CommitRecord> repairs = RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
-        assertThat(repairs).as("the foreign in-progress round must be reported as REPAIR_IN_PROGRESS").isNotEmpty();
+        assertThat(repairs).as("the foreign in-progress round must be reported as REPAIR_IN_PROGRESS").hasSize(1);
         assertThat(repairs.get(0).commit.update.partitionKey()).isEqualTo(key);
         // Documented CL semantics: the v1 repair commit is performed at the operation's commit CL
         // (QUORUM here) -- exactly. Under v2 the completion can take two routes -- the in-engine
