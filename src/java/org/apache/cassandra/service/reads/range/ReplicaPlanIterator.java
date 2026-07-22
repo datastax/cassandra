@@ -36,11 +36,9 @@ import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Pair;
 
-class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
+class ReplicaPlanIterator extends AbstractReplicaPlanIterator
 {
     private final Keyspace keyspace;
     private final ConsistencyLevel consistency;
@@ -69,7 +67,8 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
     /**
      * @return the number of {@link ReplicaPlan.ForRangeRead}s in this iterator
      */
-    int size()
+    @Override
+    public int size()
     {
         return rangeCount;
     }
@@ -81,48 +80,5 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
             return endOfData();
 
         return ReplicaPlans.forRangeRead(keyspace, indexQueryPlan, consistency, ranges.next(), 1);
-    }
-
-    /**
-     * Compute all ranges we're going to query, in sorted order. Nodes can be replica destinations for many ranges,
-     * so we need to restrict each scan to the specific range we want, or else we'd get duplicate results.
-     */
-    private static List<AbstractBounds<PartitionPosition>> getRestrictedRanges(TokenMetadata tokenMetadata, final AbstractBounds<PartitionPosition> queryRange)
-    {
-        // special case for bounds containing exactly 1 (non-minimum) token
-        if (queryRange instanceof Bounds && queryRange.left.equals(queryRange.right) && !queryRange.left.isMinimum())
-        {
-            return Collections.singletonList(queryRange);
-        }
-
-        List<AbstractBounds<PartitionPosition>> ranges = new ArrayList<>();
-        // divide the queryRange into pieces delimited by the ring and minimum tokens
-        Iterator<Token> ringIter = TokenMetadata.ringIterator(tokenMetadata.sortedTokens(), queryRange.left.getToken(), true);
-        AbstractBounds<PartitionPosition> remainder = queryRange;
-        while (ringIter.hasNext())
-        {
-            /*
-             * remainder is a range/bounds of partition positions and we want to split it with a token. We want to split
-             * using the key returned by token.maxKeyBound. For instance, if remainder is [DK(10, 'foo'), DK(20, 'bar')],
-             * and we have 3 nodes with tokens 0, 15, 30, we want to split remainder to A=[DK(10, 'foo'), 15] and
-             * B=(15, DK(20, 'bar')]. But since we can't mix tokens and keys at the same time in a range, we use
-             * 15.maxKeyBound() to have A include all keys having 15 as token and B include none of those (since that is
-             * what our node owns).
-             */
-            Token upperBoundToken = ringIter.next();
-            PartitionPosition upperBound = upperBoundToken.maxKeyBound();
-            if (!remainder.left.equals(upperBound) && !remainder.contains(upperBound))
-                // no more splits
-                break;
-            Pair<AbstractBounds<PartitionPosition>, AbstractBounds<PartitionPosition>> splits = remainder.split(upperBound);
-            if (splits == null)
-                continue;
-
-            ranges.add(splits.left);
-            remainder = splits.right;
-        }
-        ranges.add(remainder);
-
-        return ranges;
     }
 }

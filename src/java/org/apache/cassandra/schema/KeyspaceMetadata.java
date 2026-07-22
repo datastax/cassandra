@@ -35,6 +35,7 @@ import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.schema.Tables.TablesDiff;
 import org.apache.cassandra.schema.Types.TypesDiff;
@@ -390,9 +391,14 @@ public final class KeyspaceMetadata implements SchemaElement
 
     public AbstractReplicationStrategy createReplicationStrategy()
     {
+        return createReplicationStrategy(StorageService.instance.getTokenMetadataForKeyspace(name));
+    }
+
+    public AbstractReplicationStrategy createReplicationStrategy(TokenMetadata tokenMetadata)
+    {
         return AbstractReplicationStrategy.createReplicationStrategy(name,
                                                                      params.replication.klass,
-                                                                     StorageService.instance.getTokenMetadataForKeyspace(name),
+                                                                     tokenMetadata,
                                                                      DatabaseDescriptor.getEndpointSnitch(),
                                                                      params.replication.options);
     }
