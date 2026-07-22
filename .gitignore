@@ -67,6 +67,8 @@ target/
 
 # AI agents
 .ai/
+.bob/
+AGENTS.md
 
 # General
 **/__pycache__
