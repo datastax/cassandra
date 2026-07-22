@@ -61,6 +61,10 @@ public class Component
         STATS("Statistics.db"),
         // holds CRC32 checksum of the data file
         DIGEST("Digest.crc32"),
+        // holds CRC32C checksum of the data file
+        DIGEST_CRC32C("Digest.crc32c"),
+        // holds CRC64-NVMe checksum of the data file
+        DIGEST_CRC64NVME("Digest.crc64nvme"),
         // holds the CRC32 for chunks in an a uncompressed file.
         CRC("CRC.db"),
         // holds SSTable Index Summary (sampling of Index component)
@@ -104,6 +108,8 @@ public class Component
     public final static Component COMPRESSION_INFO = new Component(Type.COMPRESSION_INFO);
     public final static Component STATS = new Component(Type.STATS);
     public final static Component DIGEST = new Component(Type.DIGEST);
+    public final static Component DIGEST_CRC32C = new Component(Type.DIGEST_CRC32C);
+    public final static Component DIGEST_CRC64NVME = new Component(Type.DIGEST_CRC64NVME);
     public final static Component CRC = new Component(Type.CRC);
     public final static Component SUMMARY = new Component(Type.SUMMARY);
     public final static Component TOC = new Component(Type.TOC);
@@ -156,6 +162,8 @@ public class Component
             case COMPRESSION_INFO: return Component.COMPRESSION_INFO;
             case STATS:            return Component.STATS;
             case DIGEST:           return Component.DIGEST;
+            case DIGEST_CRC32C:    return Component.DIGEST_CRC32C;
+            case DIGEST_CRC64NVME: return Component.DIGEST_CRC64NVME;
             case CRC:              return Component.CRC;
             case SUMMARY:          return Component.SUMMARY;
             case TOC:              return Component.TOC;

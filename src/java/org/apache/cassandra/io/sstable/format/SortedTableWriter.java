@@ -28,6 +28,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionPurger;
@@ -66,8 +67,8 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Throwables;
 
 public abstract class SortedTableWriter extends SSTableWriter
@@ -99,33 +100,77 @@ public abstract class SortedTableWriter extends SSTableWriter
         super(descriptor, components, lifecycleNewTracker, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
         lifecycleNewTracker.trackNew(this); // must track before any files are created
 
-        dataFile = constructDataFileWriter(descriptor, metadata, metadataCollector, lifecycleNewTracker, writerOption);
+        dataFile = constructDataFileWriter(descriptor, metadata, metadataCollector, lifecycleNewTracker, writerOption, extractDigestComponent(components));
         dbuilder = SSTableReaderBuilder.defaultDataHandleBuilder(descriptor, ZeroCopyMetadata.EMPTY).compressed(compression);
         isInternalKeyspace = SchemaConstants.isInternalKeyspace(metadata.keyspace);
+    }
+
+    protected static Component getDigestComponent()
+    {
+        Config.SSTableDigestType ssTableDigestType = DatabaseDescriptor.getSSTableDigestType();
+        switch (ssTableDigestType)
+        {
+            case CRC32:
+                return Component.DIGEST;
+            case CRC32C:
+                return Component.DIGEST_CRC32C;
+            case CRC64NVME:
+                return Component.DIGEST_CRC64NVME;
+            default:
+                throw new IllegalStateException("Unexpected sstable digest type: " + ssTableDigestType);
+        }
+    }
+
+    private static Component extractDigestComponent(Set<Component> components)
+    {
+        if (components.contains(Component.DIGEST))
+            return Component.DIGEST;
+        if (components.contains(Component.DIGEST_CRC32C))
+            return Component.DIGEST_CRC32C;
+        if (components.contains(Component.DIGEST_CRC64NVME))
+            return Component.DIGEST_CRC64NVME;
+        throw new IllegalStateException("Missing digest component for sstable: " + components);
+    }
+
+    private static ChecksumType getChecksumType(Component digestComponent)
+    {
+        if (digestComponent.equals(Component.DIGEST))
+            return ChecksumType.CRC32;
+        if (digestComponent.equals(Component.DIGEST_CRC32C))
+            return ChecksumType.CRC32C;
+        if (digestComponent.equals(Component.DIGEST_CRC64NVME))
+            return ChecksumType.CRC64NVME;
+        throw new IllegalStateException("Unexpected digest component: " + digestComponent);
     }
 
     protected static SequentialWriter constructDataFileWriter(Descriptor descriptor,
                                                               TableMetadataRef metadata,
                                                               MetadataCollector metadataCollector,
                                                               LifecycleNewTracker lifecycleNewTracker,
-                                                              SequentialWriterOption writerOption)
+                                                              SequentialWriterOption writerOption,
+                                                              Component digestComponent)
     {
+        File dataFile = descriptor.fileFor(Component.DATA);
+        File digestFile = descriptor.fileFor(digestComponent);
+        ChecksumType checksumType = getChecksumType(digestComponent);
         if (metadata.getLocal().params.compression.isEnabled())
         {
             final CompressionParams compressionParams = compressionFor(lifecycleNewTracker.opType(), metadata);
 
-            return new CompressedSequentialWriter(descriptor.fileFor(Component.DATA),
+            return new CompressedSequentialWriter(dataFile,
                                                   descriptor.fileFor(Component.COMPRESSION_INFO),
-                                                  descriptor.fileFor(Component.DIGEST),
+                                                  digestFile,
+                                                  checksumType,
                                                   writerOption,
                                                   compressionParams,
                                                   metadataCollector);
         }
         else
         {
-            return new ChecksummedSequentialWriter(descriptor.fileFor(Component.DATA),
+            return new ChecksummedSequentialWriter(dataFile,
                                                    descriptor.fileFor(Component.CRC),
-                                                   descriptor.fileFor(Component.DIGEST),
+                                                   digestFile,
+                                                   checksumType,
                                                    writerOption);
         }
     }
