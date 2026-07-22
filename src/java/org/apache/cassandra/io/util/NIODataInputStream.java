@@ -60,11 +60,11 @@ public class NIODataInputStream extends RebufferingInputStream
     @Override
     protected void reBuffer() throws IOException
     {
-        Preconditions.checkState(buffer.remaining() == 0);
+        Preconditions.checkState(!buffer.hasRemaining(), "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
+
         buffer.clear();
-
+        //noinspection StatementWithEmptyBody
         while ((channel.read(buffer)) == 0) {}
-
         buffer.flip();
     }
 

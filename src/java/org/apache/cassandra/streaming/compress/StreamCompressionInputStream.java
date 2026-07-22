@@ -20,6 +20,8 @@ package org.apache.cassandra.streaming.compress;
 
 import java.io.IOException;
 
+import com.google.common.base.Preconditions;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.PooledByteBufAllocator;
@@ -65,6 +67,8 @@ public class StreamCompressionInputStream extends RebufferingInputStream impleme
     @Override
     public void reBuffer() throws IOException
     {
+        Preconditions.checkState(!buffer.hasRemaining(), "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
+
         currentBuf.release();
         currentBuf = deserializer.deserialize(decompressor, dataInputPlus, protocolVersion);
         buffer = currentBuf.nioBuffer(0, currentBuf.readableBytes());
