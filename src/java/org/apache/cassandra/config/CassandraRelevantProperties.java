@@ -769,7 +769,7 @@ public enum CassandraRelevantProperties
      * or to force the node to use a specific version for testing purposes.
      */
     @Deprecated // remove when cndb no longer supports bdp/6.8-cndb
-    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_11)),
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_12)),
 
     /**
      * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
