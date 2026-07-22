@@ -778,6 +778,17 @@ public enum CassandraRelevantProperties
     DEFAULT_SSTABLE_COMPRESSION("cassandra.default_sstable_compression", "fast"),
 
     /**
+     * Fully-qualified class name of a {@link org.apache.cassandra.schema.CompressionParams.Selector} implementation
+     * to use for selecting the default SSTable compression per keyspace.
+     * When set, the selector takes precedence over {@link #DEFAULT_SSTABLE_COMPRESSION}.
+     * If not set, {@link org.apache.cassandra.schema.DefaultCompressionSelector} is used, which falls back to
+     * {@link #DEFAULT_SSTABLE_COMPRESSION}.
+     * <p>
+     * This property is read once at startup and cannot be changed dynamically.
+     */
+    SSTABLE_COMPRESSION_SELECTOR_CLASS("cassandra.sstable.compression.selector.class", ""),
+
+    /**
      * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
      * with vnodes.
      */
