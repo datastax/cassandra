@@ -185,7 +185,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                         indexConfig.getConstructionBeamWidth(),
                                         indexConfig.getNeighborhoodOverflow(1.0f), // no overflow means add will be a bit slower but flush will be faster
                                         indexConfig.getAlpha(dimension > 3 ? 1.2f : 2.0f),
-                                        indexConfig.isHierarchyEnabled() && jvectorVersion >= 4);
+                                        indexConfig.isHierarchyEnabled() && jvectorVersion >= 4,
+                                        memtable != null); // Skip graph refinement on memtable to speed up flush
         searchers = ThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(builder.getGraph())));
     }
 
