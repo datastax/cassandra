@@ -37,7 +37,6 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
-import static org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyMap.invertRowId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -116,7 +115,7 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RowAware
     public void testExactRowIdOrInvertedCeiling()
     {
         assertThat(map.exactRowIdOrInvertedCeiling(beforeFirst(map))).as("before first expects the inverted first")
-                                                                     .isEqualTo(invertRowId(0));
+                                                                     .isEqualTo(~0);
 
         assertThat(map.exactRowIdOrInvertedCeiling(exactFirstRow(map))).as("exact first row")
                                                                        .isEqualTo(0);
@@ -131,14 +130,14 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RowAware
                                                                   .isEqualTo(idPk1Ck1 + 2);
 
         assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 4))).as("between pk=1 ck=3 and ck=10 expects inverted ck=10")
-                                                                  .isEqualTo(invertRowId(idPk1Ck10));
+                                                                  .isEqualTo(~idPk1Ck10);
 
         assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 10))).as("exact pk=1, ck=10 expects next after pk=1, ck=3")
                                                                    .isEqualTo(idPk1Ck1 + 3);
 
         assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, Integer.MAX_VALUE))).as("after last ck in pk=1 expects inverted next partition first row or out of range if the last partition")
                                                                                   .isEqualTo(idPk1Ck10 < map.count()
-                                                                                             ? invertRowId(idPk1Ck10 + 1)
+                                                                                             ? ~(idPk1Ck10 + 1)
                                                                                              : Integer.MAX_VALUE);
 
         assertThat(map.exactRowIdOrInvertedCeiling(exactLastRow(map))).as("exact last row")

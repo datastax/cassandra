@@ -33,7 +33,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
-import static org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyMap.invertRowId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -92,13 +91,13 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester.Versioned.RowAwar
     public void testExactRowIdOrInvertedCeiling()
     {
         assertThat(map.exactRowIdOrInvertedCeiling(beforeFirst(map))).as("before first expects the inverted first")
-                                                                     .isEqualTo(invertRowId(0));
+                                                                     .isEqualTo(~0);
 
         assertThat(map.exactRowIdOrInvertedCeiling(exactFirstRow(map))).as("exact first")
                                                                        .isEqualTo(0);
 
         assertThat(map.exactRowIdOrInvertedCeiling(betweenFirstAndSecond(map))).as("between first and second expects the inverted second")
-                                                                               .isEqualTo(invertRowId(1));
+                                                                               .isEqualTo(~1);
 
         assertThat(map.exactRowIdOrInvertedCeiling(exactLastRow(map))).as("exact last")
                                                                       .isEqualTo(map.count() - 1);

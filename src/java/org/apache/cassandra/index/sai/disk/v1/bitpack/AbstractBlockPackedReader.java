@@ -85,7 +85,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
             return -1;
 
         long index = findBlockIndex(targetValue);
-        lastIndex = index >= 0 ? index : -index - 1;
+        lastIndex = index >= 0 ? index : ~index;
         return isOutOfRangeState() ? -1 : lastIndex;
     }
 
@@ -114,7 +114,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
             return Long.MIN_VALUE;
 
         long index = findBlockIndex(targetValue);
-        lastIndex = index >= 0 ? index : -index - 1;
+        lastIndex = index >= 0 ? index : ~index;
         return isOutOfRangeState() ? Long.MIN_VALUE : index;
     }
 
@@ -193,9 +193,9 @@ public abstract class AbstractBlockPackedReader implements LongArray
             }
             else if (cmp < 0)
             {
-                // We're in the same block. Indicate a non-exact match, and this value will be both
-                // negated and then decremented to wind up at the current value of "low" here.
-                return -low - 1;
+                // We're in the same block. Indicate a non-exact match; the caller inverts this
+                // to recover the current value of "low".
+                return ~low;
             }
 
             // The target is greater than the next block's min value, so advance to that
