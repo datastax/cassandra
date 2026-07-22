@@ -40,7 +40,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * For the V2 on-disk format the {@link DecoratedKey} and {@link Clustering} are supported.
  *
  */
-public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
+public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable, ByteComparable
 {
     /**
      * A factory for creating {@link PrimaryKey} instances
@@ -176,6 +176,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
      * @param version the {@link ByteComparable.Version} to use for the implementation
      * @return the {@code ByteSource} byte comparable.
      */
+    @Override
     ByteSource asComparableBytes(ByteComparable.Version version);
 
     /**

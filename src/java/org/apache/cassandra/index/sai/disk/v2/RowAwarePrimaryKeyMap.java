@@ -103,7 +103,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
 
                 token = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES).createFileHandle();
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
-
                 termsDataBlockOffsets = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS).createFileHandle();
                 termsData = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS).createFileHandle();
                 termsTrie = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
@@ -141,7 +140,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             }
             catch (IOException e)
             {
-                throw new UncheckedIOException(e);
+                throw new UncheckedIOException("Failed to load PrimaryKeyMap for sstable: " + sstableId, e);
             }
         }
 
@@ -246,8 +245,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         if (pointId >= 0)
             return pointId;
         long ceiling = cursor.ceiling(key::asComparableBytesMinPrefix);
-        // Use min value since -(Long.MIN_VALUE) - 1 == Long.MAX_VALUE.
-        return ceiling < 0 ? Long.MIN_VALUE : -ceiling - 1;
+        // Use min value since inverting Long.MIN_VALUE gives Long.MAX_VALUE.
+        return ceiling < 0 ? Long.MIN_VALUE : ~ceiling;
     }
 
     @Override
@@ -269,7 +268,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 if (rowId == Long.MIN_VALUE)
                     return -1;
                 else
-                    return -rowId - 1;
+                    return ~rowId;
         }
 
         return cursor.ceiling(key::asComparableBytesMinPrefix);
@@ -280,7 +279,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     {
         return cursor.floor(key::asComparableBytesMaxPrefix);
     }
-
 
     @Override
     public void close() throws IOException
@@ -334,4 +332,5 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         // Note: We would normally expect to get here without going into the while loop
         return rowId;
     }
+
 }

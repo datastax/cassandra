@@ -45,6 +45,14 @@ public interface LongArray extends Closeable
     long ceilingIndex(long targetValue);
 
     /**
+     * @param targetValue Value to look up.  Must not be bigger than the next value queried
+     *                    (the method is stateful)
+     * @return The index of the largest value equal to or smaller than the target,
+     *         or negative value if the target value is smaller than all values
+     */
+    long floorIndex(long targetValue);
+
+    /**
      * Using the target value returns the first index corresponding to the value.
      *
      * @param targetValue Value to lookup, and it must not be smaller than previous value
@@ -87,6 +95,13 @@ public interface LongArray extends Closeable
         {
             open();
             return longArray.ceilingIndex(targetValue);
+        }
+
+        @Override
+        public long floorIndex(long targetValue)
+        {
+            open();
+            return longArray.floorIndex(targetValue);
         }
 
         @Override
