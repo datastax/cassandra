@@ -245,8 +245,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         if (pointId >= 0)
             return pointId;
         long ceiling = cursor.ceiling(key::asComparableBytesMinPrefix);
-        // Use min value since invertRowId(Long.MIN_VALUE) == Long.MAX_VALUE.
-        return ceiling < 0 ? Long.MIN_VALUE : invertRowId(ceiling);
+        // Use min value since inverting Long.MIN_VALUE gives Long.MAX_VALUE.
+        return ceiling < 0 ? Long.MIN_VALUE : ~ceiling;
     }
 
     @Override
@@ -268,7 +268,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 if (rowId == Long.MIN_VALUE)
                     return -1;
                 else
-                    return invertRowId(rowId);
+                    return ~rowId;
         }
 
         return cursor.ceiling(key::asComparableBytesMinPrefix);
@@ -333,11 +333,4 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         return rowId;
     }
 
-    /**
-     * Inverts a row id, which is used to return closest but not exact row id
-     */
-    public static long invertRowId(long rowId)
-    {
-        return -rowId - 1;
-    }
 }
