@@ -23,11 +23,19 @@ import java.io.IOException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
-/**
- * An iterator wrapper that wraps two iterators (left and right) and returns the primary keys from the left iterator
- * that do not match the primary keys from the right iterator. The keys returned by the wrapped iterators must
- * follow token-clustering order.
- */
+/// An iterator wrapper that wraps two iterators (left and right) and returns the primary keys from the left iterator
+/// that do not match the primary keys from the right iterator. The keys returned by the wrapped iterators must
+/// follow token-clustering order.
+///
+/// In order to avoid false negatives in the output, this class must not be used with iterators that can
+/// return false positives on the right side, in particular:
+/// - returned from different overlapping sstable/memtable indexes, because the indexed terms can be overwritten
+/// - returned from indexes that do not handle overwrites in place and may return stale values
+/// - returned from imprecise indexes that can potentially point to different values than the values actually indexed:
+///    - partition-aware indexes (version AA), because they always match the whole partition even if only one row matches
+///    - indexes over types with rounding, because they truncate the term and might match additional rows with a different value than the one searched for
+///
+/// The above-mentioned conditions are not checked, and if violated, some results may be missing.
 public class KeyRangeAntiJoinIterator extends KeyRangeIterator
 {
     final KeyRangeIterator left;
@@ -72,6 +80,7 @@ public class KeyRangeAntiJoinIterator extends KeyRangeIterator
         {
             if (cmp == 0)
             {
+                // Only skip keys on the left if we have a precise single-row match
                 key = left.nextOrNull();
             }
             else
