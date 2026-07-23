@@ -5,6 +5,11 @@
 name: 🔍 Test IBM SonarQube Connectivity
 
 on:
+  push:
+    branches:
+      - CNDB-17486-cc-main
+    paths:
+      - '.github/workflows/test-sonar-connectivity.yaml'
   workflow_dispatch:
     inputs:
       debug:
