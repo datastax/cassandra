@@ -410,7 +410,7 @@ public class PaxosRepair extends AbstractPaxosRepair
             if (!input.isSuccess())
                 return retry(this);
             // the commit reached a commitConsistency() quorum: the recovered value is now readable
-            MutatorProvider.notifyCasCommitApplied(committed, commitConsistency(), origin);
+            MutatorProvider.notifyCasCommitCompleted(committed, commitConsistency(), origin, Mutator.CasCommitOutcome.APPLIED);
             return DONE;
         }
     }
@@ -430,7 +430,7 @@ public class PaxosRepair extends AbstractPaxosRepair
         public State execute(PaxosCommit.Status input)
         {
             if (input.isSuccess())
-                MutatorProvider.notifyCasCommitApplied(committed, commitConsistency(), origin);
+                MutatorProvider.notifyCasCommitCompleted(committed, commitConsistency(), origin, Mutator.CasCommitOutcome.APPLIED);
             return restart(this);
         }
     }

@@ -67,21 +67,22 @@ public abstract class MutatorProvider
     }
 
     /**
-     * Notifies the installed Mutator that a commit has been acknowledged by given consistency level (see
-     * {@link Mutator#onCasCommitApplied}), containing any exception a misbehaving implementation
+     * Notifies the installed Mutator of the terminal outcome of a previously-announced commit (see
+     * {@link Mutator#onCasCommitCompleted}), containing any exception a misbehaving implementation
      * throws: a notification failure must never abort the paxos operation, serial read or repair.
      */
-    public static void notifyCasCommitApplied(Commit committed, ConsistencyLevel consistencyLevel, Mutator.CasCommitOrigin origin)
+    public static void notifyCasCommitCompleted(Commit committed, ConsistencyLevel consistencyLevel,
+                                                Mutator.CasCommitOrigin origin, Mutator.CasCommitOutcome outcome)
     {
         try
         {
-            instance.onCasCommitApplied(committed, consistencyLevel, origin);
+            instance.onCasCommitCompleted(committed, consistencyLevel, origin, outcome);
         }
         catch (Throwable t)
         {
             // Let fatal errors (OOM etc.) reach the JVM failure policy before we swallow.
             JVMStabilityInspector.inspectThrowable(t);
-            noSpamLogger.warn("Custom mutator onCasCommitApplied({}) failed; ignoring", origin, t);
+            noSpamLogger.warn("Custom mutator onCasCommitCompleted({}, {}) failed; ignoring", origin, outcome, t);
         }
     }
 

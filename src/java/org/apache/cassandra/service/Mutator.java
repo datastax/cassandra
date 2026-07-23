@@ -79,6 +79,44 @@ public interface Mutator
     }
 
     /**
+     * Terminal outcome of a commit previously announced via {@link #onCasCommit}. Passed to
+     * {@link #onCasCommitCompleted}. {@link #APPLIED} and {@link #CONFIRMED_BY_PREPARE} are the two
+     * success outcomes (the value is durably visible at {@code consistencyLevel}); {@link #SUPERSEDED}
+     * and {@link #UNCONFIRMED} mean this coordinator did NOT confirm the commit — but the value is
+     * still <em>decided</em> and may become durable via another proposer or a background repair, so
+     * they are "not confirmed here", never "rolled back" (Paxos never un-decides an agreed value).
+     */
+    enum CasCommitOutcome
+    {
+        /**
+         * Acknowledged by a {@code consistencyForCommit} quorum via a standalone, separately-awaited
+         * commit (the strongest confirmation). A read at {@code consistencyLevel} (or stronger) issued
+         * after this callback observes the value. Delivered for CLIENT_OPERATION under both engines,
+         * the v1 in-progress repair, and background Paxos repair.
+         */
+        APPLIED,
+        /**
+         * Inferred-applied: the commit was fused into the following prepare (the v2 {@code begin()}
+         * "commit-and-prepare" optimization used to finish another proposer's round) and that prepare
+         * reached a {@code consistencyForConsensus} (serial) promise-quorum. Every replica applies the
+         * fused commit before answering the prepare, so a promise-quorum implies the commit reached
+         * that same quorum. Slightly weaker than {@link #APPLIED} (serial-quorum, inferred rather than
+         * a directly-awaited commit ack), but still means the value is durably visible.
+         */
+        CONFIRMED_BY_PREPARE,
+        /**
+         * Decided but NOT confirmed by this coordinator: a higher ballot pre-empted the fused
+         * commit-and-prepare before a quorum was reached. Another proposer is finishing the round.
+         */
+        SUPERSEDED,
+        /**
+         * Decided but NOT confirmed: the commit (or the fused prepare) timed out or failed before a
+         * quorum acknowledged it. The value may still be completed later by a repair.
+         */
+        UNCONFIRMED
+    }
+
+    /**
      * Used for handling the given {@code mutations} as a logged batch.
      */
     void mutateAtomically(Collection<Mutation> mutations,
@@ -201,47 +239,51 @@ public interface Mutator
     }
 
     /**
-     * Callback invoked AFTER a Paxos commit dispatched by this coordinator has been ACKNOWLEDGED by
-     * a {@code consistencyLevel} of replicas — i.e. that many replicas have applied the
-     * committed {@code PartitionUpdate} to their base table and replied. Unlike {@link #onCasCommit}
-     * (which fires <em>before</em> the commit is dispatched, for every <em>decided</em> value), this
-     * fires only once the value is durably visible: a read at {@code consistencyLevel} (or stronger)
-     * issued after this callback returns will observe the committed value. Note that if
-     * {@code consistencyLevel} is {@code ONE}, reading at ONE or QUORUM may still not return the
-     * committed value if the acknowledging replica is not the one serving the read.
+     * TERMINAL completion for a commit previously announced via {@link #onCasCommit}: fires once the
+     * fate of that commit is known, carrying the {@link CasCommitOutcome outcome} (success or not).
+     * Where wired (see coverage below) it fires EXACTLY ONCE per {@link #onCasCommit} for the same
+     * ballot, letting an implementation that opened an operation on {@link #onCasCommit} close it out
+     * — pairing every announced commit with a success ({@link CasCommitOutcome#APPLIED} /
+     * {@link CasCommitOutcome#CONFIRMED_BY_PREPARE}) or a not-confirmed
+     * ({@link CasCommitOutcome#SUPERSEDED} / {@link CasCommitOutcome#UNCONFIRMED}) terminal.
      * <p>
-     * Relationship to {@link #onCasCommit}: every delivery of this callback is preceded by a
-     * matching {@link #onCasCommit} for the same ballot, and it fires only on the success path (the
-     * commit was acknowledged). Multiplicity mirrors {@link #onCasCommit}: exactly one per
-     * {@link CasCommitOrigin#CLIENT_OPERATION}; the repair/refresh origins may fire any number of
-     * times (once per completed round, across retries and repair cycles). If a commit times out or
-     * fails (the value is decided and will be completed later by a repair, but no quorum ack was
-     * received), {@link #onCasCommit} still fired but this callback does NOT — absence of this
-     * callback after an {@link #onCasCommit} means "commit not confirmed", not "not decided".
+     * Unlike {@link #onCasCommit} (which fires <em>before</em> dispatch, for every decided value),
+     * this fires once the commit's fate is settled. A success outcome means the value is durably
+     * visible: a read at {@code consistencyLevel} (or stronger) issued after this returns observes it
+     * (with the usual caveat that at {@code ONE} the acknowledging replica may not be the one serving
+     * a later read). A not-confirmed outcome does NOT mean "not decided" (see {@link CasCommitOutcome});
+     * the standard response is a deferred {@code LOCAL_SERIAL}/{@code SERIAL} read, which is
+     * self-correcting and will observe the value if/when it becomes durable.
      * <p>
-     * Coverage — this applied callback is delivered for:
+     * Coverage — a terminal is delivered for:
      * <ul>
-     *   <li>{@link CasCommitOrigin#CLIENT_OPERATION} under both paxos variants (v1 {@code doPaxos}
-     *       after the blocking commit, v2 {@code Paxos.cas} after the commit await): fires on the
-     *       request thread, inside {@link #mutateCas}, after the CLIENT_OPERATION {@link #onCasCommit};</li>
-     *   <li>{@link CasCommitOrigin#REPAIR_IN_PROGRESS} completed by the v1 engine
-     *       ({@code beginAndRepairPaxos}, on the triggering operation's request thread) and by
-     *       background {@code PaxosRepair} (on an arbitrary repair thread);</li>
-     *   <li>{@link CasCommitOrigin#REFRESH_COMMITTED} re-transmitted by background {@code PaxosRepair}.</li>
+     *   <li>{@link CasCommitOrigin#CLIENT_OPERATION} under both engines (v1 {@code doPaxos}, v2
+     *       {@code Paxos.cas}): {@link CasCommitOutcome#APPLIED} when the awaited commit is
+     *       acknowledged, else {@link CasCommitOutcome#UNCONFIRMED} — on the request thread, inside
+     *       {@link #mutateCas}, after the CLIENT_OPERATION {@link #onCasCommit};</li>
+     *   <li>the v2 {@code begin()}-path {@link CasCommitOrigin#REPAIR_IN_PROGRESS} and
+     *       {@link CasCommitOrigin#REFRESH_COMMITTED} sites (commit fused into the following prepare):
+     *       {@link CasCommitOutcome#CONFIRMED_BY_PREPARE} when that prepare reaches a promise-quorum,
+     *       {@link CasCommitOutcome#SUPERSEDED} if pre-empted, else {@link CasCommitOutcome#UNCONFIRMED};</li>
+     *   <li>the v1 in-progress {@link CasCommitOrigin#REPAIR_IN_PROGRESS} repair
+     *       ({@code beginAndRepairPaxos}): {@link CasCommitOutcome#APPLIED} or
+     *       {@link CasCommitOutcome#UNCONFIRMED};</li>
+     *   <li>background {@code PaxosRepair} ({@link CasCommitOrigin#REPAIR_IN_PROGRESS} /
+     *       {@link CasCommitOrigin#REFRESH_COMMITTED}): {@link CasCommitOutcome#APPLIED} only — this
+     *       background state machine retries on failure rather than delivering a negative terminal,
+     *       so a non-success outcome is not reported (best-effort, on an arbitrary repair thread).</li>
      * </ul>
-     * It is NOT delivered (only the dispatched {@link #onCasCommit} is) for the v1
-     * {@link CasCommitOrigin#REFRESH_COMMITTED} site (an asynchronous fire-and-forget
-     * {@code sendCommit} with no awaited ack) nor for the v2 engine's {@code begin()}-path
-     * {@link CasCommitOrigin#REFRESH_COMMITTED}/{@link CasCommitOrigin#REPAIR_IN_PROGRESS} sites
-     * (where the commit piggybacks on the following prepare and has no separable ack). For those,
-     * a deferred {@code LOCAL_SERIAL}/{@code SERIAL} read issued from {@link #onCasCommit} is
-     * self-correcting and will observe the value regardless.
+     * NO terminal is delivered (only the dispatched {@link #onCasCommit} is) for the v1
+     * {@link CasCommitOrigin#REFRESH_COMMITTED} fire-and-forget {@code sendCommit} (no awaited ack),
+     * nor for any commit performed at {@code consistencyForCommit == ANY} (which does not block for a
+     * replica ack). For those, rely on a deferred serial read.
      * <p>
      * Threading and containment mirror {@link #onCasCommit}: implementations should not throw and
      * must not block; a thrown exception is logged and ignored by
-     * {@link MutatorProvider#notifyCasCommitApplied} and never fails the operation, read or repair.
+     * {@link MutatorProvider#notifyCasCommitCompleted} and never fails the operation, read or repair.
      */
-    default void onCasCommitApplied(Commit committed, ConsistencyLevel consistencyLevel, CasCommitOrigin origin)
+    default void onCasCommitCompleted(Commit committed, ConsistencyLevel consistencyLevel,
+                                      CasCommitOrigin origin, CasCommitOutcome outcome)
     {
         // no-op
     }

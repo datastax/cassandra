@@ -776,11 +776,22 @@ public class StorageProxy implements StorageProxyMBean
                     if (!proposal.update.isEmpty())
                     {
                         MutatorProvider.notifyCasCommit(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
-                        commitPaxos(proposal, consistencyForCommit, true, requestTime, casMetrics);
+                        try
+                        {
+                            commitPaxos(proposal, consistencyForCommit, true, requestTime, casMetrics);
+                        }
+                        catch (WriteTimeoutException e)
+                        {
+                            // decided but the commit was not acknowledged in time: report UNCONFIRMED before the
+                            // failure surfaces to the client. (At CL=ANY commitPaxos does not block, so it does not
+                            // throw here; that case delivers no terminal, only the dispatched onCasCommit.)
+                            MutatorProvider.notifyCasCommitCompleted(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.UNCONFIRMED);
+                            throw e;
+                        }
                         // commitPaxos blocks until a consistencyForCommit quorum acknowledged the commit
                         // (unless CL=ANY); reaching here means the value is now readable at that CL.
                         if (consistencyForCommit != ConsistencyLevel.ANY)
-                            MutatorProvider.notifyCasCommitApplied(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
+                            MutatorProvider.notifyCasCommitCompleted(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.APPLIED);
                     }
                     RowIterator result = proposalPair.right;
                     if (result != null)
@@ -892,11 +903,21 @@ public class StorageProxy implements StorageProxyMBean
                     if (proposePaxos(refreshedInProgress, paxosPlan, false, requestTime, casMetrics))
                     {
                         MutatorProvider.notifyCasCommit(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
-                        commitPaxos(refreshedInProgress, consistencyForCommit, false, requestTime, casMetrics);
+                        try
+                        {
+                            commitPaxos(refreshedInProgress, consistencyForCommit, false, requestTime, casMetrics);
+                        }
+                        catch (WriteTimeoutException e)
+                        {
+                            // recovered value decided but the commit was not acknowledged in time: report UNCONFIRMED
+                            // before the failure propagates. (CL=ANY does not block/throw here; no terminal then.)
+                            MutatorProvider.notifyCasCommitCompleted(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, Mutator.CasCommitOutcome.UNCONFIRMED);
+                            throw e;
+                        }
                         // commitPaxos blocks until a consistencyForCommit quorum acknowledged the commit
                         // (unless CL=ANY); reaching here means the recovered value is now readable at that CL.
                         if (consistencyForCommit != ConsistencyLevel.ANY)
-                            MutatorProvider.notifyCasCommitApplied(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+                            MutatorProvider.notifyCasCommitCompleted(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, Mutator.CasCommitOutcome.APPLIED);
                     }
                     else
                     {

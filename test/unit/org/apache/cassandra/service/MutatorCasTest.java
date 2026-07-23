@@ -84,22 +84,35 @@ public class MutatorCasTest
     /** Monotonic stamp so tests can assert relative ordering of dispatched vs applied callbacks. */
     static final AtomicInteger sequence = new AtomicInteger();
 
-    /** One record per {@link Mutator#onCasCommit} / {@link Mutator#onCasCommitApplied} callback. */
+    /** One record per {@link Mutator#onCasCommit} / {@link Mutator#onCasCommitCompleted} callback. */
     static final class CommitRecord
     {
         final Commit commit;
         final ConsistencyLevel consistencyLevel;
         final Mutator.CasCommitOrigin origin;
+        final Mutator.CasCommitOutcome outcome; // null for onCasCommit (dispatch) records
         final Thread thread;
         final int seq;
 
         CommitRecord(Commit commit, ConsistencyLevel consistencyLevel, Mutator.CasCommitOrigin origin)
         {
+            this(commit, consistencyLevel, origin, null);
+        }
+
+        CommitRecord(Commit commit, ConsistencyLevel consistencyLevel, Mutator.CasCommitOrigin origin,
+                     Mutator.CasCommitOutcome outcome)
+        {
             this.commit = commit;
             this.consistencyLevel = consistencyLevel;
             this.origin = origin;
+            this.outcome = outcome;
             this.thread = Thread.currentThread();
             this.seq = sequence.incrementAndGet();
+        }
+
+        boolean isSuccess()
+        {
+            return outcome == Mutator.CasCommitOutcome.APPLIED || outcome == Mutator.CasCommitOutcome.CONFIRMED_BY_PREPARE;
         }
     }
 
@@ -113,7 +126,7 @@ public class MutatorCasTest
         static final AtomicInteger casCompleted = new AtomicInteger();
         static final AtomicInteger mutatePaxosCalls = new AtomicInteger();
         static final List<CommitRecord> commits = new CopyOnWriteArrayList<>();
-        static final List<CommitRecord> applied = new CopyOnWriteArrayList<>();
+        static final List<CommitRecord> completed = new CopyOnWriteArrayList<>();
 
         private final Mutator delegate = new StorageProxy.DefaultMutator();
 
@@ -123,7 +136,7 @@ public class MutatorCasTest
             casCompleted.set(0);
             mutatePaxosCalls.set(0);
             commits.clear();
-            applied.clear();
+            completed.clear();
             sequence.set(0);
         }
 
@@ -132,9 +145,9 @@ public class MutatorCasTest
             return withOrigin(commits, origin);
         }
 
-        static List<CommitRecord> appliedWithOrigin(Mutator.CasCommitOrigin origin)
+        static List<CommitRecord> completedWithOrigin(Mutator.CasCommitOrigin origin)
         {
-            return withOrigin(applied, origin);
+            return withOrigin(completed, origin);
         }
 
         private static List<CommitRecord> withOrigin(List<CommitRecord> records, Mutator.CasCommitOrigin origin)
@@ -175,9 +188,9 @@ public class MutatorCasTest
         }
 
         @Override
-        public void onCasCommitApplied(Commit committed, ConsistencyLevel consistencyLevel, CasCommitOrigin origin)
+        public void onCasCommitCompleted(Commit committed, ConsistencyLevel consistencyLevel, CasCommitOrigin origin, CasCommitOutcome outcome)
         {
-            applied.add(new CommitRecord(committed, consistencyLevel, origin));
+            completed.add(new CommitRecord(committed, consistencyLevel, origin, outcome));
         }
 
         @Override
@@ -352,19 +365,22 @@ public class MutatorCasTest
         assertThat(commit.thread)
             .as("CLIENT_OPERATION must fire on the mutateCas caller thread (the documented correlation contract)")
             .isSameAs(Thread.currentThread());
-        // The applied callback fires once, after the dispatched one, on the same (request) thread,
-        // once the commit is acknowledged at the commit CL -- under both paxos variants.
-        List<CommitRecord> clientApplied = RecordingMutator.appliedWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION);
-        assertThat(clientApplied).as("exactly one CLIENT_OPERATION applied callback for an applied CAS").hasSize(1);
-        CommitRecord applied = clientApplied.get(0);
+        // The terminal completion fires once, after the dispatched one, on the same (request) thread,
+        // once the commit is acknowledged at the commit CL -- under both paxos variants, with the APPLIED
+        // outcome (a standalone, separately-awaited commit).
+        List<CommitRecord> clientCompleted = RecordingMutator.completedWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION);
+        assertThat(clientCompleted).as("exactly one CLIENT_OPERATION completion callback for an applied CAS").hasSize(1);
+        CommitRecord applied = clientCompleted.get(0);
+        assertThat(applied.outcome)
+            .as("an acknowledged client commit completes as APPLIED").isEqualTo(Mutator.CasCommitOutcome.APPLIED);
         assertThat(applied.commit.update.partitionKey()).isEqualTo(key);
         assertThat(applied.commit.update.isEmpty()).isFalse();
         assertThat(applied.consistencyLevel).isEqualTo(ConsistencyLevel.QUORUM);
         assertThat(applied.thread)
-            .as("onCasCommitApplied fires on the mutateCas caller thread for CLIENT_OPERATION")
+            .as("onCasCommitCompleted fires on the mutateCas caller thread for CLIENT_OPERATION")
             .isSameAs(Thread.currentThread());
         assertThat(applied.seq)
-            .as("onCasCommitApplied fires AFTER the dispatched onCasCommit")
+            .as("onCasCommitCompleted fires AFTER the dispatched onCasCommit")
             .isGreaterThan(commit.seq);
         // Backward compatibility: moving the engine dispatch into Mutator.mutateCas must not
         // change when the legacy hook fires -- existing implementations overriding mutatePaxos
@@ -384,8 +400,8 @@ public class MutatorCasTest
         assertThat(RecordingMutator.casCompleted.get()).isEqualTo(1);
         assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION))
             .as("a non-applying CAS must not dispatch a CLIENT_OPERATION commit").isEmpty();
-        assertThat(RecordingMutator.applied)
-            .as("a non-applying CAS commits nothing, so no applied callback fires").isEmpty();
+        assertThat(RecordingMutator.completed)
+            .as("a non-applying CAS commits nothing, so no completion callback fires").isEmpty();
         assertThat(RecordingMutator.mutatePaxosCalls.get())
             .as("a non-applying CAS commits nothing, so the legacy hook must not fire either")
             .isZero();
@@ -425,7 +441,7 @@ public class MutatorCasTest
         assertThat(RecordingMutator.casBegun.get()).isEqualTo(1);
         assertThat(RecordingMutator.casCompleted.get()).as("completion also fires on failure").isEqualTo(1);
         assertThat(RecordingMutator.commits).as("no commit was dispatched").isEmpty();
-        assertThat(RecordingMutator.applied).as("no commit dispatched, so none applied").isEmpty();
+        assertThat(RecordingMutator.completed).as("no commit dispatched, so none completed").isEmpty();
         assertThat(RecordingMutator.mutatePaxosCalls.get()).isZero();
     }
 
@@ -464,7 +480,7 @@ public class MutatorCasTest
         assertThat(RecordingMutator.casBegun.get()).isEqualTo(1);
         assertThat(RecordingMutator.casCompleted.get()).as("completion also fires on failure").isEqualTo(1);
         assertThat(RecordingMutator.commits).as("no commit was dispatched").isEmpty();
-        assertThat(RecordingMutator.applied).as("no commit dispatched, so none applied").isEmpty();
+        assertThat(RecordingMutator.completed).as("no commit dispatched, so none completed").isEmpty();
         assertThat(RecordingMutator.mutatePaxosCalls.get()).isZero();
     }
 
@@ -510,26 +526,28 @@ public class MutatorCasTest
         assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION))
             .as("the non-applying operation itself must not commit").isEmpty();
 
-        // Applied-callback coverage for recovery: the v1 engine completes the foreign round with a
-        // blocking commitPaxos, so REPAIR_IN_PROGRESS also produces an applied callback (with the
-        // foreign payload, once the recovered value reached a commit-CL quorum). The v2 engine
-        // completes it in-line via begin()'s commitAndPrepare, where the commit piggybacks on the
-        // following prepare and has no separable ack -- that path is dispatched-only by design, so
-        // no applied callback fires here.
-        List<CommitRecord> repairApplied = RecordingMutator.appliedWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+        // Terminal-completion coverage for recovery: every dispatched REPAIR_IN_PROGRESS commit is now
+        // paired with a terminal onCasCommitCompleted. The v1 engine completes the foreign round with a
+        // blocking commitPaxos, so the terminal is APPLIED (the recovered value reached a commit-CL
+        // quorum). The v2 engine completes it in-line via begin()'s commitAndPrepare: the commit is fused
+        // into the following prepare, whose promise-quorum implies the commit landed, so the terminal is
+        // CONFIRMED_BY_PREPARE (or APPLIED if the PaxosRepair machinery drove it instead) -- a success
+        // outcome either way. This is the behaviour that previously delivered NO callback on v2.
+        List<CommitRecord> repairCompleted = RecordingMutator.completedWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+        assertThat(repairCompleted).as("the recovered foreign round must produce a terminal completion").isNotEmpty();
+        CommitRecord repairTerminal = repairCompleted.get(0);
+        assertThat(repairTerminal.commit.update.partitionKey()).isEqualTo(key);
+        assertThat(repairTerminal.seq)
+            .as("the completion fires after the dispatched one").isGreaterThan(repairs.get(0).seq);
+        assertThat(repairTerminal.isSuccess())
+            .as("a recovered, quorum-confirmed foreign round completes as a success outcome").isTrue();
         if (variant == Config.PaxosVariant.v1)
-        {
-            assertThat(repairApplied).as("v1 repair commit is awaited, so an applied callback fires").isNotEmpty();
-            assertThat(repairApplied.get(0).commit.update.partitionKey()).isEqualTo(key);
-            assertThat(repairApplied.get(0).seq)
-                .as("the applied callback fires after the dispatched one").isGreaterThan(repairs.get(0).seq);
-        }
+            assertThat(repairTerminal.outcome)
+                .as("v1 awaits a standalone commit, so the terminal is APPLIED").isEqualTo(Mutator.CasCommitOutcome.APPLIED);
         else
-        {
-            assertThat(repairApplied)
-                .as("v2 begin()-path repair is dispatched-only; no applied callback for this recovery route")
-                .isEmpty();
-        }
+            assertThat(repairTerminal.outcome)
+                .as("v2 confirms via the fused prepare (or APPLIED via PaxosRepair)")
+                .isIn(Mutator.CasCommitOutcome.CONFIRMED_BY_PREPARE, Mutator.CasCommitOutcome.APPLIED);
     }
 
     @Test
