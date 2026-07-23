@@ -165,7 +165,7 @@ def tasks() {
   // Steps config
   def buildSteps = [
     'jar': [script: 'build-jars.sh', toCopy: null],
-    'artifacts': [script: 'build-artifacts.sh', toCopy: 'apache-cassandra-*.tar.gz,apache-cassandra-*.jar,apache-cassandra-*.pom'],
+    'artifacts': [script: 'build-artifacts.sh', toCopy: '*-*.tar.gz,*-*.jar,*-*.pom'],
     'lint': [script: 'check-code.sh', toCopy: null],
     'debian': [script: 'build-debian.sh', toCopy: 'cassandra_*,cassandra-tools_*'],
     'redhat': [script: 'build-redhat.sh rpm', toCopy: '*.rpm'],

@@ -69,7 +69,7 @@ install: build
 		usr/share/cassandra
 
 	dh_link usr/share/cassandra/$(PROJECT_NAME)-$(VERSION).jar \
-		usr/share/cassandra/$(PROJECT_NAME).jar
+		usr/share/cassandra/cassandra.jar
 
 	cd debian/cassandra/etc/sysctl.d && mv cassandra-sysctl.conf cassandra.conf
 

@@ -44,7 +44,7 @@
         When building, javac's source and target flags are set to the jdk used, so lower JDKs are not supported at runtime.
     -->
     <property name="java.default" value="11" />
-    <property name="java.supported" value="11,17,22" />
+    <property name="java.supported" value="11,17,21,22" />
 
     <!-- directory details -->
     <property name="basedir" value="."/>
