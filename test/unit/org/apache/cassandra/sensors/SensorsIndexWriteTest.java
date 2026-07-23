@@ -39,6 +39,7 @@ import org.apache.cassandra.db.MutationVerbHandler;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -48,7 +49,10 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.paxos.CommitVerbHandler;
 import org.apache.cassandra.utils.BloomFilter;
+import org.apache.cassandra.utils.UUIDGen;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -127,6 +131,82 @@ public class SensorsIndexWriteTest
         SensorsRegistry.instance.clear();
 
         BloomFilter.recreateOnFPChanceChange = false;
+    }
+
+    /**
+     * Tests that INDEX_WRITE_BYTES is tracked when a Paxos commit applies a mutation to a table with an SAI index.
+     * Only the Commit phase is tested here because it is the only Paxos phase that writes to the base table and
+     * triggers SAI index updaters. The Prepare and Propose phases exclusively read and write the system.paxos table
+     * (via SystemKeyspace.loadPaxosState / savePaxosPromise / savePaxosProposal), which has no SAI indexes,
+     * and the SystemKeyspace.trackPaxosBytes transfer mechanism only transfers WRITE_BYTES and READ_BYTES — never
+     * INDEX_WRITE_BYTES — so those phases will always produce a zero value for INDEX_WRITE_BYTES.
+     */
+    @Test
+    public void testPaxosCommitWithSAI()
+    {
+        ColumnFamilyStore saiStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
+        Context context = new Context(KEYSPACE1, CF_STANDARD_SAI, saiStore.metadata.id.toString());
+
+        PartitionUpdate update = new RowUpdateBuilder(saiStore.metadata(), 0, "0")
+                                 .add("val", "hi there")
+                                 .buildUpdate();
+        Commit commit = Commit.newProposal(UUIDGen.getTimeUUID(), update);
+        CommitVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build());
+
+        // INDEX_WRITE_BYTES must be tracked for a Paxos commit on a table with an SAI index
+        Sensor indexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_WRITE_BYTES);
+        assertThat(indexWriteSensor).isNotNull();
+        assertThat(indexWriteSensor.getValue()).isGreaterThan(0);
+
+        // WRITE_BYTES must also be tracked
+        Sensor writeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(writeSensor).isNotNull();
+        assertThat(writeSensor.getValue()).isGreaterThan(0);
+
+        // INDEX_WRITE_BYTES must be encoded in the response message custom params
+        Message lastMessage = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
+        String indexWriteParam = SensorsCustomParams.paramForRequestSensor(indexWriteSensor).get();
+        assertThat(lastMessage.header.customParams()).containsKey(indexWriteParam);
+        double encodedValue = SensorsTestUtil.bytesToDouble(lastMessage.header.customParams().get(indexWriteParam));
+        assertThat(encodedValue).isEqualTo(indexWriteSensor.getValue());
+    }
+
+    /**
+     * Tests that INDEX_WRITE_BYTES is tracked when a Paxos commit applies a mutation to a table with a secondary
+     * (2i) index. Only the Commit phase is tested here because it is the only Paxos phase that writes to the base
+     * table and triggers secondary index updaters. The Prepare and Propose phases exclusively read and write the
+     * system.paxos table (via SystemKeyspace.loadPaxosState / savePaxosPromise / savePaxosProposal), which has no
+     * secondary indexes, and the SystemKeyspace.trackPaxosBytes transfer mechanism only transfers WRITE_BYTES and
+     * READ_BYTES — never INDEX_WRITE_BYTES — so those phases will always produce a zero value for INDEX_WRITE_BYTES.
+     */
+    @Test
+    public void testPaxosCommitWithSecondaryIndex()
+    {
+        ColumnFamilyStore secondaryIndexStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SECONDARY_INDEX);
+        Context context = new Context(KEYSPACE1, CF_STANDARD_SECONDARY_INDEX, secondaryIndexStore.metadata.id.toString());
+
+        PartitionUpdate update = new RowUpdateBuilder(secondaryIndexStore.metadata(), 0, "0")
+                                 .add("val", "hi there")
+                                 .buildUpdate();
+        Commit commit = Commit.newProposal(UUIDGen.getTimeUUID(), update);
+        CommitVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build());
+
+        // INDEX_WRITE_BYTES must be tracked for a Paxos commit on a table with a secondary index
+        Sensor indexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_WRITE_BYTES);
+        assertThat(indexWriteSensor).isNotNull();
+        assertThat(indexWriteSensor.getValue()).isGreaterThan(0);
+
+        // WRITE_BYTES must also be tracked
+        Sensor writeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(writeSensor).isNotNull();
+        assertThat(writeSensor.getValue()).isGreaterThan(0);
+
+        // INDEX_WRITE_BYTES must be encoded in the response message custom params
+        Message lastMessage = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
+        String indexWriteParam = SensorsCustomParams.paramForRequestSensor(indexWriteSensor).get();
+        assertThat(lastMessage.header.customParams()).containsKey(indexWriteParam);
+        double encodedValue = SensorsTestUtil.bytesToDouble(lastMessage.header.customParams().get(indexWriteParam));
+        assertThat(encodedValue).isEqualTo(indexWriteSensor.getValue());
     }
 
     @Test

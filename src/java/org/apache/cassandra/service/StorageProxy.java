@@ -98,7 +98,6 @@ import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -123,6 +122,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit;
@@ -210,10 +210,9 @@ public class StorageProxy implements StorageProxyMBean
 
             QueryInfoTracker.WriteTracker writeTracker = StorageProxy.queryTracker().onWrite(clientState, true, mutations, consistencyLevel);
 
-            // Request sensors are utilized to track usages from replicas serving atomic batch request
-            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
-            ExecutorLocals locals = ExecutorLocals.create(sensors);
-            ExecutorLocals.set(locals);
+            // Sensors are installed on the thread-local by the static mutateAtomically() before entering this mutator.
+            // Read them back here so they can be passed explicitly to wrapBatchResponseHandlers().
+            RequestSensors sensors = RequestTracker.instance.get();
 
             if (mutations.stream().anyMatch(mutation -> Keyspace.open(mutation.getKeyspaceName()).getReplicationStrategy().hasTransientReplicas()))
                 throw new AssertionError("Logged batches are unsupported with transient replication");
@@ -321,6 +320,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (pu.metadata().isIndex()) continue;
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
                 }
                 StorageProxy.WriteResponseHandlerWrapper wrapper = StorageProxy.wrapBatchResponseHandler(mutation,
                                                                                                          consistencyLevel,
@@ -490,6 +490,7 @@ public class StorageProxy implements StorageProxyMBean
         Context context = Context.from(metadata);
         sensors.registerSensor(context, Type.WRITE_BYTES); // track user table + paxos table write bytes
         sensors.registerSensor(context, Type.READ_BYTES); // track user table + paxos table read bytes
+        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES); // track secondary index write bytes on commit
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         try
@@ -1102,6 +1103,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (pu.metadata().isIndex()) continue;
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
                 }
 
                 if (mutation instanceof CounterMutation)
@@ -1388,6 +1390,15 @@ public class StorageProxy implements StorageProxyMBean
                                         ClientState clientState)
     throws UnavailableException, OverloadedException, WriteTimeoutException
     {
+        // Request sensors are utilized to track usages from replicas serving atomic batch request.
+        // Must be installed on the thread-local before calling mutator.mutateAtomically() so that
+        // AbstractWriteResponseHandler captures a non-null sensors object, and ResponseVerbHandler
+        // can accumulate replica sensor values back into it.
+        // This mirrors the same pattern used in mutate() and cas() for consistency across all
+        // coordinator write paths.
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
+        ExecutorLocals.set(ExecutorLocals.create(sensors));
+
         mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
     }
 
