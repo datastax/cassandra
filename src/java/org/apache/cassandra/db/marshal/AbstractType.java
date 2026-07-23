@@ -142,7 +142,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         // frozen-related errors in the past, we log an error if this happens, but continue with the type frozen as this
         // is almost surely the right thing to do.
         ImmutableList<AbstractType<?>> cleanedSubtypes = ImmutableList.copyOf(subTypes);
-        if (!isMultiCell && hasMultiCell(subTypes))
+        if (!isMultiCell && subTypes.stream().anyMatch(AbstractType::isMultiCell))
         {
             logger.error("Detected corrupted type: creating a frozen {} but with some non-frozen sub-types. " +
                          "This is likely a bug and should be reported, but continuing with the " +
@@ -151,16 +151,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         }
         this.subTypes = cleanedSubtypes;
 
-    }
-
-    protected static boolean hasMultiCell(List<AbstractType<?>> subTypes)
-    {
-        for (AbstractType<?> subType : subTypes)
-        {
-            if (subType.isMultiCell)
-                return true;
-        }
-        return false;
     }
 
     static <VL, VR, T extends Comparable<T>> int compareComposed(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR, AbstractType<T> type)
