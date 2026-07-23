@@ -56,6 +56,8 @@ import org.apache.cassandra.repair.SharedContext;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.Mutator;
+import org.apache.cassandra.service.MutatorProvider;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -243,10 +245,11 @@ public class PaxosRepair extends AbstractPaxosRepair
 
                 // we have a new enough commit, but it might not have reached enough participants; make sure it has before terminating
                 // note: we could send to only those we know haven't witnessed it, but this is a rare operation so a small amount of redundant work is fine
-                return oldestCommitted.equals(latestCommitted.ballot)
-                        ? DONE
-                        : PaxosCommit.commit(latestCommitted, participants, paxosConsistency, commitConsistency(), true,
-                                             new CommittingRepair());
+                if (oldestCommitted.equals(latestCommitted.ballot))
+                    return DONE;
+                MutatorProvider.notifyCasCommit(latestCommitted, commitConsistency(), Mutator.CasCommitOrigin.REFRESH_COMMITTED);
+                return PaxosCommit.commit(latestCommitted, participants, paxosConsistency, commitConsistency(), true,
+                                          new CommittingRepair(latestCommitted, Mutator.CasCommitOrigin.REFRESH_COMMITTED));
             }
             else if (isAcceptedButNotCommitted && !isPromisedButNotAccepted && !reproposalMayBeRejected)
             {
@@ -329,8 +332,9 @@ public class PaxosRepair extends AbstractPaxosRepair
                     // finish the in-progress commit
                     FoundIncompleteCommitted incomplete = input.incompleteCommitted();
                     logger.trace("PaxosRepair of {} found in progress {}", partitionKey(), incomplete.committed);
+                    MutatorProvider.notifyCasCommit(incomplete.committed, commitConsistency(), Mutator.CasCommitOrigin.REFRESH_COMMITTED);
                     return PaxosCommit.commit(incomplete.committed, participants, paxosConsistency, commitConsistency(), true,
-                                              new CommitAndRestart()); // we don't know if we're done, so we must restart
+                                              new CommitAndRestart(incomplete.committed, Mutator.CasCommitOrigin.REFRESH_COMMITTED)); // we don't know if we're done, so we must restart
                 }
 
                 case PROMISED:
@@ -377,8 +381,10 @@ public class PaxosRepair extends AbstractPaxosRepair
                     }
 
                     logger.trace("PaxosRepair of {} committing successful proposal {}", partitionKey(), proposal);
-                    return PaxosCommit.commit(proposal.agreed(), participants, paxosConsistency, commitConsistency(), true,
-                                              new CommittingRepair());
+                    Agreed agreed = proposal.agreed();
+                    MutatorProvider.notifyCasCommit(agreed, commitConsistency(), Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+                    return PaxosCommit.commit(agreed, participants, paxosConsistency, commitConsistency(), true,
+                                              new CommittingRepair(agreed, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS));
 
                 default:
                     throw new IllegalStateException();
@@ -388,19 +394,43 @@ public class PaxosRepair extends AbstractPaxosRepair
 
     private class CommittingRepair extends ConsumerState<PaxosCommit.Status>
     {
+        private final Agreed committed;
+        private final Mutator.CasCommitOrigin origin;
+
+        private CommittingRepair(Agreed committed, Mutator.CasCommitOrigin origin)
+        {
+            this.committed = committed;
+            this.origin = origin;
+        }
+
         @Override
         public State execute(PaxosCommit.Status input)
         {
             logger.trace("PaxosRepair of {} {}", partitionKey(), input);
-            return input.isSuccess() ? DONE : retry(this);
+            if (!input.isSuccess())
+                return retry(this);
+            // the commit reached a commitConsistency() quorum: the recovered value is now readable
+            MutatorProvider.notifyCasCommitCompleted(committed, commitConsistency(), origin, Mutator.CasCommitOutcome.APPLIED);
+            return DONE;
         }
     }
 
     private class CommitAndRestart extends ConsumerState<PaxosCommit.Status>
     {
+        private final Agreed committed;
+        private final Mutator.CasCommitOrigin origin;
+
+        private CommitAndRestart(Agreed committed, Mutator.CasCommitOrigin origin)
+        {
+            this.committed = committed;
+            this.origin = origin;
+        }
+
         @Override
         public State execute(PaxosCommit.Status input)
         {
+            if (input.isSuccess())
+                MutatorProvider.notifyCasCommitCompleted(committed, commitConsistency(), origin, Mutator.CasCommitOutcome.APPLIED);
             return restart(this);
         }
     }
