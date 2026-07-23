@@ -22,21 +22,18 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.function.Function;
 
-import javax.annotation.Nullable;
-
 import com.dynatrace.hash4j.hashing.Hasher64;
 import com.dynatrace.hash4j.hashing.Hashing;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import com.google.common.base.Preconditions;
 import io.netty.util.internal.PlatformDependent;
 import org.apache.cassandra.cache.CacheSize;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.SimpleCachedBufferPool;
 import org.apache.cassandra.metrics.MicrometerCompressionChunkOffsetCacheMetrics;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -90,15 +87,11 @@ public class CompressionChunkOffsetCache implements CacheSize
     private final Cache<BlockKey, OffsetsBlock> cache;
     private final MicrometerCompressionChunkOffsetCacheMetrics metrics;
     private final long maxSizeInBytes;
-    private final SimpleCachedBufferPool bufferPool;
-    private final int blockBufferSize;
 
     CompressionChunkOffsetCache(long maxSizeInBytes)
     {
         this.maxSizeInBytes = maxSizeInBytes;
         this.metrics = new MicrometerCompressionChunkOffsetCacheMetrics(this, "compression_chunk_offsets_cache");
-        this.blockBufferSize = blockBufferSize();
-        this.bufferPool = createBufferPool(maxSizeInBytes, blockBufferSize);
         RemovalListener<BlockKey, OffsetsBlock> remover = (key, value, cause) ->
         {
             if (value != null)
@@ -130,24 +123,6 @@ public class CompressionChunkOffsetCache implements CacheSize
     public MicrometerCompressionChunkOffsetCacheMetrics getMetrics()
     {
         return metrics;
-    }
-
-    ByteBuffer allocateBlockBuffer(int bytesToRead)
-    {
-        ByteBuffer buffer = bufferPool.createBuffer();
-        Preconditions.checkArgument(bytesToRead <= buffer.capacity());
-        buffer.limit(bytesToRead);
-        return buffer;
-    }
-
-    OffsetsBlock wrapBlockBuffer(ByteBuffer buffer)
-    {
-        return new OffsetsBlock(buffer, bufferPool);
-    }
-
-    void releaseBlockBuffer(ByteBuffer buffer)
-    {
-        bufferPool.releaseBuffer(buffer);
     }
 
     void invalidate(BlockKey blockKey)
@@ -187,15 +162,6 @@ public class CompressionChunkOffsetCache implements CacheSize
     {
         cache.invalidateAll();
         cache.cleanUp();
-        bufferPool.emptyBufferPool();
-    }
-
-    private static SimpleCachedBufferPool createBufferPool(long maxSizeInBytes, int blockBufferSize)
-    {
-        long blockCount = maxSizeInBytes / blockBufferSize + (maxSizeInBytes % blockBufferSize == 0 ? 0 : 1);
-        long poolSize = blockCount == Long.MAX_VALUE ? Long.MAX_VALUE : blockCount + 1;
-        int maxBufferPoolSize = (int) Math.min(Integer.MAX_VALUE, Math.max(1, poolSize));
-        return new SimpleCachedBufferPool(maxBufferPoolSize, blockBufferSize, BufferType.OFF_HEAP);
     }
 
     public static final class BlockKey
@@ -255,22 +221,14 @@ public class CompressionChunkOffsetCache implements CacheSize
         private final ByteBuffer offsetsBuffer;
         private final int capacity;
         private final int length;
-        @Nullable
-        private final SimpleCachedBufferPool bufferPool;
 
         public volatile int references;
 
         public OffsetsBlock(ByteBuffer offsetsBuffer)
         {
-            this(offsetsBuffer, null);
-        }
-
-        private OffsetsBlock(ByteBuffer offsetsBuffer, SimpleCachedBufferPool bufferPool)
-        {
             this.offsetsBuffer = offsetsBuffer;
             this.length = offsetsBuffer.remaining();
             this.capacity = offsetsBuffer.capacity();
-            this.bufferPool = bufferPool;
             this.references = 1;
             NATIVE_MEMORY_USAGE.addAndGet(capacity);
         }
@@ -302,10 +260,7 @@ public class CompressionChunkOffsetCache implements CacheSize
         {
             if (referencesUpdater.decrementAndGet(this) == 0)
             {
-                if (bufferPool == null)
-                    FileUtils.clean(offsetsBuffer);
-                else
-                    bufferPool.releaseBuffer(offsetsBuffer);
+                FileUtils.clean(offsetsBuffer);
                 NATIVE_MEMORY_USAGE.addAndGet(-capacity);
             }
         }

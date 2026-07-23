@@ -310,7 +310,7 @@ public interface CompressionChunkOffsets extends AutoCloseable
                 int count = Math.min(offsetsPerBlock, remaining);
                 int bytesToRead = count * Long.BYTES;
                 long position = offsetsStart + ((long) blockStartIndex * Long.BYTES);
-                ByteBuffer buffer = cache.allocateBlockBuffer(bytesToRead);
+                ByteBuffer buffer = ByteBuffer.allocateDirect(bytesToRead);
                 boolean success = false;
                 try
                 {
@@ -326,12 +326,12 @@ public interface CompressionChunkOffsets extends AutoCloseable
                     }
                     buffer.flip();
                     success = true;
-                    return cache.wrapBlockBuffer(buffer);
+                    return new CompressionChunkOffsetCache.OffsetsBlock(buffer);
                 }
                 finally
                 {
                     if (!success)
-                        cache.releaseBlockBuffer(buffer);
+                        FileUtils.clean(buffer);
                 }
             }
             catch (IOException e)

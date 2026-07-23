@@ -89,31 +89,6 @@ public class CompressionChunkOffsetCacheTest
     }
 
     @Test
-    public void testBlockBufferReusedAfterRelease()
-    {
-        long before = CompressionMetadata.nativeMemoryAllocated();
-        CompressionChunkOffsetCache cache = new CompressionChunkOffsetCache(1024);
-
-        ByteBuffer first = cache.allocateBlockBuffer(512);
-        first.position(512);
-        first.flip();
-
-        CompressionChunkOffsetCache.OffsetsBlock block = cache.wrapBlockBuffer(first);
-        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before + first.capacity());
-        assertThat(block.capacity()).isEqualTo(first.capacity());
-        assertThat(block.count()).isEqualTo(64);
-
-        block.release();
-        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
-
-        ByteBuffer second = cache.allocateBlockBuffer(512);
-        assertThat(second).isSameAs(first);
-
-        cache.releaseBlockBuffer(second);
-        cache.clear();
-    }
-
-    @Test
     public void testMetrics()
     {
         CompressionChunkOffsetCache cache = new CompressionChunkOffsetCache(1024);
