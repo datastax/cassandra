@@ -17,7 +17,7 @@ jobs:
   test-from-github-hosted:
     runs-on: ubuntu-latest  # GitHub-hosted runner
     name: Test from GitHub-Hosted Runner
-
+    
     steps:
       - name: Environment Info
         run: |
@@ -27,7 +27,7 @@ jobs:
           curl -s ifconfig.me || echo "Could not determine IP"
           echo ""
           echo "========================================="
-
+      
       - name: Test 1 - DNS Resolution
         run: |
           echo "=== Test 1: DNS Resolution ==="
@@ -38,7 +38,7 @@ jobs:
           echo "Testing: sonarqube-prod.apps.wdc-sonarqube-prod.core.cirrus.ibm.com"
           nslookup sonarqube-prod.apps.wdc-sonarqube-prod.core.cirrus.ibm.com || echo "DNS lookup failed"
           echo ""
-
+      
       - name: Test 2 - HTTPS Connectivity (No Auth)
         run: |
           echo "=== Test 2: HTTPS Connectivity (No Certificate) ==="
@@ -53,7 +53,7 @@ jobs:
           curl -v -I --max-time 30 \
             https://sonarqube-prod.apps.wdc-sonarqube-prod.core.cirrus.ibm.com/api/system/status 2>&1 || echo "Connection failed"
           echo ""
-
+      
       - name: Test 3 - With Certificate (If Secret Exists)
         env:
           IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64: ${{ secrets.IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64 }}
@@ -96,7 +96,7 @@ jobs:
           echo "Full response with details:"
           curl -v --cacert ./castorevpcprod \
             https://sonarqube-prod.whitewater.ibm.com/api/system/status 2>&1 || true
-
+      
       - name: Test 4 - With Auth Token (If Secret Exists)
         env:
           IBM_SONARQUBE_API_TOKEN: ${{ secrets.IBM_SONARQUBE_API_TOKEN }}
@@ -116,7 +116,7 @@ jobs:
           curl -v --cacert ./castorevpcprod \
             -H "Authorization: Bearer $IBM_SONARQUBE_API_TOKEN" \
             https://sonarqube-prod.whitewater.ibm.com/api/system/status 2>&1 || true
-
+      
       - name: Summary
         if: always()
         run: |
