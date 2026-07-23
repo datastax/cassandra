@@ -168,7 +168,8 @@ public class CompositeType extends AbstractCompositeType
     public static CompositeType getInstance(ImmutableList<AbstractType<?>> types)
     {
         assert types != null && !types.isEmpty();
-        return getInstance(instances, types, () -> new CompositeType(types));
+        ImmutableList<AbstractType<?>> typesCopy = freeze(types);
+        return getInstance(instances, typesCopy, () -> new CompositeType(typesCopy));
     }
 
     protected CompositeType(ImmutableList<AbstractType<?>> types)
@@ -523,6 +524,9 @@ public class CompositeType extends AbstractCompositeType
     {
         // Subtypes will always be frozen (since CompositeType always is), but we don't include it in the string
         // representation (so that we ignore our parameter).
+        // This is done this way because it was historically considered redundant,
+        // and used that way when writing sstable headers.
+        // We should be careful to freeze all the subtypes when parsing this back in getInstance(TypeParser).
         return getClass().getName() + TypeParser.stringifyTypeParameters(subTypes, true);
     }
 
