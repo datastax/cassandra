@@ -1,19 +1,23 @@
 # Test Network Connectivity to IBM SonarQube
-# Location: Save as ~/projects/cc-main/.github/workflows/test-sonar-connectivity.yaml
-# 
 # Purpose: Verify GitHub-hosted runners can reach IBM SonarQube server
 # Run this BEFORE implementing the full sonar workflow
 
-name: Test SonarQube Connectivity
+name: 🔍 Test IBM SonarQube Connectivity
 
 on:
   workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable verbose output'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   test-from-github-hosted:
     runs-on: ubuntu-latest  # GitHub-hosted runner
     name: Test from GitHub-Hosted Runner
-    
+
     steps:
       - name: Environment Info
         run: |
@@ -23,7 +27,7 @@ jobs:
           curl -s ifconfig.me || echo "Could not determine IP"
           echo ""
           echo "========================================="
-      
+
       - name: Test 1 - DNS Resolution
         run: |
           echo "=== Test 1: DNS Resolution ==="
@@ -34,7 +38,7 @@ jobs:
           echo "Testing: sonarqube-prod.apps.wdc-sonarqube-prod.core.cirrus.ibm.com"
           nslookup sonarqube-prod.apps.wdc-sonarqube-prod.core.cirrus.ibm.com || echo "DNS lookup failed"
           echo ""
-      
+
       - name: Test 2 - HTTPS Connectivity (No Auth)
         run: |
           echo "=== Test 2: HTTPS Connectivity (No Certificate) ==="
@@ -49,20 +53,20 @@ jobs:
           curl -v -I --max-time 30 \
             https://sonarqube-prod.apps.wdc-sonarqube-prod.core.cirrus.ibm.com/api/system/status 2>&1 || echo "Connection failed"
           echo ""
-      
+
       - name: Test 3 - With Certificate (If Secret Exists)
-        if: ${{ secrets.IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64 != '' }}
         env:
           IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64: ${{ secrets.IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64 }}
           IBM_SONARQUBE_CERT_PASSWORD: ${{ secrets.IBM_SONARQUBE_CERT_PASSWORD }}
         run: |
           echo "=== Test 3: With IBM Certificate ==="
-          
+
           if [ -z "$IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64" ]; then
             echo "⚠️  IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64 secret not set"
+            echo "Skipping certificate test"
             exit 0
           fi
-          
+
           echo "Decoding truststore certificate..."
           echo "$IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64" | base64 --decode > ./castorevpcprod
           ls -lh ./castorevpcprod
@@ -92,17 +96,17 @@ jobs:
           echo "Full response with details:"
           curl -v --cacert ./castorevpcprod \
             https://sonarqube-prod.whitewater.ibm.com/api/system/status 2>&1 || true
-      
+
       - name: Test 4 - With Auth Token (If Secret Exists)
-        if: ${{ secrets.IBM_SONARQUBE_API_TOKEN != '' }}
         env:
           IBM_SONARQUBE_API_TOKEN: ${{ secrets.IBM_SONARQUBE_API_TOKEN }}
           IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64: ${{ secrets.IBM_SONARQUBE_CERT_TRUSTSTORE_BASE64 }}
         run: |
           echo "=== Test 4: With Auth Token ==="
-          
+
           if [ -z "$IBM_SONARQUBE_API_TOKEN" ]; then
             echo "⚠️  IBM_SONARQUBE_API_TOKEN secret not set"
+            echo "Skipping authentication test"
             exit 0
           fi
           
@@ -112,7 +116,7 @@ jobs:
           curl -v --cacert ./castorevpcprod \
             -H "Authorization: Bearer $IBM_SONARQUBE_API_TOKEN" \
             https://sonarqube-prod.whitewater.ibm.com/api/system/status 2>&1 || true
-      
+
       - name: Summary
         if: always()
         run: |
