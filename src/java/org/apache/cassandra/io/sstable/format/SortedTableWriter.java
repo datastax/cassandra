@@ -66,7 +66,6 @@ import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Throwables;
 
 public abstract class SortedTableWriter extends SSTableWriter
