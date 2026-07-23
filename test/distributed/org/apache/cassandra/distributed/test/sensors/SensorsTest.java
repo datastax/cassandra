@@ -158,6 +158,7 @@ public class SensorsTest extends TestBaseImpl
         result.addAll(secondaryIndexScenarios());
         result.addAll(saiScalarScenarios());
         result.addAll(saiCollectionScenarios());
+        result.addAll(conditionalBatchScenarios());
         return result;
     }
 
@@ -194,7 +195,8 @@ public class SensorsTest extends TestBaseImpl
 
     /**
      * Secondary index (2i) scenarios on {@value TBL_2I}: inserts (insertRow path), updates (updateRow path),
-     * and CAS (insert via IF NOT EXISTS / update via IF condition).
+     * CAS (insert via IF NOT EXISTS / update via IF condition), and multi-table batches mixing
+     * {@value TBL_2I} and {@value TBL_SAI} (exercises the per-table sensor loop for two distinct tables).
      */
     private static List<Object[]> secondaryIndexScenarios()
     {
@@ -203,6 +205,7 @@ public class SensorsTest extends TestBaseImpl
         String writeUpdate = withKeyspace("INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (1, '2i updated')");
         String cas = withKeyspace("UPDATE %s." + TBL_2I + " SET v1 = '2i cas update' WHERE pk = 1 IF v1 = '2i read me'");
         String casInsert = withKeyspace("INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (5, '2i cas insert') IF NOT EXISTS");
+        // single-table batches (same table, multiple rows)
         String loggedBatch = String.format("BEGIN BATCH\n" +
                                            "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (2, '2i read me 2');\n" +
                                            "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (3, '2i read me 3');\n" +
@@ -219,6 +222,19 @@ public class SensorsTest extends TestBaseImpl
                                                    "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (4, '2i updated 2');\n" +
                                                    "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (4, '2i updated 3');\n" +
                                                    "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        // multi-table batches: tbl_2i + tbl_sai in the same batch — sensors must appear for both tables
+        String multiTableLoggedBatch = String.format("BEGIN BATCH\n" +
+                                                     "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (20, 'mt 2i a');\n" +
+                                                     "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (21, 'mt 2i b');\n" +
+                                                     "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (20, 'mt sai a');\n" +
+                                                     "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (21, 'mt sai b');\n" +
+                                                     "APPLY BATCH;", KEYSPACE, KEYSPACE, KEYSPACE, KEYSPACE);
+        String multiTableUnloggedBatch = String.format("BEGIN UNLOGGED BATCH\n" +
+                                                       "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (22, 'mt 2i a');\n" +
+                                                       "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (23, 'mt 2i b');\n" +
+                                                       "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (22, 'mt sai a');\n" +
+                                                       "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (23, 'mt sai b');\n" +
+                                                       "APPLY BATCH;", KEYSPACE, KEYSPACE, KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
         // inserts: insertRow path
@@ -232,6 +248,9 @@ public class SensorsTest extends TestBaseImpl
         // CAS: IF NOT EXISTS (insertRow path) and IF condition (updateRow path)
         result.add(new Object[]{ TBL_2I, noPrep, casInsert, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
         result.add(new Object[]{ TBL_2I, new String[]{ write }, cas, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
+        // multi-table: sensors from both tbl_2i and tbl_sai must be present in the response
+        result.add(new Object[]{ TBL_2I + "+" + TBL_SAI, noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, INDEX_WRITE_2I, WRITE_SAI, INDEX_WRITE_SAI } });
+        result.add(new Object[]{ TBL_2I + "+" + TBL_SAI, noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, INDEX_WRITE_2I, WRITE_SAI, INDEX_WRITE_SAI } });
         return result;
     }
 
@@ -294,6 +313,65 @@ public class SensorsTest extends TestBaseImpl
         return result;
     }
 
+    /**
+     * Conditional batch scenarios: BEGIN BATCH statements with IF conditions, routed through
+     * {@code BatchStatement.executeWithConditions}. These exercise the {@code ResultMessage.Rows}
+     * return path, which must also carry INDEX_WRITE_BYTES sensors.
+     *
+     * Cassandra requires all statements in a conditional batch to target the same partition key and table.
+     * Multi-statement scenarios below use multiple statements on the same partition to exercise the
+     * repeated-same-TableMetadata path through {@code .distinct()} in the sensor loop.
+     */
+    private static List<Object[]> conditionalBatchScenarios()
+    {
+        String[] noPrep = new String[0];
+
+        // 2i: single conditional statement — IF NOT EXISTS (insert path)
+        String prep2i = withKeyspace("INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (1, '2i read me')");
+        String conditionalBatch2iInsert = String.format("BEGIN BATCH\n" +
+                                                        "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (10, '2i cond batch insert') IF NOT EXISTS;\n" +
+                                                        "APPLY BATCH;", KEYSPACE);
+        // 2i: single conditional statement — IF condition (update path)
+        String conditionalBatch2iUpdate = String.format("BEGIN BATCH\n" +
+                                                        "UPDATE %s." + TBL_2I + " SET v1 = '2i cond batch update' WHERE pk = 1 IF v1 = '2i read me';\n" +
+                                                        "APPLY BATCH;", KEYSPACE);
+        // 2i: multiple statements on the same partition — conditional insert + unconditional insert on pk=10,
+        // exercises the duplicate-TableMetadata path (same metadata object appears twice in statements list)
+        String conditionalBatch2iMultiStmt = String.format("BEGIN BATCH\n" +
+                                                           "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (10, '2i multi a') IF NOT EXISTS;\n" +
+                                                           "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (10, '2i multi b');\n" +
+                                                           "APPLY BATCH;", KEYSPACE, KEYSPACE);
+
+        // SAI: single conditional statement — IF NOT EXISTS (insert path)
+        String prepSai = withKeyspace("INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (1, 'sai read me')");
+        String conditionalBatchSaiInsert = String.format("BEGIN BATCH\n" +
+                                                         "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (10, 'sai cond batch insert') IF NOT EXISTS;\n" +
+                                                         "APPLY BATCH;", KEYSPACE);
+        // SAI: single conditional statement — IF condition (update path)
+        String conditionalBatchSaiUpdate = String.format("BEGIN BATCH\n" +
+                                                         "UPDATE %s." + TBL_SAI + " SET v1 = 'sai cond batch update' WHERE pk = 1 IF v1 = 'sai read me';\n" +
+                                                         "APPLY BATCH;", KEYSPACE);
+        // SAI: multiple statements on the same partition — conditional insert + unconditional insert on pk=10,
+        // exercises the duplicate-TableMetadata path (same metadata object appears twice in statements list)
+        String conditionalBatchSaiMultiStmt = String.format("BEGIN BATCH\n" +
+                                                            "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (10, 'sai multi a') IF NOT EXISTS;\n" +
+                                                            "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (10, 'sai multi b');\n" +
+                                                            "APPLY BATCH;", KEYSPACE, KEYSPACE);
+
+        List<Object[]> result = new ArrayList<>();
+        // 2i conditional batch: IF NOT EXISTS (insert path) and IF condition (update path)
+        result.add(new Object[]{ TBL_2I, noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
+        result.add(new Object[]{ TBL_2I, new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
+        // 2i conditional batch: multiple statements on same partition (duplicate TableMetadata in statements list)
+        result.add(new Object[]{ TBL_2I, noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
+        // SAI conditional batch: IF NOT EXISTS (insert path) and IF condition (update path)
+        result.add(new Object[]{ TBL_SAI, noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI } });
+        result.add(new Object[]{ TBL_SAI, new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI } });
+        // SAI conditional batch: multiple statements on same partition (duplicate TableMetadata in statements list)
+        result.add(new Object[]{ TBL_SAI, noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI } });
+        return result;
+    }
+
     @Test
     public void testSensorsInCQLResponseEnabled() throws Throwable
     {
@@ -344,7 +422,7 @@ public class SensorsTest extends TestBaseImpl
 
     private double getBytesForHeader(Map<String, ByteBuffer> customPayload, String expectedHeader)
     {
-        Assertions.assertThat(customPayload).containsKey(expectedHeader);
+        Assertions.assertThat(customPayload).describedAs("Expected header %s not found in custom payload", expectedHeader).containsKey(expectedHeader);
         return ByteBufferUtil.toDouble(customPayload.get(expectedHeader));
     }
 
