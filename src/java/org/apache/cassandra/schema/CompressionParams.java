@@ -650,6 +650,12 @@ public final class CompressionParams
             .toHashCode();
     }
 
+    @Override
+    public String toString()
+    {
+        return asMap().toString();
+    }
+
     static class Serializer implements IVersionedSerializer<CompressionParams>
     {
         public void serialize(CompressionParams parameters, DataOutputPlus out, int version) throws IOException
