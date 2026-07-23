@@ -90,6 +90,12 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     }
 
     @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return source.positionForSkip(currentPosition, bytesToSkip);
+    }
+
+    @Override
     public BufferHolder rebuffer(long position)
     {
         offset = alignedPosition(position);

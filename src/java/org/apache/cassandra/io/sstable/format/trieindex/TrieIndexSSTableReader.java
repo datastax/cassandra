@@ -78,6 +78,7 @@ import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -342,6 +343,27 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     /**
+     * In encrypted index files skipBytes may end up in a different but equivalent position when it's at the
+     * end of an encrypted chunk. More precisely, if the skipped sequence of bytes lands exactly at the end of the
+     * useable part of a chunk (just before the hole left for encryption metadata), a normal read would leave the file
+     * at that position; before reading the next byte it will silently advance to the start of the next chunk. A skip,
+     * on the other hand, will jump to the position that follows the data, which is correctly converted to the beginning
+     * of the next page in preparation for reading. As a result it will leave the file positioned at the start of the
+     * next page immediately. See {@link PartitionIndexEncryptedTest#testSkipAcrossHoles}.
+     *
+     * To avoid this, we skip one fewer byte and consume the last byte.
+     */
+    @VisibleForTesting
+    static void skipBytesWithCorrectPosition(DataInputPlus in, int skip) throws IOException
+    {
+        if (skip > 0)
+        {
+            in.skipBytesFully(skip - 1);
+            in.readByte();
+        }
+    }
+
+    /**
      * Called by getPosition above (via Reader.ceiling/floor) to check if the position satisfies the full key constraint.
      * This is called once if there is a prefix match (which can be in any relationship with the sought key, thus
      * assumeNoMatch: false), and if it returns null it is called again for the closest greater position
@@ -355,7 +377,10 @@ public class TrieIndexSSTableReader extends SSTableReader
             try (FileDataInput in = rowIndexFile.createReader(pos))
             {
                 if (assumeNoMatch)
-                    ByteBufferUtil.skipShortLength(in);
+                {
+                    int skip = ByteBufferUtil.readShortLength(in);
+                    skipBytesWithCorrectPosition(in, skip);
+                }
                 else
                 {
                     ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
