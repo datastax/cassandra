@@ -293,7 +293,6 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
                                                {
                                                    rowIndexFHBuilder.withLengthOverride(rowIndexPosition);
                                                    callWhenReady.accept(partitionIndex);
-                                                   rowIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
                                                },
                                                rowIndexPosition, dataPosition);
         }
@@ -319,12 +318,8 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
 
             // truncate index file
             rowIndexWriter.prepareToCommit();
-            
-            // For encrypted writers, we don't use getLastFlushOffset() as the length override
-            if (!(rowIndexWriter instanceof EncryptedSequentialWriter))
-            {
-                rowIndexFHBuilder.withLengthOverride(rowIndexWriter.getLastFlushOffset());
-            }
+
+            rowIndexWriter.updateFileHandle(rowIndexFHBuilder);
 
             complete();
         }
@@ -340,14 +335,8 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
                 partitionIndexCompleted = true;
                 
                 // Update FileHandle builders for encrypted writers
-                if (rowIndexWriter instanceof EncryptedSequentialWriter)
-                {
-                    ((EncryptedSequentialWriter) rowIndexWriter).updateFileHandle(rowIndexFHBuilder, rowIndexWriter.position());
-                }
-                if (partitionIndexWriter instanceof EncryptedSequentialWriter)
-                {
-                    ((EncryptedSequentialWriter) partitionIndexWriter).updateFileHandle(partitionIndexFHBuilder, partitionIndexWriter.position());
-                }
+                rowIndexWriter.updateFileHandle(rowIndexFHBuilder);
+                partitionIndexWriter.updateFileHandle(partitionIndexFHBuilder);
             }
             catch (IOException e)
             {
@@ -358,16 +347,6 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         PartitionIndex completedPartitionIndex()
         {
             complete();
-            // For encrypted writers, the length override has been set by updateFileHandle()
-            // Don't reset it to NO_LENGTH_OVERRIDE
-            if (!(rowIndexWriter instanceof EncryptedSequentialWriter))
-            {
-                rowIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
-            }
-            if (!(partitionIndexWriter instanceof EncryptedSequentialWriter))
-            {
-                partitionIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
-            }
             try
             {
                 return PartitionIndex.load(partitionIndexFHBuilder, metadata.getLocal().partitioner, false, descriptor.version.getByteComparableVersion());

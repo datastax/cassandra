@@ -54,6 +54,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
+import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -148,7 +149,7 @@ public class PartitionIndexTest
             ch.write(generateRandomKey().getKey(), f.length() * 2 / 3);
         }
 
-        assertThatThrownBy(() -> testGetEq(data)).isInstanceOfAny(AssertionError.class, IndexOutOfBoundsException.class, IllegalArgumentException.class);
+        assertThatThrownBy(() -> testGetEq(data)).rootCause().isInstanceOfAny(AssertionError.class, IndexOutOfBoundsException.class, IllegalArgumentException.class, CorruptBlockException.class);
     }
 
     @Test

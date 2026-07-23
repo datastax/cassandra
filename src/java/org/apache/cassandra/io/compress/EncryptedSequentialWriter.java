@@ -70,7 +70,6 @@ public class EncryptedSequentialWriter extends SequentialWriter
     // Having the size fixed to 4k also prevents fragmentation in the chunk cache, but may be wasteful if the
     // encryptor needs to store a lot of information each frame.
 
-
     private final ChecksumWriter crcMetadata;
 
     private final ICompressor encryptor;
@@ -288,6 +287,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
         return bufferOffset + (buffer.position() == 0 ? 0 : CHUNK_SIZE);
     }
 
+    @Override
     public void establishEndAddressablePosition(int bytesNeeded) throws IOException
     {
         // Make sure the data does not span a page boundary (and the encryption data put there).
