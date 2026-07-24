@@ -93,6 +93,9 @@ import org.apache.cassandra.metrics.ClientRequestMetrics;
 import org.apache.cassandra.service.CASRequest;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.FailureRecordingCallback.AsMap;
+import org.apache.cassandra.service.Mutator;
+import org.apache.cassandra.service.MutatorProvider;
+import org.apache.cassandra.service.paxos.Commit.Agreed;
 import org.apache.cassandra.service.paxos.Commit.Proposal;
 import org.apache.cassandra.service.paxos.cleanup.PaxosRepairState;
 import org.apache.cassandra.service.reads.DataResolver;
@@ -682,6 +685,7 @@ public class Paxos
         try (PaxosOperationLock lock = PaxosState.lock(partitionKey, metadata, proposeDeadline, consistencyForConsensus, true))
         {
             Paxos.Async<PaxosCommit.Status> commit = null;
+            Agreed committedAgreed = null; // the value behind 'commit', for the onCasCommitCompleted notification
             done: while (true)
             {
                 // read the current values and check they validate the conditions
@@ -774,7 +778,12 @@ public class Paxos
                         //   1) reached a majority, in which case it was agreed, had no effect and we can do nothing; or
                         //   2) did not reach a majority, was not agreed, and was not user visible as a result so we can ignore it
                         if (!proposal.update.isEmpty())
-                            commit = commit(proposal.agreed(), participants, consistencyForConsensus, consistencyForCommit, true);
+                        {
+                            Agreed agreed = proposal.agreed();
+                            MutatorProvider.notifyCasCommit(agreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
+                            commit = commit(agreed, participants, consistencyForConsensus, consistencyForCommit, true);
+                            committedAgreed = agreed;
+                        }
 
                         break done;
                     }
@@ -808,7 +817,20 @@ public class Paxos
             {
                 PaxosCommit.Status result = commit.awaitUntil(commitDeadline);
                 if (!result.isSuccess())
+                {
+                    // decided (agreed by a quorum) but the commit was not acknowledged in time: report the
+                    // terminal as UNCONFIRMED before surfacing the failure to the client. The value may still
+                    // be completed by a later operation or repair.
+                    MutatorProvider.notifyCasCommitCompleted(committedAgreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.UNCONFIRMED);
                     throw result.maybeFailure().markAndThrowAsTimeoutOrFailure(true, consistencyForCommit, failedAttemptsDueToContention, metrics);
+                }
+                // the commit reached a consistencyForCommit quorum: the value is now readable at that CL.
+                // Note that, unlike the v1 path in StorageProxy, we do not need to special case CL=ANY here:
+                // v1 does not block at all for ANY (it fires the commits off and returns), so it must suppress
+                // this notification; here we always await PaxosCommit, which requires blockForWrite(ANY) == 1
+                // genuine replica acknowledgement (hints are not counted as accepts), so reaching this point
+                // means the commit really was applied on at least the replicas that consistencyForCommit requires.
+                MutatorProvider.notifyCasCommitCompleted(committedAgreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.APPLIED);
             }
             Tracing.trace("CAS successful");
             return null;
@@ -995,11 +1017,33 @@ public class Paxos
         initialParticipants.assureSufficientLiveNodes(isWrite);
         PaxosPrepare preparing = prepare(minimumBallot, initialParticipants, query, isWrite, acceptEarlyReadPermission);
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(query.metadata().keyspace);
+        // A commit fused into the following prepare (commitAndPrepare, used to finish another proposer's
+        // round) has no separable ack; its fate is only known when that prepare resolves at the next
+        // awaitUntil below. Stash it here so we can deliver a terminal onCasCommitCompleted then.
+        Commit pendingFused = null;
+        Mutator.CasCommitOrigin pendingFusedOrigin = null;
         while (true)
         {
             // prepare
             PaxosPrepare retry = null;
-            PaxosPrepare.Status prepare = preparing.awaitUntil(deadline);
+            PaxosPrepare.Status prepare;
+            try
+            {
+                prepare = preparing.awaitUntil(deadline);
+            }
+            catch (Throwable t)
+            {
+                // the fused prepare (and its batched commit) did not resolve: report it as not confirmed
+                if (pendingFused != null)
+                    MutatorProvider.notifyCasCommitCompleted(pendingFused, consistencyForConsensus, pendingFusedOrigin, Mutator.CasCommitOutcome.UNCONFIRMED);
+                throw t;
+            }
+            if (pendingFused != null)
+            {
+                MutatorProvider.notifyCasCommitCompleted(pendingFused, consistencyForConsensus, pendingFusedOrigin, fusedCommitOutcome(prepare.outcome));
+                pendingFused = null;
+                pendingFusedOrigin = null;
+            }
             boolean isPromised = false;
             retry: switch (prepare.outcome)
             {
@@ -1009,7 +1053,10 @@ public class Paxos
                 {
                     FoundIncompleteCommitted incomplete = prepare.incompleteCommitted();
                     Tracing.trace("Repairing replicas that missed the most recent commit");
+                    MutatorProvider.notifyCasCommit(incomplete.committed, consistencyForConsensus, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
                     retry = commitAndPrepare(incomplete.committed, incomplete.participants, query, isWrite, acceptEarlyReadPermission);
+                    pendingFused = incomplete.committed;           // terminal delivered when 'retry' resolves
+                    pendingFusedOrigin = Mutator.CasCommitOrigin.REFRESH_COMMITTED;
                     break;
                 }
                 case FOUND_INCOMPLETE_ACCEPTED:
@@ -1037,8 +1084,14 @@ public class Paxos
                             throw proposeResult.maybeFailure().markAndThrowAsTimeoutOrFailure(isWrite, consistencyForConsensus, failedAttemptsDueToContention, metrics);
 
                         case SUCCESS:
-                            retry = commitAndPrepare(repropose.agreed(), inProgress.participants, query, isWrite, acceptEarlyReadPermission);
+                        {
+                            Agreed reproposeAgreed = repropose.agreed();
+                            MutatorProvider.notifyCasCommit(reproposeAgreed, consistencyForConsensus, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+                            retry = commitAndPrepare(reproposeAgreed, inProgress.participants, query, isWrite, acceptEarlyReadPermission);
+                            pendingFused = reproposeAgreed;        // terminal delivered when 'retry' resolves
+                            pendingFusedOrigin = Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS;
                             break retry;
+                        }
 
                         case SUPERSEDED:
                             // since we are proposing a previous value that was maybe superseded by us before completion
@@ -1116,6 +1169,29 @@ public class Paxos
         return (includesRead ? EndpointsForToken.natural(keyspace, key.getToken())
                              : ReplicaLayout.forTokenWriteLiveAndDown(keyspace, key.getToken()).all()
         ).contains(getBroadcastAddressAndPort());
+    }
+
+    /**
+     * Maps the outcome of a fused commit-and-prepare (the prepare that carried a batched commit) to the
+     * terminal {@link Mutator.CasCommitOutcome} for that commit. A promise-quorum outcome
+     * (PROMISED/READ_PERMITTED, or FOUND_INCOMPLETE_* which likewise require a quorum of promises) implies
+     * the batched commit reached that quorum, because each replica applies the commit before answering the
+     * prepare; SUPERSEDED means pre-empted before a quorum; anything else is not confirmed.
+     */
+    private static Mutator.CasCommitOutcome fusedCommitOutcome(PaxosPrepare.Status.Outcome outcome)
+    {
+        switch (outcome)
+        {
+            case PROMISED:
+            case READ_PERMITTED:
+            case FOUND_INCOMPLETE_ACCEPTED:
+            case FOUND_INCOMPLETE_COMMITTED:
+                return Mutator.CasCommitOutcome.CONFIRMED_BY_PREPARE;
+            case SUPERSEDED:
+                return Mutator.CasCommitOutcome.SUPERSEDED;
+            default: // MAYBE_FAILURE, ELECTORATE_MISMATCH
+                return Mutator.CasCommitOutcome.UNCONFIRMED;
+        }
     }
 
     static ConsistencyLevel nonSerial(ConsistencyLevel serial)
