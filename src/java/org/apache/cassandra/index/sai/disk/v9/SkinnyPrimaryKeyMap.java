@@ -96,38 +96,38 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
 
         public Factory(IndexComponents.ForRead perSSTableComponents, ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
-            FileHandle rowToTokenFile = null;
-            FileHandle rowToPartitionFile = null;
-            FileHandle partitionKeyBlockOffsetsFile = null;
-            FileHandle partitionKeyBlocksFile = null;
+            FileHandle rowToTokenFileLocal = null;
+            FileHandle rowToPartitionFileLocal = null;
+            FileHandle partitionKeyBlockOffsetsFileLocal = null;
+            FileHandle partitionKeyBlocksFileLocal = null;
             try
             {
                 this.metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
 
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.ROW_TO_TOKEN)));
-                rowToTokenFile = perSSTableComponents.get(IndexComponentType.ROW_TO_TOKEN).createFileHandle();
-                this.rowToTokenReaderFactory = new BlockPackedReader(rowToTokenFile, tokensMeta);
+                rowToTokenFileLocal = perSSTableComponents.get(IndexComponentType.ROW_TO_TOKEN).createFileHandle();
+                this.rowToTokenReaderFactory = new BlockPackedReader(rowToTokenFileLocal, tokensMeta);
 
                 NumericValuesMeta partitionsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.ROW_TO_PARTITION)));
-                rowToPartitionFile = perSSTableComponents.get(IndexComponentType.ROW_TO_PARTITION).createFileHandle();
-                this.rowToPartitionReaderFactory = new MonotonicBlockPackedReader(rowToPartitionFile, partitionsMeta);
+                rowToPartitionFileLocal = perSSTableComponents.get(IndexComponentType.ROW_TO_PARTITION).createFileHandle();
+                this.rowToPartitionReaderFactory = new MonotonicBlockPackedReader(rowToPartitionFileLocal, partitionsMeta);
 
                 NumericValuesMeta partitionKeyBlockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS)));
                 KeyLookupMeta partitionKeysMeta = new KeyLookupMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCKS)));
-                partitionKeyBlocksFile = perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCKS).createFileHandle();
-                partitionKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS).createFileHandle();
-                this.partitionKeyReader = new KeyLookup(partitionKeyBlocksFile, partitionKeyBlockOffsetsFile, partitionKeysMeta, partitionKeyBlockOffsetsMeta);
+                partitionKeyBlocksFileLocal = perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCKS).createFileHandle();
+                partitionKeyBlockOffsetsFileLocal = perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS).createFileHandle();
+                this.partitionKeyReader = new KeyLookup(partitionKeyBlocksFileLocal, partitionKeyBlockOffsetsFileLocal, partitionKeysMeta, partitionKeyBlockOffsetsMeta);
             }
             catch (Throwable t)
             {
-                throw Throwables.unchecked(Throwables.close(t, rowToTokenFile, rowToPartitionFile, partitionKeyBlocksFile, partitionKeyBlockOffsetsFile));
+                throw Throwables.unchecked(Throwables.close(t, rowToTokenFileLocal, rowToPartitionFileLocal, partitionKeyBlocksFileLocal, partitionKeyBlockOffsetsFileLocal));
             }
             this.perSSTableComponents = perSSTableComponents;
 
-            this.rowToTokenFile = rowToTokenFile;
-            this.rowToPartitionFile = rowToPartitionFile;
-            this.partitionKeyBlockOffsetsFile = partitionKeyBlockOffsetsFile;
-            this.partitionKeyBlocksFile =  partitionKeyBlocksFile;
+            this.rowToTokenFile = rowToTokenFileLocal;
+            this.rowToPartitionFile = rowToPartitionFileLocal;
+            this.partitionKeyBlockOffsetsFile = partitionKeyBlockOffsetsFileLocal;
+            this.partitionKeyBlocksFile = partitionKeyBlocksFileLocal;
 
             this.partitioner = sstable.metadata().partitioner;
             this.primaryKeyFactory = primaryKeyFactory;

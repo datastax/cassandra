@@ -82,34 +82,34 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         {
             super(perSSTableComponents, primaryKeyFactory, sstable);
 
-            FileHandle clusteringKeyBlockOffsetsFile = null;
-            FileHandle clustingingKeyBlocksFile = null;
-            FileHandle partitionToSizeFile = null;
+            FileHandle clusteringKeyBlockOffsetsFileLocal = null;
+            FileHandle clustingingKeyBlocksFileLocal = null;
+            FileHandle partitionToSizeFileLocal = null;
 
             try
             {
-                clusteringKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle();
-                clustingingKeyBlocksFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle();
+                clusteringKeyBlockOffsetsFileLocal = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle();
+                clustingingKeyBlocksFileLocal = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle();
 
                 NumericValuesMeta partitionSizeMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_TO_SIZE)));
-                partitionToSizeFile = perSSTableComponents.get(IndexComponentType.PARTITION_TO_SIZE).createFileHandle();
-                this.partitionToSizeReaderFactory = new BlockPackedReader(partitionToSizeFile, partitionSizeMeta);
+                partitionToSizeFileLocal = perSSTableComponents.get(IndexComponentType.PARTITION_TO_SIZE).createFileHandle();
+                this.partitionToSizeReaderFactory = new BlockPackedReader(partitionToSizeFileLocal, partitionSizeMeta);
 
                 NumericValuesMeta clusteringKeyBlockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)));
                 KeyLookupMeta clusteringKeyMeta = new KeyLookupMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS)));
-                this.clusteringKeyReader = new KeyLookup(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile,
+                this.clusteringKeyReader = new KeyLookup(clustingingKeyBlocksFileLocal, clusteringKeyBlockOffsetsFileLocal,
                                                          clusteringKeyMeta, clusteringKeyBlockOffsetsMeta);
             }
             catch (Throwable t)
             {
-                throw Throwables.unchecked(Throwables.close(t, clusteringKeyBlockOffsetsFile, clustingingKeyBlocksFile, partitionToSizeFile));
+                throw Throwables.unchecked(Throwables.close(t, clusteringKeyBlockOffsetsFileLocal, clustingingKeyBlocksFileLocal, partitionToSizeFileLocal));
             }
             this.perSSTableComponents = perSSTableComponents;
             this.clusteringComparator = sstable.metadata().comparator;
 
-            this.clusteringKeyBlockOffsetsFile = clusteringKeyBlockOffsetsFile;
-            this.clustingingKeyBlocksFile = clustingingKeyBlocksFile;
-            this.partitionToSizeFile = partitionToSizeFile;
+            this.clusteringKeyBlockOffsetsFile = clusteringKeyBlockOffsetsFileLocal;
+            this.clustingingKeyBlocksFile = clustingingKeyBlocksFileLocal;
+            this.partitionToSizeFile = partitionToSizeFileLocal;
         }
 
         @Override
