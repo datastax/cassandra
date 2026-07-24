@@ -81,6 +81,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     // This is used to record the number of rows in each partition
     private long partitionRowCount = 0;
 
+    @SuppressWarnings("resource")
     public SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
     {
         this.perSSTableComponents = perSSTableComponents;
