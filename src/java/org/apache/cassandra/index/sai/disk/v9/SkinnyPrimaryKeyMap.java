@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.disk.v9;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.function.BiFunction;
@@ -141,20 +140,13 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         {
             LongArray rowIdToToken = new LongArray.DeferredLongArray(rowToTokenReaderFactory::open);
             LongArray rowIdToPartitionId = new LongArray.DeferredLongArray(rowToPartitionReaderFactory::open);
-            try
-            {
-                return new SkinnyPrimaryKeyMap(rowIdToToken,
-                                               rowIdToPartitionId,
-                                               partitionKeyReader.openCursor(),
-                                               partitioner,
-                                               primaryKeyFactory,
-                                               sstableId,
-                                               hasStaticColumns);
-            }
-            catch (IOException e)
-            {
-                throw new UncheckedIOException("Failed to load PrimaryKeyMap for sstable: " + sstableId, e);
-            }
+            return new SkinnyPrimaryKeyMap(rowIdToToken,
+                                           rowIdToPartitionId,
+                                           partitionKeyReader.openCursor(),
+                                           partitioner,
+                                           primaryKeyFactory,
+                                           sstableId,
+                                           hasStaticColumns);
         }
 
         @Override

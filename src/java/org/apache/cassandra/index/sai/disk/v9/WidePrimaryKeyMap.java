@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.disk.v9;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Arrays;
 
 import javax.annotation.concurrent.NotThreadSafe;
@@ -118,24 +117,16 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             LongArray partitionIdToToken = new LongArray.DeferredLongArray(rowToPartitionReaderFactory::open);
             LongArray partitionIdToSize = new LongArray.DeferredLongArray(partitionToSizeReaderFactory::open);
 
-            try
-            {
-
-                return new WidePrimaryKeyMap(rowIdToToken,
-                                             partitionIdToToken,
-                                             partitionIdToSize,
-                                             partitionKeyReader.openCursor(),
-                                             clusteringKeyReader.openCursor(),
-                                             partitioner,
-                                             primaryKeyFactory,
-                                             clusteringComparator,
-                                             sstableId,
-                                             hasStaticColumns);
-            }
-            catch (IOException e)
-            {
-                throw new UncheckedIOException("Failed to load PrimaryKeyMap for sstable: " + sstableId, e);
-            }
+            return new WidePrimaryKeyMap(rowIdToToken,
+                                         partitionIdToToken,
+                                         partitionIdToSize,
+                                         partitionKeyReader.openCursor(),
+                                         clusteringKeyReader.openCursor(),
+                                         partitioner,
+                                         primaryKeyFactory,
+                                         clusteringComparator,
+                                         sstableId,
+                                         hasStaticColumns);
         }
 
         @Override
