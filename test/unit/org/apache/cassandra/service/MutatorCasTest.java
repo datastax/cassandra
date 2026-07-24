@@ -17,6 +17,7 @@
 package org.apache.cassandra.service;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -43,8 +44,10 @@ import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -56,6 +59,7 @@ import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static org.apache.cassandra.Util.dk;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -128,6 +132,12 @@ public class MutatorCasTest
         static final List<CommitRecord> commits = new CopyOnWriteArrayList<>();
         static final List<CommitRecord> completed = new CopyOnWriteArrayList<>();
 
+        /**
+         * When non-null, {@link #mutatePaxos} returns a handler whose {@code get()} throws this instead
+         * of dispatching a real commit -- lets a test drive the commit-phase failure path in doPaxos.
+         */
+        static volatile RuntimeException commitFailure;
+
         private final Mutator delegate = new StorageProxy.DefaultMutator();
 
         static void reset()
@@ -137,6 +147,7 @@ public class MutatorCasTest
             mutatePaxosCalls.set(0);
             commits.clear();
             completed.clear();
+            commitFailure = null;
             sequence.set(0);
         }
 
@@ -243,7 +254,39 @@ public class MutatorCasTest
             // Counted to pin backward compatibility: implementations that rely on the legacy v1
             // commit-transport hook must keep receiving it unchanged through the new dispatch.
             mutatePaxosCalls.incrementAndGet();
+            RuntimeException failure = commitFailure;
+            if (failure != null)
+                return throwingCommitHandler(failure);
             return delegate.mutatePaxos(proposal, consistencyLevel, allowHints, requestTime);
+        }
+
+        /**
+         * A commit response handler whose {@code get()} fails with {@code failure} -- simulating a
+         * commit that could not be confirmed (replica failure, timeout, interruption). Only
+         * {@code get()} is exercised by commitPaxos, so the other members are inert.
+         */
+        private static AbstractWriteResponseHandler<Commit> throwingCommitHandler(RuntimeException failure)
+        {
+            return new AbstractWriteResponseHandler<Commit>(null, null, WriteType.SIMPLE, null,
+                                                            Dispatcher.RequestTime.forImmediateExecution())
+            {
+                @Override
+                public void get()
+                {
+                    throw failure;
+                }
+
+                @Override
+                public int ackCount()
+                {
+                    return 0;
+                }
+
+                @Override
+                public void onResponse(Message<Commit> msg)
+                {
+                }
+            };
         }
 
         @Override
@@ -560,5 +603,66 @@ public class MutatorCasTest
     public void inProgressRoundIsReportedAsRepairV2()
     {
         inProgressRoundIsReportedAsRepair(Config.PaxosVariant.v2, "cas_repair_v2");
+    }
+
+    /**
+     * A commit that fails after the proposal was accepted must still be paired with a terminal.
+     * {@code doPaxos} announces the client commit (onCasCommit), then commitPaxos throws; because
+     * the proposal already succeeded the value is DECIDED, so the terminal is UNCONFIRMED (decided
+     * but not confirmed here) and the original exception still surfaces to the caller.
+     *
+     * <p>This is the v1 path: only v1 drives the operation's commit through {@code commitPaxos}
+     * (hence {@code mutatePaxos}); v2 confirms via its fused commit-and-prepare, covered elsewhere.
+     * Two failure modes are exercised to justify catching {@code RuntimeException} rather than just
+     * {@code WriteTimeoutException}: a {@link WriteFailureException} (replicas answered with errors,
+     * not a timeout -- a different branch of the exception hierarchy) and an
+     * {@link UncheckedInterruptedException} (the request thread was interrupted while awaiting the
+     * commit ack). Neither is a {@code WriteTimeoutException}, so the pre-fix catch would have
+     * dropped the terminal.
+     */
+    private void commitFailureCompletesUnconfirmed(RuntimeException failure, String keyName)
+    {
+        setPaxosVariant(Config.PaxosVariant.v1);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+
+        RecordingMutator.commitFailure = failure;
+        // The empty partition matches the condition, so the proposal is accepted and the commit is
+        // attempted -- where our injected handler fails it. The original exception must surface.
+        assertThatThrownBy(() -> cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "v-" + keyName)))
+            .isSameAs(failure);
+
+        List<CommitRecord> clientCommits = RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION);
+        assertThat(clientCommits).as("the applying CAS announces exactly one client commit").hasSize(1);
+
+        List<CommitRecord> clientCompleted = RecordingMutator.completedWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION);
+        assertThat(clientCompleted)
+            .as("a failed commit still pairs the announcement with exactly one terminal").hasSize(1);
+        CommitRecord terminal = clientCompleted.get(0);
+        assertThat(terminal.outcome)
+            .as("a decided-but-unconfirmed commit completes as UNCONFIRMED")
+            .isEqualTo(Mutator.CasCommitOutcome.UNCONFIRMED);
+        assertThat(terminal.isSuccess()).as("UNCONFIRMED is not a success outcome").isFalse();
+        assertThat(terminal.commit.update.partitionKey()).isEqualTo(key);
+        assertThat(terminal.consistencyLevel).isEqualTo(ConsistencyLevel.QUORUM);
+        assertThat(terminal.thread)
+            .as("the terminal fires on the mutateCas caller thread for CLIENT_OPERATION")
+            .isSameAs(Thread.currentThread());
+        assertThat(terminal.seq)
+            .as("the terminal fires after the announced commit").isGreaterThan(clientCommits.get(0).seq);
+    }
+
+    @Test
+    public void commitWriteFailureCompletesUnconfirmedV1()
+    {
+        WriteFailureException failure = new WriteFailureException(ConsistencyLevel.QUORUM, 0, 2, WriteType.SIMPLE,
+                                                                 Collections.emptyMap());
+        commitFailureCompletesUnconfirmed(failure, "cas_commit_fail_v1");
+    }
+
+    @Test
+    public void commitInterruptedCompletesUnconfirmedV1()
+    {
+        commitFailureCompletesUnconfirmed(new UncheckedInterruptedException(), "cas_commit_interrupt_v1");
     }
 }

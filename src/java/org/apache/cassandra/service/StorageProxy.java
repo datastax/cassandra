@@ -780,11 +780,13 @@ public class StorageProxy implements StorageProxyMBean
                         {
                             commitPaxos(proposal, consistencyForCommit, true, requestTime, casMetrics);
                         }
-                        catch (WriteTimeoutException e)
+                        catch (RuntimeException e)
                         {
-                            // decided but the commit was not acknowledged in time: report UNCONFIRMED before the
-                            // failure surfaces to the client. (At CL=ANY commitPaxos does not block, so it does not
-                            // throw here; that case delivers no terminal, only the dispatched onCasCommit.)
+                            // proposePaxos already returned true, so the value is DECIDED; any failure to confirm
+                            // the commit here (timeout, replica failure, interruption surfaced as
+                            // UncheckedInterruptedException) leaves it decided-but-not-confirmed: report UNCONFIRMED
+                            // before the failure surfaces to the client. (At CL=ANY commitPaxos does not block, so it
+                            // does not throw here; that case delivers no terminal, only the dispatched onCasCommit.)
                             MutatorProvider.notifyCasCommitCompleted(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.UNCONFIRMED);
                             throw e;
                         }
