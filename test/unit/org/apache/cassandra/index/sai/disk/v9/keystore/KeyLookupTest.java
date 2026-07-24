@@ -904,8 +904,8 @@ public class KeyLookupTest extends SaiRandomizedTest
         }
         catch (Throwable ignored)
         {
+            return false;
         }
-        return false;
     }
 
     @FunctionalInterface
