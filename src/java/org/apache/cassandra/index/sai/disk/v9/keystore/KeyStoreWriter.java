@@ -130,11 +130,8 @@ public class KeyStoreWriter implements Closeable
 
         BytesRef keyRef = tempKey.get();
 
-        if (clustering && inPartition)
-        {
-            if (compareKeys(keyRef, prevKey.get()) <= 0)
+        if (clustering && inPartition && compareKeys(keyRef, prevKey.get()) <= 0)
                 throw new IllegalArgumentException("Clustering keys must be in ascending lexicographical order");
-        }
 
         inPartition = true;
 
