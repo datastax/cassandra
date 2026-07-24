@@ -76,19 +76,13 @@ public class StorageAttachedIndexBuilderTest extends SAITester
 
             // there is one descriptor populated by index build and it has all built index components
             assertThat(group.sstableContextManager().getDescriptorCount()).isEqualTo(1);
-            IndexDescriptor builtDescriptor = group.descriptorFor(sstable);
-            assertThat(builtDescriptor.perSSTableComponents().isComplete()).isTrue();
-            for (StorageAttachedIndex index : group.getIndexes())
-                assertThat(builtDescriptor.perIndexComponents(index.getIndexContext()).isComplete()).isTrue();
+            assertCompleteComponents(group, sstable);
 
             // now clear the cached descriptor and reload from TOC
             group.sstableContextManager().clear();
             assertThat(group.sstableContextManager().getDescriptorCount()).isEqualTo(0);
 
-            IndexDescriptor reloadedDescriptor = group.descriptorFor(sstable);
-            assertThat(reloadedDescriptor.perSSTableComponents().isComplete()).isTrue();
-            for (StorageAttachedIndex index : group.getIndexes())
-                assertThat(reloadedDescriptor.perIndexComponents(index.getIndexContext()).isComplete()).isTrue();
+            assertCompleteComponents(group, sstable);
         }
         finally
         {
@@ -97,6 +91,7 @@ public class StorageAttachedIndexBuilderTest extends SAITester
     }
 
     // called by byteman
+    @SuppressWarnings("unused")
     public static void evictDescriptorCache()
     {
         StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(columnFamilyStore);
@@ -105,5 +100,13 @@ public class StorageAttachedIndexBuilderTest extends SAITester
 
         group.sstableContextManager().clear();
         descriptorCacheEvicted = true;
+    }
+
+    private void assertCompleteComponents(StorageAttachedIndexGroup group, SSTableReader sstable)
+    {
+        IndexDescriptor descriptor = group.descriptorFor(sstable);
+        assertThat(descriptor.perSSTableComponents().isComplete()).isTrue();
+        for (StorageAttachedIndex index : group.getIndexes())
+            assertThat(descriptor.perIndexComponents(index.getIndexContext()).isComplete()).isTrue();
     }
 }
