@@ -84,7 +84,7 @@ public class KeyLookup
      * The cursor is valid as long as this object hasn't been closed.
      * You must close the cursor when you no longer need it.
      */
-    public @Nonnull Cursor openCursor() throws IOException
+    public @Nonnull Cursor openCursor()
     {
         if (keyLookupMeta.keyCount == 0)
             return new EmptyCursor();
