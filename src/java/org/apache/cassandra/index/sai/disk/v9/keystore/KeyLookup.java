@@ -200,9 +200,9 @@ public class KeyLookup
                 this.blockMask = (1 << this.blockShift) - 1;
                 this.clustering = this.keysInput.readByte() == 1;
             }
-            catch (Throwable t)
+            catch (IOException e)
             {
-                throw Throwables.unchecked(Throwables.close(t, keysFileHandle));
+                throw Throwables.unchecked(Throwables.close(e, keysFileHandle));
             }
 
             this.keysFilePointer = this.keysInput.getFilePointer();
