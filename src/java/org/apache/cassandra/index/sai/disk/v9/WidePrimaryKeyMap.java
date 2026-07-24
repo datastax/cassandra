@@ -100,9 +100,9 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
                 this.clusteringKeyReader = new KeyLookup(clustingingKeyBlocksFileLocal, clusteringKeyBlockOffsetsFileLocal,
                                                          clusteringKeyMeta, clusteringKeyBlockOffsetsMeta);
             }
-            catch (Throwable t)
+            catch (IOException e)
             {
-                throw Throwables.unchecked(Throwables.close(t, clusteringKeyBlockOffsetsFileLocal, clustingingKeyBlocksFileLocal, partitionToSizeFileLocal));
+                throw Throwables.unchecked(Throwables.close(e, clusteringKeyBlockOffsetsFileLocal, clustingingKeyBlocksFileLocal, partitionToSizeFileLocal));
             }
             this.perSSTableComponents = perSSTableComponents;
             this.clusteringComparator = sstable.metadata().comparator;

@@ -118,9 +118,9 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
                 partitionKeyBlockOffsetsFileLocal = perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS).createFileHandle();
                 this.partitionKeyReader = new KeyLookup(partitionKeyBlocksFileLocal, partitionKeyBlockOffsetsFileLocal, partitionKeysMeta, partitionKeyBlockOffsetsMeta);
             }
-            catch (Throwable t)
+            catch (IOException e)
             {
-                throw Throwables.unchecked(Throwables.close(t, rowToTokenFileLocal, rowToPartitionFileLocal, partitionKeyBlocksFileLocal, partitionKeyBlockOffsetsFileLocal));
+                throw Throwables.unchecked(Throwables.close(e, rowToTokenFileLocal, rowToPartitionFileLocal, partitionKeyBlocksFileLocal, partitionKeyBlockOffsetsFileLocal));
             }
             this.perSSTableComponents = perSSTableComponents;
 
