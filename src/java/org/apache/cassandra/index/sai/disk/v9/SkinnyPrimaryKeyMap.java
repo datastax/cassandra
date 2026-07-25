@@ -86,14 +86,14 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         protected final LongArray.Factory rowToPartitionReaderFactory;
         protected final KeyLookup partitionKeyReader;
         protected final IPartitioner partitioner;
-        protected final ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory;
+        protected final RowAwarePrimaryKeyFactory primaryKeyFactory;
 
         private final FileHandle rowToTokenFile;
         private final FileHandle rowToPartitionFile;
         private final FileHandle partitionKeyBlockOffsetsFile;
         private final FileHandle partitionKeyBlocksFile;
 
-        public Factory(IndexComponents.ForRead perSSTableComponents, ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
+        public Factory(IndexComponents.ForRead perSSTableComponents, RowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
             FileHandle rowToTokenFileLocal = null;
             FileHandle rowToPartitionFileLocal = null;
@@ -160,7 +160,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     protected final LongArray rowIdToPartitionIdArray;
     protected final KeyLookup.Cursor partitionKeyCursor;
     protected final IPartitioner partitioner;
-    protected final ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory;
+    protected final RowAwarePrimaryKeyFactory primaryKeyFactory;
     protected final SSTableId<?> sstableId;
     private final boolean hasStaticColumns;
 
@@ -168,7 +168,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
                                   LongArray rowIdToPartitionIdArray,
                                   KeyLookup.Cursor partitionKeyCursor,
                                   IPartitioner partitioner,
-                                  ClusteredRowAwarePrimaryKeyFactory primaryKeyFactory,
+                                  RowAwarePrimaryKeyFactory primaryKeyFactory,
                                   SSTableId<?> sstableId,
                                   boolean hasStaticColumns)
     {
