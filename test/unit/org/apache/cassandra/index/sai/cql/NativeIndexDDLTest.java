@@ -1274,15 +1274,16 @@ public class NativeIndexDDLTest extends SAITester
         // their removal. If we are testing with encryption then we don't want to test any components
         // that are encryptable unless they have been removed because encrypted components aren't
         // checksum validated.
-
-        if (component == IndexComponentType.PRIMARY_KEY_TRIE || component == IndexComponentType.PRIMARY_KEY_BLOCKS || component == IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)
-            return;
-
         if (((component == IndexComponentType.GROUP_COMPLETION_MARKER) ||
              (component == IndexComponentType.COLUMN_COMPLETION_MARKER)) &&
             (corruptionType != CorruptionType.REMOVED))
             return;
 
+        // Skip per SSTable components for v2 primary key maps
+        if (component == IndexComponentType.PRIMARY_KEY_TRIE || component == IndexComponentType.PRIMARY_KEY_BLOCKS || component == IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)
+            return;
+
+        // Skip per SSTables components for v9 primary key maps
         if (component == IndexComponentType.ROW_TO_TOKEN || component == IndexComponentType.ROW_TO_PARTITION ||
             component == IndexComponentType.PARTITION_TO_SIZE || component == IndexComponentType.PARTITION_KEY_BLOCKS ||
             component == IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS || component == IndexComponentType.CLUSTERING_KEY_BLOCKS ||
