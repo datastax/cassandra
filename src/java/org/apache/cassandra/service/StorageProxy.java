@@ -210,10 +210,6 @@ public class StorageProxy implements StorageProxyMBean
 
             QueryInfoTracker.WriteTracker writeTracker = StorageProxy.queryTracker().onWrite(clientState, true, mutations, consistencyLevel);
 
-            // Sensors are installed on the thread-local by the static mutateAtomically() before entering this mutator.
-            // Read them back here so they can be passed explicitly to wrapBatchResponseHandlers().
-            RequestSensors sensors = RequestTracker.instance.get();
-
             if (mutations.stream().anyMatch(mutation -> Keyspace.open(mutation.getKeyspaceName()).getReplicationStrategy().hasTransientReplicas()))
                 throw new AssertionError("Logged batches are unsupported with transient replication");
 
@@ -240,7 +236,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 BatchlogResponseHandler.BatchlogCleanup cleanup = new BatchlogResponseHandler.BatchlogCleanup(mutations.size(), () -> clearBatchlog(keyspace, replicaPlan, batchUUID));
 
-                List<StorageProxy.WriteResponseHandlerWrapper> wrappers = wrapBatchResponseHandlers(mutations, consistencyLevel, batchConsistencyLevel, cleanup, queryStartNanoTime, sensors);
+                List<StorageProxy.WriteResponseHandlerWrapper> wrappers = wrapBatchResponseHandlers(mutations, consistencyLevel, batchConsistencyLevel, cleanup, queryStartNanoTime);
 
                 // persist batchlog before writing batched mutations
                 persistBatchlog(mutations, queryStartNanoTime, replicaPlan, batchUUID);
@@ -307,21 +303,13 @@ public class StorageProxy implements StorageProxyMBean
                                                                               ConsistencyLevel consistencyLevel,
                                                                               ConsistencyLevel batchConsistencyLevel,
                                                                               BatchlogResponseHandler.BatchlogCleanup cleanup,
-                                                                              long queryStartNanoTime,
-                                                                              RequestSensors sensors)
+                                                                              long queryStartNanoTime)
         {
             List<StorageProxy.WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
 
             // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
             for (Mutation mutation : mutations)
             {
-                // register the sensors for the mutation before the actual write is performed
-                for (PartitionUpdate pu: mutation.getPartitionUpdates())
-                {
-                    if (pu.metadata().isIndex()) continue;
-                    sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
-                    sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
-                }
                 StorageProxy.WriteResponseHandlerWrapper wrapper = StorageProxy.wrapBatchResponseHandler(mutation,
                                                                                                          consistencyLevel,
                                                                                                          batchConsistencyLevel,
@@ -1398,6 +1386,19 @@ public class StorageProxy implements StorageProxyMBean
         // coordinator write paths.
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
         ExecutorLocals.set(ExecutorLocals.create(sensors));
+
+        // Register sensors for each mutation partition before the mutator constructs WriteResponseHandlers.
+        // AbstractWriteResponseHandler captures the sensors reference at construction time, so both
+        // sensor creation (above) and registration (here) must precede any call to getWriteResponseHandler().
+        for (Mutation mutation : mutations)
+        {
+            for (PartitionUpdate pu : mutation.getPartitionUpdates())
+            {
+                if (pu.metadata().isIndex()) continue;
+                sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
+            }
+        }
 
         mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
     }

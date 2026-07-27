@@ -22,8 +22,11 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.AfterClass;
@@ -43,10 +46,18 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.sensors.ActiveSensorsFactory;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.tracing.TraceKeyspace;
+import org.apache.cassandra.tracing.TraceStateImpl;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.UUIDGen;
 import org.assertj.core.api.Assertions;
 
 /**
@@ -444,5 +455,109 @@ public class SensorsTest extends TestBaseImpl
                                                           ProtocolVersion.CURRENT,
                                                           prepared.keyspace);
         return prepared.statement.execute(QueryProcessor.internalQueryState(), initialOptions, nanoTime);
+    }
+
+    /**
+     * Verifies that enabling tracing on a CQL INSERT does not inflate the user table's {@code WRITE_BYTES_REQUEST}
+     * sensor in the response custom payload.
+     *
+     * <p>Trace writes are submitted to {@code Stage.TRACING} with an isolated {@link org.apache.cassandra.sensors.RequestSensors}
+     * instance. The {@code StorageProxy.mutate()} call on that thread creates its own {@code system_traces} sensor set
+     * and never touches the user table's sensor set on the coordinator thread. Therefore the sensor payload for a traced
+     * INSERT must be byte-for-byte identical to that of an untraced INSERT against the same table.
+     */
+    @Test
+    public void testTraceWriteDoesNotInflateSensors() throws Throwable
+    {
+        cluster.schemaChange(withKeyspace("CREATE TABLE IF NOT EXISTS %s.tbl_trace_isolation (pk int PRIMARY KEY, v1 text)"));
+
+        String insert = withKeyspace("INSERT INTO %s.tbl_trace_isolation (pk, v1) VALUES (1, 'hello')");
+        String expectedHeader = "WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl_trace_isolation";
+
+        // Untraced INSERT — baseline WRITE_BYTES for the user table.
+        AtomicReference<Map<String, ByteBuffer>> refNoTrace = new AtomicReference<>();
+        cluster.get(1).acceptsOnInstance(
+               (IIsolatedExecutor.SerializableConsumer<AtomicReference<Map<String, ByteBuffer>>>)
+               (reference) -> {
+                   CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
+                   reference.set(executeWithResult(insert).getCustomPayload());
+               })
+               .accept(refNoTrace);
+        Map<String, ByteBuffer> payloadNoTrace = refNoTrace.get();
+        Assertions.assertThat(payloadNoTrace)
+                  .describedAs("Untraced INSERT must carry sensor payload")
+                  .isNotNull()
+                  .containsKey(expectedHeader);
+        double writeBytesNoTrace = ByteBufferUtil.toDouble(payloadNoTrace.get(expectedHeader));
+        Assertions.assertThat(writeBytesNoTrace)
+                  .describedAs("Untraced INSERT WRITE_BYTES must be > 0")
+                  .isGreaterThan(0D);
+
+        // Traced INSERT — Tracing.instance.newSession() is called inside the node's classloader so the
+        // TRACING thread-local is set correctly on the node side. The trace writes to system_traces must
+        // not appear in the user table's sensor payload.
+        // Use Object[] to carry both the custom payload map and the session UUID out of the node's
+        // isolated classloader in a single acceptsOnInstance call. Two-element array: [0] = payload
+        // map, [1] = session UUID. AtomicReference set inside the lambda only updates the node-side
+        // copy, so we use the consumer argument itself to ferry data back to the outer JVM.
+        Object[] tracedResult = new Object[2];
+        cluster.get(1).acceptsOnInstance(
+               (IIsolatedExecutor.SerializableConsumer<Object[]>)
+               (result) -> {
+                   CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
+                   // Ensure stopSession() waits for all Stage.TRACING futures so that
+                   // system_traces.sessions is durable before we query it after the call.
+                   int prevTimeout = TraceStateImpl.WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS;
+                   TraceStateImpl.WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS = 60;
+                   UUID sessionId = UUIDGen.getTimeUUID();
+                   result[1] = sessionId;
+                   Tracing.instance.newSession(ClientState.forInternalCalls(), sessionId, Collections.emptyMap());
+                   // begin() writes the system_traces.sessions row — mirrors what QueryMessage does
+                   // before executing the CQL statement in the native protocol handler.
+                   Tracing.instance.begin("Execute CQL3 query", null, Collections.emptyMap());
+                   try
+                   {
+                       result[0] = executeWithResult(insert).getCustomPayload();
+                   }
+                   finally
+                   {
+                       // stopSession() calls waitForPendingEvents(), which (with the timeout set above)
+                       // blocks until all Stage.TRACING futures complete — guaranteeing the sessions
+                       // row is written before we query system_traces below.
+                       Tracing.instance.stopSession();
+                       TraceStateImpl.WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS = prevTimeout;
+                   }
+               })
+               .accept(tracedResult);
+        @SuppressWarnings("unchecked")
+        Map<String, ByteBuffer> payloadTraced = (Map<String, ByteBuffer>) tracedResult[0];
+        UUID sessionId = (UUID) tracedResult[1];
+        Assertions.assertThat(payloadTraced)
+                  .describedAs("Traced INSERT must carry sensor payload")
+                  .isNotNull()
+                  .containsKey(expectedHeader);
+        double writeBytesTraced = ByteBufferUtil.toDouble(payloadTraced.get(expectedHeader));
+
+        // Verify tracing was genuinely active: system_traces.sessions must contain a row for
+        // our session_id, written by TraceStateImpl when the query started.
+        AtomicBoolean traceSessionExists = new AtomicBoolean(false);
+        cluster.get(1).acceptsOnInstance(
+               (IIsolatedExecutor.SerializableConsumer<AtomicBoolean>)
+               (flag) -> {
+                   UntypedResultSet rows = QueryProcessor.executeInternal(
+                           "SELECT session_id FROM " + SchemaConstants.TRACE_KEYSPACE_NAME + '.' + TraceKeyspace.SESSIONS + " WHERE session_id = ?",
+                           sessionId);
+                   flag.set(rows != null && !rows.isEmpty());
+               })
+               .accept(traceSessionExists);
+        Assertions.assertThat(traceSessionExists.get())
+                  .describedAs("system_traces.sessions must contain a row for session %s — confirms tracing was active", sessionId)
+                  .isTrue();
+
+        // Trace writes go to system_traces on a separate TRACING thread with an isolated sensor set.
+        // The user table's WRITE_BYTES must be unchanged — not inflated by trace writes.
+        Assertions.assertThat(writeBytesTraced)
+                  .describedAs("Enabling tracing must not inflate WRITE_BYTES for the user table")
+                  .isEqualTo(writeBytesNoTrace);
     }
 }
