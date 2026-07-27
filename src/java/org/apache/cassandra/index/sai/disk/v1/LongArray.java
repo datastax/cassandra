@@ -45,8 +45,7 @@ public interface LongArray extends Closeable
     long ceilingIndex(long targetValue);
 
     /**
-     * @param targetValue Value to look up.  Must not be bigger than the next value queried
-     *                    (the method is stateful)
+     * @param targetValue Value to look up.
      * @return The index of the largest value equal to or smaller than the target,
      *         or negative value if the target value is smaller than all values
      */
