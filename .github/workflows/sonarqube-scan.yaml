@@ -92,9 +92,9 @@ jobs:
       - name: Install SonarQube Scanner
         run: |
           echo "Installing SonarQube Scanner CLI..."
-          wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
-          unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
-          echo "$(pwd)/sonar-scanner-5.0.1.3006-linux/bin" >> $GITHUB_PATH
+          wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-8.1.0.6389-linux-x64.zip
+          unzip -q sonar-scanner-cli-8.1.0.6389-linux-x64.zip
+          echo "$(pwd)/sonar-scanner-8.1.0.6389-linux-x64/bin" >> $GITHUB_PATH
 
       - name: Run SonarQube analysis
         id: sonar-scan
