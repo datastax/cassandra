@@ -473,11 +473,34 @@ public class StorageProxy implements StorageProxyMBean
                                                                                 key,
                                                                                 consistencyForPaxos,
                                                                                 consistencyForCommit);
-        // Request sensors are utilized to track usages from replicas serving a cas request
+        // All three sensor types are registered against the user-table context here on the coordinator.
+        // This same context is reused for system.paxos I/O via the following two-step mechanism:
+        //
+        // 1. Re-attribution inside SystemKeyspace (replica-local):
+        //    Every system.paxos read (loadPaxosState) and write (savePaxosPromise / savePaxosProposal /
+        //    savePaxosCommit) temporarily registers a sensor under PaxosContext (system.paxos metadata),
+        //    measures the actual bytes, then calls transferPaxosSensorBytes() which copies that value into
+        //    Context.from(userTableMetadata) on the same RequestSensors — re-keying the measurement from
+        //    system.paxos to the user table before the reply is sent.
+        //    Concretely: Prepare reads+writes system.paxos (loadPaxosState + savePaxosPromise),
+        //    Propose reads+writes system.paxos (loadPaxosState + savePaxosProposal), and
+        //    Commit writes system.paxos (savePaxosCommit) and, when the condition was met, also applies
+        //    the user-table mutation — all of these bytes end up under the user-table context after transfer.
+        //
+        // 2. Merging replica values back into the coordinator sensor (ResponseVerbHandler):
+        //    Each verb handler (PrepareVerbHandler, ProposeVerbHandler, CommitVerbHandler) on the replica
+        //    encodes the accumulated sensor values into the internode response as custom parameters
+        //    (SensorsCustomParams.addSensorsToInternodeResponse). The coordinator's ResponseVerbHandler
+        //    detects AbstractPaxosCallback instances and calls incrementSensor() on this RequestSensors
+        //    object with the user-table context, accumulating all replica contributions here.
+        //
+        // The Commit object carries the user-table TableMetadata (set in Commit.newPrepare via
+        // Schema.instance.validateTable above), so message.payload.update.metadata() on every verb handler
+        // is the user-table metadata, not system.paxos — guaranteeing consistent context across all replicas.
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(keyspaceName);
         Context context = Context.from(metadata);
-        sensors.registerSensor(context, Type.WRITE_BYTES); // track user table + paxos table write bytes
-        sensors.registerSensor(context, Type.READ_BYTES); // track user table + paxos table read bytes
+        sensors.registerSensor(context, Type.WRITE_BYTES); // tracks user table + system.paxos write bytes (see comment above)
+        sensors.registerSensor(context, Type.READ_BYTES);  // tracks user table + system.paxos read bytes (see comment above)
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES); // track secondary index write bytes on commit
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
