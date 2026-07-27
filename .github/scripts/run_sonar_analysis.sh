@@ -87,6 +87,12 @@ for attempt in $(seq 1 $MAX_RETRIES); do
   RESULT=$?
   set +x
 
+  # Check for errors in log even if exit code is 0 (sonar-scanner bug in newer versions)
+  if grep -q "ERROR Error during SonarScanner" sonar-output.log; then
+    echo "ERROR detected in scanner output, treating as failure"
+    RESULT=1
+  fi
+
   if [[ $RESULT -eq 0 ]]; then
     echo ""
     echo "=========================================="
@@ -110,7 +116,7 @@ for attempt in $(seq 1 $MAX_RETRIES); do
     fi
 
     # Check if this is a transient error (retry these)
-    if grep -Eq "503|Service Unavailable|timeout|Connection reset|temporarily unavailable|ConnectException" sonar-output.log; then
+    if grep -Eqi "503|Service Unavailable|Timeout|Connection reset|temporarily unavailable|ConnectException|SocketTimeoutException" sonar-output.log; then
       if [[ $attempt -lt $MAX_RETRIES ]]; then
         echo "Transient error detected. Will retry..."
       else
