@@ -112,46 +112,35 @@ public class VectorFormatDiskUsageTest extends VectorTester {
     /// All other components (`PQ`, `POSTING_LISTS`, `COLUMN_COMPLETION_MARKER`) are unchanged.
     @Test
     public void testDiskUsageECvsFB() {
-        DiskMeasurement ecPreCompaction = measureDiskUsage(Version.EC, "EC-preCompaction", false);
-        DiskMeasurement ecPostCompaction = measureDiskUsage(Version.EC, "EC-postCompaction", true);
-        DiskMeasurement fbPreCompaction = measureDiskUsage(Version.FB, "FB-preCompaction", false);
-        DiskMeasurement fbPostCompaction = measureDiskUsage(Version.FB, "FB-postCompaction", true);
+        testDiskUsageECvsFB(false);
+        testDiskUsageECvsFB(true);
+    }
 
-        assertTrue("EC preCompaction index must have non-zero disk usage", ecPreCompaction.totalBytes > 0);
-        assertTrue("FB preCompaction index must have non-zero disk usage", fbPreCompaction.totalBytes > 0);
-        assertTrue("EC postCompaction index must have non-zero disk usage", ecPostCompaction.totalBytes > 0);
-        assertTrue("FB postCompaction index must have non-zero disk usage", fbPostCompaction.totalBytes > 0);
+    private void testDiskUsageECvsFB(boolean compact) {
+        String phase = compact ? "postCompaction" : "preCompaction";
 
-        long preCompactionTermsDataDelta = fbPreCompaction.termsDataBytes - ecPreCompaction.termsDataBytes;
-        long postCompactionTermsDataDelta = fbPostCompaction.termsDataBytes - ecPostCompaction.termsDataBytes;
+        DiskMeasurement ec = measureDiskUsage(Version.EC, "EC-" + phase, compact);
+        DiskMeasurement fb = measureDiskUsage(Version.FB, "FB-" + phase, compact);
 
-        double diskGrowthPercentPreCompaction = 100.0 * (fbPreCompaction.totalBytes - ecPreCompaction.totalBytes) / ecPreCompaction.totalBytes;
-        double diskGrowthPercentPostCompaction = 100.0 * (fbPostCompaction.totalBytes - ecPostCompaction.totalBytes) / ecPostCompaction.totalBytes;
+        assertTrue("EC index must have non-zero disk usage", ec.totalBytes > 0);
+        assertTrue("FB index must have non-zero disk usage", fb.totalBytes > 0);
 
-        logger.debug("  EC preCompaction  diskUsage() : {} ({} segments)", ecPreCompaction.totalBytes, ecPreCompaction.segmentCount);
-        logger.debug("  FB preCompaction  diskUsage() : {} ({} segments)", fbPreCompaction.totalBytes, fbPreCompaction.segmentCount);
-        logger.debug("  EC postCompaction diskUsage() : {} ({} segments)", ecPostCompaction.totalBytes, ecPostCompaction.segmentCount);
-        logger.debug("  FB postCompaction diskUsage() : {} ({} segments)", fbPostCompaction.totalBytes, fbPostCompaction.segmentCount);
-        logger.debug("  Total disk usage growth preCompaction  : +{} bytes ({} %)",
-                fbPreCompaction.totalBytes - ecPreCompaction.totalBytes, String.format("%.4f", diskGrowthPercentPreCompaction));
-        logger.debug("  Total disk usage growth postCompaction : +{} bytes ({} %)",
-                fbPostCompaction.totalBytes - ecPostCompaction.totalBytes, String.format("%.4f", diskGrowthPercentPostCompaction));
-        logger.debug("  TERMS_DATA delta preCompaction  : {} (expected {} × {} = {})",
-                preCompactionTermsDataDelta, NUM_FLUSHES, EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT,
+        long termsDataDelta = fb.termsDataBytes - ec.termsDataBytes;
+        double diskGrowthPercent = 100.0 * (fb.totalBytes - ec.totalBytes) / ec.totalBytes;
+
+        logger.debug("  EC {}  diskUsage() : {} ({} segments)", phase, ec.totalBytes, ec.segmentCount);
+        logger.debug("  FB {}  diskUsage() : {} ({} segments)", phase, fb.totalBytes, fb.segmentCount);
+        logger.debug("  Total disk usage growth {}  : +{} bytes ({} %)",
+                phase, fb.totalBytes - ec.totalBytes, String.format("%.4f", diskGrowthPercent));
+        logger.debug("  TERMS_DATA delta {}  : {} (expected {} × {} = {})",
+                phase, termsDataDelta, NUM_FLUSHES, EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT,
                 NUM_FLUSHES * EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT);
-        logger.debug("  TERMS_DATA delta postCompaction : {} (expected {})",
-                postCompactionTermsDataDelta, EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT);
 
-        verifyComponentAccounting(ecPreCompaction, fbPreCompaction, "preCompaction");
-        verifyComponentAccounting(ecPostCompaction, fbPostCompaction, "postCompaction");
-        verifyTermsDataDelta(preCompactionTermsDataDelta, ecPreCompaction.segmentCount, "preCompaction");
-        verifyTermsDataDelta(postCompactionTermsDataDelta, ecPostCompaction.segmentCount, "postCompaction");
-        verifyUnchangedComponents(ecPreCompaction, fbPreCompaction, "preCompaction");
-        verifyUnchangedComponents(ecPostCompaction, fbPostCompaction, "postCompaction");
-        verifyConservation(ecPreCompaction, fbPreCompaction, preCompactionTermsDataDelta, "preCompaction");
-        verifyConservation(ecPostCompaction, fbPostCompaction, postCompactionTermsDataDelta, "postCompaction");
-        verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPreCompaction, "preCompaction");
-        verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPostCompaction, "postCompaction");
+        verifyComponentAccounting(ec, fb, phase);
+        verifyTermsDataDelta(termsDataDelta, ec.segmentCount, phase);
+        verifyUnchangedComponents(ec, fb, phase);
+        verifyConservation(ec, fb, termsDataDelta, phase);
+        verifyTotalDiskGrowthUnder5Percent(diskGrowthPercent, phase);
     }
 
     /// Regression guard: for every vector-capable version from [Version#JVECTOR_EARLIEST] (CA)
@@ -160,29 +149,29 @@ public class VectorFormatDiskUsageTest extends VectorTester {
     /// by a new format version.
     @Test
     public void testDiskGrowthAcrossVersions() {
-        DiskMeasurement latestPreCompaction = measureDiskUsage(Version.LATEST, Version.LATEST + "-preCompaction", false);
-        DiskMeasurement latestPostCompaction = measureDiskUsage(Version.LATEST, Version.LATEST + "-postCompaction", true);
+        testDiskGrowthAcrossVersions(false);
+        testDiskGrowthAcrossVersions(true);
+    }
 
-        Version.ALL.stream()
-                .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST) && !v.equals(Version.LATEST))
-                .forEach(older ->
-                {
-                    DiskMeasurement olderPreCompaction = measureDiskUsage(older, older + "-preCompaction", false);
-                    DiskMeasurement olderPostCompaction = measureDiskUsage(older, older + "-postCompaction", true);
+    private void testDiskGrowthAcrossVersions(boolean compact) {
+        String name = compact ? "postCompaction" : "preCompaction";
+        DiskMeasurement latest = measureDiskUsage(Version.LATEST, Version.LATEST + "-" + name, compact);
 
-                    double diskGrowthPercentPreCompaction = 100.0 * (latestPreCompaction.totalBytes - olderPreCompaction.totalBytes) / olderPreCompaction.totalBytes;
-                    double diskGrowthPercentPostCompaction = 100.0 * (latestPostCompaction.totalBytes - olderPostCompaction.totalBytes) / olderPostCompaction.totalBytes;
+        for (Version version : Version.ALL)
+        {
+            if (version == Version.LATEST || !version.onOrAfter(Version.JVECTOR_EARLIEST))
+                continue;
 
-                    logger.debug("  {} → {} preCompaction  : {} → {} bytes ({} %)",
-                            older, Version.LATEST, olderPreCompaction.totalBytes, latestPreCompaction.totalBytes,
-                            String.format("%.4f", diskGrowthPercentPreCompaction));
-                    logger.debug("  {} → {} postCompaction : {} → {} bytes ({} %)",
-                            older, Version.LATEST, olderPostCompaction.totalBytes, latestPostCompaction.totalBytes,
-                            String.format("%.4f", diskGrowthPercentPostCompaction));
+            DiskMeasurement older = measureDiskUsage(version, version + "-" + name, compact);
 
-                    verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPreCompaction, older + " → " + Version.LATEST + " preCompaction");
-                    verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPostCompaction, older + " → " + Version.LATEST + " postCompaction");
-                });
+            double diskGrowthPercent = 100.0 * (latest.totalBytes - older.totalBytes) / older.totalBytes;
+
+            logger.debug("  {} → {} {}  : {} → {} bytes ({} %)",
+                         version, Version.LATEST, name, older.totalBytes, latest.totalBytes,
+                         String.format("%.4f", diskGrowthPercent));
+
+            verifyTotalDiskGrowthUnder5Percent(diskGrowthPercent, version + " → " + Version.LATEST + ' ' + name);
+        }
     }
 
     /// Sanity: totalBytes must equal the sum of all five components (nothing missed or double-counted).
