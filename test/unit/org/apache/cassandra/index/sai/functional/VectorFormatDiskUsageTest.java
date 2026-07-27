@@ -36,8 +36,7 @@ import static org.junit.Assert.*;
 
 /// Verifies on-disk vector index size behavior across SAI format versions,
 /// both preCompaction and postCompaction.
-public class VectorFormatDiskUsageTest extends VectorTester
-{
+public class VectorFormatDiskUsageTest extends VectorTester {
     private static final int DIMENSION = 128;
 
     /// Number of flushes before compaction. Each flush produces one SSTable. With only
@@ -55,14 +54,12 @@ public class VectorFormatDiskUsageTest extends VectorTester
     private static final long EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT = 312L;
 
     @BeforeClass
-    public static void setUpClass()
-    {
+    public static void setUpClass() {
         VectorTester.setUpClass();
     }
 
     @After
-    public void resetVersion()
-    {
+    public void resetVersion() {
         SAIUtil.resetCurrentVersion();
     }
 
@@ -114,47 +111,46 @@ public class VectorFormatDiskUsageTest extends VectorTester
     /// `META` grows by exactly 8 bytes per segment (a `totalTermCount` long added in ED).
     /// All other components (`PQ`, `POSTING_LISTS`, `COLUMN_COMPLETION_MARKER`) are unchanged.
     @Test
-    public void testDiskUsageECvsFB()
-    {
-        DiskMeasurement ecPreCompaction  = measureDiskUsage(Version.EC, "EC-preCompaction",  false);
+    public void testDiskUsageECvsFB() {
+        DiskMeasurement ecPreCompaction = measureDiskUsage(Version.EC, "EC-preCompaction", false);
         DiskMeasurement ecPostCompaction = measureDiskUsage(Version.EC, "EC-postCompaction", true);
-        DiskMeasurement fbPreCompaction  = measureDiskUsage(Version.FB, "FB-preCompaction",  false);
+        DiskMeasurement fbPreCompaction = measureDiskUsage(Version.FB, "FB-preCompaction", false);
         DiskMeasurement fbPostCompaction = measureDiskUsage(Version.FB, "FB-postCompaction", true);
 
-        assertTrue("EC preCompaction index must have non-zero disk usage",  ecPreCompaction.totalBytes  > 0);
-        assertTrue("FB preCompaction index must have non-zero disk usage",  fbPreCompaction.totalBytes  > 0);
+        assertTrue("EC preCompaction index must have non-zero disk usage", ecPreCompaction.totalBytes > 0);
+        assertTrue("FB preCompaction index must have non-zero disk usage", fbPreCompaction.totalBytes > 0);
         assertTrue("EC postCompaction index must have non-zero disk usage", ecPostCompaction.totalBytes > 0);
         assertTrue("FB postCompaction index must have non-zero disk usage", fbPostCompaction.totalBytes > 0);
 
-        long preCompactionTermsDataDelta  = fbPreCompaction.termsDataBytes  - ecPreCompaction.termsDataBytes;
+        long preCompactionTermsDataDelta = fbPreCompaction.termsDataBytes - ecPreCompaction.termsDataBytes;
         long postCompactionTermsDataDelta = fbPostCompaction.termsDataBytes - ecPostCompaction.termsDataBytes;
 
-        double diskGrowthPercentPreCompaction  = 100.0 * (fbPreCompaction.totalBytes  - ecPreCompaction.totalBytes)  / ecPreCompaction.totalBytes;
+        double diskGrowthPercentPreCompaction = 100.0 * (fbPreCompaction.totalBytes - ecPreCompaction.totalBytes) / ecPreCompaction.totalBytes;
         double diskGrowthPercentPostCompaction = 100.0 * (fbPostCompaction.totalBytes - ecPostCompaction.totalBytes) / ecPostCompaction.totalBytes;
 
-        logger.debug("  EC preCompaction  diskUsage() : {} ({} segments)", ecPreCompaction.totalBytes,  ecPreCompaction.segmentCount);
-        logger.debug("  FB preCompaction  diskUsage() : {} ({} segments)", fbPreCompaction.totalBytes,  fbPreCompaction.segmentCount);
+        logger.debug("  EC preCompaction  diskUsage() : {} ({} segments)", ecPreCompaction.totalBytes, ecPreCompaction.segmentCount);
+        logger.debug("  FB preCompaction  diskUsage() : {} ({} segments)", fbPreCompaction.totalBytes, fbPreCompaction.segmentCount);
         logger.debug("  EC postCompaction diskUsage() : {} ({} segments)", ecPostCompaction.totalBytes, ecPostCompaction.segmentCount);
         logger.debug("  FB postCompaction diskUsage() : {} ({} segments)", fbPostCompaction.totalBytes, fbPostCompaction.segmentCount);
         logger.debug("  Total disk usage growth preCompaction  : +{} bytes ({} %)",
-                    fbPreCompaction.totalBytes  - ecPreCompaction.totalBytes,  String.format("%.4f", diskGrowthPercentPreCompaction));
+                fbPreCompaction.totalBytes - ecPreCompaction.totalBytes, String.format("%.4f", diskGrowthPercentPreCompaction));
         logger.debug("  Total disk usage growth postCompaction : +{} bytes ({} %)",
-                    fbPostCompaction.totalBytes - ecPostCompaction.totalBytes, String.format("%.4f", diskGrowthPercentPostCompaction));
+                fbPostCompaction.totalBytes - ecPostCompaction.totalBytes, String.format("%.4f", diskGrowthPercentPostCompaction));
         logger.debug("  TERMS_DATA delta preCompaction  : {} (expected {} × {} = {})",
-                    preCompactionTermsDataDelta,  NUM_FLUSHES, EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT,
-                    NUM_FLUSHES * EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT);
+                preCompactionTermsDataDelta, NUM_FLUSHES, EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT,
+                NUM_FLUSHES * EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT);
         logger.debug("  TERMS_DATA delta postCompaction : {} (expected {})",
-                    postCompactionTermsDataDelta, EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT);
+                postCompactionTermsDataDelta, EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT);
 
-        verifyComponentAccounting(ecPreCompaction,  fbPreCompaction,  "preCompaction");
+        verifyComponentAccounting(ecPreCompaction, fbPreCompaction, "preCompaction");
         verifyComponentAccounting(ecPostCompaction, fbPostCompaction, "postCompaction");
-        verifyTermsDataDelta(preCompactionTermsDataDelta,  ecPreCompaction.segmentCount,  "preCompaction");
+        verifyTermsDataDelta(preCompactionTermsDataDelta, ecPreCompaction.segmentCount, "preCompaction");
         verifyTermsDataDelta(postCompactionTermsDataDelta, ecPostCompaction.segmentCount, "postCompaction");
-        verifyUnchangedComponents(ecPreCompaction,  fbPreCompaction,  "preCompaction");
+        verifyUnchangedComponents(ecPreCompaction, fbPreCompaction, "preCompaction");
         verifyUnchangedComponents(ecPostCompaction, fbPostCompaction, "postCompaction");
-        verifyConservation(ecPreCompaction,  fbPreCompaction,  preCompactionTermsDataDelta,  "preCompaction");
+        verifyConservation(ecPreCompaction, fbPreCompaction, preCompactionTermsDataDelta, "preCompaction");
         verifyConservation(ecPostCompaction, fbPostCompaction, postCompactionTermsDataDelta, "postCompaction");
-        verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPreCompaction,  "preCompaction");
+        verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPreCompaction, "preCompaction");
         verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPostCompaction, "postCompaction");
     }
 
@@ -163,91 +159,84 @@ public class VectorFormatDiskUsageTest extends VectorTester
     /// 5% more disk than that older version. Catches accidental large regressions introduced
     /// by a new format version.
     @Test
-    public void testDiskGrowthAcrossVersions()
-    {
-        DiskMeasurement latestPreCompaction  = measureDiskUsage(Version.LATEST, Version.LATEST + "-preCompaction",  false);
+    public void testDiskGrowthAcrossVersions() {
+        DiskMeasurement latestPreCompaction = measureDiskUsage(Version.LATEST, Version.LATEST + "-preCompaction", false);
         DiskMeasurement latestPostCompaction = measureDiskUsage(Version.LATEST, Version.LATEST + "-postCompaction", true);
 
         Version.ALL.stream()
-                   .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST) && !v.equals(Version.LATEST))
-                   .forEach(older ->
-        {
-            DiskMeasurement olderPreCompaction  = measureDiskUsage(older, older + "-preCompaction",  false);
-            DiskMeasurement olderPostCompaction = measureDiskUsage(older, older + "-postCompaction", true);
+                .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST) && !v.equals(Version.LATEST))
+                .forEach(older ->
+                {
+                    DiskMeasurement olderPreCompaction = measureDiskUsage(older, older + "-preCompaction", false);
+                    DiskMeasurement olderPostCompaction = measureDiskUsage(older, older + "-postCompaction", true);
 
-            double diskGrowthPercentPreCompaction  = 100.0 * (latestPreCompaction.totalBytes  - olderPreCompaction.totalBytes)  / olderPreCompaction.totalBytes;
-            double diskGrowthPercentPostCompaction = 100.0 * (latestPostCompaction.totalBytes - olderPostCompaction.totalBytes) / olderPostCompaction.totalBytes;
+                    double diskGrowthPercentPreCompaction = 100.0 * (latestPreCompaction.totalBytes - olderPreCompaction.totalBytes) / olderPreCompaction.totalBytes;
+                    double diskGrowthPercentPostCompaction = 100.0 * (latestPostCompaction.totalBytes - olderPostCompaction.totalBytes) / olderPostCompaction.totalBytes;
 
-            logger.debug("  {} → {} preCompaction  : {} → {} bytes ({} %)",
-                         older, Version.LATEST, olderPreCompaction.totalBytes,  latestPreCompaction.totalBytes,
-                         String.format("%.4f", diskGrowthPercentPreCompaction));
-            logger.debug("  {} → {} postCompaction : {} → {} bytes ({} %)",
-                         older, Version.LATEST, olderPostCompaction.totalBytes, latestPostCompaction.totalBytes,
-                         String.format("%.4f", diskGrowthPercentPostCompaction));
+                    logger.debug("  {} → {} preCompaction  : {} → {} bytes ({} %)",
+                            older, Version.LATEST, olderPreCompaction.totalBytes, latestPreCompaction.totalBytes,
+                            String.format("%.4f", diskGrowthPercentPreCompaction));
+                    logger.debug("  {} → {} postCompaction : {} → {} bytes ({} %)",
+                            older, Version.LATEST, olderPostCompaction.totalBytes, latestPostCompaction.totalBytes,
+                            String.format("%.4f", diskGrowthPercentPostCompaction));
 
-            verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPreCompaction,  older + " → " + Version.LATEST + " preCompaction");
-            verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPostCompaction, older + " → " + Version.LATEST + " postCompaction");
-        });
+                    verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPreCompaction, older + " → " + Version.LATEST + " preCompaction");
+                    verifyTotalDiskGrowthUnder5Percent(diskGrowthPercentPostCompaction, older + " → " + Version.LATEST + " postCompaction");
+                });
     }
 
     /// Sanity: totalBytes must equal the sum of all five components (nothing missed or double-counted).
-    private static void verifyComponentAccounting(DiskMeasurement ec, DiskMeasurement fb, String phase)
-    {
+    private static void verifyComponentAccounting(DiskMeasurement ec, DiskMeasurement fb, String phase) {
         assertEquals("EC " + phase + ": totalBytes must equal sum of all per-index components",
-                     ec.totalBytes, ec.termsDataBytes + ec.pqBytes + ec.metaBytes + ec.postingListsBytes + ec.completionMarkerBytes);
+                ec.totalBytes, ec.termsDataBytes + ec.pqBytes + ec.metaBytes + ec.postingListsBytes + ec.completionMarkerBytes);
         assertEquals("FB " + phase + ": totalBytes must equal sum of all per-index components",
-                     fb.totalBytes, fb.termsDataBytes + fb.pqBytes + fb.metaBytes + fb.postingListsBytes + fb.completionMarkerBytes);
+                fb.totalBytes, fb.termsDataBytes + fb.pqBytes + fb.metaBytes + fb.postingListsBytes + fb.completionMarkerBytes);
     }
 
     /// The TERMS_DATA delta must equal exactly [#EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT] × segmentCount.
     /// Each segment contributes one graph to the TERMS_DATA file, and each graph carries one header delta.
-    private static void verifyTermsDataDelta(long actualTermsDataDelta, int segmentCount, String phase)
-    {
+    private static void verifyTermsDataDelta(long actualTermsDataDelta, int segmentCount, String phase) {
         long expected = EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT * segmentCount;
         assertEquals("TERMS_DATA delta " + phase + " must equal " + EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT
-                     + " bytes × " + segmentCount + " segment(s) = " + expected
-                     + " (jvector format 4→6 header layout change only)",
-                     expected, actualTermsDataDelta);
+                        + " bytes × " + segmentCount + " segment(s) = " + expected
+                        + " (jvector format 4→6 header layout change only)",
+                expected, actualTermsDataDelta);
     }
 
-    private static void verifyUnchangedComponents(DiskMeasurement ec, DiskMeasurement fb, String phase)
-    {
+    private static void verifyUnchangedComponents(DiskMeasurement ec, DiskMeasurement fb, String phase) {
         assertEquals("PQ component size must be the same for EC and FB (" + phase + ')',
-                     ec.pqBytes, fb.pqBytes);
+                ec.pqBytes, fb.pqBytes);
         assertEquals("POSTING_LISTS must be the same size for EC and FB (" + phase + ')',
-                     ec.postingListsBytes, fb.postingListsBytes);
+                ec.postingListsBytes, fb.postingListsBytes);
         assertEquals("COLUMN_COMPLETION_MARKER must be the same size for EC and FB (" + phase + ')',
-                     ec.completionMarkerBytes, fb.completionMarkerBytes);
+                ec.completionMarkerBytes, fb.completionMarkerBytes);
     }
 
     /// META grows by exactly 8 bytes per segment EC → FB (a `totalTermCount` long added in ED).
     /// Because all other components except TERMS_DATA are identical, the net total delta equals
     /// the TERMS_DATA delta plus 8 × segmentCount bytes.
     private static void verifyConservation(DiskMeasurement ec, DiskMeasurement fb,
-                                           long actualTermsDataDelta, String phase)
-    {
+                                           long actualTermsDataDelta, String phase) {
         assertEquals("FB META must be exactly " + Long.BYTES + " bytes × " + ec.segmentCount
-                     + " segment(s) larger than EC META (" + phase + ')',
-                     ec.metaBytes + (long) Long.BYTES * ec.segmentCount, fb.metaBytes);
+                        + " segment(s) larger than EC META (" + phase + ')',
+                ec.metaBytes + (long) Long.BYTES * ec.segmentCount, fb.metaBytes);
         assertEquals("FB.totalBytes must equal ec.totalBytes + TERMS_DATA delta + 8 × segmentCount"
-                     + " (" + phase + ')',
-                     ec.totalBytes + actualTermsDataDelta + (long) Long.BYTES * ec.segmentCount,
-                     fb.totalBytes);
+                        + " (" + phase + ')',
+                ec.totalBytes + actualTermsDataDelta + (long) Long.BYTES * ec.segmentCount,
+                fb.totalBytes);
     }
 
     /// Total disk usage must grow by less than 5% between consecutive format versions.
     /// The fixed per-segment overhead (header delta + META) is negligible relative to
     /// the graph node data for any realistic dataset.
-    private static void verifyTotalDiskGrowthUnder5Percent(double diskGrowthPercent, String phase)
-    {
+    private static void verifyTotalDiskGrowthUnder5Percent(double diskGrowthPercent, String phase) {
         assertTrue(String.format("Total disk usage growth %s must be < 5%% but was %.4f%%",
-                                 phase, diskGrowthPercent),
-                   diskGrowthPercent < 5.0);
+                        phase, diskGrowthPercent),
+                diskGrowthPercent < 5.0);
     }
 
     /// Snapshot of per-component file sizes and segment count for one index build.
-    private static class DiskMeasurement
-    {
+    private static class DiskMeasurement {
         final long totalBytes;
         final long termsDataBytes;
         final long pqBytes;
@@ -256,8 +245,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
         final long completionMarkerBytes;
         final int segmentCount; // total segments across all SSTables
 
-        private DiskMeasurement(Builder b)
-        {
+        private DiskMeasurement(Builder b) {
             this.totalBytes = b.totalBytes;
             this.termsDataBytes = b.termsDataBytes;
             this.pqBytes = b.pqBytes;
@@ -267,8 +255,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
             this.segmentCount = b.segmentCount;
         }
 
-        static class Builder
-        {
+        static class Builder {
             long totalBytes;
             long termsDataBytes;
             long pqBytes;
@@ -277,50 +264,42 @@ public class VectorFormatDiskUsageTest extends VectorTester
             long completionMarkerBytes;
             int segmentCount;
 
-            Builder totalBytes(long v)
-            {
+            Builder totalBytes(long v) {
                 this.totalBytes = v;
                 return this;
             }
 
-            Builder termsDataBytes(long v)
-            {
+            Builder termsDataBytes(long v) {
                 this.termsDataBytes = v;
                 return this;
             }
 
-            Builder pqBytes(long v)
-            {
+            Builder pqBytes(long v) {
                 this.pqBytes = v;
                 return this;
             }
 
-            Builder metaBytes(long v)
-            {
+            Builder metaBytes(long v) {
                 this.metaBytes = v;
                 return this;
             }
 
-            Builder postingListsBytes(long v)
-            {
+            Builder postingListsBytes(long v) {
                 this.postingListsBytes = v;
                 return this;
             }
 
-            Builder completionMarkerBytes(long v)
-            {
+            Builder completionMarkerBytes(long v) {
                 this.completionMarkerBytes = v;
                 return this;
             }
 
-            Builder segmentCount(int v)
-            {
+            Builder segmentCount(int v) {
                 this.segmentCount = v;
                 return this;
             }
 
-            DiskMeasurement build()
-            {
+            DiskMeasurement build() {
                 return new DiskMeasurement(this);
             }
         }
@@ -333,15 +312,13 @@ public class VectorFormatDiskUsageTest extends VectorTester
     /// Each flush produces one SSTable with one segment (one graph in TERMS_DATA), so
     /// pre-compaction there are [#NUM_FLUSHES] segments across [#NUM_FLUSHES] SSTables;
     /// post-compaction there is exactly 1 segment in 1 SSTable.
-    private DiskMeasurement measureDiskUsage(Version version, String label, boolean compact)
-    {
+    private DiskMeasurement measureDiskUsage(Version version, String label, boolean compact) {
         SAIUtil.setCurrentVersion(version);
         createTable("CREATE TABLE %s (pk int, v vector<float, " + DIMENSION + ">, PRIMARY KEY(pk))");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         disableCompaction();
 
-        for (int flush = 0; flush < NUM_FLUSHES; flush++)
-        {
+        for (int flush = 0; flush < NUM_FLUSHES; flush++) {
             for (int i = 0; i < CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
                 execute("INSERT INTO %s (pk, v) VALUES (?, ?)",
                         flush * CassandraOnHeapGraph.MIN_PQ_ROWS + i, randomVectorBoxed(DIMENSION));
@@ -366,7 +343,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
         int totalSegments = sstableIndexes.stream().mapToInt(s -> s.getSegments().size()).sum();
         int expectedSegments = compact ? 1 : NUM_FLUSHES;
         assertEquals("Expected " + expectedSegments + " segment(s) " + label,
-                     expectedSegments, totalSegments);
+                expectedSegments, totalSegments);
 
         logger.debug("[{}] diskUsage()                : {} ({} segment(s))", label, totalDiskBytes, totalSegments);
         logger.debug("[{}] TERMS_DATA component bytes : {}", label, graphComponentBytes);
@@ -376,25 +353,24 @@ public class VectorFormatDiskUsageTest extends VectorTester
         logger.debug("[{}] COMPLETION_MARKER bytes    : {}", label, completionMarkerBytes);
 
         return new DiskMeasurement.Builder()
-               .totalBytes(totalDiskBytes)
-               .termsDataBytes(graphComponentBytes)
-               .pqBytes(pqComponentBytes)
-               .metaBytes(metaComponentBytes)
-               .postingListsBytes(postingListsBytes)
-               .completionMarkerBytes(completionMarkerBytes)
-               .segmentCount(totalSegments)
-               .build();
+                .totalBytes(totalDiskBytes)
+                .termsDataBytes(graphComponentBytes)
+                .pqBytes(pqComponentBytes)
+                .metaBytes(metaComponentBytes)
+                .postingListsBytes(postingListsBytes)
+                .completionMarkerBytes(completionMarkerBytes)
+                .segmentCount(totalSegments)
+                .build();
     }
 
     private long componentSize(IndexContext indexContext,
-                               IndexComponentType type)
-    {
+                               IndexComponentType type) {
         return indexContext.getView().getIndexes()
-                           .stream()
-                           .mapToLong(idx -> {
-                               IndexComponents.ForRead perIndex = idx.usedPerIndexComponents();
-                               return perIndex.has(type) ? perIndex.get(type).file().length() : 0L;
-                           })
-                           .sum();
+                .stream()
+                .mapToLong(idx -> {
+                    IndexComponents.ForRead perIndex = idx.usedPerIndexComponents();
+                    return perIndex.has(type) ? perIndex.get(type).file().length() : 0L;
+                })
+                .sum();
     }
 }
