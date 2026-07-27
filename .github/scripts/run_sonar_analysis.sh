@@ -87,8 +87,20 @@ for attempt in $(seq 1 $MAX_RETRIES); do
   RESULT=$?
   set +x
 
+  # Check for Quality Gate failure first (this is NOT an error to retry)
+  if grep -q "QUALITY GATE STATUS: FAILED" sonar-output.log; then
+    echo ""
+    echo "=========================================="
+    echo "⚠️ Quality Gate FAILED"
+    echo "=========================================="
+    echo "Dashboard: $SONAR_HOST_URL/dashboard?id=$PROJECT_KEY&branch=$GIT_BRANCH"
+    echo "This is a code quality issue - fix the issues reported and re-run."
+    echo "result=quality_gate_failed" >> $GITHUB_OUTPUT
+    exit 1
+  fi
+
   # Check for errors in log even if exit code is 0 (sonar-scanner bug in newer versions)
-  if grep -q "ERROR Error during SonarScanner" sonar-output.log; then
+  if grep -Eq "ERROR|FAILURE|BUILD FAILURE|Failed to|IllegalStateException|EXECUTION FAILURE" sonar-output.log; then
     echo "ERROR detected in scanner output, treating as failure"
     RESULT=1
   fi
@@ -105,15 +117,6 @@ for attempt in $(seq 1 $MAX_RETRIES); do
     echo "=========================================="
     echo "✗ SonarQube analysis failed with exit code: $RESULT"
     echo "=========================================="
-
-    # Check if this is a Quality Gate failure (don't retry)
-    if grep -q "QUALITY GATE STATUS: FAILED" sonar-output.log; then
-      echo "⚠️ Quality Gate failed - this is a code quality issue, not a transient error"
-      echo "Dashboard: $SONAR_HOST_URL/dashboard?id=$PROJECT_KEY&branch=$GIT_BRANCH"
-      echo "Fix the quality issues and re-run. Not retrying."
-      echo "result=quality_gate_failed" >> $GITHUB_OUTPUT
-      exit $RESULT
-    fi
 
     # Check if this is a transient error (retry these)
     if grep -Eqi "503|Service Unavailable|Timeout|Connection reset|temporarily unavailable|ConnectException|SocketTimeoutException" sonar-output.log; then
