@@ -22,6 +22,7 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -253,17 +254,17 @@ public class VectorFormatDiskUsageTest extends VectorTester
         final long metaBytes;
         final long postingListsBytes;
         final long completionMarkerBytes;
-        final int  segmentCount; // total segments across all SSTables
+        final int segmentCount; // total segments across all SSTables
 
         private DiskMeasurement(Builder b)
         {
-            this.totalBytes            = b.totalBytes;
-            this.termsDataBytes        = b.termsDataBytes;
-            this.pqBytes               = b.pqBytes;
-            this.metaBytes             = b.metaBytes;
-            this.postingListsBytes     = b.postingListsBytes;
+            this.totalBytes = b.totalBytes;
+            this.termsDataBytes = b.termsDataBytes;
+            this.pqBytes = b.pqBytes;
+            this.metaBytes = b.metaBytes;
+            this.postingListsBytes = b.postingListsBytes;
             this.completionMarkerBytes = b.completionMarkerBytes;
-            this.segmentCount          = b.segmentCount;
+            this.segmentCount = b.segmentCount;
         }
 
         static class Builder
@@ -274,17 +275,54 @@ public class VectorFormatDiskUsageTest extends VectorTester
             long metaBytes;
             long postingListsBytes;
             long completionMarkerBytes;
-            int  segmentCount;
+            int segmentCount;
 
-            Builder totalBytes(long v)            { this.totalBytes            = v; return this; }
-            Builder termsDataBytes(long v)        { this.termsDataBytes        = v; return this; }
-            Builder pqBytes(long v)               { this.pqBytes               = v; return this; }
-            Builder metaBytes(long v)             { this.metaBytes             = v; return this; }
-            Builder postingListsBytes(long v)     { this.postingListsBytes     = v; return this; }
-            Builder completionMarkerBytes(long v) { this.completionMarkerBytes = v; return this; }
-            Builder segmentCount(int v)           { this.segmentCount          = v; return this; }
+            Builder totalBytes(long v)
+            {
+                this.totalBytes = v;
+                return this;
+            }
 
-            DiskMeasurement build()               { return new DiskMeasurement(this); }
+            Builder termsDataBytes(long v)
+            {
+                this.termsDataBytes = v;
+                return this;
+            }
+
+            Builder pqBytes(long v)
+            {
+                this.pqBytes = v;
+                return this;
+            }
+
+            Builder metaBytes(long v)
+            {
+                this.metaBytes = v;
+                return this;
+            }
+
+            Builder postingListsBytes(long v)
+            {
+                this.postingListsBytes = v;
+                return this;
+            }
+
+            Builder completionMarkerBytes(long v)
+            {
+                this.completionMarkerBytes = v;
+                return this;
+            }
+
+            Builder segmentCount(int v)
+            {
+                this.segmentCount = v;
+                return this;
+            }
+
+            DiskMeasurement build()
+            {
+                return new DiskMeasurement(this);
+            }
         }
     }
 
@@ -313,15 +351,15 @@ public class VectorFormatDiskUsageTest extends VectorTester
         if (compact)
             compact();
 
-        var sai = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(indexName);
+        StorageAttachedIndex sai = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(indexName);
         assertNotNull("Index not found: " + indexName, sai);
-        var indexContext = sai.getIndexContext();
+        IndexContext indexContext = sai.getIndexContext();
 
-        long totalDiskBytes        = indexContext.diskUsage();
-        long graphComponentBytes   = componentSize(indexContext, IndexComponentType.TERMS_DATA);
-        long pqComponentBytes      = componentSize(indexContext, IndexComponentType.PQ);
-        long metaComponentBytes    = componentSize(indexContext, IndexComponentType.META);
-        long postingListsBytes     = componentSize(indexContext, IndexComponentType.POSTING_LISTS);
+        long totalDiskBytes = indexContext.diskUsage();
+        long graphComponentBytes = componentSize(indexContext, IndexComponentType.TERMS_DATA);
+        long pqComponentBytes = componentSize(indexContext, IndexComponentType.PQ);
+        long metaComponentBytes = componentSize(indexContext, IndexComponentType.META);
+        long postingListsBytes = componentSize(indexContext, IndexComponentType.POSTING_LISTS);
         long completionMarkerBytes = componentSize(indexContext, IndexComponentType.COLUMN_COMPLETION_MARKER);
 
         List<SSTableIndex> sstableIndexes = List.copyOf(indexContext.getView().getIndexes());
@@ -348,7 +386,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
                .build();
     }
 
-    private long componentSize(org.apache.cassandra.index.sai.IndexContext indexContext,
+    private long componentSize(IndexContext indexContext,
                                IndexComponentType type)
     {
         return indexContext.getView().getIndexes()
