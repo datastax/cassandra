@@ -218,8 +218,6 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
                                                                         Optional.of(compactionMetadata),  // never null here
                                                                         SSTableReader.OpenReason.EARLY, header);
 
-            sstable.first = getMinimalKey(partitionIndex.firstKey());
-            sstable.last = getMinimalKey(partitionIndex.lastKey());
             sstable.setup(true);
             callWhenReady.accept(sstable);
         });
@@ -246,17 +244,17 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         iwriter.rowIndexFile.updateFileHandle(iwriter.rowIndexFHBuilder);
         FileHandle rowIndexFile = iwriter.rowIndexFHBuilder.complete();
         SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
-                                                            components(),
-                                                            this.metadata,
-                                                            rowIndexFile,
-                                                            dataFileHandle,
-                                                            partitionIndex,
-                                                            iwriter.bf.sharedCopy(),
-                                                            maxDataAge,
-                                                            stats,
-                                                            compactionMetadata,
-                                                            reason,
-                                                            header);
+                                                                    components(),
+                                                                    this.metadata,
+                                                                    rowIndexFile,
+                                                                    dataFileHandle,
+                                                                    partitionIndex,
+                                                                    iwriter.bf.sharedCopy(),
+                                                                    maxDataAge,
+                                                                    stats,
+                                                                    compactionMetadata,
+                                                                    reason,
+                                                                    header);
         sstable.setup(true);
         return sstable;
     }

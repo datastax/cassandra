@@ -58,6 +58,7 @@ import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.memory.HeapCloner;
 
@@ -187,9 +188,9 @@ public abstract class SSTable
      */
     public static DecoratedKey getMinimalKey(DecoratedKey key)
     {
-        return key.getKey().position() > 0 || key.getKey().hasRemaining() || !key.getKey().hasArray()
-                                       ? new BufferDecoratedKey(key.getToken(), HeapCloner.instance.clone(key.getKey()))
-                                       : key;
+        return ByteBufferUtil.canMinimize(key.getKey())
+               ? new BufferDecoratedKey(key.getToken(), HeapCloner.instance.clone(key.getKey()))
+               : key;
     }
 
     public String getFilename()
