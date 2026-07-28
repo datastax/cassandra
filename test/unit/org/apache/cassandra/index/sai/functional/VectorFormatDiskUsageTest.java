@@ -220,8 +220,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
         assertEquals("FB META must be exactly " + Long.BYTES + " bytes × " + ec.segmentCount
                         + " segment(s) larger than EC META (" + phase + ')',
                 ec.metaBytes + (long) Long.BYTES * ec.segmentCount, fb.metaBytes);
-        assertEquals("FB.totalBytes must equal ec.totalBytes + TERMS_DATA delta + 8 × segmentCount"
-                        + " (" + phase + ')',
+        assertEquals("FB.totalBytes must equal ec.totalBytes + TERMS_DATA delta + 8 × segmentCount(" + phase + ')',
                 ec.totalBytes + actualTermsDataDelta + (long) Long.BYTES * ec.segmentCount,
                 fb.totalBytes);
     }
