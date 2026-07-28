@@ -1,13 +1,6 @@
 name: SonarQube Code Quality Scan
 
 on:
-  push:
-    branches:
-      - CNDB-17486-*
-    paths-ignore:
-      - '**.md'
-      - 'doc/**'
-
   workflow_dispatch:
     inputs:
       branch:
@@ -20,11 +13,6 @@ on:
         required: false
         default: false
         type: boolean
-
-  pull_request:
-    branches:
-      - main
-      - main-5.0
 
 concurrency:
   group: sonarqube-${{ github.ref_name }}
