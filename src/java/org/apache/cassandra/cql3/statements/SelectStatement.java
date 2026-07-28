@@ -494,7 +494,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
      * <p>
      * Apart from substituting {@code query} for {@link #getQuery(QueryOptions, ClientState, ColumnFilter, long, int, int, int, AggregationSpecification)},
      * this is the same flow as {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)}: consistency
-     * validation, guardrails ({@link #validateQueryOptions}, {@code pageSize.guard}), read-threshold tracking
+     * validation, guardrails ({@link #validateQueryOptions}, {@code pageSize.guard}), the per-query validation
+     * {@code getQuery} applies to the query it builds ({@link ReadQuery#validateSelectOptions(SelectOptions, ClientState)},
+     * {@link ReadQuery#maybeValidateIndexes()}), read-threshold tracking
      * ({@link ReadQuery#trackWarnings()}), selection/projection, user {@code LIMIT}/{@code OFFSET}, aggregation,
      * dynamic-data masking, the single-shot fast path when paging can be skipped, read metrics/sensors, and page
      * continuation via {@link ResultSet.ResultMetadata#setHasMorePages}.
@@ -536,6 +538,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         Selectors selectors = selection.newSelectors(options);
         AggregationSpecification aggregationSpec = getAggregationSpec(options);
+
+        // The validation getQuery(...) would have performed on the query it builds.
+        query.validateSelectOptions(selectOptions, state.getClientState());
+        query.maybeValidateIndexes();
 
         if (options.isReadThresholdsEnabled())
             query.trackWarnings();
