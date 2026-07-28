@@ -182,6 +182,10 @@ public class TrieIndexSSTableReader extends SSTableReader
         TrieIndexSSTableReader reader = new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, compactionMetadata, openReason, header, dfile, rowIndexFile, partitionIndex, bf);
         reader.first = partitionIndex.firstKey();
         reader.last = partitionIndex.lastKey();
+        // Make sure index is not retaining keys that reference slab memory.
+        assert !ByteBufferUtil.canMinimize(reader.first.getKey());
+        assert !ByteBufferUtil.canMinimize(reader.last.getKey());
+
 
         return reader;
     }
