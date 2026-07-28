@@ -35,6 +35,7 @@ import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -428,6 +429,22 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     @Override
     public ResultMessage.Rows execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime)
     {
+        return execute(state, options, null, requestTime);
+    }
+
+    /**
+     * Common implementation of {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)} and
+     * {@link #executeWithReadQuery(QueryState, QueryOptions, ReadQuery, Dispatcher.RequestTime)}: the two differ
+     * only in where the {@link ReadQuery} to read comes from.
+     *
+     * @param externalQuery the caller-supplied query to read, or {@code null} to build one from this statement's
+     *                      own restrictions with {@code getQuery(...)}
+     */
+    private ResultMessage.Rows execute(QueryState state,
+                                       QueryOptions options,
+                                       @Nullable ReadQuery externalQuery,
+                                       Dispatcher.RequestTime requestTime)
+    {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
 
@@ -443,8 +460,19 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         Selectors selectors = selection.newSelectors(options);
         AggregationSpecification aggregationSpec = getAggregationSpec(options);
-        ReadQuery query = getQuery(options, state.getClientState(), selectors.getColumnFilter(),
-                                   nowInSec, userLimit, userPerPartitionLimit, userOffset, aggregationSpec);
+        ReadQuery query;
+        if (externalQuery == null)
+        {
+            query = getQuery(options, state.getClientState(), selectors.getColumnFilter(),
+                             nowInSec, userLimit, userPerPartitionLimit, userOffset, aggregationSpec);
+        }
+        else
+        {
+            // getQuery(...) validates the query it builds before returning it; do the same for the supplied one.
+            query = externalQuery;
+            query.validateSelectOptions(selectOptions, state.getClientState());
+            query.maybeValidateIndexes();
+        }
 
         if (options.isReadThresholdsEnabled())
             query.trackWarnings();
@@ -493,7 +521,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
      * page boundaries.
      * <p>
      * Apart from substituting {@code query} for {@link #getQuery(QueryOptions, ClientState, ColumnFilter, long, int, int, int, AggregationSpecification)},
-     * this is the same flow as {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)}: consistency
+     * this runs the very same code as {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)} — both
+     * delegate to {@link #execute(QueryState, QueryOptions, ReadQuery, Dispatcher.RequestTime)}: consistency
      * validation, guardrails ({@link #validateQueryOptions}, {@code pageSize.guard}), the per-query validation
      * {@code getQuery} applies to the query it builds ({@link ReadQuery#validateSelectOptions(SelectOptions, ClientState)},
      * {@link ReadQuery#maybeValidateIndexes()}), read-threshold tracking
@@ -525,55 +554,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         // Top-K needs the specific validation/CL-downgrade handling in getQuery, which this entry point bypasses.
         checkFalse(query.isTopK(), "Top-K queries are not supported by executeWithReadQuery");
 
-        ConsistencyLevel cl = options.getConsistency();
-        checkNotNull(cl, "Invalid empty consistency level");
-        cl.validateForRead();
-        validateQueryOptions(state, options);
-
-        long nowInSec = options.getNowInSeconds(state);
-        int userLimit = getLimit(options);
-        int userOffset = getOffset(options);
-        PageSize pageSize = options.getPageSize();
-        boolean unmask = !table.hasMaskedColumns() || state.getClientState().hasTablePermission(table, Permission.UNMASK);
-
-        Selectors selectors = selection.newSelectors(options);
-        AggregationSpecification aggregationSpec = getAggregationSpec(options);
-
-        // The validation getQuery(...) would have performed on the query it builds.
-        query.validateSelectOptions(selectOptions, state.getClientState());
-        query.maybeValidateIndexes();
-
-        if (options.isReadThresholdsEnabled())
-            query.trackWarnings();
-
-        if (query.limits().isGroupByLimit() && pageSize != null && pageSize.isDefined() && pageSize.getUnit() == PageSize.PageUnit.BYTES)
-            throw new InvalidRequestException("Paging in bytes cannot be specified for aggregation queries");
-
-        ResultMessage.Rows rows;
-        if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))
-        {
-            rows = execute(query, options, state.getClientState(), selectors, nowInSec, userLimit, userOffset, null, requestTime, unmask);
-        }
-        else
-        {
-            QueryPager pager = getPager(query, options);
-            rows = execute(state,
-                           Pager.forDistributedQuery(pager, cl, state.getClientState()),
-                           options,
-                           selectors,
-                           pageSize,
-                           nowInSec,
-                           userLimit,
-                           userOffset,
-                           aggregationSpec,
-                           requestTime,
-                           unmask);
-        }
-
-        if (!SchemaConstants.isSystemKeyspace(table.keyspace))
-            ClientRequestSizeMetrics.recordReadResponseMetrics(rows, restrictions, selection);
-
-        return rows;
+        return execute(state, options, query, requestTime);
     }
 
     public AggregationSpecification getAggregationSpec(QueryOptions options)
