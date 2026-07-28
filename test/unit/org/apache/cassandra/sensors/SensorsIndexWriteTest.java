@@ -138,8 +138,7 @@ public class SensorsIndexWriteTest
      * Only the Commit phase is tested here because it is the only Paxos phase that writes to the base table and
      * triggers SAI index updaters. The Prepare and Propose phases exclusively read and write the system.paxos table
      * (via SystemKeyspace.loadPaxosState / savePaxosPromise / savePaxosProposal), which has no SAI indexes,
-     * and the SystemKeyspace.trackPaxosBytes transfer mechanism only transfers WRITE_BYTES and READ_BYTES — never
-     * INDEX_WRITE_BYTES — so those phases will always produce a zero value for INDEX_WRITE_BYTES.
+     * so those phases will always produce a zero value for INDEX_WRITE_BYTES regardless of the transfer mechanism.
      */
     @Test
     public void testPaxosCommitWithSAI()
@@ -176,8 +175,8 @@ public class SensorsIndexWriteTest
      * (2i) index. Only the Commit phase is tested here because it is the only Paxos phase that writes to the base
      * table and triggers secondary index updaters. The Prepare and Propose phases exclusively read and write the
      * system.paxos table (via SystemKeyspace.loadPaxosState / savePaxosPromise / savePaxosProposal), which has no
-     * secondary indexes, and the SystemKeyspace.trackPaxosBytes transfer mechanism only transfers WRITE_BYTES and
-     * READ_BYTES — never INDEX_WRITE_BYTES — so those phases will always produce a zero value for INDEX_WRITE_BYTES.
+     * secondary indexes, so those phases will always produce a zero value for INDEX_WRITE_BYTES regardless of the
+     * transfer mechanism.
      */
     @Test
     public void testPaxosCommitWithSecondaryIndex()
