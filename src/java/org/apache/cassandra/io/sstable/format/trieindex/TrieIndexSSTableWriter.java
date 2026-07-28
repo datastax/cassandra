@@ -243,6 +243,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
     protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats, Optional<CompactionMetadata> compactionMetadata)
     {
         PartitionIndex partitionIndex = iwriter.completedPartitionIndex();
+        iwriter.rowIndexFile.updateFileHandle(iwriter.rowIndexFHBuilder);
         FileHandle rowIndexFile = iwriter.rowIndexFHBuilder.complete();
         SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                             components(),
@@ -397,7 +398,6 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
 
         public boolean buildPartial(long dataPosition, Consumer<PartitionIndex> callWhenReady)
         {
-            rowIndexFile.updateFileHandle(rowIndexFHBuilder);
             return partitionIndex.buildPartial(callWhenReady, rowIndexFile.position(), dataPosition);
         }
 
@@ -450,8 +450,6 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
 
             // truncate index file
             rowIndexFile.prepareToCommit();
-            rowIndexFHBuilder.withLength(rowIndexFile.getLastFlushOffset());
-            //TODO figure out whether the update should be done before or after the prepare to commit
             rowIndexFile.updateFileHandle(rowIndexFHBuilder);
 
             complete();
