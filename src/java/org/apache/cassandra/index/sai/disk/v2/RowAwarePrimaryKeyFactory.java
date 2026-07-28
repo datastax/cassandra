@@ -186,7 +186,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int compareTo(PrimaryKey o)
         {
-            // Always start comparison with token, since comparing parition key requires loading it
+            // Always start comparison with token, since comparing directly on partition key requires loading it
             int cmp = token().compareTo(o.token());
             if (cmp != 0 || o.isTokenOnly())
                 return cmp;
