@@ -332,5 +332,4 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         // Note: We would normally expect to get here without going into the while loop
         return rowId;
     }
-
 }
