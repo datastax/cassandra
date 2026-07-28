@@ -223,12 +223,12 @@ public class TrieIndexSSTableReader extends SSTableReader
         partitionIndex.addTo(identities);
     }
 
-    protected boolean filterFirst()
+    public boolean filterFirst()
     {
         return openReason == OpenReason.MOVED_START || sstableMetadata.zeroCopyMetadata.exists();
     }
 
-    protected boolean filterLast()
+    public boolean filterLast()
     {
         return sstableMetadata.zeroCopyMetadata.exists();
     }
@@ -526,16 +526,10 @@ public class TrieIndexSSTableReader extends SSTableReader
             assert !AbstractBounds.strictlyWrapsAround(bounds.left, bounds.right) : String.format("[%s,%s]", bounds.left, bounds.right);
 
             left = bounds.left;
-            inclusiveLeft = bounds.inclusiveLeft();
-            if (filterFirst() && first.compareTo(left) > 0)
-            {
-                left = first;
-                inclusiveLeft = true;
-            }
-
             right = bounds.right;
+            inclusiveLeft = bounds.inclusiveLeft();
             inclusiveRight = bounds.inclusiveRight();
-            if (filterLast() && last.compareTo(right) < 0)
+            if (right.isMinimum())
             {
                 right = last;
                 inclusiveRight = true;
@@ -550,21 +544,19 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException
     {
-        AbstractBounds<PartitionPosition> cover = Bounds.bounds(left, inclusiveLeft, right, inclusiveRight);
-        boolean isLeftInSStableRange = !filterFirst() || first.compareTo(left) <= 0 && last.compareTo(left) >= 0;
-        boolean isRightInSStableRange = !filterLast() || first.compareTo(right) <= 0 && last.compareTo(right) >= 0;
-        if (isLeftInSStableRange || isRightInSStableRange || (cover.contains(first) && cover.contains(last)))
-        {
-            inclusiveLeft = isLeftInSStableRange ? inclusiveLeft : true;
-            inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
-            return new PartitionIterator(partitionIndex,
-                                         metadata().partitioner,
-                                         rowIndexFile, dfile,
-                                         isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
-                                         isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
-        }
-        else
+        if (filterFirst() && first.compareTo(right) > 0 || filterLast() && last.compareTo(left) < 0)
             return PartitionIterator.empty(partitionIndex);
+
+        boolean isLeftInSStableRange = !filterFirst() || first.compareTo(left) <= 0;
+        boolean isRightInSStableRange = !filterLast() || last.compareTo(right) >= 0;
+
+        inclusiveLeft = isLeftInSStableRange ? inclusiveLeft : true;
+        inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
+        return new PartitionIterator(partitionIndex,
+                                     metadata().partitioner,
+                                     rowIndexFile, dfile,
+                                     isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
+                                     isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
     }
 
     public PartitionIterator allKeysIterator() throws IOException
