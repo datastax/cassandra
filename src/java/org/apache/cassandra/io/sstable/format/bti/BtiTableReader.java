@@ -85,7 +85,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
         this.approximateBloomFilterMemorySize = isBloomFilterLoaded() ? filter.offHeapSize() : computeExpectedBloomFilterMemorySize();
     }
 
-    protected final Builder unbuildTo(Builder builder, boolean sharedCopy)
+    public final Builder unbuildTo(Builder builder, boolean sharedCopy)
     {
         Builder b = super.unbuildTo(builder, sharedCopy);
         if (builder.getPartitionIndex() == null)
@@ -115,13 +115,16 @@ public class BtiTableReader extends SSTableReaderWithFilter
     }
 
     /**
-     * Whether to filter out data after {@link #last}. Early-open sstables may contain data beyond the switch point
-     * (because an early-opened sstable is not ready until buffers have been flushed), and leaving that data visible
-     * will give a redundant copy with all associated overheads.
+     * Whether to filter out data after {@link #last}. We only do this for zero-copy-streamed sstables where the index
+     * contains more keys than we have streamed.
+     *
+     * Early-open sstables may contain data beyond the switch point, but the partition index is created in a way that
+     * does not surface that data.
      */
-    protected boolean filterLast()
+    @VisibleForTesting
+    public boolean filterLast()
     {
-        return openReason == OpenReason.EARLY && partitionIndex instanceof PartitionIndexEarly || sstableMetadata.zeroCopyMetadata.exists();
+        return sstableMetadata.zeroCopyMetadata.exists();
     }
 
     public long estimatedKeys()
