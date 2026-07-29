@@ -28,12 +28,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
+import java.util.Objects;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -427,6 +429,22 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     @Override
     public ResultMessage.Rows execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime)
     {
+        return execute(state, options, null, requestTime);
+    }
+
+    /**
+     * Common implementation of {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)} and
+     * {@link #executeWithReadQuery(QueryState, QueryOptions, ReadQuery, Dispatcher.RequestTime)}: the two differ
+     * only in where the {@link ReadQuery} to read comes from.
+     *
+     * @param externalQuery the caller-supplied query to read, or {@code null} to build one from this statement's
+     *                      own restrictions with {@code getQuery(...)}
+     */
+    private ResultMessage.Rows execute(QueryState state,
+                                       QueryOptions options,
+                                       @Nullable ReadQuery externalQuery,
+                                       Dispatcher.RequestTime requestTime)
+    {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
 
@@ -442,8 +460,19 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         Selectors selectors = selection.newSelectors(options);
         AggregationSpecification aggregationSpec = getAggregationSpec(options);
-        ReadQuery query = getQuery(options, state.getClientState(), selectors.getColumnFilter(),
-                                   nowInSec, userLimit, userPerPartitionLimit, userOffset, aggregationSpec);
+        ReadQuery query;
+        if (externalQuery == null)
+        {
+            query = getQuery(options, state.getClientState(), selectors.getColumnFilter(),
+                             nowInSec, userLimit, userPerPartitionLimit, userOffset, aggregationSpec);
+        }
+        else
+        {
+            // getQuery(...) validates the query it builds before returning it; do the same for the supplied one.
+            query = externalQuery;
+            query.validateSelectOptions(selectOptions, state.getClientState());
+            query.maybeValidateIndexes();
+        }
 
         if (options.isReadThresholdsEnabled())
             query.trackWarnings();
@@ -476,6 +505,56 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             ClientRequestSizeMetrics.recordReadResponseMetrics(rows, restrictions, selection);
 
         return rows;
+    }
+
+    /**
+     * Executes this {@code SELECT} against a caller-supplied {@link ReadQuery} instead of the one this
+     * statement would build from its own {@code WHERE} restrictions, returning a single page of results.
+     * <p>
+     * This is the entry point for components that resolve <em>which</em> partitions to read (and in
+     * <em>what order</em>) out of band — for example a custom {@link org.apache.cassandra.cql3.QueryHandler}
+     * that obtains the matching primary keys from an external index and, in the desired order, assembles a
+     * {@link org.apache.cassandra.db.SinglePartitionReadCommand.Group}. Result order is entirely the query's:
+     * this method pages the supplied {@code query} through {@link #getPager(ReadQuery, QueryOptions)}, and a
+     * {@link org.apache.cassandra.service.pager.MultiPartitionPager} yields partitions in the order of the
+     * {@link org.apache.cassandra.db.SinglePartitionReadCommand.Group}'s commands — not token order — across
+     * page boundaries.
+     * <p>
+     * Apart from substituting {@code query} for {@link #getQuery(QueryOptions, ClientState, ColumnFilter, long, int, int, int, AggregationSpecification)},
+     * this runs the very same code as {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)} — both
+     * delegate to {@link #execute(QueryState, QueryOptions, ReadQuery, Dispatcher.RequestTime)}: consistency
+     * validation, guardrails ({@link #validateQueryOptions}, {@code pageSize.guard}), the per-query validation
+     * {@code getQuery} applies to the query it builds ({@link ReadQuery#validateSelectOptions(SelectOptions, ClientState)},
+     * {@link ReadQuery#maybeValidateIndexes()}), read-threshold tracking
+     * ({@link ReadQuery#trackWarnings()}), selection/projection, user {@code LIMIT}/{@code OFFSET}, aggregation,
+     * dynamic-data masking, the single-shot fast path when paging can be skipped, read metrics/sensors, and page
+     * continuation via {@link ResultSet.ResultMetadata#setHasMorePages}.
+     * <p>
+     * Caller contract:
+     * <ul>
+     *   <li>{@code query} must read partitions of this statement's {@link #table}; build it with this
+     *       statement's data limits and column filter (see {@link #getQuery(QueryOptions, long)}) so
+     *       storage-level and result-level limits agree. Passing a query over a different table, or one whose
+     *       shape disagrees with this statement's aggregation/selection, is undefined.</li>
+     *   <li>Top-K queries are not supported through this entry point.</li>
+     * </ul>
+     * This method holds no state across calls and reads only immutable statement fields, so — like
+     * {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)} — it is safe to call concurrently on a
+     * single shared (prepared) {@code SelectStatement} instance, one {@code query} per call. It relies on the
+     * same request-scoped thread-locals as the normal read path ({@link ClientWarn},
+     * {@link org.apache.cassandra.sensors.RequestTracker}), so callers must invoke it on a request thread that
+     * has them set up (as the native-transport dispatch path does).
+     */
+    public ResultMessage.Rows executeWithReadQuery(QueryState state,
+                                                   QueryOptions options,
+                                                   ReadQuery query,
+                                                   Dispatcher.RequestTime requestTime)
+    {
+        Objects.requireNonNull(query, "query");
+        // Top-K needs the specific validation/CL-downgrade handling in getQuery, which this entry point bypasses.
+        checkFalse(query.isTopK(), "Top-K queries are not supported by executeWithReadQuery");
+
+        return execute(state, options, query, requestTime);
     }
 
     public AggregationSpecification getAggregationSpec(QueryOptions options)
