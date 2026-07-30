@@ -58,8 +58,8 @@ public class DefaultCompressionSelector implements CompressionParams.Selector
     public CompressionParams flushCompression(String keyspace, CompressionParams tableParams)
     {
         final ICompressor compressor = tableParams.getSstableCompressor();
-        if (compressor == null)
-            return tableParams;
+        if (compressor == null || compressor.encryptionOnly() != null)
+            return tableParams; // FlushCompression cannot disable encryption
 
         switch (DatabaseDescriptor.getFlushCompression())
         {
