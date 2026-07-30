@@ -222,9 +222,16 @@ abstract public class AbstractTrieTestBase
             return 0;
         }
 
+        @Override
         public long adjustPosition(long position)
         {
             return position;
+        }
+
+        @Override
+        public long positionForSkip(long currentPosition, int bytesToSkip)
+        {
+            return currentPosition + bytesToSkip;
         }
 
         @Override
