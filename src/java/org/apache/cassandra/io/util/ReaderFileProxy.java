@@ -40,4 +40,13 @@ public interface ReaderFileProxy extends AutoCloseable
      * sequences of bytes (e.g. keys) that span over a hole.
      */
     long adjustPosition(long position);
+
+    /**
+     * Called to provide the position to be seeked to after skipping the given number of bytes.
+     * Default implementation in AbstractReaderFileProxy just adds the position and bytes.
+     * Overridden by EncryptedChunkReader to properly account for holes.
+     * Rebufferers (which often use a ChunkReader to do the work) must implement it to defer to
+     * their source.
+     */
+    long positionForSkip(long currentPosition, int bytesToSkip);
 }
