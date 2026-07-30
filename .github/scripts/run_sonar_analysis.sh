@@ -40,7 +40,6 @@ SONAR_ARGS=(
   -Dsonar.token="$SONAR_TOKEN"
   -Dsonar.links.homepage="$GIT_REPO_URL"
   -Dsonar.qualitygate.wait=true
-  -Dsonar.qualitygate.timeout=1800
 )
 
 # Add PR-specific or branch-specific arguments
