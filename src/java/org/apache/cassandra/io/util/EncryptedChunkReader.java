@@ -79,6 +79,20 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         return position - maxBytesInPage + CHUNK_SIZE;
     }
 
+    @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        long currentOffset = inChunkOffset(currentPosition);
+        while (currentOffset + bytesToSkip > maxBytesInPage)
+        {
+            long len = maxBytesInPage - currentOffset;
+            bytesToSkip -= len;
+            currentPosition += CHUNK_SIZE - maxBytesInPage + len;
+            currentOffset = 0;
+        }
+        return currentPosition + bytesToSkip;
+    }
+
     private static long inChunkOffset(long position)
     {
         return position & (CHUNK_SIZE - 1);

@@ -117,6 +117,12 @@ public class ChunkCacheInterceptingTest
         }
 
         @Override
+        public long positionForSkip(long currentPosition, int bytesToSkip)
+        {
+            return wrapped.positionForSkip(currentPosition, bytesToSkip);
+        }
+
+        @Override
         public Rebufferer instantiateRebufferer(boolean isScan)
         {
             numInstantiations += 1;

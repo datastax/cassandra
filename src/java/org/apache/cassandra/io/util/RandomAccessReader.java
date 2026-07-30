@@ -353,11 +353,17 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             return 0;
         if (buffer == null)
             throw new IOException("Attempted skipBytes() on a closed RAR");
-        long current = current();
-        long newPosition = Math.min(current + n, length());
-        n = (int)(newPosition - current);
-        seek(newPosition);
-        return n;
+        if (n <= buffer.remaining())
+        {
+            buffer.position(buffer.position() + n);
+            return n;
+        }
+
+        long current = getFilePointer();
+        long newPosition = rebufferer.positionForSkip(current, n);
+        long adjustedForSize = Math.min(newPosition, length());
+        seek(adjustedForSize);
+        return n + (int) (adjustedForSize - newPosition);
     }
 
     /**

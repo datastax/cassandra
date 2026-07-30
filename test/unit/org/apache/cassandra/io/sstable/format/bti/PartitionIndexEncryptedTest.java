@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.sstable.format.bti;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -25,7 +26,9 @@ import java.util.Map;
 import javax.crypto.spec.DESKeySpec;
 
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -40,6 +43,7 @@ import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.PageAware;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
@@ -215,5 +219,77 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
     public void testDumpTrieToFile()
     {
         //FIXME: the tested trie dump method seems to be used only in tests, it should be revisited and fixed evnetually
+    }
+
+    /**
+     * Verifies that seeking, reading and skipping over encryption-only files result in the same positions and read the
+     * same data. See DSP-25176.
+     */
+    @Test
+    public void testSkipAcrossHoles() throws IOException
+    {
+        int pageSize = PageAware.PAGE_SIZE;
+        File tempFile = new File(java.io.File.createTempFile(getClass().getName(), ".test"));
+        try (SequentialWriter writer = makeWriter(tempFile))
+        {
+            for (int i = 0; i < pageSize * 8; ++i)
+                writer.writeByte((byte) writer.position());
+            writer.finish();
+        }
+
+        FileHandle.Builder fhBuilder = makeHandle(tempFile);
+        try (FileHandle fh = fhBuilder.complete();
+             RandomAccessReader rdr = fh.createReader())
+        {
+            long len = rdr.length();
+            for (int readSize : new int[]{ 1, 7, 33, 45, 67, pageSize + 55, pageSize * 2, pageSize * 3 + 34 })
+            {
+                byte[] buf = new byte[readSize];
+                for (int seekPos = pageSize - 33; seekPos < len - 1; ++seekPos)
+                {
+                    rdr.seek(seekPos);
+                    int read = rdr.read(buf, 0, buf.length);
+                    long afterRead = rdr.getFilePointer();
+                    int nextByte = getNextByte(rdr);
+                    int expectedNextByte = (int) afterRead & 0xFF;
+
+                    rdr.seek(seekPos);
+                    BtiTableReader.skipBytesWithCorrectPosition(rdr, read);
+                    long afterSkip = rdr.getFilePointer();
+                    int nextByteAfterSkip = getNextByte(rdr);
+                    String context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x corrected skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
+
+                    Assert.assertEquals("Position" + context, afterRead, afterSkip);
+                    Assert.assertEquals("Next byte" + context, nextByte, nextByteAfterSkip);
+
+                    rdr.seek(seekPos);
+                    rdr.skipBytes(read);
+                    afterSkip = rdr.getFilePointer();
+                    nextByteAfterSkip = getNextByte(rdr);
+                    context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x plain skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
+
+                    if (afterRead != afterSkip)
+                        System.out.println("Different position after plain skip " + context); // this is expected and corrected for by BtiTableReader.skipBytesWithCorrectPosition
+                    Assert.assertEquals("Next byte" + context, nextByte, nextByteAfterSkip);
+
+                    if (nextByte != Integer.MAX_VALUE)
+                        Assert.assertEquals("Byte from write pos" + context, expectedNextByte, nextByte);
+                    else
+                        break; // because length() is imprecise, next seeks may hit beyond the end of the file
+                }
+            }
+        }
+    }
+
+    private static int getNextByte(RandomAccessReader rdr) throws IOException
+    {
+        try
+        {
+            return rdr.readByte() & 0xFF;
+        }
+        catch (EOFException e)
+        {
+            return Integer.MAX_VALUE;
+        }
     }
 }
