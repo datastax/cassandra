@@ -98,7 +98,6 @@ import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -200,6 +199,12 @@ public class StorageProxy implements StorageProxyMBean
         public AbstractWriteResponseHandler<Commit> mutatePaxos(Commit proposal, ConsistencyLevel consistencyLevel, boolean allowHints, long queryStartNanoTime)
         {
             return defaultCommitPaxos(proposal, consistencyLevel, allowHints, queryStartNanoTime);
+        }
+
+        @Override
+        public RowIterator mutateCas(String keyspaceName, DecoratedKey key, CASRequest request, ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime, QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics, TableMetadata metadata)
+        {
+            return defaultCas(keyspaceName, key, request, consistencyForPaxos, consistencyForCommit, state, nowInSeconds, queryStartNanoTime, lwtTracker, metrics, metadata);
         }
 
         @Override
@@ -494,72 +499,8 @@ public class StorageProxy implements StorageProxyMBean
         ExecutorLocals.set(locals);
         try
         {
-            consistencyForPaxos.validateForCas(keyspaceName, state);
-            consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName, state);
 
-            Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer = () ->
-            {
-                long startTimeNanos = System.nanoTime();
-                try
-                {
-                    // read the current values and check they validate the conditions
-                    Tracing.trace("Reading existing values for CAS precondition");
-                    SinglePartitionReadCommand readCommand = (SinglePartitionReadCommand) request.readCommand(nowInSeconds);
-                    ConsistencyLevel readConsistency = consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL ? ConsistencyLevel.LOCAL_QUORUM : ConsistencyLevel.QUORUM;
-
-                    FilteredPartition current;
-
-                    try (RowIterator rowIter = readOne(readCommand, readConsistency, queryStartNanoTime, lwtTracker))
-                    {
-                        current = FilteredPartition.create(rowIter);
-                    }
-
-                    if (!request.appliesTo(current))
-                    {
-                        Tracing.trace("CAS precondition does not match current values {}", current);
-                        lwtTracker.onNotApplied();
-                        lwtTracker.onDone();
-                        metrics.casWriteMetrics.conditionNotMet.inc();
-                        return Pair.create(PartitionUpdate.emptyUpdate(metadata, key), current.rowIterator());
-                    }
-
-                    // Create the desired updates
-                    PartitionUpdate updates = request.makeUpdates(current, state);
-                    lwtTracker.onApplied(updates);
-                    lwtTracker.onDone();
-
-                    long size = updates.dataSize();
-                    metrics.casWriteMetrics.mutationSize.update(size);
-                    metrics.writeMetricsForLevel(consistencyForPaxos).mutationSize.update(size);
-
-                    // Apply triggers to cas updates. A consideration here is that
-                    // triggers emit Mutations, and so a given trigger implementation
-                    // may generate mutations for partitions other than the one this
-                    // paxos round is scoped for. In this case, TriggerExecutor will
-                    // validate that the generated mutations are targetted at the same
-                    // partition as the initial updates and reject (via an
-                    // InvalidRequestException) any which aren't.
-                    updates = TriggerExecutor.instance.execute(updates);
-
-                    return Pair.create(updates, null);
-                }
-                finally
-                {
-                    metrics.casWriteMetrics.createProposalLatency.addNano(System.nanoTime() - startTimeNanos);
-                }
-            };
-
-            return doPaxos(metadata,
-                           key,
-                           consistencyForPaxos,
-                           consistencyForCommit,
-                           consistencyForCommit,
-                           state,
-                           queryStartNanoTime,
-                           metrics.casWriteMetrics,
-                           updateProposer,
-                           false);
-
+            return mutator.mutateCas(keyspaceName, key, request, consistencyForPaxos, consistencyForCommit, state, nowInSeconds, queryStartNanoTime, lwtTracker, metrics, metadata);
         }
         catch (CasWriteUnknownResultException e)
         {
@@ -605,6 +546,75 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             Keyspace.openAndGetStore(metadata).metric.coordinatorCasWriteLatency.update(latency, NANOSECONDS);
         }
+    }
+
+    private static RowIterator defaultCas(String keyspaceName, DecoratedKey key, CASRequest request, ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime, QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics, TableMetadata metadata)
+    {
+        consistencyForPaxos.validateForCas(keyspaceName, state);
+        consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName, state);
+
+        Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer = () ->
+        {
+            long startTimeNanos = System.nanoTime();
+            try
+            {
+                // read the current values and check they validate the conditions
+                Tracing.trace("Reading existing values for CAS precondition");
+                SinglePartitionReadCommand readCommand = (SinglePartitionReadCommand) request.readCommand(nowInSeconds);
+                ConsistencyLevel readConsistency = consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL ? ConsistencyLevel.LOCAL_QUORUM : ConsistencyLevel.QUORUM;
+
+                FilteredPartition current;
+
+                try (RowIterator rowIter = readOne(readCommand, readConsistency, queryStartNanoTime, lwtTracker))
+                {
+                    current = FilteredPartition.create(rowIter);
+                }
+
+                if (!request.appliesTo(current))
+                {
+                    Tracing.trace("CAS precondition does not match current values {}", current);
+                    lwtTracker.onNotApplied();
+                    lwtTracker.onDone();
+                    metrics.casWriteMetrics.conditionNotMet.inc();
+                    return Pair.create(PartitionUpdate.emptyUpdate(metadata, key), current.rowIterator());
+                }
+
+                // Create the desired updates
+                PartitionUpdate updates = request.makeUpdates(current, state);
+                lwtTracker.onApplied(updates);
+                lwtTracker.onDone();
+
+                long size = updates.dataSize();
+                metrics.casWriteMetrics.mutationSize.update(size);
+                metrics.writeMetricsForLevel(consistencyForPaxos).mutationSize.update(size);
+
+                // Apply triggers to cas updates. A consideration here is that
+                // triggers emit Mutations, and so a given trigger implementation
+                // may generate mutations for partitions other than the one this
+                // paxos round is scoped for. In this case, TriggerExecutor will
+                // validate that the generated mutations are targetted at the same
+                // partition as the initial updates and reject (via an
+                // InvalidRequestException) any which aren't.
+                updates = TriggerExecutor.instance.execute(updates);
+
+                return Pair.create(updates, null);
+            }
+            finally
+            {
+                metrics.casWriteMetrics.createProposalLatency.addNano(System.nanoTime() - startTimeNanos);
+            }
+        };
+
+        return doPaxos(metadata,
+                       key,
+                       consistencyForPaxos,
+                       consistencyForCommit,
+                       consistencyForCommit,
+                       state,
+                       queryStartNanoTime,
+                       metrics.casWriteMetrics,
+                       updateProposer,
+                       false);
     }
 
     private static void recordCasContention(TableMetadata table,
