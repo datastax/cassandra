@@ -326,15 +326,15 @@ public class MetadataSerializer implements IMetadataSerializer
         rewriteSSTableMetadata(descriptor, currentComponents);
     }
 
+    // Package-private for testing
+    static CompressionParams testCompressionParams = null;
+
     /**
      * Read the compression info file pointed by the given descriptor and create the corresponding encryptor.
      *
      * Returns null if no encryption applies (version doesn't support it, compression is not applied, or the applicable
      * compression does not include encryption).
      */
-    // Package-private for testing
-    static CompressionParams testCompressionParams = null;
-    
     private ICompressor getEncryptor(Descriptor desc, boolean writeTime)
     {
         if (!desc.version.metadataIsEncrypted())
@@ -350,6 +350,8 @@ public class MetadataSerializer implements IMetadataSerializer
         }
         
         File compressionFile = desc.fileFor(Components.COMPRESSION_INFO);
+        if (!compressionFile.exists())
+            return null;
 
         try
         {
@@ -379,7 +381,7 @@ public class MetadataSerializer implements IMetadataSerializer
             // If we can't read the compression metadata, assume no encryption.
             // During flush, the compression file may not be accessible yet in some implementations
             // causing FSReadError. Catch Throwable to handle both Exception and Error.
-            logger.debug("Could not read compression metadata for {}: {}", desc, t.getMessage());
+            logger.debug("Could not read compression metadata for {}: {}", desc, t.getMessage(), t);
             return null;
         }
     }

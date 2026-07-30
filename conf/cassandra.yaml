@@ -683,7 +683,8 @@ commitlog_segment_size: 32MiB
 commitlog_disk_access_mode: legacy
 
 # Compression to apply to SSTables as they flush for compressed tables.
-# Note that tables without compression enabled do not respect this flag.
+# Note that tables without compression enabled, or whose compression includes
+# an encryption component do not respect this flag.
 #
 # As high ratio compressors like LZ4HC, Zstd, and Deflate can potentially
 # block flushes for too long, the default is to flush with a known fast

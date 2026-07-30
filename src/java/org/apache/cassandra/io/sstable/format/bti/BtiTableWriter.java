@@ -239,7 +239,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
                     rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
                                                       .withMmappedRegionsCache(b.getMmappedRegionsCache())
                                                       .withCompressionMetadata(encryptionMetadata)
-                                                      .maybeEncrypted(true);
+                                                      .encryptionOnly();
 
                     piWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX),
                                                              b.getIOOptions().writerOptions,
@@ -247,7 +247,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
                     partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
                                                             .withMmappedRegionsCache(b.getMmappedRegionsCache())
                                                             .withCompressionMetadata(encryptionMetadata)
-                                                            .maybeEncrypted(true);
+                                                            .encryptionOnly();
                 }
                 else
                 {

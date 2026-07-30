@@ -201,11 +201,12 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
         }
 
         assert f.exists();
-        FileHandle.Builder builder = new FileHandle.Builder(f)
-                .withCompressionMetadata(CompressionMetadata.encryptedOnly(compressionParams))
-                .maybeEncrypted(true)
-                .mmapped(useMemmap);
-        try (FileHandle fh = builder.complete();
+        try (CompressionMetadata cm = CompressionMetadata.encryptedOnly(compressionParams);
+             FileHandle fh = new FileHandle.Builder(f)
+                                  .withCompressionMetadata(cm)
+                                  .encryptionOnly()
+                                  .mmapped(useMemmap)
+                                  .complete();
              RandomAccessReader reader = fh.createReader())
         {
             // No longer true: assertEquals(dataPre.length + rawPost.length, reader.length());
@@ -295,10 +296,11 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
             writer.finish();
         }
 
-        FileHandle.Builder builder = new FileHandle.Builder(tempFile)
-                .withCompressionMetadata(CompressionMetadata.encryptedOnly(AESEncryptorParams))
-                .maybeEncrypted(true);
-        try (FileHandle fh = builder.complete();
+        try (CompressionMetadata cm = CompressionMetadata.encryptedOnly(AESEncryptorParams);
+             FileHandle fh = new FileHandle.Builder(tempFile)
+                                  .withCompressionMetadata(cm)
+                                  .encryptionOnly()
+                                  .complete();
              RandomAccessReader reader = fh.createReader())
         {
             assertTrue(reader.isEOF());
