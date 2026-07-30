@@ -66,6 +66,7 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.io.util.WrappingRebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
@@ -93,7 +94,7 @@ public class PartitionIndexTest
 
     static final IPartitioner partitioner = Util.testPartitioner();
     //Lower the size of the indexes when running without the chunk cache, otherwise the test times out on Jenkins
-    static final int COUNT = ChunkCache.instance != null ? 245256 : 24525;
+    static int COUNT = ChunkCache.instance != null ? 245256 : 24525;
 
     @Parameterized.Parameters()
     public static Collection<Object[]> generateData()
@@ -149,7 +150,7 @@ public class PartitionIndexTest
             ch.write(generateRandomKey().getKey(), f.length() * 2 / 3);
         }
 
-        assertThatThrownBy(() -> testGetEq(data)).rootCause().isInstanceOfAny(AssertionError.class, IndexOutOfBoundsException.class, IllegalArgumentException.class, CorruptBlockException.class);
+        assertThatThrownBy(() -> testGetEq(data)).satisfies(t -> Throwables.assertAnyCause(t, AssertionError.class, IndexOutOfBoundsException.class, IllegalArgumentException.class, CorruptBlockException.class));
     }
 
     @Test
