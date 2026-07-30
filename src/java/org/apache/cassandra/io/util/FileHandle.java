@@ -301,6 +301,7 @@ public class FileHandle extends SharedCloseableImpl
         private MmappedRegionsCache mmappedRegionsCache;
         private SliceDescriptor sliceDescriptor = SliceDescriptor.NONE;
         private boolean adviseRandom = false;
+        private boolean encryptionOnly = false;
 
         public Builder(File file)
         {
@@ -424,10 +425,11 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
-        public Builder maybeEncrypted(boolean encrypted)
+        public Builder encryptionOnly()
         {
             // For encrypted files, we need to ensure compressionMetadata is available
             // This is needed because encrypted files use the compression framework
+            this.encryptionOnly = true;
             return this;
         }
 
@@ -451,15 +453,10 @@ public class FileHandle extends SharedCloseableImpl
                 channel = channelProxyFactory.apply(file);
 
                 long fileLength;
-                if (compressionMetadata != null && compressionMetadata.useActualFileSize)
-                {
-                    // For encrypted-only files, we need to use the actual file size
-                    fileLength = channel.size();
-                }
+                if (compressionMetadata != null && !encryptionOnly)
+                    fileLength = compressionMetadata.compressedFileLength;
                 else
-                {
-                    fileLength = (compressionMetadata != null) ? compressionMetadata.compressedFileLength : channel.size();
-                }
+                    fileLength = channel.size();
                 long length = lengthOverride >= 0 ? lengthOverride : fileLength;
 
                 RebuffererFactory rebuffererFactory;
@@ -472,11 +469,11 @@ public class FileHandle extends SharedCloseableImpl
                     if (compressionMetadata != null)
                     {
                         // Check if this is encryption rather than compression
-                        if (compressionMetadata.compressor() instanceof Encryptor)
+                        if (encryptionOnly)
                         {
                             // For encrypted files, we need to map the actual file size, not logical data length
                             // MmappedRegions maps physical file regions, not logical data
-                            Encryptor encryptor = (Encryptor) compressionMetadata.compressor();
+                            Encryptor encryptor = (Encryptor) compressionMetadata.compressor().encryptionOnly();
                             
                             // Map the actual file size, with chunks aligned to CHUNK_SIZE
                             int chunkSize = EncryptedSequentialWriter.CHUNK_SIZE;
@@ -509,9 +506,9 @@ public class FileHandle extends SharedCloseableImpl
                     if (compressionMetadata != null)
                     {
                         // Check if this is encryption rather than compression
-                        if (compressionMetadata.compressor() instanceof Encryptor)
+                        if (encryptionOnly)
                         {
-                            Encryptor encryptor = (Encryptor) compressionMetadata.compressor();
+                            Encryptor encryptor = (Encryptor) compressionMetadata.compressor().encryptionOnly();
                             // For encrypted files without explicit length override, pass -1 to let EncryptedChunkReader calculate the logical length
                             long encryptedOverrideLength = (lengthOverride >= 0) ? length : -1;
                             rebuffererFactory = EncryptedChunkReader.createStandard(channel, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength);

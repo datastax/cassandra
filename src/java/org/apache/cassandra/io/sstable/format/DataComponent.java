@@ -23,8 +23,6 @@ import java.util.Optional;
 import org.apache.cassandra.config.Config.FlushCompression;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
-import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
-import org.apache.cassandra.io.compress.Encryptor;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
@@ -47,24 +45,12 @@ public class DataComponent
         if (metadata.params.compression.isEnabled())
         {
             final CompressionParams compressionParams = buildCompressionParams(metadata, operationType, flushCompression);
-            final ICompressor compressor = compressionParams.getSstableCompressor();
-
-            // Check if this is encryption-only (no actual compression)
-            if (compressor instanceof Encryptor)
-            {
-                return new EncryptedSequentialWriter(descriptor.fileFor(Components.DATA),
-                                                     options,
-                                                     compressor);
-            }
-            else
-            {
-                return new CompressedSequentialWriter(descriptor.fileFor(Components.DATA),
-                                                      descriptor.fileFor(Components.COMPRESSION_INFO),
-                                                      descriptor.fileFor(Components.DIGEST),
-                                                      options,
-                                                      compressionParams,
-                                                      metadataCollector);
-            }
+            return new CompressedSequentialWriter(descriptor.fileFor(Components.DATA),
+                                                  descriptor.fileFor(Components.COMPRESSION_INFO),
+                                                  descriptor.fileFor(Components.DIGEST),
+                                                  options,
+                                                  compressionParams,
+                                                  metadataCollector);
         }
         else
         {
@@ -87,6 +73,9 @@ public class DataComponent
 
         if (null != compressor && operationType == OperationType.FLUSH)
         {
+            if (compressor.encryptionOnly() != null)
+                return compressionParams; // FlushCompression cannot disable encryption
+
             // When we are flushing out of the memtable throughput of the compressor is critical as flushes,
             // especially of large tables, can queue up and potentially block writes.
             // This optimization allows us to fall back to a faster compressor if a particular

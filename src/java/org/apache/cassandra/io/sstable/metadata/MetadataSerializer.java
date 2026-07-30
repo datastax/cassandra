@@ -325,15 +325,15 @@ public class MetadataSerializer implements IMetadataSerializer
         rewriteSSTableMetadata(descriptor, currentComponents);
     }
 
+    // Package-private for testing
+    static CompressionParams testCompressionParams = null;
+
     /**
      * Read the compression info file pointed by the given descriptor and create the corresponding encryptor.
      *
      * Returns null if no encryption applies (version doesn't support it, compression is not applied, or the applicable
      * compression does not include encryption).
      */
-    // Package-private for testing
-    static CompressionParams testCompressionParams = null;
-    
     private ICompressor getEncryptor(Descriptor desc, boolean writeTime)
     {
         if (!desc.version.metadataIsEncrypted())
@@ -349,30 +349,29 @@ public class MetadataSerializer implements IMetadataSerializer
         }
         
         File compressionFile = desc.fileFor(Components.COMPRESSION_INFO);
+        if (!compressionFile.exists())
+            return null;
 
-        try
+        // Read the compression metadata from file
+        // We pass a negative compressedLength as we only need the parameters, not the actual chunk offsets
+        // CompressionMetadata is ref-counted and holds the chunk offsets in off-heap Memory, so it must be
+        // closed once the parameters have been extracted.
+        try (CompressionMetadata cm = CompressionMetadata.open(compressionFile, -1, false))
         {
-            // Read the compression metadata from file
-            // We pass a small compressedLength as we only need the parameters, not the actual chunk offsets.
-            // CompressionMetadata is ref-counted and holds the chunk offsets in off-heap Memory, so it must be
-            // closed once the parameters have been extracted.
-            try (CompressionMetadata cm = CompressionMetadata.open(compressionFile, 1024, false))
-            {
-                // Note: we use only the encryption component, without any compression. The reason for doing this is to
-                // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
-                // serialization on reads.
-                ICompressor compressor = cm.parameters.getSstableCompressor();
-                if (compressor != null)
-                    return compressor.encryptionOnly();
-                return null;
-            }
+            // Note: we use only the encryption component, without any compression. The reason for doing this is to
+            // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
+            // serialization on reads.
+            ICompressor compressor = cm.parameters.getSstableCompressor();
+            if (compressor != null)
+                return compressor.encryptionOnly();
+            return null;
         }
         catch (Throwable t)
         {
             // If we can't read the compression metadata, assume no encryption.
             // During flush, the compression file may not be accessible yet in some implementations
             // causing FSReadError. Catch Throwable to handle both Exception and Error.
-            logger.debug("Could not read compression metadata for {}: {}", desc, t.getMessage());
+            logger.debug("Could not read compression metadata for {}: {}", desc, t.getMessage(), t);
             return null;
         }
     }

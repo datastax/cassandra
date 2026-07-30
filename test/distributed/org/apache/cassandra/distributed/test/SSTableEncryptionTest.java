@@ -34,6 +34,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.crypto.LocalSystemKey;
 import org.apache.cassandra.crypto.TDEConfigurationProvider;
 import org.apache.cassandra.db.Keyspace;
@@ -42,8 +43,9 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
@@ -78,9 +80,22 @@ public class SSTableEncryptionTest extends TestBaseImpl
     }
 
     @Test
+    public void shouldFlushToQueryableEncryptedSSTables() throws Throwable
+    {
+        // test reading sstables as set up by flush/compaction on the running node
+        testQueryableEncryptedSSTables(false);
+    }
+
+    @Test
     public void shouldCreateQueryableEncryptedSSTables() throws Throwable
     {
-        try (Cluster cluster = builder().withNodes(2)
+        // test reading sstables from disk without write-time set-up
+        testQueryableEncryptedSSTables(true);
+    }
+
+    public void testQueryableEncryptedSSTables(boolean restartNodes) throws Throwable
+    {
+        try (Cluster cluster = builder().withNodes(1)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                         .start())
         {
@@ -101,6 +116,14 @@ public class SSTableEncryptionTest extends TestBaseImpl
             cluster.get(1).flush(keyspace);
 
             insertAndFlush(cluster, keyspace, table, numberOfRows);
+
+            if (restartNodes)
+            {
+                for (int i = 1; i <= cluster.size(); ++i)
+                {
+                    restartWithDeletedCommitLog(cluster, i);
+                }
+            }
 
             // when querying all
             Object[][] rows = cluster.coordinator(1).execute(String.format("SELECT * FROM %s.%s ", keyspace, table), ALL);
@@ -128,6 +151,16 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(byIdRows[0][1]).isEqualTo(String.valueOf(2));
             assertThat(byIdRows[0][2]).isEqualTo(String.valueOf(2));
         }
+    }
+
+    private static void restartWithDeletedCommitLog(Cluster cluster, int i)
+    {
+        String commitlogpath = cluster.get(1).callOnInstance(() -> DatabaseDescriptor.getCommitLogLocation().path());
+        waitOn(cluster.get(i).shutdown());
+        // delete the commit log to make sure we are not recreating the data from it
+        PathUtils.deleteRecursive(Path.of(commitlogpath));
+        // start-up must now read the sstables
+        cluster.get(i).startup();
     }
 
     @Test
@@ -245,8 +278,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertEquals(secretKey, secretKey2);
 
             // restart to clear in memory secret key cache
-            waitOn(cluster.get(1).shutdown());
-            cluster.get(1).startup();
+            restartWithDeletedCommitLog(cluster, 1);
 
             // when
             Object[][] rows = cluster. get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, nonEncryptedTableName));

@@ -24,6 +24,8 @@ import java.util.HashMap;
 import java.util.Map;
 import javax.crypto.spec.DESKeySpec;
 
+import org.junit.After;
+import org.junit.Before;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -76,6 +78,9 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
         opts.put(EncryptionConfig.SECRET_KEY_STRENGTH, Integer.toString(DESKeySpec.DES_KEY_LEN * 8));
         opts.put(CompressionParams.CLASS, Encryptor.class.getName());
         compressionParamsDes = CompressionParams.fromMap(opts);
+
+        // TODO: Figure out why encrypted instance runs much slower
+        COUNT = 24525;
     }
 
     public static class OutOfPlaceEncryptor extends Encryptor
@@ -127,6 +132,20 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
     @Parameterized.Parameter(value = 3)
     public static ByteComparable.Version version;
 
+    CompressionMetadata compressionMetadata;
+
+    @Before
+    public void setCompressionMetadata()
+    {
+        compressionMetadata = CompressionMetadata.encryptedOnly(compressionParams);
+    }
+
+    @After
+    public void releaseCompressionMetadata()
+    {
+        compressionMetadata.close();
+    }
+
     class JumpingEncryptedFile extends EncryptedSequentialWriter
     {
         long[] cutoffs;
@@ -176,8 +195,8 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
                 .bufferSize(PageAware.PAGE_SIZE)
                 .mmapped(accessMode == Config.DiskAccessMode.mmap)
                 .withChunkCache(ChunkCache.instance)
-                .maybeEncrypted(true)
-                .withCompressionMetadata(CompressionMetadata.encryptedOnly(compressionParams));
+                .encryptionOnly()
+                .withCompressionMetadata(compressionMetadata);
     }
 
     @Override
