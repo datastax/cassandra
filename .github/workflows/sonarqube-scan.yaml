@@ -101,18 +101,18 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ steps.sonar-scan.outputs.result }}" == "success" ]]; then
-            echo "✅ **Status**: Analysis completed successfully" >> $GITHUB_STEP_SUMMARY
+            echo "[OK] **Status**: Analysis completed successfully" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ steps.sonar-scan.outputs.result }}" == "quality_gate_failed" ]]; then
-            echo "⚠️ **Status**: Quality Gate Failed" >> $GITHUB_STEP_SUMMARY
+            echo "[WARN] **Status**: Quality Gate Failed" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🔍 **This is a code quality issue, not an infrastructure problem.**" >> $GITHUB_STEP_SUMMARY
+            echo "**This is a code quality issue, not an infrastructure problem.**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Next steps:**" >> $GITHUB_STEP_SUMMARY
             echo "1. Click the dashboard link below to see which quality conditions failed" >> $GITHUB_STEP_SUMMARY
             echo "2. Common issues: low test coverage, code smells, bugs, security hotspots, duplicated code" >> $GITHUB_STEP_SUMMARY
             echo "3. Fix the code quality issues and push again" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Status**: Analysis failed" >> $GITHUB_STEP_SUMMARY
+            echo "[ERROR] **Status**: Analysis failed" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -121,12 +121,20 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ steps.health-check.outputs.server_available }}" == "false" ]]; then
-            echo "⚠️ **Warning**: SonarQube server health check failed before analysis" >> $GITHUB_STEP_SUMMARY
+            echo "[WARN] **Warning**: SonarQube server health check failed before analysis" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "### Links" >> $GITHUB_STEP_SUMMARY
-          echo "- [🔍 SonarQube Dashboard]($SONAR_DASHBOARD_HOST/dashboard?id=$SONAR_PROJECT_KEY&branch=${{ steps.set-branch.outputs.branch }})" >> $GITHUB_STEP_SUMMARY
+
+          # Use extracted dashboard URL if available, otherwise construct it
+          DASHBOARD_URL="${{ steps.sonar-scan.outputs.dashboard_url }}"
+          if [[ -n "$DASHBOARD_URL" ]]; then
+            echo "- [SonarQube Dashboard]($DASHBOARD_URL)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- [SonarQube Dashboard]($SONAR_DASHBOARD_HOST/dashboard?id=$SONAR_PROJECT_KEY&branch=${{ steps.set-branch.outputs.branch }})" >> $GITHUB_STEP_SUMMARY
+          fi
+
           echo "- [Workflow Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 

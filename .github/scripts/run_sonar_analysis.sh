@@ -109,6 +109,16 @@ for attempt in $(seq 1 $MAX_RETRIES); do
     echo "=========================================="
     echo "✓ SonarQube analysis completed successfully!"
     echo "=========================================="
+
+    # Extract dashboard URL from report-task.txt (like Jenkins does)
+    if [[ -f ".scannerwork/report-task.txt" ]]; then
+      DASHBOARD_URL=$(grep "^dashboardUrl=" .scannerwork/report-task.txt | cut -d'=' -f2-)
+      if [[ -n "$DASHBOARD_URL" ]]; then
+        echo "Dashboard URL: $DASHBOARD_URL"
+        echo "dashboard_url=$DASHBOARD_URL" >> $GITHUB_OUTPUT
+      fi
+    fi
+
     echo "result=success" >> $GITHUB_OUTPUT
     exit 0
   else
