@@ -33,7 +33,9 @@ import java.util.stream.IntStream;
 
 import com.google.common.collect.Iterators;
 import com.googlecode.concurrenttrees.common.Iterables;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.db.compaction.CompactionStrategyContainer;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
@@ -43,6 +45,7 @@ import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.assertj.core.api.ObjectAssert;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
@@ -114,6 +117,35 @@ public class ColumnFamilyStoreTest
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         Keyspace.open(KEYSPACE2).getColumnFamilyStore(CF_STANDARD1).truncateBlocking();
+    }
+
+    @Test
+    public void testDisablingCompactionActuallyDisablesCompaction()
+    {
+        // test that compactions are not active if we disable them all.
+
+        // we have to first unload the keyspace to ensure that when it reopens it checks compaction flags.
+        System.setProperty(CassandraRelevantProperties.DISABLED_ALL_COMPACTIONS.getKey(), "true");
+        Keyspace ks = null;
+        try
+        {
+            SchemaLoader.createKeyspace("KS3", KeyspaceParams.simple(1),
+                                        SchemaLoader.standardCFMD("KS3", "S3"));
+            ks = Keyspace.open("KS3");
+            ColumnFamilyStore cfs = ks.getColumnFamilyStore("S3");
+
+            ObjectAssert<CompactionStrategyContainer> containerAssert = assertThat(cfs.getCompactionStrategyContainer());
+            containerAssert.extracting(CompactionStrategyContainer::isActive).isEqualTo(false);
+        }
+        finally
+        {
+            System.setProperty(CassandraRelevantProperties.DISABLED_ALL_COMPACTIONS.getKey(), "false");
+            if (ks != null)
+            {
+                //reload the keyspace for other tests to use
+                ks.unload(false);
+            }
+        }
     }
 
     @Test
