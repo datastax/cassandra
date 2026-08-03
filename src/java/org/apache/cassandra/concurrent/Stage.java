@@ -217,7 +217,7 @@ public enum Stage
         }, executor());
     }
 
-    private LocalAwareExecutorService executor()
+    public LocalAwareExecutorService executor()
     {
         if (executor == null)
         {
