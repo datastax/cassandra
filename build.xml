@@ -857,6 +857,7 @@
         <dependency groupId="com.dynatrace.hash4j" artifactId="hash4j"/>
         <dependency groupId="com.ning" artifactId="compress-lzf"/>
         <dependency groupId="com.google.guava" artifactId="guava"/>
+        <dependency groupId="com.dynatrace.hash4j" artifactId="hash4j"/>
         <dependency groupId="commons-cli" artifactId="commons-cli"/>
         <dependency groupId="commons-codec" artifactId="commons-codec"/>
         <dependency groupId="org.apache.commons" artifactId="commons-lang3"/>

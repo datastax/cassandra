@@ -18,8 +18,10 @@
 package org.apache.cassandra.db.virtual;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.io.compress.CompressionChunkOffsetCache;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.dht.LocalPartitioner;
+import org.apache.cassandra.io.compress.CompressionChunkOffsetsFactory;
 import org.apache.cassandra.metrics.CacheMetrics;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.schema.TableMetadata;
@@ -87,6 +89,11 @@ final class CachesTable extends AbstractVirtualTable
 
         if (null != ChunkCache.instance)
             addRow(result, "chunks", ChunkCache.instance.metrics);
+        if (CompressionChunkOffsetsFactory.type() == CompressionChunkOffsetsFactory.Type.BLOCK_CACHE)
+        {
+            CompressionChunkOffsetCache compressionCache = CompressionChunkOffsetCache.get();
+            addRow(result, "compression_chunk_offsets", compressionCache.getMetrics());
+        }
         addRow(result, "counters", CacheService.instance.counterCache.getMetrics());
         addRow(result, "keys", CacheService.instance.keyCache.getMetrics());
         addRow(result, "rows", CacheService.instance.rowCache.getMetrics());

@@ -825,7 +825,44 @@ public enum CassandraRelevantProperties
     /**
      * A directory to the default system key location - used by transparent data encryption
      */
-    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf");
+    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf"),
+
+    /**
+     * Cache size for compression chunk offsets if BLOCK_CACHE is configured. By default, it uses 25% of max direct memory.
+     *
+     * Alternatively, an absolute cache size can be configured, e.g. "10GiB".
+     */
+    COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE("cassandra.compression_chunk_offsets_block_cache_size", "auto@0.25"),
+    /**
+     * Number of bytes per compression chunk offsets cache block. The value divided by {@link Long#BYTES} determines
+     * how many chunk offsets are loaded from the compression info file on each cache miss. Values that are not
+     * divisible by {@link Long#BYTES} are rounded down to a whole offset and floored at one offset.
+     */
+    COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE("cassandra.compression_chunk_offsets_cache_block_size_bytes", "65536"),
+    /**
+     * Selects the {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} implementation. One of:
+     * <ul>
+     *     <li>{@code in_memory} (default): load all offsets into off-heap memory.</li>
+     *     <li>{@code mmap}: memory-map the offsets section of the compression info file. Gives close to in-memory
+     *     performance while leaving page management to the OS, so memory is reclaimed under pressure. Only suitable
+     *     when the compression info file is fully available on local disk.</li>
+     *     <li>{@code block_cache}: use the block cache sized by {@link #COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE}
+     *     and fail configuration validation if that size resolves to zero or less.</li>
+     * </ul>
+     */
+    COMPRESSION_CHUNK_OFFSETS_TYPE("cassandra.compression_chunk_offsets_type", "in_memory"),
+    /**
+     * Maximum size in bytes of a single memory-mapped segment used by the {@code mmap}
+     * {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} implementation. A {@code MappedByteBuffer} can
+     * map at most {@link Integer#MAX_VALUE} bytes, so larger offset sections are split into multiple segments. The
+     * effective value is rounded down to a whole number of 8-byte offsets. Primarily useful for tests that need to
+     * exercise the multi-segment path without creating a multi-TB file.
+     */
+    COMPRESSION_CHUNK_OFFSETS_MMAP_SEGMENT_SIZE("cassandra.compression_chunk_offsets.mmapped_max_segment_size", String.valueOf(Integer.MAX_VALUE)),
+    /**
+     * Factory for initializing {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} instances
+     */
+    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
