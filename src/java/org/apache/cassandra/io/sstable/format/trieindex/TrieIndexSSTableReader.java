@@ -52,7 +52,6 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
@@ -353,7 +352,7 @@ public class TrieIndexSSTableReader extends SSTableReader
      * at that position; before reading the next byte it will silently advance to the start of the next chunk. A skip,
      * on the other hand, will jump to the position that follows the data, which is correctly converted to the beginning
      * of the next page in preparation for reading. As a result it will leave the file positioned at the start of the
-     * next page immediately. See {@link PartitionIndexEncryptedTest#testSkipAcrossHoles}.
+     * next page immediately. See PartitionIndexEncryptedTest#testSkipAcrossHoles.
      *
      * To avoid this, we skip one fewer byte and consume the last byte.
      */
