@@ -25,30 +25,31 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-
-import org.apache.cassandra.db.ConsistencyLevel;
-
-import org.apache.cassandra.locator.EndpointsForToken;
-import org.apache.cassandra.locator.ReplicaPlan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
+import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.RequestCallback;
+import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
-import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
-import org.apache.cassandra.net.MessagingService;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.locator.Replicas.countInOurDc;
@@ -57,12 +58,13 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
 {
     protected static final Logger logger = LoggerFactory.getLogger(AbstractWriteResponseHandler.class);
 
-    //Count down until all responses and expirations have occured before deciding whether the ideal CL was reached.
+    // Count down until all responses and expirations have occured before deciding whether the ideal CL was reached.
     private AtomicInteger responsesAndExpirations;
+    protected final ExecutionTimeSensorAccumulator execTimeAccumulator;
     private final SimpleCondition condition = new SimpleCondition();
     protected final ReplicaPlan.ForTokenWrite replicaPlan;
 
-    protected final Runnable callback;
+    public final Runnable callback;
     protected final WriteType writeType;
     private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
     = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
@@ -70,7 +72,7 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     protected final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
 
-    private final RequestSensors requestSensors;
+    protected final RequestSensors requestSensors;
 
     /**
       * Delegate to another WriteResponseHandler or possibly this one to track if the ideal consistency level was reached.
@@ -100,6 +102,7 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.queryStartNanoTime = queryStartNanoTime;
         this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(replicaPlan.blockFor());
     }
 
     public void get() throws WriteTimeoutException, WriteFailureException
@@ -339,6 +342,12 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     public RequestSensors getRequestSensors()
     {
         return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     /**

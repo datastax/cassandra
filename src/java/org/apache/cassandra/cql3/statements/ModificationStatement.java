@@ -659,6 +659,10 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
 
     public ResultMessage executeLocally(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
+        // Sensors are not tracked for internal execution: RequestSensors is only initialised by StorageProxy and the
+        // verb handlers (for internode messages), so RequestTracker.instance.get() always returns null here. This path
+        // is reached via executeLocally(), which is only invoked for NODE_LOCAL consistency — a debug-only mode that
+        // deliberately bypasses the coordinator stack entirely.
         return hasConditions()
                ? executeInternalWithCondition(queryState, options)
                : executeInternalWithoutCondition(queryState, options, System.nanoTime());

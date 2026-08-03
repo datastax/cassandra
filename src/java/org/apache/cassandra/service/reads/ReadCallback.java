@@ -22,11 +22,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.locator.ReplicaPlan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadResponse;
@@ -35,15 +34,19 @@ import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.RequestCallback;
+import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
-import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
-import org.apache.cassandra.net.MessagingService;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -65,6 +68,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     private final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final boolean couldSpeculate;
     private final RequestSensors requestSensors;
+    private final ExecutionTimeSensorAccumulator execTimeAccumulator;
 
     public ReadCallback(ResponseResolver<E, P> resolver, ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
     {
@@ -86,6 +90,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockFor, this.replicaPlan);
         this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(blockFor);
     }
 
     protected P replicaPlan()
@@ -102,6 +107,12 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     public RequestSensors getRequestSensors()
     {
         return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     /**
@@ -161,9 +172,11 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     public void onResponse(Message<ReadResponse> message)
     {
         assertWaitingFor(message.from());
-        
+
+        execTimeAccumulator.onResponse(requestSensors);
+
         resolver.preprocess(message);
-        
+
         trackReplicaResponseSize(message);
 
         /*

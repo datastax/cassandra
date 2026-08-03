@@ -28,7 +28,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
@@ -48,18 +47,24 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         final CounterMutation cm = message.payload;
         logger.trace("Applying forwarded {}", cm);
 
-        // Initialize the sensor and set ExecutorLocals
         RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
-        Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
-        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
-        ExecutorLocals.set(locals);
+        ExecutorLocals.set(ExecutorLocals.create(requestSensors));
 
-        // Initialize internode bytes with the inbound message size:
+        // Register sensors that need to exist before applyCounterMutationOnLeader constructs the
+        // WriteResponseHandler (which captures the RequestSensors reference at construction time).
+        // WRITE_EXECUTION_TIME is built up in two steps on the leader:
+        //   1. counterWriteTask increments it with the leader apply time before onResponse(null).
+        //   2. ResponseVerbHandler increments it with max(sub-replica times) via the accumulator
+        //      as sub-replica MUTATION_RSP ACKs arrive and the inner WriteResponseHandler reaches quorum.
+        // The combined value is then encoded into the COUNTER_MUTATION_RSP by CounterMutationCallback
+        // and picked up by the coordinator's ResponseVerbHandler accumulator (threshold=1).
+        // INTERNODE_BYTES is incremented in CounterMutationCallback once the response is ready to send.
+        Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
         for (TableMetadata tm : tables)
         {
-            Context context = Context.from(tm);
-            requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+            requestSensors.registerSensor(Context.from(tm), Type.INTERNODE_BYTES);
+            if (!tm.isIndex())
+                requestSensors.registerSensor(Context.from(tm), Type.WRITE_EXECUTION_TIME);
         }
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
