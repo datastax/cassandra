@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
-import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -46,8 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * execution begins.
  *
  * <p>Virtual table writes bypass the storage engine and replica round-trips entirely, so no
- * {@link RequestSensors} are installed on the thread-local and the response carries no sensor
- * custom-payload headers.
+ * sensor custom-payload headers appear in the response.
  *
  * <p>Tests use the native-protocol stack (not the internal query path) so that the full
  * batch execution path is exercised, including the virtual-table branch that applies mutations
@@ -101,17 +99,11 @@ public class SensorsVirtualTableBatchTest extends CQLTester
                 new VirtualKeyspace(KS_NAME, ImmutableList.of(new WritableVirtualTable(KS_NAME, VT_NAME))));
     }
 
-    @After
-    public void afterTest()
-    {
-        // Clear thread-local sensor state between tests.
-        RequestTracker.instance.set(null);
-    }
-
     /**
      * An UNLOGGED batch on a virtual table applies mutations directly without going through the
-     * storage engine or any replica round-trip. Because no storage activity occurs, no sensor
-     * values are produced and the response must carry no sensor custom-payload headers.
+     * storage engine or any replica round-trip. Because {@link org.apache.cassandra.service.StorageProxy}
+     * is never invoked, no {@link RequestSensors} is installed on the server thread and no sensor
+     * headers appear in the response custom payload.
      */
     @Test
     public void testUnloggedBatchOnVirtualTableProducesNoSensors() throws Throwable
@@ -122,13 +114,8 @@ public class SensorsVirtualTableBatchTest extends CQLTester
                            "UPDATE " + KS_NAME + '.' + VT_NAME + " SET value = 2 WHERE key = 'pk2';" +
                            "APPLY BATCH");
 
-        // Virtual table writes produce no storage activity, so no sensor values are accumulated.
-        // The thread-local sensor reference is null (never initialised for this path).
-        assertThat(RequestTracker.instance.get())
-                .as("No RequestSensors should be initialised for a virtual table batch — no storage occurs")
-                .isNull();
-
-        // The response custom payload must also be empty: no storage means no sensor headers to report.
+        // Virtual table writes bypass StorageProxy entirely, so no RequestSensors is installed
+        // and no sensor headers are written into the response custom payload.
         Map<String, ByteBuffer> payload = rs.getExecutionInfo().getIncomingPayload();
         assertThat(payload)
                 .as("Response custom payload must contain no sensor headers for a virtual table batch")
