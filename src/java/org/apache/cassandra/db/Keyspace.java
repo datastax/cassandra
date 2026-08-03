@@ -35,6 +35,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
@@ -149,7 +151,23 @@ public class Keyspace
         }
     }
 
-    public static Keyspace open(String keyspaceName)
+    /**
+     * Convenience function for when getting {@code null} if the keyspace does not exist is more convenient than a
+     * {@link UnknownKeyspaceException}.
+     */
+    public static @Nullable Keyspace openIfExists(String keyspaceName)
+    {
+        try
+        {
+            return open(keyspaceName);
+        }
+        catch (UnknownKeyspaceException e)
+        {
+            return null;
+        }
+    }
+
+    public static Keyspace open(String keyspaceName) throws UnknownKeyspaceException
     {
         assert initialized || SchemaConstants.isLocalSystemKeyspace(keyspaceName) : "Initialized: " + initialized;
         return open(keyspaceName, Schema.instance, true);
