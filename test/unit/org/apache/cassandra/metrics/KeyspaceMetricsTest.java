@@ -30,6 +30,7 @@ import org.junit.Test;
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.Session;
 import org.apache.cassandra.ServerTestUtils;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.EmbeddedCassandraService;
@@ -69,6 +70,29 @@ public class KeyspaceMetricsTest
         session.execute(String.format("DROP KEYSPACE %s;", keyspace));
         // no metrics after drop
         assertEquals(metrics.get().collect(Collectors.joining(",")), 0, metrics.get().count());
+    }
+
+    @Test
+    public void testMetricsNotRecordedWhenDisabled()
+    {
+        System.setProperty(CassandraRelevantProperties.KEYSPACE_METRICS_ENABLED.getKey(), "false");
+        try {
+            String keyspace = "norecorded_keyspace";
+            CassandraMetricsRegistry registry = CassandraMetricsRegistry.Metrics;
+            Supplier<Stream<String>> ksMetrics = () -> registry.getNames().stream().filter(m -> m.contains(keyspace));
+            // no metrics before creating
+            assertEquals(0, ksMetrics.get().count());
+            session.execute(String.format("CREATE KEYSPACE %s WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };", keyspace));
+            //still no metrics
+            assertEquals(0, ksMetrics.get().count());
+
+            session.execute(String.format("DROP KEYSPACE %s;", keyspace));
+            // no metrics after drop
+            assertEquals(ksMetrics.get().collect(Collectors.joining(",")), 0, ksMetrics.get().count());
+        }
+        finally {
+            System.setProperty(CassandraRelevantProperties.KEYSPACE_METRICS_ENABLED.getKey(), "true");
+        }
     }
 
     @AfterClass

@@ -23,8 +23,10 @@ import java.util.Collections;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.processing.Generated;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
@@ -39,12 +41,12 @@ import org.apache.cassandra.utils.MBeanWrapper;
  * The 3.0 API comes with poor JMX integration
  * </p>
  */
-public class CassandraMetricsRegistry extends MetricRegistry
+public abstract class CassandraMetricsRegistry extends MetricRegistry
 {
-    public static final CassandraMetricsRegistry Metrics = new CassandraMetricsRegistry();
+    public static final CassandraMetricsRegistry Metrics = new PublishingMetricsRegistry();
+    public static final CassandraMetricsRegistry NoOpMetrics = new NoOpMetricsRegistry();
     private final Map<String, ThreadPoolMetrics> threadPoolMetrics = new ConcurrentHashMap<>();
 
-    private final MBeanWrapper mBeanServer = MBeanWrapper.instance;
 
     private CassandraMetricsRegistry()
     {
@@ -81,13 +83,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
         return meter;
     }
 
-    public Histogram histogram(MetricName name, boolean considerZeroes)
-    {
-        Histogram histogram = register(name, new ClearableHistogram(new DecayingEstimatedHistogramReservoir(considerZeroes)));
-        registerMBean(histogram, name.getMBeanName());
-
-        return histogram;
-    }
+    public abstract Histogram histogram(MetricName name, boolean considerZeroes);
 
     public Histogram histogram(MetricName name, MetricName alias, boolean considerZeroes)
     {
@@ -96,13 +92,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
         return histogram;
     }
 
-    public Timer timer(MetricName name)
-    {
-        Timer timer = register(name, new Timer(new DecayingEstimatedHistogramReservoir()));
-        registerMBean(timer, name.getMBeanName());
-
-        return timer;
-    }
+    public abstract Timer timer(MetricName name);
 
     public Timer timer(MetricName name, MetricName alias)
     {
@@ -164,13 +154,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
         return ret;
     }
 
-    public boolean remove(MetricName name)
-    {
-        boolean removed = remove(name.getMetricName());
-
-        mBeanServer.unregisterMBean(name.getMBeanName(), MBeanWrapper.OnException.IGNORE);
-        return removed;
-    }
+    public abstract boolean remove(MetricName name);
 
     public boolean remove(MetricName name, MetricName... aliases)
     {
@@ -185,41 +169,12 @@ public class CassandraMetricsRegistry extends MetricRegistry
         return false;
     }
 
-    public void registerMBean(Metric metric, ObjectName name)
-    {
-        AbstractBean mbean;
+    public abstract void registerMBean(Metric metric, ObjectName name);
 
-        if (metric instanceof Gauge)
-            mbean = new JmxGauge((Gauge<?>) metric, name);
-        else if (metric instanceof Counter)
-            mbean = new JmxCounter((Counter) metric, name);
-        else if (metric instanceof Histogram)
-            mbean = new JmxHistogram((Histogram) metric, name);
-        else if (metric instanceof Timer)
-            mbean = new JmxTimer((Timer) metric, name, TimeUnit.SECONDS, TimeUnit.MICROSECONDS);
-        else if (metric instanceof Metered)
-            mbean = new JmxMeter((Metered) metric, name, TimeUnit.SECONDS);
-        else
-            throw new IllegalArgumentException("Unknown metric type: " + metric.getClass());
+    protected abstract void registerAlias(MetricName existingName, MetricName aliasName);
 
-        if (!mBeanServer.isRegistered(name))
-            mBeanServer.registerMBean(mbean, name, MBeanWrapper.OnException.LOG);
-    }
+    protected abstract void removeAlias(MetricName name);
 
-    private void registerAlias(MetricName existingName, MetricName aliasName)
-    {
-        Metric existing = Metrics.getMetrics().get(existingName.getMetricName());
-        assert existing != null : existingName + " not registered";
-
-        registerMBean(existing, aliasName.getMBeanName());
-    }
-
-    private void removeAlias(MetricName name)
-    {
-        if (mBeanServer.isRegistered(name.getMBeanName()))
-            MBeanWrapper.instance.unregisterMBean(name.getMBeanName(), MBeanWrapper.OnException.IGNORE);
-    }
-    
     /**
      * Strips a single final '$' from input
      * 
@@ -941,6 +896,333 @@ public class CassandraMetricsRegistry extends MetricRegistry
                 name = method.getName();
             }
             return name;
+        }
+    }
+
+    private static class PublishingMetricsRegistry extends CassandraMetricsRegistry
+    {
+        private final MBeanWrapper mBeanServer = MBeanWrapper.instance;
+
+        @Override
+        public void registerMBean(Metric metric, ObjectName name)
+        {
+            AbstractBean mbean;
+
+            if (metric instanceof Gauge)
+                mbean = new JmxGauge((Gauge<?>) metric, name);
+            else if (metric instanceof Counter)
+                mbean = new JmxCounter((Counter) metric, name);
+            else if (metric instanceof Histogram)
+                mbean = new JmxHistogram((Histogram) metric, name);
+            else if (metric instanceof Timer)
+                mbean = new JmxTimer((Timer) metric, name, TimeUnit.SECONDS, TimeUnit.MICROSECONDS);
+            else if (metric instanceof Metered)
+                mbean = new JmxMeter((Metered) metric, name, TimeUnit.SECONDS);
+            else
+                throw new IllegalArgumentException("Unknown metric type: " + metric.getClass());
+
+            if (!mBeanServer.isRegistered(name))
+                mBeanServer.registerMBean(mbean, name, MBeanWrapper.OnException.LOG);
+        }
+
+        @Override
+        protected void registerAlias(MetricName existingName, MetricName aliasName)
+        {
+            Metric existing = Metrics.getMetrics().get(existingName.getMetricName());
+            assert existing != null : existingName + " not registered";
+
+            registerMBean(existing, aliasName.getMBeanName());
+        }
+
+        @Override
+        protected void removeAlias(MetricName name)
+        {
+            if (mBeanServer.isRegistered(name.getMBeanName()))
+                MBeanWrapper.instance.unregisterMBean(name.getMBeanName(), MBeanWrapper.OnException.IGNORE);
+        }
+
+        @Override
+        public boolean remove(MetricName name)
+        {
+            boolean removed = remove(name.getMetricName());
+
+            mBeanServer.unregisterMBean(name.getMBeanName(), MBeanWrapper.OnException.IGNORE);
+            return removed;
+        }
+
+        public Histogram histogram(MetricName name, boolean considerZeroes)
+        {
+            Histogram histogram = register(name, new ClearableHistogram(new DecayingEstimatedHistogramReservoir(considerZeroes)));
+            registerMBean(histogram, name.getMBeanName());
+
+            return histogram;
+        }
+
+        public Timer timer(MetricName name)
+        {
+            Timer timer = register(name, new Timer(new DecayingEstimatedHistogramReservoir()));
+            registerMBean(timer, name.getMBeanName());
+
+            return timer;
+        }
+    }
+
+    // Classes relating to the no-op registry. It's held here in order to hide the subclass implementations.
+    private static class NoOpMetricsRegistry extends CassandraMetricsRegistry
+    {
+        @Override
+        public Counter counter(String name)
+        {
+            return NoOpCounter.instance;
+        }
+
+        @Override
+        public Meter meter(String name)
+        {
+            return NoOpMeter.instance;
+        }
+
+        @Override
+        public Histogram histogram(MetricName name, boolean considerZeroes)
+        {
+            return NoOpHistogram.instance;
+        }
+
+
+        @Override
+        public Timer timer(MetricName name)
+        {
+            return NoOpTimer.instance;
+        }
+
+        @Override
+        public <T extends Metric> T register(MetricName name, T metric)
+        {
+            return metric;
+        }
+
+        @Override
+        public boolean remove(MetricName name)
+        {
+            return false;
+        }
+
+        @Override
+        public void registerMBean(Metric metric, ObjectName name)
+        {
+            //no-op
+        }
+
+        @Override
+        protected void registerAlias(MetricName existingName, MetricName aliasName)
+        {
+            //no-op
+        }
+
+        @Override
+        protected void removeAlias(MetricName name)
+        {
+            //no-op
+        }
+    }
+
+    private static class EmptyReservoir implements Reservoir{
+        public static final EmptyReservoir instance = new EmptyReservoir();
+        private final Snapshot snapshot;
+        private EmptyReservoir(){
+            this.snapshot = new UniformSnapshot(new long[]{0});
+        }
+
+        @Override
+        public int size()
+        {
+            return 0;
+        }
+
+        @Override
+        public void update(long value)
+        {
+
+        }
+
+        @Override
+        public Snapshot getSnapshot()
+        {
+            return snapshot;
+        }
+    }
+
+    private static class NoOpCounter extends Counter
+    {
+        static final NoOpCounter instance = new NoOpCounter();
+        @Override
+        public void inc()
+        {
+        }
+
+        @Override
+        public void inc(long n)
+        {
+        }
+
+        @Override
+        public void dec()
+        {
+        }
+
+        @Override
+        public void dec(long n)
+        {
+        }
+
+        @Override
+        public long getCount()
+        {
+            return 0L;
+        }
+    }
+
+    private static class NoOpMeter extends Meter
+    {
+        static final NoOpMeter instance = new NoOpMeter();
+        private NoOpMeter()
+        {
+
+        }
+
+        @Override
+        public void mark()
+        {
+        }
+
+        @Override
+        public void mark(long n)
+        {
+        }
+
+        @Override
+        public long getCount()
+        {
+            return 0L;
+        }
+
+        @Override
+        public double getFifteenMinuteRate()
+        {
+            return 0d;
+        }
+
+        @Override
+        public double getFiveMinuteRate()
+        {
+            return 0d;
+        }
+
+        @Override
+        public double getMeanRate()
+        {
+            return 0d;
+        }
+
+        @Override
+        public double getOneMinuteRate()
+        {
+            return 0d;
+        }
+    }
+
+    private static class NoOpHistogram extends Histogram
+    {
+        static final NoOpHistogram instance = new NoOpHistogram();
+
+        private final Snapshot snapshot;
+
+        private NoOpHistogram()
+        {
+            super(EmptyReservoir.instance);
+            this.snapshot = new UniformSnapshot(new long[]{0L});
+        }
+        @Override
+        public void update(int value)
+        {
+        }
+
+        @Override
+        public void update(long value)
+        {
+        }
+
+        @Override
+        public long getCount()
+        {
+            return 0L;
+        }
+
+        @Override
+        public Snapshot getSnapshot()
+        {
+            return snapshot;
+        }
+    }
+
+    private static class NoOpTimer extends Timer
+    {
+
+        static final NoOpTimer instance = new NoOpTimer();
+
+        private final Snapshot snapshot;
+
+        private NoOpTimer()
+        {
+            super(EmptyReservoir.instance);
+            this.snapshot = new UniformSnapshot(new long[]{0L});
+        }
+
+        @Override
+        public void update(long duration, TimeUnit unit)
+        {
+        }
+
+        @Override
+        public <T> T time(Callable<T> event) throws Exception
+        {
+            return event.call();
+        }
+
+        @Override
+        public long getCount()
+        {
+            return 0L;
+        }
+
+        @Override
+        public double getFifteenMinuteRate()
+        {
+            return 0d;
+        }
+
+        @Override
+        public double getFiveMinuteRate()
+        {
+            return 0d;
+        }
+
+        @Override
+        public double getMeanRate()
+        {
+            return 0d;
+        }
+
+        @Override
+        public double getOneMinuteRate()
+        {
+            return 0d;
+        }
+
+        @Override
+        public Snapshot getSnapshot()
+        {
+            return snapshot;
         }
     }
 }
