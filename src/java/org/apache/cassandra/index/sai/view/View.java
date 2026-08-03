@@ -47,6 +47,7 @@ import org.apache.cassandra.utils.concurrent.RefCounted;
 public class View implements Iterable<SSTableIndex>
 {
     private final Map<Descriptor, SSTableIndex> view;
+    private final boolean isQueryable;
     private final AtomicInteger references = new AtomicInteger(1);
     private volatile boolean indexWasDropped;
 
@@ -60,9 +61,11 @@ public class View implements Iterable<SSTableIndex>
      * @param indexes the indexes. Note that the referencing logic for these indexes is handled
      *                outside of this constructor and all indexes are assumed to have been referenced already.
      *                The view will release the indexes when it is finally released.
+     * @param isQueryable true if the view is queryable; false otherwise.
      */
-    public View(IndexContext context, Collection<SSTableIndex> indexes)
+    public View(IndexContext context, Collection<SSTableIndex> indexes, boolean isQueryable)
     {
+        this.isQueryable = isQueryable;
         this.view = new HashMap<>();
         this.keyValidator = context.keyValidator();
 
@@ -149,6 +152,11 @@ public class View implements Iterable<SSTableIndex>
     public int size()
     {
         return view.size();
+    }
+
+    public boolean isQueryable()
+    {
+        return isQueryable;
     }
 
     /**

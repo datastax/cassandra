@@ -34,6 +34,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
+import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -142,6 +143,9 @@ public class QueryView implements AutoCloseable
                 // Now that we referenced a view, need to confirm that the view we referenced isn't somehow invalid.
                 if (!indexContext.isIndexed())
                     throw new MissingIndexException(indexContext);
+
+                if (!saiView.isQueryable())
+                    throw new IndexNotAvailableException(indexContext.getIndexName());
 
                 var sstableReaders = new ArrayList<SSTableReader>(saiView.size());
                 // These are already referenced because they are referenced by the same view we just referenced.
