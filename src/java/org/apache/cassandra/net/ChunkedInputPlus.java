@@ -19,9 +19,11 @@ package org.apache.cassandra.net;
 
 import java.io.EOFException;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebufferingInputStream;
 
 /**
@@ -51,21 +53,27 @@ class ChunkedInputPlus extends RebufferingInputStream
     {
         PeekingIterator<ShareableBytes> iter = Iterators.peekingIterator(buffers.iterator());
         if (!iter.hasNext())
-            throw new IllegalArgumentException();
+            throw new IllegalArgumentException("Cannot create ChunkedInputPlus from empty iterable");
         return new ChunkedInputPlus(iter);
     }
 
     @Override
     protected void reBuffer() throws EOFException
     {
-        buffer = null;
-        iter.peek().release();
-        iter.next();
+        Preconditions.checkState(buffer != null, "Stream already closed");
+        Preconditions.checkState(buffer.remaining() == 0, "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
 
-        if (!iter.hasNext())
-            throw new EOFException();
+        buffer = Rebufferer.EMPTY.buffer();
 
-        buffer = iter.peek().get();
+        // skip and release empty buffers because returning an empty buffer would mean EOF
+        while (iter.hasNext() && !iter.peek().hasRemaining())
+            iter.next().release();
+
+        if (iter.hasNext())
+        {
+            buffer = iter.peek().get();
+            assert buffer.hasRemaining() : "Next buffer should be non-empty";
+        }
     }
 
     @Override
