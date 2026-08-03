@@ -24,11 +24,13 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.util.IOUtils;
 
 /**
@@ -56,7 +58,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     }
 
     @Override
-    public void startPartition(long position)
+    public void startPartition(DecoratedKey decoratedKey, long position)
     {
         currentKeyPartitionOffset = position;
     }
@@ -75,9 +77,11 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     }
 
     @Override
+    @SuppressWarnings("ThrowableNotThrown")
     public void abort(Throwable accumulator)
     {
         logger.debug(perSSTableComponents.logMessage("Aborting token/offset writer for {}..."), perSSTableComponents.descriptor());
+        Throwables.close(accumulator, tokenWriter, offsetWriter, metadataWriter);
         perSSTableComponents.forceDeleteAllComponents();
     }
 

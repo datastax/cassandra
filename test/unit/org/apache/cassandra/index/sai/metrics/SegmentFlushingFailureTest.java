@@ -87,6 +87,12 @@ public abstract class SegmentFlushingFailureTest extends SAITester
                       "complete",
                       RuntimeException.class);
 
+    private static final Injection v9sstableComponentsWriterFailure =
+    newFailureOnEntry("sstableComponentsWriterFailure",
+                      org.apache.cassandra.index.sai.disk.v9.SSTableComponentsWriter.class,
+                      "complete",
+                      RuntimeException.class);
+
     private static final Injection segmentFlushFailure =
             newFailureOnEntry("segmentFlushFailure", SegmentBuilder.class, "flush", RuntimeException.class);
 
@@ -141,9 +147,21 @@ public abstract class SegmentFlushingFailureTest extends SAITester
     @Test
     public void shouldZeroMemoryTrackerOnOffsetsRuntimeFailure() throws Throwable
     {
-        shouldZeroMemoryTrackerOnFailure(Version.current(KEYSPACE) == Version.AA ? v1sstableComponentsWriterFailure : v2sstableComponentsWriterFailure, "v1");
+        shouldZeroMemoryTrackerOnFailure(getSstableComponentsWriterFailure(),
+                                         "v1");
         resetCounters();
-        shouldZeroMemoryTrackerOnFailure(Version.current(KEYSPACE) == Version.AA ? v1sstableComponentsWriterFailure : v2sstableComponentsWriterFailure, "v2");
+        shouldZeroMemoryTrackerOnFailure(getSstableComponentsWriterFailure(),
+                                         "v2");
+    }
+
+    private static Injection getSstableComponentsWriterFailure()
+    {
+        if (Version.current(KEYSPACE).onOrAfter(Version.GA))
+            return v9sstableComponentsWriterFailure;
+        else if (Version.current(KEYSPACE).onOrAfter(Version.BA))
+            return v2sstableComponentsWriterFailure;
+        else
+            return v1sstableComponentsWriterFailure;
     }
 
     @Test
