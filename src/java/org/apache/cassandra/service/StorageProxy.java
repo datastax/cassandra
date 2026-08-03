@@ -2011,6 +2011,7 @@ public class StorageProxy implements StorageProxyMBean
         RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
         Context context = Context.from(group.metadata());
         requestSensors.registerSensor(context, Type.READ_BYTES);
+        requestSensors.registerSensor(context, Type.READ_LATENCY_TIER);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
@@ -2389,6 +2390,7 @@ public class StorageProxy implements StorageProxyMBean
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
         Context context = Context.from(command);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_LATENCY_TIER);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 

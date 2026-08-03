@@ -24,6 +24,8 @@ import java.util.function.Predicate;
 
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.utils.DoubleBinaryPredicate;
+
 /**
  * No-op implementation of {@link RequestSensors}. This is used when sensors are disabled.
  */
@@ -51,6 +53,12 @@ public class NoOpRequestSensors implements RequestSensors
 
     @Override
     public void incrementSensor(Context context, Type type, double value)
+    {
+
+    }
+
+    @Override
+    public void setSensorIf(Context context, Type type, double candidate, DoubleBinaryPredicate predicate)
     {
 
     }

@@ -22,6 +22,8 @@ import java.util.Collection;
 import java.util.Optional;
 import java.util.function.Predicate;
 
+import org.apache.cassandra.utils.DoubleBinaryPredicate;
+
 /**
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
  * point to create and modify sensors. Actual implementations can be created via {@link SensorsFactory}.
@@ -62,6 +64,19 @@ public interface RequestSensors
      * @param value   the value to increment the sensor by
      */
     void incrementSensor(Context context, Type type, double value);
+
+    /**
+     * Conditionally sets the sensor value associated to the given context and type to
+     * {@code candidate} if {@code predicate.test(currentValue, candidate)} returns {@code true}.
+     * The update is performed atomically with respect to concurrent callers on the same sensor.
+     *
+     * @param context   the sensor context associated with the request/response
+     * @param type      the type of the sensor
+     * @param candidate the value to conditionally store
+     * @param predicate a function of {@code (currentValue, candidate)} returning
+     *                  {@code true} if the update should occur
+     */
+    void setSensorIf(Context context, Type type, double candidate, DoubleBinaryPredicate predicate);
 
     /**
      * Sync all the sensors values tracked for this request to the global {@link SensorsRegistry}. This method
