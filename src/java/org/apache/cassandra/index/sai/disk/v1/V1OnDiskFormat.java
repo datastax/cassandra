@@ -319,6 +319,6 @@ public class V1OnDiskFormat implements OnDiskFormat
     @Override
     public int jvectorFileFormatVersion()
     {
-        throw new UnsupportedOperationException("JVector is not supported in V2OnDiskFormat");
+        throw new UnsupportedOperationException("JVector is not supported");
     }
 }
