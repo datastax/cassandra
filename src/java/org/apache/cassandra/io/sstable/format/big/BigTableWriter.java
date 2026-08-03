@@ -110,7 +110,7 @@ public class BigTableWriter extends SortedTableWriter
                                                     Component.STATS,
                                                     Component.SUMMARY,
                                                     Component.TOC,
-                                                    Component.DIGEST);
+                                                    getDigestComponent());
 
         if (metadata.params.bloomFilterFpChance < 1.0)
             components.add(Component.FILTER);

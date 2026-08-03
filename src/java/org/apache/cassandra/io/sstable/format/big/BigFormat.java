@@ -65,6 +65,8 @@ public class BigFormat implements SSTableFormat
                                                                                Component.COMPRESSION_INFO,
                                                                                Component.STATS,
                                                                                Component.DIGEST,
+                                                                               Component.DIGEST_CRC32C,
+                                                                               Component.DIGEST_CRC64NVME,
                                                                                Component.CRC,
                                                                                Component.SUMMARY,
                                                                                Component.TOC);
@@ -76,6 +78,8 @@ public class BigFormat implements SSTableFormat
                                                                                Component.COMPRESSION_INFO,
                                                                                Component.FILTER,
                                                                                Component.DIGEST,
+                                                                               Component.DIGEST_CRC32C,
+                                                                               Component.DIGEST_CRC64NVME,
                                                                                Component.CRC);
 
     private final static Set<Component> PRIMARY_INDEX_COMPONENTS = ImmutableSet.of(Component.PRIMARY_INDEX);

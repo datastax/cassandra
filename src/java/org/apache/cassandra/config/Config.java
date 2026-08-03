@@ -645,6 +645,8 @@ public class Config
     public volatile int consecutive_message_errors_threshold = 1;
     public volatile boolean invalid_legacy_protocol_magic_no_spam_enabled = false;
 
+    public volatile SSTableDigestType sstable_digest_type = SSTableDigestType.CRC32;
+
     /**
      * Default compaction configuration, used if a table does not specify any.
      */
@@ -817,6 +819,13 @@ public class Config
             this.useDynamicSnitchScores = useDynamicSnitchScores;
             this.preferLocalRack = preferLocalRack;
         }
+    }
+
+    public enum SSTableDigestType
+    {
+        CRC32,
+        CRC32C,
+        CRC64NVME
     }
 
     private static final List<String> SENSITIVE_KEYS = new ArrayList<String>() {{

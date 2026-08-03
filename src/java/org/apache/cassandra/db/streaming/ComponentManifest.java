@@ -39,7 +39,7 @@ public final class ComponentManifest implements Iterable<Component>
 {
     private static final List<Component> STREAM_COMPONENTS = ImmutableList.of(Component.DATA, Component.PRIMARY_INDEX, Component.PARTITION_INDEX, Component.ROW_INDEX,
                                                                               Component.STATS, Component.COMPRESSION_INFO, Component.FILTER, Component.SUMMARY,
-                                                                              Component.DIGEST, Component.CRC);
+                                                                              Component.DIGEST, Component.DIGEST_CRC32C, Component.DIGEST_CRC64NVME, Component.CRC);
 
     private final LinkedHashMap<Component, Long> components;
 
