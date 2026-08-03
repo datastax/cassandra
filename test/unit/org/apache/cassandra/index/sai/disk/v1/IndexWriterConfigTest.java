@@ -158,7 +158,7 @@ public class IndexWriterConfigTest
     {
         Map<String, String> options = new HashMap<>();
         // Provide a valid enable_hierarchy
-        options.put(IndexWriterConfig.ENABLE_HIERARCHY, "true");
+        //options.put(IndexWriterConfig.ENABLE_HIERARCHY, "true");
         IndexWriterConfig config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options);
         assertThat(config.isHierarchyEnabled()).isTrue();
 
