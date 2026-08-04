@@ -105,6 +105,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.BloomFilter;
+import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -560,10 +561,14 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
     public DataIntegrityMetadata.FileDigestValidator maybeGetDigestValidator() throws IOException
     {
+        File dataFile = descriptor.fileFor(Components.DATA);
         if (descriptor.fileFor(Components.DIGEST).exists())
-            return new DataIntegrityMetadata.FileDigestValidator(descriptor.fileFor(Components.DATA), descriptor.fileFor(Components.DIGEST));
-        else
-            return null;
+            return new DataIntegrityMetadata.FileDigestValidator(dataFile, descriptor.fileFor(Components.DIGEST), ChecksumType.CRC32);
+        if (descriptor.fileFor(Components.DIGEST_CRC32C).exists())
+            return new DataIntegrityMetadata.FileDigestValidator(dataFile, descriptor.fileFor(Components.DIGEST_CRC32C), ChecksumType.CRC32C);
+        if (descriptor.fileFor(Components.DIGEST_CRC64NVME).exists())
+            return new DataIntegrityMetadata.FileDigestValidator(dataFile, descriptor.fileFor(Components.DIGEST_CRC64NVME), ChecksumType.CRC64NVME);
+        return null;
     }
 
     public static long getTotalBytes(Iterable<SSTableReader> sstables)

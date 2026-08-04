@@ -20,12 +20,14 @@ package org.apache.cassandra.io.sstable.format;
 
 import java.util.Optional;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config.FlushCompression;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
 import org.apache.cassandra.io.compress.Encryptor;
 import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -34,9 +36,28 @@ import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ChecksumType;
 
 public class DataComponent
 {
+    private static final ChecksumType checksumType = CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE.getEnum(ChecksumType.CRC32);
+    private static final Component digestComponent = getDigestComponent();
+
+    private static Component getDigestComponent()
+    {
+        switch (checksumType)
+        {
+            case CRC32:
+                return Components.DIGEST;
+            case CRC32C:
+                return Components.DIGEST_CRC32C;
+            case CRC64NVME:
+                return Components.DIGEST_CRC64NVME;
+            default:
+                throw new IllegalStateException("Unexpected checksumType for digest file: " + checksumType);
+        }
+    }
+
     public static SequentialWriter buildWriter(Descriptor descriptor,
                                                TableMetadata metadata,
                                                SequentialWriterOption options,
@@ -60,7 +81,8 @@ public class DataComponent
             {
                 return new CompressedSequentialWriter(descriptor.fileFor(Components.DATA),
                                                       descriptor.fileFor(Components.COMPRESSION_INFO),
-                                                      descriptor.fileFor(Components.DIGEST),
+                                                      descriptor.fileFor(digestComponent),
+                                                      checksumType,
                                                       options,
                                                       compressionParams,
                                                       metadataCollector);
@@ -70,7 +92,8 @@ public class DataComponent
         {
             return new ChecksummedSequentialWriter(descriptor.fileFor(Components.DATA),
                                                    descriptor.fileFor(Components.CRC),
-                                                   descriptor.fileFor(Components.DIGEST),
+                                                   descriptor.fileFor(digestComponent),
+                                                   checksumType,
                                                    options);
         }
     }

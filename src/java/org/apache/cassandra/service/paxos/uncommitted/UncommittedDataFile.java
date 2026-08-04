@@ -225,7 +225,7 @@ public class UncommittedDataFile
 
             this.file = new File(this.directory, fileName(generation) + TMP_SUFFIX);
             this.crcFile = new File(this.directory, crcName(generation) + TMP_SUFFIX);
-            this.writer = new ChecksummedSequentialWriter(file, crcFile, null, SequentialWriterOption.DEFAULT);
+            this.writer = new ChecksummedSequentialWriter(file, crcFile, SequentialWriterOption.DEFAULT);
             this.writer.writeInt(VERSION);
         }
 

@@ -66,7 +66,7 @@ public class ChecksummedSequentialWriterTest extends SequentialWriterTest
 
         private TestableCSW(File file, File crcFile) throws IOException
         {
-            this(file, crcFile, new ChecksummedSequentialWriter(file, crcFile, null, SequentialWriterOption.newBuilder()
+            this(file, crcFile, new ChecksummedSequentialWriter(file, crcFile, SequentialWriterOption.newBuilder()
                                                                                                            .bufferSize(BUFFER_SIZE)
                                                                                                            .build()));
         }

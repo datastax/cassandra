@@ -113,6 +113,8 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
                                                                              COMPRESSION_INFO,
                                                                              FILTER,
                                                                              DIGEST,
+                                                                             DIGEST_CRC32C,
+                                                                             DIGEST_CRC64NVME,
                                                                              CRC,
                                                                              TOC);
 
