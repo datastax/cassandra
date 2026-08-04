@@ -1,4 +1,5 @@
 Future version (tbd)
+ * Compact all SSTables of a level shard if their number reaches a limit (CNDB-14577)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 Merged from 5.0:
  * Disable chronicle analytics (CASSANDRA-19656)
