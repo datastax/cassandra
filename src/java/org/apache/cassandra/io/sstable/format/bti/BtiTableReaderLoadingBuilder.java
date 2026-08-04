@@ -73,12 +73,12 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
     {
         checkNotNull(statsMetadata);
 
-        try (PartitionIndex index = PartitionIndex.load(partitionIndexFileBuilder(), tableMetadataRef.getLocal().partitioner, false, descriptor.version.getByteComparableVersion());
-             CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components, statsMetadata.zeroCopyMetadata);
+        try (CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components, statsMetadata.zeroCopyMetadata);
+             PartitionIndex index = PartitionIndex.load(partitionIndexFileBuilder(compressionMetadata), tableMetadataRef.getLocal().partitioner, false, descriptor.version.getByteComparableVersion());
              FileHandle dFile = dataFileBuilder(statsMetadata).withCompressionMetadata(compressionMetadata)
                                                               .withCrcCheckChance(() -> tableMetadataRef.getLocal().params.crcCheckChance)
                                                               .complete();
-             FileHandle riFile = rowIndexFileBuilder().complete())
+             FileHandle riFile = rowIndexFileBuilder(compressionMetadata).complete())
         {
             return PartitionIterator.create(index,
                                             tableMetadataRef.getLocal().partitioner,
@@ -126,24 +126,11 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
             if (builder.getFilter() == null)
                 builder.setFilter(FilterFactory.AlwaysPresent);
 
-            if (builder.getComponents().contains(Components.ROW_INDEX))
-                builder.setRowIndexFile(rowIndexFileBuilder().complete());
-
             if (descriptor.version.hasKeyRange() && builder.getStatsMetadata() != null)
             {
                 IPartitioner partitioner = tableMetadataRef.getLocal().partitioner;
                 builder.setFirst(partitioner.decorateKey(builder.getStatsMetadata().firstKey));
                 builder.setLast(partitioner.decorateKey(builder.getStatsMetadata().lastKey));
-            }
-
-            if (builder.getComponents().contains(Components.PARTITION_INDEX))
-            {
-                builder.setPartitionIndex(openPartitionIndex(!builder.getFilter().isInformative(), statsComponent.statsMetadata().zeroCopyMetadata));
-                if (builder.getFirst() == null || builder.getLast() == null)
-                {
-                    builder.setFirst(builder.getPartitionIndex().firstKey());
-                    builder.setLast(builder.getPartitionIndex().lastKey());
-                }
             }
 
             try (CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components, statsComponent.statsMetadata().zeroCopyMetadata))
@@ -152,6 +139,19 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
                                     .withCompressionMetadata(compressionMetadata)
                                     .withCrcCheckChance(() -> tableMetadataRef.getLocal().params.crcCheckChance)
                                     .complete());
+
+                if (builder.getComponents().contains(Components.ROW_INDEX))
+                    builder.setRowIndexFile(rowIndexFileBuilder(compressionMetadata).complete());
+
+                if (builder.getComponents().contains(Components.PARTITION_INDEX))
+                {
+                    builder.setPartitionIndex(openPartitionIndex(compressionMetadata, !builder.getFilter().isInformative(), statsComponent.statsMetadata().zeroCopyMetadata));
+                    if (builder.getFirst() == null || builder.getLast() == null)
+                    {
+                        builder.setFirst(builder.getPartitionIndex().firstKey());
+                        builder.setLast(builder.getPartitionIndex().lastKey());
+                    }
+                }
             }
         }
         catch (IOException | RuntimeException | Error ex)
@@ -187,9 +187,9 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         return bf;
     }
 
-    private PartitionIndex openPartitionIndex(boolean preload, ZeroCopyMetadata zeroCopyMetadata) throws IOException
+    private PartitionIndex openPartitionIndex(CompressionMetadata compressionMetadata, boolean preload, ZeroCopyMetadata zeroCopyMetadata) throws IOException
     {
-        try (FileHandle indexFile = partitionIndexFileBuilder().complete())
+        try (FileHandle indexFile = partitionIndexFileBuilder(compressionMetadata).complete())
         {
             return PartitionIndex.load(indexFile, tableMetadataRef.getLocal().partitioner, preload, zeroCopyMetadata, descriptor.version.getByteComparableVersion());
         }
@@ -200,7 +200,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         }
     }
 
-    private FileHandle.Builder rowIndexFileBuilder()
+    private FileHandle.Builder rowIndexFileBuilder(CompressionMetadata compressionMetadata)
     {
         assert rowIndexFileBuilder == null || rowIndexFileBuilder.file.equals(descriptor.fileFor(Components.ROW_INDEX));
 
@@ -209,11 +209,13 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
 
         rowIndexFileBuilder.withChunkCache(chunkCache);
         rowIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
+        if (compressionMetadata != null && compressionMetadata.parameters.getSstableCompressor().encryptionOnly() != null)
+            rowIndexFileBuilder.withCompressionMetadata(compressionMetadata).encryptionOnly();
 
         return rowIndexFileBuilder;
     }
 
-    private FileHandle.Builder partitionIndexFileBuilder()
+    private FileHandle.Builder partitionIndexFileBuilder(CompressionMetadata compressionMetadata)
     {
         assert partitionIndexFileBuilder == null || partitionIndexFileBuilder.file.equals(descriptor.fileFor(Components.PARTITION_INDEX));
 
@@ -222,6 +224,8 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
 
         partitionIndexFileBuilder.withChunkCache(chunkCache);
         partitionIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
+        if (compressionMetadata != null && compressionMetadata.parameters.getSstableCompressor().encryptionOnly() != null)
+            partitionIndexFileBuilder.withCompressionMetadata(compressionMetadata).encryptionOnly();
 
         return partitionIndexFileBuilder;
     }

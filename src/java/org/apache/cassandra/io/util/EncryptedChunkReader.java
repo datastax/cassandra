@@ -79,6 +79,20 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         return position - maxBytesInPage + CHUNK_SIZE;
     }
 
+    @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        long currentOffset = inChunkOffset(currentPosition);
+        while (currentOffset + bytesToSkip > maxBytesInPage)
+        {
+            long len = maxBytesInPage - currentOffset;
+            bytesToSkip -= len;
+            currentPosition += CHUNK_SIZE - maxBytesInPage + len;
+            currentOffset = 0;
+        }
+        return currentPosition + bytesToSkip;
+    }
+
     private static long inChunkOffset(long position)
     {
         return position & (CHUNK_SIZE - 1);
@@ -162,18 +176,8 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
 
         if (overrideLength <= 0)
         {
-            // For encrypted files, we need to calculate the logical data length
-            // Each chunk can hold maxBytesInPage of actual data
-            // Calculate how many complete chunks we have
-            long numChunks = fileLength / CHUNK_SIZE;
-            // Calculate the logical data that can be stored
-            overrideLength = numChunks * maxBytesInPage;
-            // If there's a partial last chunk, add its data
-            long lastChunkSize = fileLength % CHUNK_SIZE;
-            if (lastChunkSize > 0) {
-                // The last chunk might have less data
-                overrideLength += Math.max(0, lastChunkSize - (CHUNK_SIZE - maxBytesInPage));
-            }
+            // Use the position after the last useable byte to allow partition index readers to find their metadata
+            overrideLength = fileLength - (CHUNK_SIZE - maxBytesInPage);
         }
 
         return new Standard(channel, compressionParams, encryptor, overrideLength, maxBytesInPage);
@@ -190,18 +194,8 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
 
         if (overrideLength <= 0)
         {
-            // For encrypted files, we need to calculate the logical data length
-            // Each chunk can hold maxBytesInPage of actual data
-            // Calculate how many complete chunks we have
-            long numChunks = fileLength / CHUNK_SIZE;
-            // Calculate the logical data that can be stored
-            overrideLength = numChunks * maxBytesInPage;
-            // If there's a partial last chunk, add its data
-            long lastChunkSize = fileLength % CHUNK_SIZE;
-            if (lastChunkSize > 0) {
-                // The last chunk might have less data
-                overrideLength += Math.max(0, lastChunkSize - (CHUNK_SIZE - maxBytesInPage));
-            }
+            // Use the position after the last useable byte to allow partition index readers to find their metadata
+            overrideLength = fileLength - (CHUNK_SIZE - maxBytesInPage);
         }
         return new Mmap(channel, regions, compressionParams, encryptor, overrideLength, maxBytesInPage);
     }

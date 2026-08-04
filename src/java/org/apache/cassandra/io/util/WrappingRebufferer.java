@@ -81,6 +81,12 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     }
 
     @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return wrapped.positionForSkip(currentPosition, bytesToSkip);
+    }
+
+    @Override
     public void close()
     {
         assert buffer == null : "Rebufferer is attempted to be closed but the buffer holder has not been released";
