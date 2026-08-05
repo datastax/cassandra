@@ -99,7 +99,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
             var recall = testRecall(limit, queryVectors, groundTruth, rerankK, null);
             // All recalls should be better than rerank_k = 0
             assertTrue("Recall for rerank_k = " + rerankK + " should be at least as good as with rerank_k = 0",
-                      recall >= zeroRerankRecall);
+                       recall >= zeroRerankRecall);
 
             // Recall varies, so we can only assert that it does not get worse on a per-run basis. However, it should
             // get better strictly at least some of the time
@@ -125,7 +125,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
     private void testUsePruningOptionCompatibility(List<float[]> queryVectors, List<List<Integer>> groundTruth)
     {
         int limit = 10;
-        
+
         // Test with pruning "enabled" (actually disabled by JVector)
         double recallWithPruningTrue = testRecall(limit, queryVectors, groundTruth, null, true);
 
@@ -135,9 +135,9 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
         // Since JVector always disables pruning, recall should be identical
         // (allowing for minor floating point differences)
         assertTrue("Recall with use_pruning=true (" + recallWithPruningTrue +
-                  ") should equal recall with use_pruning=false (" + recallWithPruningFalse +
-                  ") since JVector always disables pruning for top-K queries",
-                  Math.abs(recallWithPruningTrue - recallWithPruningFalse) < 0.001);
+                   ") should equal recall with use_pruning=false (" + recallWithPruningFalse +
+                   ") since JVector always disables pruning for top-K queries",
+                   Math.abs(recallWithPruningTrue - recallWithPruningFalse) < 0.001);
     }
 
     // Note: test only fails when scores are sent from replica to coordinator.
@@ -167,7 +167,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
 
             // Execute query with rerank_k = 0 and get the similarity scores computed by the coordinator
             String query = String.format("SELECT pk, similarity_euclidean(val, %s) as similarity FROM %%s ORDER BY val ANN OF %s LIMIT %d WITH ann_options = {'rerank_k': 0}",
-                                        queryVectorAsString, queryVectorAsString, limit);
+                                         queryVectorAsString, queryVectorAsString, limit);
             UntypedResultSet result = execute(query);
 
             // Verify that results are in descending order of similarity score
@@ -178,9 +178,9 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
             {
                 float similarity = row.getFloat("similarity");
                 assertTrue(String.format("Query %d: Similarity scores should be in descending order (higher score = more similar). " +
-                                       "Previous: %.10f, Current: %.10f",
-                                       queryIdx, lastSimilarity, similarity),
-                          similarity <= lastSimilarity);
+                                         "Previous: %.10f, Current: %.10f",
+                                         queryIdx, lastSimilarity, similarity),
+                           similarity <= lastSimilarity);
                 lastSimilarity = similarity;
             }
         }
@@ -351,12 +351,13 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
             float[] queryVector = queryVectors.get(i);
             String queryVectorAsString = Arrays.toString(queryVector);
 
-            try {
+            try
+            {
                 StringBuilder query = new StringBuilder()
-                    .append("SELECT pk FROM %s ORDER BY val ANN OF ")
-                    .append(queryVectorAsString)
-                    .append(" LIMIT ")
-                    .append(topK);
+                                      .append("SELECT pk FROM %s ORDER BY val ANN OF ")
+                                      .append(queryVectorAsString)
+                                      .append(" LIMIT ")
+                                      .append(topK);
 
                 if (rerankK != null || usePruning != null)
                 {
@@ -379,9 +380,11 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
                 // we don't care about order within the topK but we do need to restrict the size first
                 var gtSet = new HashSet<>(gt.subList(0, topK));
 
-                int n = (int)result.stream().filter(row -> gtSet.contains(row.getInt("pk"))).count();
+                int n = (int) result.stream().filter(row -> gtSet.contains(row.getInt("pk"))).count();
                 topKfound.addAndGet(n);
-            } catch (Throwable throwable) {
+            }
+            catch (Throwable throwable)
+            {
                 throw new RuntimeException(throwable);
             }
         });
@@ -405,9 +408,12 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
     {
         IntStream.range(0, vectors.size()).parallel().forEach(i -> {
             float[] arrayVector = vectors.get(i);
-            try {
+            try
+            {
                 execute("INSERT INTO %s (pk, val) VALUES (?, ?)", baseRowId + i, vector(arrayVector));
-            } catch (Throwable throwable) {
+            }
+            catch (Throwable throwable)
+            {
                 throw new RuntimeException(throwable);
             }
         });

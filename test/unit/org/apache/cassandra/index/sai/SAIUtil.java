@@ -29,6 +29,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.ReflectionUtils;
@@ -93,6 +94,29 @@ public class SAIUtil
                     }
                 }
             }
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static void setParallelGraphWriting(boolean enabled)
+    {
+        CompactionGraph.PARALLEL_ENCODING_WRITING = enabled;
+    }
+
+    public static void setEnableFused(boolean enableFused)
+    {
+        try
+        {
+            CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.setBoolean(enableFused);
+            Field field = JVectorVersionUtil.class.getDeclaredField("ENABLE_FUSED");
+            field.setAccessible(true);
+            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
+            modifiersField.setAccessible(true);
+            modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+            field.set(null, enableFused);
         }
         catch (Exception e)
         {
