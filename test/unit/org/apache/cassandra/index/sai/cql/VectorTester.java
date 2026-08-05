@@ -129,7 +129,8 @@ public class VectorTester extends SAITester
         return (double) matches / topK;
     }
 
-    protected void verifyChecksum() {
+    protected void verifyChecksum()
+    {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         cfs.indexManager.listIndexes().stream().forEach(index -> {
             try
@@ -140,7 +141,8 @@ public class VectorTester extends SAITester
                 logger.info("Verifying checksum for index {}", index.getIndexMetadata().name);
                 boolean checksumValid = verifyChecksum(indexContext);
                 assertThat(checksumValid).isTrue();
-            } catch (IllegalAccessException e)
+            }
+            catch (IllegalAccessException e)
             {
                 throw new RuntimeException(e);
             }
@@ -179,6 +181,35 @@ public class VectorTester extends SAITester
     }
 
     /**
+     * Builds a CREATE CUSTOM INDEX DDL string for a vector column.
+     * When {@code enableFused} is true, {@code 'enable_hierarchy': 'true'} is appended so that
+     * every FusedPQ run exercises the hierarchical graph code path — the two features must
+     * always be tested together.
+     *
+     * @param table        the table placeholder, typically {@code "%s"}
+     * @param column       the vector column name
+     * @param extraOptions additional options such as {@code "'similarity_function': 'euclidean'"},
+     *                     or {@code null} for none
+     * @param enableFused  whether FusedPQ is enabled for this test run
+     */
+    protected static String vectorIndexDDL(String table, String column, String extraOptions, boolean enableFused)
+    {
+        StringBuilder opts = new StringBuilder();
+        if (extraOptions != null)
+            opts.append(extraOptions);
+        if (enableFused)
+        {
+            if (opts.length() > 0)
+                opts.append(", ");
+            opts.append("'enable_hierarchy': 'true'");
+        }
+        if (opts.length() > 0)
+            return "CREATE CUSTOM INDEX ON " + table + '(' + column + ") USING 'StorageAttachedIndex'"
+                   + " WITH OPTIONS = {" + opts + '}';
+        return "CREATE CUSTOM INDEX ON " + table + '(' + column + ") USING 'StorageAttachedIndex'";
+    }
+
+    /**
      * {@link VectorTester} parameterized for all {@link Version}s supporting vector indexes.
      */
     @Ignore
@@ -198,22 +229,21 @@ public class VectorTester extends SAITester
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
+            // FA is excluded: it always has FusedPQ on and is superseded by FB.
             return Version.ALL.stream()
                               .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                              .filter(v -> !v.equals(Version.FA))
                               .flatMap(v -> {
                                   var enableNVQ = JVectorVersionUtil.versionSupportsNVQ(v)
                                                   ? new Boolean[]{ true, false }
                                                   : new Boolean[]{ false };
-                                  // FA always uses FusedPQ regardless of the flag, so only test enableFused=true there.
-                                  // FB+ allows toggling the flag, so test both values.
+                                  // FB+ allows toggling FusedPQ via the flag, so test both values.
                                   // Pre-FA versions don't support FusedPQ at all.
                                   var enableFused = v.onOrAfter(Version.FB)
                                                     ? new Boolean[]{ true, false }
-                                                    : JVectorVersionUtil.versionSupportsFused(v)
-                                                      ? new Boolean[]{ true }   // FA: always-on
-                                                      : new Boolean[]{ false };  // pre-FA: unsupported
+                                                    : new Boolean[]{ false };  // pre-FA: unsupported
                                   return Arrays.stream(enableNVQ).flatMap(nvq ->
-                                      Arrays.stream(enableFused).map(fused -> new Object[]{ v, nvq, fused })
+                                                                          Arrays.stream(enableFused).map(fused -> new Object[]{ v, nvq, fused })
                                   );
                               }).collect(Collectors.toList());
         }
@@ -234,6 +264,40 @@ public class VectorTester extends SAITester
         public void setEnableFused()
         {
             SAIUtil.setEnableFused(ENABLE_FUSED);
+        }
+
+        @Before
+        public void setParallelGraphWriting()
+        {
+            // Enable parallel graph writing when running with FusedPQ (FB+ with ENABLE_FUSED=true)
+            SAIUtil.setParallelGraphWriting(ENABLE_FUSED);
+        }
+
+        /**
+         * Returns a CREATE CUSTOM INDEX DDL string for a vector column.
+         * When {@link #ENABLE_FUSED} is true, {@code enable_hierarchy: true} is included so that
+         * every FusedPQ run exercises the hierarchical graph code path — the two features must
+         * always be tested together.
+         *
+         * @param table the table placeholder, typically {@code "%s"}
+         * @param column the vector column name
+         */
+        protected String vectorIndexDDL(String table, String column)
+        {
+            return vectorIndexDDL(table, column, null);
+        }
+
+        /**
+         * Like {@link #vectorIndexDDL(String, String)} but merges additional index options.
+         *
+         * @param table        the table placeholder, typically {@code "%s"}
+         * @param column       the vector column name
+         * @param extraOptions additional options to include, e.g. {@code "'similarity_function': 'euclidean'"},
+         *                     or {@code null} for none
+         */
+        protected String vectorIndexDDL(String table, String column, String extraOptions)
+        {
+            return VectorTester.vectorIndexDDL(table, column, extraOptions, ENABLE_FUSED);
         }
     }
 

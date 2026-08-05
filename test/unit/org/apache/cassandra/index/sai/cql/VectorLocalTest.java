@@ -84,7 +84,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
                   "    PRIMARY KEY ((lat_low_precision, lon_low_precision), lat_high_precision, lon_high_precision, id)\n" +
                   ") WITH CLUSTERING ORDER BY (lat_high_precision ASC, lon_high_precision ASC, id ASC);");
         createIndex("CREATE CUSTOM INDEX lat_high_precision_index ON %s (lat_high_precision) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex';");
-        createIndex("CREATE CUSTOM INDEX lat_lon_embedding_index ON %s (lat_lon_embedding) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'EUCLIDEAN'};");
+        createIndex("CREATE CUSTOM INDEX lat_lon_embedding_index ON %s (lat_lon_embedding) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'EUCLIDEAN'" + (ENABLE_FUSED ? ", 'enable_hierarchy': 'true'" : "") + "}");
         createIndex("CREATE CUSTOM INDEX lon_high_precision_index ON %s (lon_high_precision) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex';");
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
@@ -140,7 +140,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     private void randomizedTest(int dimension)
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", dimension));
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
         List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
@@ -194,7 +194,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     public void multiSSTablesTest()
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         disableCompaction(keyspace());
 
         int sstableCount = getRandom().nextIntBetween(3, 6);
@@ -234,7 +234,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     public void rangeRestrictedTest() throws Throwable
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
 
@@ -321,7 +321,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
 
         // create index on existing sstable to produce multiple segments
         SegmentBuilder.updateLastValidSegmentRowId(50); // 50 rows per segment
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         verifyChecksum();
 
         // query multiple on-disk indexes
@@ -381,7 +381,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
 
         // create indexes on existing sstable to produce multiple segments
         SegmentBuilder.updateLastValidSegmentRowId(50); // 50 rows per segment
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         flush();
         verifyChecksum();
