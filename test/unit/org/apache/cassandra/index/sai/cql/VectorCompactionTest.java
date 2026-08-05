@@ -73,8 +73,10 @@ abstract public class VectorCompactionTest extends VectorTester
     public static Collection<Object[]> data()
     {
         // See Version file for explanation of changes associated with each version
+        // FA is excluded: it always has FusedPQ on and is superseded by FB.
         return Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(v -> !v.equals(Version.FA))
                           .flatMap(vd -> {
                               // NVQ is only relevant some of the time
                               Boolean[] enableNVQ = JVectorVersionUtil.versionSupportsNVQ(vd)
@@ -405,14 +407,10 @@ abstract public class VectorCompactionTest extends VectorTester
                                 // reasonable for now.
                                 assertEquals(1.0f, quantizedSim, 0.01f);
                             }
-                            else if (numRows >= MIN_PQ_ROWS)
+                            else
                             {
-                                // With fused PQ (FA always; GA+ only when enabled), PQ metadata is stored inline
-                                // with the graph nodes — there is no standalone CompressedVectors to validate against.
-                                // Without fused PQ (GA+ default, pre-FA), we should never reach this branch.
-                                assertTrue("Found " + numRows + " rows without CompressedVectors; expected fused PQ for version " + version,
-                                           JVectorVersionUtil.shouldWriteFused(version));
-                                assertNotNull("Expected PQ metadata for fused PQ on version " + version, searcher.getPQ());
+                                // We should only hit this case when we don't have enough rows to build a PQ.
+                                assertTrue("Found " + numRows + " but no PQ", MIN_PQ_ROWS > numRows);
                             }
                         }
                     }

@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.stream.Collectors;
 
@@ -31,7 +32,6 @@ import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
-import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,16 +41,27 @@ import static org.junit.Assert.assertTrue;
 @RunWith(Parameterized.class)
 public class VectorMetricsTest extends VectorTester
 {
-    @Parameterized.Parameter
+    @Parameterized.Parameter(0)
     public Version version;
 
-    @Parameterized.Parameters(name = "version={0}")
+    @Parameterized.Parameter(1)
+    public boolean enableFused;
+
+    @Parameterized.Parameters(name = "version={0} enableFused={1}")
     public static Collection<Object[]> data()
     {
-        // Test all versions that support vector indexes
+        // Test all versions that support vector indexes.
+        // FA is excluded: it always has FusedPQ on and is superseded by FB.
         return Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
-                          .map(v -> new Object[]{ v })
+                          .filter(v -> !v.equals(Version.FA))
+                          .flatMap(v -> {
+                              // FB+ allows toggling FusedPQ; pre-FA versions don't support it
+                              Boolean[] fusedValues = v.onOrAfter(Version.FB)
+                                                      ? new Boolean[]{ true, false }
+                                                      : new Boolean[]{ false };
+                              return Arrays.stream(fusedValues).map(fused -> new Object[]{ v, fused });
+                          })
                           .collect(Collectors.toList());
     }
 
@@ -66,13 +77,18 @@ public class VectorMetricsTest extends VectorTester
     {
         super.setup();
         SAIUtil.setCurrentVersion(version);
+        SAIUtil.setEnableFused(enableFused);
+        SAIUtil.setParallelGraphWriting(enableFused);
     }
 
     @Test
     public void testBasicColumnQueryMetricsVectorIndexMetrics()
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        String indexDdl = enableFused
+                          ? "CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'enable_hierarchy': 'true'}"
+                          : "CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'";
+        createIndex(indexDdl);
         disableCompaction();
 
         // Get the metrics
@@ -100,12 +116,11 @@ public class VectorMetricsTest extends VectorTester
             execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vector(1 + i, 2 + i, 3 + i));
         flush();
 
-        // FA always uses FusedPQ; FB+ uses it only when cassandra.sai.vector.enable_fused=true (default false).
+        // FusedPQ is active when enableFused=true (FB+ with the flag set).
         // Pre-FA versions never use FusedPQ.
-        boolean fusedPQ = JVectorVersionUtil.shouldWriteFused(version);
         long pqMemoryAfterFlush = vectorMetrics.quantizationMemoryBytes.sum();
 
-        if (fusedPQ)
+        if (enableFused)
         {
             // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
             assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ",
@@ -125,7 +140,7 @@ public class VectorMetricsTest extends VectorTester
         compact();
         long pqMemoryAfterCompaction = vectorMetrics.quantizationMemoryBytes.sum();
 
-        if (fusedPQ)
+        if (enableFused)
         {
             // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
             assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ after compaction",

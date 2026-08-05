@@ -198,20 +198,19 @@ public class VectorTester extends SAITester
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
+            // FA is excluded: it always has FusedPQ on and is superseded by FB.
             return Version.ALL.stream()
                               .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                              .filter(v -> !v.equals(Version.FA))
                               .flatMap(v -> {
                                   var enableNVQ = JVectorVersionUtil.versionSupportsNVQ(v)
                                                   ? new Boolean[]{ true, false }
                                                   : new Boolean[]{ false };
-                                  // FA always uses FusedPQ regardless of the flag, so only test enableFused=true there.
-                                  // FB+ allows toggling the flag, so test both values.
+                                  // FB+ allows toggling FusedPQ via the flag, so test both values.
                                   // Pre-FA versions don't support FusedPQ at all.
                                   var enableFused = v.onOrAfter(Version.FB)
                                                     ? new Boolean[]{ true, false }
-                                                    : JVectorVersionUtil.versionSupportsFused(v)
-                                                      ? new Boolean[]{ true }   // FA: always-on
-                                                      : new Boolean[]{ false };  // pre-FA: unsupported
+                                                    : new Boolean[]{ false };  // pre-FA: unsupported
                                   return Arrays.stream(enableNVQ).flatMap(nvq ->
                                       Arrays.stream(enableFused).map(fused -> new Object[]{ v, nvq, fused })
                                   );
@@ -234,6 +233,13 @@ public class VectorTester extends SAITester
         public void setEnableFused()
         {
             SAIUtil.setEnableFused(ENABLE_FUSED);
+        }
+
+        @Before
+        public void setParallelGraphWriting()
+        {
+            // Enable parallel graph writing when running with FusedPQ (FB+ with ENABLE_FUSED=true)
+            SAIUtil.setParallelGraphWriting(ENABLE_FUSED);
         }
     }
 
