@@ -46,7 +46,6 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.sensors.ActiveSensorsFactory;
@@ -101,10 +100,10 @@ public class SensorsTest extends TestBaseImpl
     private static Cluster cluster;
 
     /**
-     * Table name for the scenario — kept for test name readability in parameterized output only.
+     * Human-readable scenario name used as the JUnit test display name.
      */
     @Parameterized.Parameter(0)
-    public String schema;
+    public String scenarioName;
 
     /**
      * Queries to be executed to prepare the table, for example insert some data before read to populate read sensors.
@@ -124,6 +123,15 @@ public class SensorsTest extends TestBaseImpl
      */
     @Parameterized.Parameter(3)
     public String[] expectedHeaders;
+
+    /**
+     * When {@code true}, the query is executed with a page size, which always takes the paging
+     * path ({@code execute(Pager,...)}). When {@code false}, no page size is supplied
+     * ({@link PageSize#NONE}), causing {@code canSkipPaging} to return {@code true} and routing
+     * execution through the distributed non-paging path ({@code execute(ReadQuery,...)}).
+     */
+    @Parameterized.Parameter(4)
+    public boolean paging;
 
     @BeforeClass
     public static void setupCluster() throws IOException
@@ -161,7 +169,7 @@ public class SensorsTest extends TestBaseImpl
         cluster.schemaChange(withKeyspace("TRUNCATE %s." + TBL_COL));
     }
 
-    @Parameterized.Parameters(name = "schema={0}, prepQueries={1}, testQuery={2}, expectedHeaders={3}")
+    @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
         List<Object[]> result = new ArrayList<>();
@@ -194,13 +202,15 @@ public class SensorsTest extends TestBaseImpl
                                              "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ TBL, noPrep, write, new String[]{ WRITE_TBL } });
-        result.add(new Object[]{ TBL_COUNTER, noPrep, counter, new String[]{ WRITE_COUNTER } });
-        result.add(new Object[]{ TBL, new String[]{ write }, read, new String[]{ READ_TBL } });
-        result.add(new Object[]{ TBL, noPrep, cas, new String[]{ WRITE_TBL, READ_TBL } });
-        result.add(new Object[]{ TBL, noPrep, loggedBatch, new String[]{ WRITE_TBL } });
-        result.add(new Object[]{ TBL, noPrep, unloggedBatch, new String[]{ WRITE_TBL } });
-        result.add(new Object[]{ TBL, new String[]{ write }, range, new String[]{ READ_TBL } });
+        result.add(new Object[]{ "tbl: insert",                      noPrep,                write,       new String[]{ WRITE_TBL },           true  });
+        result.add(new Object[]{ "tbl_counter: counter update",      noPrep,                counter,     new String[]{ WRITE_COUNTER },        true  });
+        result.add(new Object[]{ "tbl: point read (paging)",         new String[]{ write }, read,        new String[]{ READ_TBL },             true  });
+        result.add(new Object[]{ "tbl: point read (no paging)",      new String[]{ write }, read,        new String[]{ READ_TBL },             false });
+        result.add(new Object[]{ "tbl: CAS update",                  noPrep,                cas,         new String[]{ WRITE_TBL, READ_TBL },  true  });
+        result.add(new Object[]{ "tbl: logged batch insert",         noPrep,                loggedBatch, new String[]{ WRITE_TBL },            true  });
+        result.add(new Object[]{ "tbl: unlogged batch insert",       noPrep,                unloggedBatch, new String[]{ WRITE_TBL },          true  });
+        result.add(new Object[]{ "tbl: range read (paging)",         new String[]{ write }, range,       new String[]{ READ_TBL },             true  });
+        result.add(new Object[]{ "tbl: range read (no paging)",      new String[]{ write }, range,       new String[]{ READ_TBL },             false });
         return result;
     }
 
@@ -248,20 +258,16 @@ public class SensorsTest extends TestBaseImpl
                                                        "APPLY BATCH;", KEYSPACE, KEYSPACE, KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        // inserts: insertRow path
-        result.add(new Object[]{ TBL_2I, noPrep, write, new String[]{ WRITE_2I, INDEX_WRITE_2I } });
-        result.add(new Object[]{ TBL_2I, noPrep, loggedBatch, new String[]{ WRITE_2I, INDEX_WRITE_2I } });
-        result.add(new Object[]{ TBL_2I, noPrep, unloggedBatch, new String[]{ WRITE_2I, INDEX_WRITE_2I } });
-        // updates: updateRow path (row pre-exists, new value differs to ensure index allocation)
-        result.add(new Object[]{ TBL_2I, new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, INDEX_WRITE_2I } });
-        result.add(new Object[]{ TBL_2I, new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, INDEX_WRITE_2I } });
-        result.add(new Object[]{ TBL_2I, new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, INDEX_WRITE_2I } });
-        // CAS: IF NOT EXISTS (insertRow path) and IF condition (updateRow path)
-        result.add(new Object[]{ TBL_2I, noPrep, casInsert, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
-        result.add(new Object[]{ TBL_2I, new String[]{ write }, cas, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
-        // multi-table: sensors from both tbl_2i and tbl_sai must be present in the response
-        result.add(new Object[]{ TBL_2I + "+" + TBL_SAI, noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, INDEX_WRITE_2I, WRITE_SAI, INDEX_WRITE_SAI } });
-        result.add(new Object[]{ TBL_2I + "+" + TBL_SAI, noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, INDEX_WRITE_2I, WRITE_SAI, INDEX_WRITE_SAI } });
+        result.add(new Object[]{ "2i: insert (insertRow path)",               noPrep,                       write,                  new String[]{ WRITE_2I, INDEX_WRITE_2I },                       true  });
+        result.add(new Object[]{ "2i: logged batch insert",                   noPrep,                       loggedBatch,            new String[]{ WRITE_2I, INDEX_WRITE_2I },                       true  });
+        result.add(new Object[]{ "2i: unlogged batch insert",                 noPrep,                       unloggedBatch,          new String[]{ WRITE_2I, INDEX_WRITE_2I },                       true  });
+        result.add(new Object[]{ "2i: update (updateRow path)",               new String[]{ write },        writeUpdate,            new String[]{ WRITE_2I, INDEX_WRITE_2I },                       true  });
+        result.add(new Object[]{ "2i: logged batch update",                   new String[]{ loggedBatch },  loggedBatchUpdate,      new String[]{ WRITE_2I, INDEX_WRITE_2I },                       true  });
+        result.add(new Object[]{ "2i: unlogged batch update",                 new String[]{ unloggedBatch },unloggedBatchUpdate,    new String[]{ WRITE_2I, INDEX_WRITE_2I },                       true  });
+        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)",    noPrep,                       casInsert,              new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I },              true  });
+        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)",     new String[]{ write },        cas,                    new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I },              true  });
+        result.add(new Object[]{ "2i+sai: multi-table logged batch",          noPrep,                       multiTableLoggedBatch,  new String[]{ WRITE_2I, INDEX_WRITE_2I, WRITE_SAI, INDEX_WRITE_SAI }, true  });
+        result.add(new Object[]{ "2i+sai: multi-table unlogged batch",        noPrep,                       multiTableUnloggedBatch,new String[]{ WRITE_2I, INDEX_WRITE_2I, WRITE_SAI, INDEX_WRITE_SAI }, true  });
         return result;
     }
 
@@ -295,17 +301,14 @@ public class SensorsTest extends TestBaseImpl
                                                    "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        // inserts: insertRow path
-        result.add(new Object[]{ TBL_SAI, noPrep, write, new String[]{ WRITE_SAI, INDEX_WRITE_SAI } });
-        result.add(new Object[]{ TBL_SAI, noPrep, loggedBatch, new String[]{ WRITE_SAI, INDEX_WRITE_SAI } });
-        result.add(new Object[]{ TBL_SAI, noPrep, unloggedBatch, new String[]{ WRITE_SAI, INDEX_WRITE_SAI } });
-        // updates: updateRow path (row pre-exists, new value differs to ensure index allocation)
-        result.add(new Object[]{ TBL_SAI, new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, INDEX_WRITE_SAI } });
-        result.add(new Object[]{ TBL_SAI, new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, INDEX_WRITE_SAI } });
-        result.add(new Object[]{ TBL_SAI, new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, INDEX_WRITE_SAI } });
-        // CAS: IF NOT EXISTS (insertRow path) and IF condition (updateRow path)
-        result.add(new Object[]{ TBL_SAI, noPrep, casInsert, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI } });
-        result.add(new Object[]{ TBL_SAI, new String[]{ write }, cas, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI } });
+        result.add(new Object[]{ "sai: insert (insertRow path)",              noPrep,                       write,             new String[]{ WRITE_SAI, INDEX_WRITE_SAI },       true  });
+        result.add(new Object[]{ "sai: logged batch insert",                  noPrep,                       loggedBatch,       new String[]{ WRITE_SAI, INDEX_WRITE_SAI },       true  });
+        result.add(new Object[]{ "sai: unlogged batch insert",                noPrep,                       unloggedBatch,     new String[]{ WRITE_SAI, INDEX_WRITE_SAI },       true  });
+        result.add(new Object[]{ "sai: update (updateRow path)",              new String[]{ write },        writeUpdate,       new String[]{ WRITE_SAI, INDEX_WRITE_SAI },       true  });
+        result.add(new Object[]{ "sai: logged batch update",                  new String[]{ loggedBatch },  loggedBatchUpdate, new String[]{ WRITE_SAI, INDEX_WRITE_SAI },       true  });
+        result.add(new Object[]{ "sai: unlogged batch update",                new String[]{ unloggedBatch },unloggedBatchUpdate,new String[]{ WRITE_SAI, INDEX_WRITE_SAI },      true  });
+        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)",   noPrep,                       casInsert,         new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI }, true  });
+        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)",    new String[]{ write },        cas,               new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI }, true  });
         return result;
     }
 
@@ -319,8 +322,8 @@ public class SensorsTest extends TestBaseImpl
         String collectionUpdate = withKeyspace("INSERT INTO %s." + TBL_COL + "(pk, tags) VALUES (1, {'c', 'd'})");
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ TBL_COL, new String[0], collectionWrite, new String[]{ WRITE_COL, INDEX_WRITE_COL } });
-        result.add(new Object[]{ TBL_COL, new String[]{ collectionWrite }, collectionUpdate, new String[]{ WRITE_COL, INDEX_WRITE_COL } });
+        result.add(new Object[]{ "sai collection: insert",  new String[0],                   collectionWrite,  new String[]{ WRITE_COL, INDEX_WRITE_COL }, true  });
+        result.add(new Object[]{ "sai collection: update",  new String[]{ collectionWrite },  collectionUpdate, new String[]{ WRITE_COL, INDEX_WRITE_COL }, true  });
         return result;
     }
 
@@ -370,16 +373,12 @@ public class SensorsTest extends TestBaseImpl
                                                             "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        // 2i conditional batch: IF NOT EXISTS (insert path) and IF condition (update path)
-        result.add(new Object[]{ TBL_2I, noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
-        result.add(new Object[]{ TBL_2I, new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
-        // 2i conditional batch: multiple statements on same partition (duplicate TableMetadata in statements list)
-        result.add(new Object[]{ TBL_2I, noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I } });
-        // SAI conditional batch: IF NOT EXISTS (insert path) and IF condition (update path)
-        result.add(new Object[]{ TBL_SAI, noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI } });
-        result.add(new Object[]{ TBL_SAI, new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI } });
-        // SAI conditional batch: multiple statements on same partition (duplicate TableMetadata in statements list)
-        result.add(new Object[]{ TBL_SAI, noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI } });
+        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)",    noPrep,                conditionalBatch2iInsert,   new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I },    true  });
+        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)",     new String[]{ prep2i },conditionalBatch2iUpdate,   new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I },    true  });
+        result.add(new Object[]{ "2i cond batch: multi-stmt same partition",    noPrep,                conditionalBatch2iMultiStmt,new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I },    true  });
+        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)",   noPrep,                conditionalBatchSaiInsert,  new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI }, true  });
+        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)",    new String[]{ prepSai },conditionalBatchSaiUpdate,  new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI }, true  });
+        result.add(new Object[]{ "sai cond batch: multi-stmt same partition",   noPrep,                conditionalBatchSaiMultiStmt,new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI },true  });
         return result;
     }
 
@@ -410,6 +409,8 @@ public class SensorsTest extends TestBaseImpl
 
     /**
      * Execute the test with the given {@code propagateViaNativeProtocol} flag and return the custom payload.
+     * Routes through {@link #executeWithResultNoPaging} when {@link #paging} is {@code false},
+     * otherwise through {@link #executeWithResult}.
      */
     private Map<String, ByteBuffer> executeTest(boolean propagateViaNativeProtocol) throws Throwable
     {
@@ -418,6 +419,7 @@ public class SensorsTest extends TestBaseImpl
             cluster.coordinator(1).execute(prepQuery, ConsistencyLevel.ALL);
         // work around serializability of @Parameterized.Parameter by providing a locally scoped variable
         String query = this.testQuery;
+        boolean paging = this.paging;
         // The cluster is shared across scenarios, so SENSORS_VIA_NATIVE_PROTOCOL must be set inside the node's
         // classloader via runOnInstance rather than on the outer test JVM — the node won't see outer JVM property changes.
         // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
@@ -425,7 +427,8 @@ public class SensorsTest extends TestBaseImpl
                (IIsolatedExecutor.SerializableConsumer<AtomicReference<Map<String, ByteBuffer>>>)
                (reference) -> {
                    CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(propagateViaNativeProtocol);
-                   reference.set(executeWithResult(query).getCustomPayload());
+                   ResultMessage<?> result = paging ? executeWithResult(query) : executeWithResultNoPaging(query);
+                   reference.set(result.getCustomPayload());
                })
                .accept(customPayload);
         return customPayload.get();
@@ -437,24 +440,29 @@ public class SensorsTest extends TestBaseImpl
         return ByteBufferUtil.toDouble(customPayload.get(expectedHeader));
     }
 
-    /**
-     * TODO: update SimpleQueryResult in the dtest-api project to expose custom payload and use Coordinator##executeWithResult instead
-     */
+    /** TODO: update SimpleQueryResult in the dtest-api project to expose custom payload and use Coordinator##executeWithResult instead */
     private static ResultMessage<?> executeWithResult(String query)
+    {
+        return executeWithResult(query, PageSize.inRows(512));
+    }
+
+    /**
+     * Like {@link #executeWithResult(String)} but passes {@link PageSize#NONE} so that
+     * {@code canSkipPaging} returns {@code true} and the distributed non-paging path
+     * ({@code execute(ReadQuery,...)}) is taken instead of the paging path.
+     */
+    private static ResultMessage<?> executeWithResultNoPaging(String query)
+    {
+        return executeWithResult(query, PageSize.NONE);
+    }
+
+    private static ResultMessage<?> executeWithResult(String query, PageSize pageSize)
     {
         long nanoTime = System.nanoTime();
         QueryHandler.Prepared prepared = QueryProcessor.prepareInternal(query);
-        ConsistencyLevel consistencyLevel = ConsistencyLevel.valueOf(CONSISTENCY_LEVEL.name());
-        org.apache.cassandra.db.ConsistencyLevel cl = org.apache.cassandra.db.ConsistencyLevel.fromCode(consistencyLevel.ordinal());
-        QueryOptions initialOptions = QueryOptions.create(cl,
-                                                          null,
-                                                          false,
-                                                          PageSize.inRows(512),
-                                                          null,
-                                                          null,
-                                                          ProtocolVersion.CURRENT,
-                                                          prepared.keyspace);
-        return prepared.statement.execute(QueryProcessor.internalQueryState(), initialOptions, nanoTime);
+        org.apache.cassandra.db.ConsistencyLevel cl = org.apache.cassandra.db.ConsistencyLevel.fromCode(ConsistencyLevel.valueOf(CONSISTENCY_LEVEL.name()).ordinal());
+        QueryOptions options = QueryOptions.create(cl, null, false, pageSize, null, null, ProtocolVersion.CURRENT, prepared.keyspace);
+        return prepared.statement.execute(QueryProcessor.internalQueryState(), options, nanoTime);
     }
 
     /**

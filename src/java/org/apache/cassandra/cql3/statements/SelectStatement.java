@@ -448,10 +448,15 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        int userOffset,
                                        long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
+        ResultMessage.Rows msg;
         try (PartitionIterator data = query.execute(options.getConsistency(), queryState, queryStartNanoTime))
         {
-            return processResults(data, options, selectors, nowInSec, userLimit, userOffset);
+            msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset);
         }
+        RequestSensors sensors = RequestTracker.instance.get();
+        Context context = Context.from(this.table);
+        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+        return msg;
     }
 
     @Override
