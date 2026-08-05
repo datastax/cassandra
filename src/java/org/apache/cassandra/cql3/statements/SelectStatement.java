@@ -641,10 +641,15 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        Dispatcher.RequestTime requestTime,
                                        boolean unmask)
     {
+        ResultMessage.Rows msg;
         try (PartitionIterator data = query.execute(options.getConsistency(), state, requestTime))
         {
-            return processResults(data, options, selectors, nowInSec, userLimit, userOffset, aggregationSpec, unmask, state);
+            msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset, aggregationSpec, unmask, state);
         }
+        RequestSensors sensors = RequestTracker.instance.get();
+        Context context = Context.from(this.table);
+        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+        return msg;
     }
 
     @Override

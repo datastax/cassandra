@@ -47,6 +47,7 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         // Commit phase reads from the Paxos table and writes the proposal to the user table
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         RequestTracker.instance.set(sensors);
