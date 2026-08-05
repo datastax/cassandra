@@ -44,10 +44,10 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
         Context context = Context.from(message.payload.update.metadata());
 
-        // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
+        // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor.
+        // INDEX_WRITE_BYTES is not registered here because prepare only writes to system.paxos, which has no indexes.
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
-        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);

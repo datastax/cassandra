@@ -264,15 +264,14 @@ public class ReplicaSensorsTrackingTest
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> prepare = Message.builder(Verb.PAXOS_PREPARE_REQ, mutation).build();
 
-        // init request sensors, must happen before the callback is created
+        // init request sensors, must happen before the callback is created.
+        // INDEX_WRITE_BYTES is intentionally not registered: prepare only writes to system.paxos, which has no indexes.
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.READ_BYTES);
-        requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
         Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
-        Sensor actualIndexWriteSensor = requestSensors.getSensor(context, Type.INDEX_WRITE_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -284,13 +283,10 @@ public class ReplicaSensorsTrackingTest
         mockingPrepareWriteSensor.increment(13.0);
         Sensor mockingPrepareReadSensor = new mockingSensor(context, Type.READ_BYTES);
         mockingPrepareReadSensor.increment(14.0);
-        Sensor mockingPrepareIndexWriteSensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
-        mockingPrepareIndexWriteSensor.increment(15.0);
         Pair<Sensor, Sensor> prepareWriterSensors = Pair.create(actualWriteSensor, mockingPrepareWriteSensor);
         Pair<Sensor, Sensor> prepareReadSensors = Pair.create(actualReadSensor, mockingPrepareReadSensor);
-        Pair<Sensor, Sensor> prepareIndexWriteSensors = Pair.create(actualIndexWriteSensor, mockingPrepareIndexWriteSensor);
 
-        assertReplicaSensorsTracked(prepare, callback, prepareWriterSensors, prepareReadSensors, prepareIndexWriteSensors);
+        assertReplicaSensorsTracked(prepare, callback, prepareWriterSensors, prepareReadSensors);
     }
 
     @Test
@@ -304,15 +300,14 @@ public class ReplicaSensorsTrackingTest
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> propose = Message.builder(Verb.PAXOS_PROPOSE_REQ, mutation).build();
 
-        // init request sensors, must happen before the callback is created
+        // init request sensors, must happen before the callback is created.
+        // INDEX_WRITE_BYTES is intentionally not registered: propose only writes to system.paxos, which has no indexes.
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.READ_BYTES);
-        requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
         Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
-        Sensor actualIndexWriteSensor = requestSensors.getSensor(context, Type.INDEX_WRITE_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -323,13 +318,10 @@ public class ReplicaSensorsTrackingTest
         mockingProposeWriteSensor.increment(15.0);
         Sensor mockingProposeReadSensor = new mockingSensor(context, Type.READ_BYTES);
         mockingProposeReadSensor.increment(16.0);
-        Sensor mockingProposeIndexWriteSensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
-        mockingProposeIndexWriteSensor.increment(17.0);
         Pair<Sensor, Sensor> proposeWriterSensors = Pair.create(actualWriteSensor, mockingProposeWriteSensor);
         Pair<Sensor, Sensor> proposeReadSensors = Pair.create(actualReadSensor, mockingProposeReadSensor);
-        Pair<Sensor, Sensor> proposeIndexWriteSensors = Pair.create(actualIndexWriteSensor, mockingProposeIndexWriteSensor);
 
-        assertReplicaSensorsTracked(propose, callback, proposeWriterSensors, proposeReadSensors, proposeIndexWriteSensors);
+        assertReplicaSensorsTracked(propose, callback, proposeWriterSensors, proposeReadSensors);
     }
 
     /**
