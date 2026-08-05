@@ -264,7 +264,8 @@ public class ReplicaSensorsTrackingTest
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> prepare = Message.builder(Verb.PAXOS_PREPARE_REQ, mutation).build();
 
-        // init request sensors, must happen before the callback is created
+        // init request sensors, must happen before the callback is created.
+        // INDEX_WRITE_BYTES is intentionally not registered: prepare only writes to system.paxos, which has no indexes.
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
@@ -299,7 +300,8 @@ public class ReplicaSensorsTrackingTest
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> propose = Message.builder(Verb.PAXOS_PROPOSE_REQ, mutation).build();
 
-        // init request sensors, must happen before the callback is created
+        // init request sensors, must happen before the callback is created.
+        // INDEX_WRITE_BYTES is intentionally not registered: propose only writes to system.paxos, which has no indexes.
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
@@ -340,18 +342,24 @@ public class ReplicaSensorsTrackingTest
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor actualIndexWriteSensor = requestSensors.getSensor(context, Type.INDEX_WRITE_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
         // init callback
         AbstractWriteResponseHandler<?> callback = createWriteResponseHandler(ConsistencyLevel.ALL, ConsistencyLevel.ALL);
 
-        // mimic a sensor to be used in replica response
+        // mimic sensors to be used in replica response
         Sensor mockingWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
         mockingWriteSensor.increment(13.0);
+        Sensor mockingIndexWriteSensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
+        mockingIndexWriteSensor.increment(7.0);
 
-        assertReplicaSensorsTracked(writeRequest, callback, allowHints, Pair.create(actualWriteSensor, mockingWriteSensor));
+        assertReplicaSensorsTracked(writeRequest, callback, allowHints,
+                                    Pair.create(actualWriteSensor, mockingWriteSensor),
+                                    Pair.create(actualIndexWriteSensor, mockingIndexWriteSensor));
     }
 
     @SafeVarargs
