@@ -672,15 +672,21 @@ public final class SystemKeyspace
     }
 
     /**
-     * Decorates a paxos comit consumer with methods to track bytes written to the Paxos system table under the context of the user table that initiated Paxos.
+     * Decorates a paxos commit consumer with methods to track bytes written to the Paxos system table under the
+     * context of the user table that initiated Paxos. Both {@link Type#WRITE_BYTES} and
+     * {@link Type#INDEX_WRITE_BYTES} are registered under {@link #PaxosContext} before the write runs and
+     * transferred to the user-table context afterward, so that any index writes on {@code system.paxos} are
+     * attributed to the user table consistently with base-table writes.
      */
     private static void trackPaxosBytes(Commit commit, Runnable paxosCommitConsumer)
     {
         // Track bytes written to the Paxos system table for the commit that initiated Paxos
         registerPaxosSensor(Type.WRITE_BYTES);
+        registerPaxosSensor(Type.INDEX_WRITE_BYTES);
         paxosCommitConsumer.run();
         // transfer bytes written to the Paxos system table to the user table for the commit that initiated Paxos
         transferPaxosSensorBytes(commit.update.metadata(), Type.WRITE_BYTES);
+        transferPaxosSensorBytes(commit.update.metadata(), Type.INDEX_WRITE_BYTES);
     }
 
     private static void registerPaxosSensor(Type type)
