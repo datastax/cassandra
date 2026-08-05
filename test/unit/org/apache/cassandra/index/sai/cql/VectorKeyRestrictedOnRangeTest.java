@@ -33,7 +33,7 @@ public class VectorKeyRestrictedOnRangeTest extends VectorKeyRestrictedTester
     public void rangeSearchTest() throws Throwable
     {
         createTable("CREATE TABLE %s (partition int, val vector<float, 2>, PRIMARY KEY(partition))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createIndex(vectorIndexDDL("%s", "val", "'similarity_function' : 'euclidean'"));
 
         var nPartitions = 100;
         Map<Integer, float[]> vectorsByKey = new HashMap<>();

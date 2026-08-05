@@ -38,7 +38,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void partitionDeleteVectorInMemoryTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -70,7 +70,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void rowDeleteVectorInMemoryAndFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, ck int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, ck))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, ck, str_val, val) VALUES (0, 0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, ck, str_val, val) VALUES (1, 1, 'B', [2.0, 3.0, 4.0])");
@@ -91,7 +91,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void testFlushWithDeletedVectors()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "v"));
 
         execute("INSERT INTO %s (pk, v) VALUES (0, [1.0, 2.0])");
         execute("INSERT INTO %s (pk, v) VALUES (0, null)");
@@ -107,7 +107,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void rangeDeleteVectorInMemoryAndFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, ck int, ck2 int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, ck, ck2))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, ck, ck2, str_val, val) VALUES (0, 0, 0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, ck, ck2, str_val, val) VALUES (1, 1, 1, 'B', [2.0, 3.0, 4.0])");
@@ -128,7 +128,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void updateVectorInMemoryAndFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -149,7 +149,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void deleteVectorPostFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -176,7 +176,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void deletedInOtherSSTablesTest() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -201,7 +201,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'A', [2.0, 3.0, 4.0])");
@@ -223,7 +223,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void rangeDeletedInOtherSSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, ck1 int, ck2 int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, ck1, ck2))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 1, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 2, 'B', [2.0, 3.0, 4.0])");
@@ -250,7 +250,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void partitionDeletedInOtherSSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, ck1 int, ck2 int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, ck1, ck2))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 1, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 2, 'B', [2.0, 3.0, 4.0])");
@@ -277,7 +277,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void upsertTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         // insert row A redundantly, and row B once
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
@@ -313,7 +313,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void updateTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         // overwrite row A a bunch of times; also write row B with the same vector as a deleted A value
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
@@ -370,7 +370,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     {
         // contrived example to make sure we exercise VectorIndexSearcher.limitToTopResults
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
 
         // overwrite row A a bunch of times
@@ -402,7 +402,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void updateOtherColumnsTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -416,7 +416,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void updateManySSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         flush();
@@ -454,7 +454,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void shadowedPrimaryKeyInDifferentSSTable()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector
@@ -478,7 +478,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void shadowedPrimaryKeyWithSharedVector()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector that is shared by two rows
@@ -505,7 +505,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector that is shared by two rows
@@ -532,7 +532,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, num int, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         disableCompaction(KEYSPACE);
 
         // Same PK, different num, different vectors
@@ -555,7 +555,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     {
         setMaxBruteForceRows(0);
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", 2));
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])"); // -3485513579396041028
         execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 2.0])"); // -4069959284402364209
@@ -581,7 +581,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     {
         setMaxBruteForceRows(0);
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", 2));
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
@@ -613,7 +613,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void testVectorRowWhereUpdateMakesRowMatchNonOrderingPredicates()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "vec"));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Split the row across 1 sstable and the memtable.
@@ -648,7 +648,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
         // Use euclidean distance to more easily verify correctness of caching
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
+        createIndex(vectorIndexDDL("%s", "vec", "'similarity_function' : 'euclidean'"));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // We will search for [11,11]
@@ -670,7 +670,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void testUpdateNonVectorColumnWhereNoSingleSSTableRowMatchesAllPredicates()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val1 text, val2 text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "vec"));
         createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex'");
 
@@ -693,7 +693,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void shadowedPrimaryKeyInDifferentSSTableEachWithMultipleRows()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector
@@ -722,7 +722,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void shadowedPrimaryKeysRequireDeeperSearch() throws Throwable
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         disableCompaction(KEYSPACE);
 
@@ -759,7 +759,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void testUpdateVectorToWorseAndBetterPositions() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
         execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 3.0])");
@@ -798,7 +798,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         setMaxBruteForceRows(0);
 
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         disableCompaction(KEYSPACE);
 
@@ -840,7 +840,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     {
         setMaxBruteForceRows(0);
         createTable("CREATE TABLE %s (pk int, val vector<float, " + vectorDimension + ">, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         // Insert 100 vectors
         for (int i = 0; i < 100; i++)
@@ -874,7 +874,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, a))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         disableCompaction(KEYSPACE);
 
         // Insert a row with a vector
@@ -897,7 +897,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, a))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         disableCompaction(KEYSPACE);
 
         // Insert two rows with different vectors to get different ordinals
@@ -920,7 +920,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void ensureCompressedVectorsCanFlush()
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 4>, PRIMARY KEY(pk))");
-        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        var indexName = createIndex(vectorIndexDDL("%s", "val"));
 
         // insert enough vectors for pq plus 1 because we need quantization and we're deleting a row
         for (int i = 0; i < MIN_PQ_ROWS + 1; i++)
@@ -938,7 +938,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void testTTLOverwriteHasCorrectOnDiskRowCount() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int primary key, val vector<float, 3>)");
-        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        var indexName = createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0, 3.0]) USING TTL 1");
 
@@ -965,7 +965,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void testSameRowInMultipleSSTablesWithSameTimestamp() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, ck int, val vector<float, 3>, PRIMARY KEY(pk, ck))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
         // We don't want compaction preventing us from hitting the intended code path.
         disableCompaction();
 
@@ -989,8 +989,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void testMemtableInsertSearchUpdateSearchHandling()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, embedding vector<float, 5>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(embedding) USING 'StorageAttachedIndex' " +
-                    "WITH OPTIONS = {'similarity_function': 'dot_product', 'source_model': 'OTHER'}");
+        createIndex(vectorIndexDDL("%s", "embedding", "'similarity_function': 'dot_product', 'source_model': 'OTHER'"));
 
         // Insert initial data
         execute("INSERT INTO %s (id, embedding) VALUES ('row1', [0.1, 0.1, 0.1, 0.1, 0.1])");

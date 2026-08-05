@@ -33,7 +33,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     {
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, val text, vec vector<float, 2>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "vec"));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Insert rows into two sstables. The tokens for each PK are in each line's comment.
@@ -62,7 +62,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     {
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "vec"));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Insert rows into two sstables. The tokens for each PK are in each line's comment.
@@ -89,7 +89,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     {
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "vec"));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 1, 'A', [1, 3])");
@@ -111,7 +111,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
         setMaxBruteForceRows(0);
         QueryController.QUERY_OPT_LEVEL = 0;
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "vec"));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Create two sstables. The first needs a hole forcing us to skip.
@@ -133,7 +133,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     public void testHybridSearchSeqLogicForMappingPKsBackToRowIds() throws Throwable
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
+        createIndex(vectorIndexDDL("%s", "vec", "'similarity_function' : 'euclidean'"));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Insert rows into two sstables. The rows are interleaved to ensure binary search is less efficient, which
@@ -166,7 +166,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
         // This test requires the non-bruteforce route
         setMaxBruteForceRows(0);
         createTable("CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createIndex(vectorIndexDDL("%s", "vec", "'similarity_function' : 'euclidean'"));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         execute("INSERT INTO %s (pk, val, vec) VALUES (1, 'A', [1, 1])");
@@ -198,7 +198,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
         // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
         // in a peer index for an sstable's search index but not its vector index.
         createTable("CREATE TABLE %s (k int, i int, v vector<float, 2>, c int,  PRIMARY KEY(k, i))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "v"));
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
         // We'll manually control compaction.
         disableCompaction();
@@ -227,7 +227,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
         QueryController.QUERY_OPT_LEVEL = 0;
 
         createTable("CREATE TABLE %s (pk int, val int, vec vector<float, 128>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "vec"));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Insert many rows in parallel
