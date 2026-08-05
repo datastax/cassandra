@@ -98,7 +98,6 @@ import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -123,6 +122,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit;
@@ -210,11 +210,6 @@ public class StorageProxy implements StorageProxyMBean
 
             QueryInfoTracker.WriteTracker writeTracker = StorageProxy.queryTracker().onWrite(clientState, true, mutations, consistencyLevel);
 
-            // Request sensors are utilized to track usages from replicas serving atomic batch request
-            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
-            ExecutorLocals locals = ExecutorLocals.create(sensors);
-            ExecutorLocals.set(locals);
-
             if (mutations.stream().anyMatch(mutation -> Keyspace.open(mutation.getKeyspaceName()).getReplicationStrategy().hasTransientReplicas()))
                 throw new AssertionError("Logged batches are unsupported with transient replication");
 
@@ -241,7 +236,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 BatchlogResponseHandler.BatchlogCleanup cleanup = new BatchlogResponseHandler.BatchlogCleanup(mutations.size(), () -> clearBatchlog(keyspace, replicaPlan, batchUUID));
 
-                List<StorageProxy.WriteResponseHandlerWrapper> wrappers = wrapBatchResponseHandlers(mutations, consistencyLevel, batchConsistencyLevel, cleanup, queryStartNanoTime, sensors);
+                List<StorageProxy.WriteResponseHandlerWrapper> wrappers = wrapBatchResponseHandlers(mutations, consistencyLevel, batchConsistencyLevel, cleanup, queryStartNanoTime);
 
                 // persist batchlog before writing batched mutations
                 persistBatchlog(mutations, queryStartNanoTime, replicaPlan, batchUUID);
@@ -308,20 +303,13 @@ public class StorageProxy implements StorageProxyMBean
                                                                               ConsistencyLevel consistencyLevel,
                                                                               ConsistencyLevel batchConsistencyLevel,
                                                                               BatchlogResponseHandler.BatchlogCleanup cleanup,
-                                                                              long queryStartNanoTime,
-                                                                              RequestSensors sensors)
+                                                                              long queryStartNanoTime)
         {
             List<StorageProxy.WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
 
             // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
             for (Mutation mutation : mutations)
             {
-                // register the sensors for the mutation before the actual write is performed
-                for (PartitionUpdate pu: mutation.getPartitionUpdates())
-                {
-                    if (pu.metadata().isIndex()) continue;
-                    sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
-                }
                 StorageProxy.WriteResponseHandlerWrapper wrapper = StorageProxy.wrapBatchResponseHandler(mutation,
                                                                                                          consistencyLevel,
                                                                                                          batchConsistencyLevel,
@@ -485,11 +473,35 @@ public class StorageProxy implements StorageProxyMBean
                                                                                 key,
                                                                                 consistencyForPaxos,
                                                                                 consistencyForCommit);
-        // Request sensors are utilized to track usages from replicas serving a cas request
+        // All three sensor types are registered against the user-table context here on the coordinator.
+        // This same context is reused for system.paxos I/O via the following two-step mechanism:
+        //
+        // 1. Re-attribution inside SystemKeyspace (replica-local):
+        //    Every system.paxos read (loadPaxosState) and write (savePaxosPromise / savePaxosProposal /
+        //    savePaxosCommit) temporarily registers a sensor under PaxosContext (system.paxos metadata),
+        //    measures the actual bytes, then calls transferPaxosSensorBytes() which copies that value into
+        //    Context.from(userTableMetadata) on the same RequestSensors — re-keying the measurement from
+        //    system.paxos to the user table before the reply is sent.
+        //    Concretely: Prepare reads+writes system.paxos (loadPaxosState + savePaxosPromise),
+        //    Propose reads+writes system.paxos (loadPaxosState + savePaxosProposal), and
+        //    Commit writes system.paxos (savePaxosCommit) and, when the condition was met, also applies
+        //    the user-table mutation — all of these bytes end up under the user-table context after transfer.
+        //
+        // 2. Merging replica values back into the coordinator sensor (ResponseVerbHandler):
+        //    Each verb handler (PrepareVerbHandler, ProposeVerbHandler, CommitVerbHandler) on the replica
+        //    encodes the accumulated sensor values into the internode response as custom parameters
+        //    (SensorsCustomParams.addSensorsToInternodeResponse). The coordinator's ResponseVerbHandler
+        //    detects AbstractPaxosCallback instances and calls incrementSensor() on this RequestSensors
+        //    object with the user-table context, accumulating all replica contributions here.
+        //
+        // The Commit object carries the user-table TableMetadata (set in Commit.newPrepare via
+        // Schema.instance.validateTable above), so message.payload.update.metadata() on every verb handler
+        // is the user-table metadata, not system.paxos — guaranteeing consistent context across all replicas.
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(keyspaceName);
         Context context = Context.from(metadata);
-        sensors.registerSensor(context, Type.WRITE_BYTES); // track user table + paxos table write bytes
-        sensors.registerSensor(context, Type.READ_BYTES); // track user table + paxos table read bytes
+        sensors.registerSensor(context, Type.WRITE_BYTES); // tracks user table + system.paxos write bytes (see comment above)
+        sensors.registerSensor(context, Type.READ_BYTES);  // tracks user table + system.paxos read bytes (see comment above)
+        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES); // track secondary index write bytes on commit
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         try
@@ -1102,6 +1114,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (pu.metadata().isIndex()) continue;
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
                 }
 
                 if (mutation instanceof CounterMutation)
@@ -1388,6 +1401,28 @@ public class StorageProxy implements StorageProxyMBean
                                         ClientState clientState)
     throws UnavailableException, OverloadedException, WriteTimeoutException
     {
+        // Request sensors are utilized to track usages from replicas serving atomic batch request.
+        // Must be installed on the thread-local before calling mutator.mutateAtomically() so that
+        // AbstractWriteResponseHandler captures a non-null sensors object, and ResponseVerbHandler
+        // can accumulate replica sensor values back into it.
+        // This mirrors the same pattern used in mutate() and cas() for consistency across all
+        // coordinator write paths.
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
+        ExecutorLocals.set(ExecutorLocals.create(sensors));
+
+        // Register sensors for each mutation partition before the mutator constructs WriteResponseHandlers.
+        // AbstractWriteResponseHandler captures the sensors reference at construction time, so both
+        // sensor creation (above) and registration (here) must precede any call to getWriteResponseHandler().
+        for (Mutation mutation : mutations)
+        {
+            for (PartitionUpdate pu : mutation.getPartitionUpdates())
+            {
+                if (pu.metadata().isIndex()) continue;
+                sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
+            }
+        }
+
         mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
     }
 

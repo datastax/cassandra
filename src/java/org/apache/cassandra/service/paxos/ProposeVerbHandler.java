@@ -44,7 +44,8 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
         Context context = Context.from(message.payload.update.metadata());
 
-        // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor
+        // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor.
+        // INDEX_WRITE_BYTES is not registered here because propose only writes to system.paxos, which has no indexes.
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
