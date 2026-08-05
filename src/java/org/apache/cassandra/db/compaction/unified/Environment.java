@@ -16,11 +16,6 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
-import java.util.List;
-import java.util.Random;
-
-import org.agrona.collections.IntArrayList;
-import org.apache.cassandra.db.compaction.CompactionAggregate;
 import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.utils.MovingAverage;
 
