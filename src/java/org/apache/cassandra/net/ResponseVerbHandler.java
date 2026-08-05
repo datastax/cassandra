@@ -105,6 +105,7 @@ public class ResponseVerbHandler implements IVerbHandler
             Context context = Context.from(paxosCallback.getMetadata());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+            incrementSensor(sensors, context, Type.INDEX_WRITE_BYTES, message);
         }
     }
 

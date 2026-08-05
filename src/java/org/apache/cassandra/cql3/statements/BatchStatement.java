@@ -453,20 +453,20 @@ public class BatchStatement implements CQLStatement
         }
 
         RequestSensors sensors = RequestTracker.instance.get();
-        statements.stream()
-                  .map(ModificationStatement::metadata)
-                  .distinct()
-                  .forEach(metadata ->
-                           {
-                               Context context = Context.from(metadata);
-                               SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_BYTES);
-                               SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.INDEX_WRITE_BYTES);
-                               if (hasConditions)
-                               {
-                                   // Conditional batches always perform a Paxos read, so READ_BYTES is always tracked
-                                   SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.READ_BYTES);
-                               }
-                           });
+        Map<TableId, TableMetadata> tableMetadataById = statements.stream()
+                                                                  .map(ModificationStatement::metadata)
+                                                                  .collect(Collectors.toMap(metadata -> metadata.id, Function.identity(), (existing, replacement) -> existing));
+        for (TableMetadata metadata : tableMetadataById.values())
+        {
+            Context context = Context.from(metadata);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.INDEX_WRITE_BYTES);
+            if (hasConditions)
+            {
+                // Conditional batches always perform a Paxos read, so READ_BYTES is always tracked
+                SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.READ_BYTES);
+            }
+        }
         return result;
     }
 

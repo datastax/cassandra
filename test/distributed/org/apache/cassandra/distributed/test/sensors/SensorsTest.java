@@ -162,11 +162,11 @@ public class SensorsTest extends TestBaseImpl
     @Before
     public void truncateTables()
     {
-        cluster.schemaChange(withKeyspace("TRUNCATE %s." + TBL));
-        cluster.schemaChange(withKeyspace("TRUNCATE %s." + TBL_COUNTER));
-        cluster.schemaChange(withKeyspace("TRUNCATE %s." + TBL_2I));
-        cluster.schemaChange(withKeyspace("TRUNCATE %s." + TBL_SAI));
-        cluster.schemaChange(withKeyspace("TRUNCATE %s." + TBL_COL));
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL_COUNTER), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL_2I), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL_SAI), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL_COL), ConsistencyLevel.ALL);
     }
 
     @Parameterized.Parameters(name = "{0}")

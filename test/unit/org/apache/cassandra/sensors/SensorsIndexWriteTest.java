@@ -163,6 +163,7 @@ public class SensorsIndexWriteTest
         assertThat(writeSensor.getValue()).isGreaterThan(0);
 
         // INDEX_WRITE_BYTES must be encoded in the response message custom params
+        assertThat(capturedOutboundMessages).isNotEmpty();
         Message lastMessage = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
         String indexWriteParam = SensorsCustomParams.paramForRequestSensor(indexWriteSensor).get();
         assertThat(lastMessage.header.customParams()).containsKey(indexWriteParam);
@@ -201,6 +202,7 @@ public class SensorsIndexWriteTest
         assertThat(writeSensor.getValue()).isGreaterThan(0);
 
         // INDEX_WRITE_BYTES must be encoded in the response message custom params
+        assertThat(capturedOutboundMessages).isNotEmpty();
         Message lastMessage = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
         String indexWriteParam = SensorsCustomParams.paramForRequestSensor(indexWriteSensor).get();
         assertThat(lastMessage.header.customParams()).containsKey(indexWriteParam);
@@ -308,6 +310,7 @@ public class SensorsIndexWriteTest
     private void assertResponseSensors(double requestValue, double registryValue, String requestParam, String globalParam)
     {
         // verify against the last message to enable testing of multiple mutations in a for loop
+        assertThat(capturedOutboundMessages).isNotEmpty();
         Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
         assertResponseSensors(message, requestValue, registryValue, requestParam, globalParam);
 
