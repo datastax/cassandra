@@ -67,7 +67,6 @@ import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Throwables;
 
 public abstract class SortedTableWriter extends SSTableWriter
@@ -363,21 +362,16 @@ public abstract class SortedTableWriter extends SSTableWriter
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
         invalidateCacheAtPreviousBoundary(dfile, Long.MAX_VALUE);
 
-        DecoratedKey firstMinimized = getMinimalKey(first);
-        DecoratedKey lastMinimized = getMinimalKey(last);
         try
         {
-            SSTableReader reader = openReader(reason, dfile, stats, Optional.of(compactionMetadata));
-            reader.first = firstMinimized;
-            reader.last = lastMinimized;
-            return reader;
+            return openReader(reason, dfile, stats, Optional.of(compactionMetadata));
         }
         catch (Throwable t)
         {
             Throwable err = Throwables.close(t, dfile);
 
             if (storageHandler != null)
-                return storageHandler.onOpeningWrittenSSTableFailure(reason, descriptor, components(), dfile.onDiskLength, dfile.dataLength(), stats, firstMinimized, lastMinimized, keyCount, err);
+                return storageHandler.onOpeningWrittenSSTableFailure(reason, descriptor, components(), dfile.onDiskLength, dfile.dataLength(), stats, getMinimalKey(first), getMinimalKey(last), keyCount, err);
 
             throw Throwables.unchecked(err);
         }

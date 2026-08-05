@@ -75,7 +75,18 @@ public class SSTableEncryptionTest extends TestBaseImpl
     }
 
     @Test
+    public void shouldFlushToQueryableEncryptedSSTables() throws Throwable
+    {
+        testQueryableEncryptedSSTables(false);
+    }
+
+    @Test
     public void shouldCreateQueryableEncryptedSSTables() throws Throwable
+    {
+        testQueryableEncryptedSSTables(true);
+    }
+
+    public void testQueryableEncryptedSSTables(boolean restartNodes) throws Throwable
     {
         try (Cluster cluster = builder().withNodes(2)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
@@ -98,6 +109,15 @@ public class SSTableEncryptionTest extends TestBaseImpl
             cluster.get(1).flush(keyspace);
 
             insertAndFlush(cluster, keyspace, table, numberOfRows);
+
+            if (restartNodes)
+            {
+                for (int i = 1; i <= cluster.size(); ++i)
+                {
+                    waitOn(cluster.get(i).shutdown());
+                    cluster.get(i).startup();
+                }
+            }
 
             // when querying all
             Object[][] rows = cluster.coordinator(1).execute(String.format("SELECT * FROM %s.%s ", keyspace, table), ALL);

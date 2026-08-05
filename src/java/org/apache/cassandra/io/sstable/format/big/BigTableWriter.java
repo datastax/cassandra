@@ -38,7 +38,6 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.Downsampling;
@@ -246,18 +245,21 @@ public class BigTableWriter extends SortedTableWriter
         int indexBufferSize = optimizationStrategy.bufferSize(indexFileLength / indexSummary.size());
         iwriter.indexFile.updateFileHandle(iwriter.builder);
         FileHandle ifile = iwriter.builder.bufferSize(indexBufferSize).complete();
-        return SSTableReader.internalOpen(descriptor,
-                                          components(),
-                                          metadata,
-                                          ifile,
-                                          dataFileHandle,
-                                          indexSummary,
-                                          iwriter.bf.sharedCopy(),
-                                          maxDataAge,
-                                          stats,
-                                          compactionMetadata,
-                                          reason,
-                                          header);
+        SSTableReader reader =  SSTableReader.internalOpen(descriptor,
+                                                           components(),
+                                                           metadata,
+                                                           ifile,
+                                                           dataFileHandle,
+                                                           indexSummary,
+                                                           iwriter.bf.sharedCopy(),
+                                                           maxDataAge,
+                                                           stats,
+                                                           compactionMetadata,
+                                                           reason,
+                                                           header);
+        reader.first = getMinimalKey(first);
+        reader.last = getMinimalKey(last);
+        return reader;
     }
 
     protected SortedTableWriter.TransactionalProxy txnProxy()

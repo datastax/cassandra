@@ -52,7 +52,6 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
@@ -78,6 +77,7 @@ import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -181,6 +181,10 @@ public class TrieIndexSSTableReader extends SSTableReader
         TrieIndexSSTableReader reader = new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, compactionMetadata, openReason, header, dfile, rowIndexFile, partitionIndex, bf);
         reader.first = partitionIndex.firstKey();
         reader.last = partitionIndex.lastKey();
+        // Make sure index is not retaining keys that reference slab memory.
+        assert !ByteBufferUtil.canMinimize(reader.first.getKey());
+        assert !ByteBufferUtil.canMinimize(reader.last.getKey());
+
 
         return reader;
     }
@@ -222,12 +226,12 @@ public class TrieIndexSSTableReader extends SSTableReader
         partitionIndex.addTo(identities);
     }
 
-    protected boolean filterFirst()
+    public boolean filterFirst()
     {
         return openReason == OpenReason.MOVED_START || sstableMetadata.zeroCopyMetadata.exists();
     }
 
-    protected boolean filterLast()
+    public boolean filterLast()
     {
         return sstableMetadata.zeroCopyMetadata.exists();
     }
@@ -342,6 +346,27 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     /**
+     * In encrypted index files skipBytes may end up in a different but equivalent position when it's at the
+     * end of an encrypted chunk. More precisely, if the skipped sequence of bytes lands exactly at the end of the
+     * useable part of a chunk (just before the hole left for encryption metadata), a normal read would leave the file
+     * at that position; before reading the next byte it will silently advance to the start of the next chunk. A skip,
+     * on the other hand, will jump to the position that follows the data, which is correctly converted to the beginning
+     * of the next page in preparation for reading. As a result it will leave the file positioned at the start of the
+     * next page immediately. See PartitionIndexEncryptedTest#testSkipAcrossHoles.
+     *
+     * To avoid this, we skip one fewer byte and consume the last byte.
+     */
+    @VisibleForTesting
+    static void skipBytesWithCorrectPosition(DataInputPlus in, int skip) throws IOException
+    {
+        if (skip > 0)
+        {
+            in.skipBytesFully(skip - 1);
+            in.readByte();
+        }
+    }
+
+    /**
      * Called by getPosition above (via Reader.ceiling/floor) to check if the position satisfies the full key constraint.
      * This is called once if there is a prefix match (which can be in any relationship with the sought key, thus
      * assumeNoMatch: false), and if it returns null it is called again for the closest greater position
@@ -355,7 +380,10 @@ public class TrieIndexSSTableReader extends SSTableReader
             try (FileDataInput in = rowIndexFile.createReader(pos))
             {
                 if (assumeNoMatch)
-                    ByteBufferUtil.skipShortLength(in);
+                {
+                    int skip = ByteBufferUtil.readShortLength(in);
+                    skipBytesWithCorrectPosition(in, skip);
+                }
                 else
                 {
                     ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
@@ -501,16 +529,10 @@ public class TrieIndexSSTableReader extends SSTableReader
             assert !AbstractBounds.strictlyWrapsAround(bounds.left, bounds.right) : String.format("[%s,%s]", bounds.left, bounds.right);
 
             left = bounds.left;
-            inclusiveLeft = bounds.inclusiveLeft();
-            if (filterFirst() && first.compareTo(left) > 0)
-            {
-                left = first;
-                inclusiveLeft = true;
-            }
-
             right = bounds.right;
+            inclusiveLeft = bounds.inclusiveLeft();
             inclusiveRight = bounds.inclusiveRight();
-            if (filterLast() && last.compareTo(right) < 0)
+            if (right.isMinimum())
             {
                 right = last;
                 inclusiveRight = true;
@@ -525,21 +547,19 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException
     {
-        AbstractBounds<PartitionPosition> cover = Bounds.bounds(left, inclusiveLeft, right, inclusiveRight);
-        boolean isLeftInSStableRange = !filterFirst() || first.compareTo(left) <= 0 && last.compareTo(left) >= 0;
-        boolean isRightInSStableRange = !filterLast() || first.compareTo(right) <= 0 && last.compareTo(right) >= 0;
-        if (isLeftInSStableRange || isRightInSStableRange || (cover.contains(first) && cover.contains(last)))
-        {
-            inclusiveLeft = isLeftInSStableRange ? inclusiveLeft : true;
-            inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
-            return new PartitionIterator(partitionIndex,
-                                         metadata().partitioner,
-                                         rowIndexFile, dfile,
-                                         isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
-                                         isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
-        }
-        else
+        if (filterFirst() && first.compareTo(right) > 0 || filterLast() && last.compareTo(left) < 0)
             return PartitionIterator.empty(partitionIndex);
+
+        boolean isLeftInSStableRange = !filterFirst() || first.compareTo(left) <= 0;
+        boolean isRightInSStableRange = !filterLast() || last.compareTo(right) >= 0;
+
+        inclusiveLeft = isLeftInSStableRange ? inclusiveLeft : true;
+        inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
+        return new PartitionIterator(partitionIndex,
+                                     metadata().partitioner,
+                                     rowIndexFile, dfile,
+                                     isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
+                                     isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
     }
 
     public PartitionIterator allKeysIterator() throws IOException
