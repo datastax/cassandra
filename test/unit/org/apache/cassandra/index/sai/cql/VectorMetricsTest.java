@@ -41,7 +41,7 @@ import static org.junit.Assert.assertTrue;
 @RunWith(Parameterized.class)
 public class VectorMetricsTest extends VectorTester
 {
-    @Parameterized.Parameter(0)
+    @Parameterized.Parameter()
     public Version version;
 
     @Parameterized.Parameter(1)
@@ -124,13 +124,13 @@ public class VectorMetricsTest extends VectorTester
         {
             // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
             assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ",
-                        0L, pqMemoryAfterFlush);
+                         0L, pqMemoryAfterFlush);
         }
         else
         {
             // Without FusedPQ, PQ vectors are stored separately, so we expect some memory usage
             assertTrue("Version " + version + " should have PQ memory without FusedPQ",
-                      pqMemoryAfterFlush > 0);
+                       pqMemoryAfterFlush > 0);
         }
 
         assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum()); // unique vectors means no cache required
@@ -144,15 +144,15 @@ public class VectorMetricsTest extends VectorTester
         {
             // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
             assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ after compaction",
-                        0L, pqMemoryAfterCompaction);
+                         0L, pqMemoryAfterCompaction);
         }
         else
         {
             // Without FusedPQ, PQ vectors are stored separately, so we expect some memory usage
             assertTrue("Version " + version + " should have PQ memory without FusedPQ after compaction",
-                      pqMemoryAfterCompaction > 0);
+                       pqMemoryAfterCompaction > 0);
         }
-        
+
         assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum()); // unique vectors means no cache required
         assertEquals(1, vectorMetrics.onDiskGraphsCount.sum());
         assertEquals(CassandraOnHeapGraph.MIN_PQ_ROWS, vectorMetrics.onDiskGraphVectorsCount.sum());

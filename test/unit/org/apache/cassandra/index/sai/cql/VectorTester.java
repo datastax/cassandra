@@ -129,7 +129,8 @@ public class VectorTester extends SAITester
         return (double) matches / topK;
     }
 
-    protected void verifyChecksum() {
+    protected void verifyChecksum()
+    {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         cfs.indexManager.listIndexes().stream().forEach(index -> {
             try
@@ -140,7 +141,8 @@ public class VectorTester extends SAITester
                 logger.info("Verifying checksum for index {}", index.getIndexMetadata().name);
                 boolean checksumValid = verifyChecksum(indexContext);
                 assertThat(checksumValid).isTrue();
-            } catch (IllegalAccessException e)
+            }
+            catch (IllegalAccessException e)
             {
                 throw new RuntimeException(e);
             }
@@ -212,7 +214,7 @@ public class VectorTester extends SAITester
                                                     ? new Boolean[]{ true, false }
                                                     : new Boolean[]{ false };  // pre-FA: unsupported
                                   return Arrays.stream(enableNVQ).flatMap(nvq ->
-                                      Arrays.stream(enableFused).map(fused -> new Object[]{ v, nvq, fused })
+                                                                          Arrays.stream(enableFused).map(fused -> new Object[]{ v, nvq, fused })
                                   );
                               }).collect(Collectors.toList());
         }

@@ -279,7 +279,7 @@ abstract public class VectorCompactionTest extends VectorTester
             var duplicateExists = false;
             while (vectorsInserted.size() < vectorsPerSstable || !duplicateExists)
             {
-                if (!nullInserted && vectorsInserted.size() == vectorsPerSstable/2)
+                if (!nullInserted && vectorsInserted.size() == vectorsPerSstable / 2)
                 {
                     // Insert one null vector in the middle
                     execute("INSERT INTO %s (pk, v) VALUES (?, null)", j++);
@@ -517,8 +517,9 @@ abstract public class VectorCompactionTest extends VectorTester
         }
     }
 
-    private static float[] create2DVector() {
+    private static float[] create2DVector()
+    {
         var R = getRandom();
-        return new float[] { R.nextFloatBetween(-100, 100), R.nextFloatBetween(-100, 100) };
+        return new float[]{ R.nextFloatBetween(-100, 100), R.nextFloatBetween(-100, 100) };
     }
 }
