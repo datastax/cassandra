@@ -502,6 +502,7 @@ public class StorageProxy implements StorageProxyMBean
         sensors.registerSensor(context, Type.WRITE_BYTES); // tracks user table + system.paxos write bytes (see comment above)
         sensors.registerSensor(context, Type.READ_BYTES);  // tracks user table + system.paxos read bytes (see comment above)
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES); // track secondary index write bytes on commit
+        sensors.registerSensor(context, Type.READ_LATENCY_TIER); // worst-case tier across all Paxos read phases propagated from replicas via ResponseVerbHandler
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         try

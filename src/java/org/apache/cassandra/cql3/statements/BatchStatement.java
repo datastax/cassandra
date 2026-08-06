@@ -463,8 +463,9 @@ public class BatchStatement implements CQLStatement
             SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.INDEX_WRITE_BYTES);
             if (hasConditions)
             {
-                // Conditional batches always perform a Paxos read, so READ_BYTES is always tracked
+                // Conditional batches always perform a Paxos read, so READ_BYTES and READ_LATENCY_TIER are always tracked
                 SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.READ_BYTES);
+                SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.READ_LATENCY_TIER);
             }
         }
         return result;
