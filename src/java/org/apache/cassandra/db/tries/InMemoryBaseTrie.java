@@ -1439,14 +1439,15 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         Mutator<T, U, C, A> apply() throws TrieSpaceExhaustedException
         {
             int depth = state.currentDepth;
+            long position = mutationCursor.encodedPosition();
             while (true)
             {
                 if (depth < forcedCopyDepth)
                     forcedCopyDepth = needsForcedCopy.test(this) ? depth : Integer.MAX_VALUE;
 
-                applyContent(mutationCursor.content());
+                applyContent((position & Cursor.MAY_HAVE_CONTENT_BIT) != 0 ? mutationCursor.content() : null);
 
-                long position = mutationCursor.advance();
+                position = mutationCursor.advance();
                 assert !Cursor.isOnReturnPath(position) : "Return path in forward direction can only be used in range tries.";
                 depth = Cursor.depth(position);
                 if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
@@ -1492,7 +1493,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         @Override
         public U content()
         {
-            return mutationCursor.content();
+            return (mutationCursor.encodedPosition() & Cursor.MAY_HAVE_CONTENT_BIT) != 0 ? mutationCursor.content() : null;
         }
 
         /// Return the depth of the currently processed node.

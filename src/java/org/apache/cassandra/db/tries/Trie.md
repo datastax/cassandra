@@ -218,11 +218,9 @@ ones.
 
 More precisely, in bits 32 to 63 of the `encodedPosition` long we store `-depth`, and in bits 20 to 27 &ndash;
 `incomingTransition`. Some of the other bits have meanings that are descibed in the paragraphs below, and others 
-are reserved for future use (e.g. we could set a bit to signify that the node at the
-current position may have content to drastically reduce the number of `content` calls a consumer needs to do).
-The `Cursor` class implements methods to compose and decompose encoded states, as well as to perform common checks
-(e.g. whether an advance descended into a child position) and to prepare certain positions for skipping (e.g. over 
-the current branch).
+are reserved for future use. The `Cursor` class implements methods to compose and decompose encoded states, as well as
+to perform common checks (e.g. whether an advance descended into a child position) and to prepare certain positions for
+skipping (e.g. over the current branch).
 
 ### Reverse iteration
 
@@ -281,6 +279,23 @@ to the requested position. They cannot have children.
 
 Their usages will be further detailed in the [sections on sets](#trie-sets); there are also
 [alternative approaches we considered during development](#return-stop-alternatives).
+
+### Feature flags
+
+In a lot of cases it is very easy to know if a state we end up in contains features such as content or deletion
+branch (to be described below). To make it possible to take advantage of this and avoid having to call megamorphic 
+methods like `content()` on every visited node, the encoded position also includes bits flagging whether a feature 
+may be present. The various iteration and processing methods take advantage of this by tracking the encoded position
+returned by `advance()` calls and only calling `content()` if the flag is set (using the helper method
+`Cursor.content(Cursor, position)`).
+
+The flags work like a bloom filter: if the flag is not set, the feature definitely isn't there, and if the flag is set,
+the feature _may_ be present. In particular, if checking e.g. for the presence of content is hard, the cursor may
+unconditionally set the flag to ensure that if the user needs the content they will call `content()` to retrieve it.
+
+We currently have two such feature flags: `MAY_HAVE_CONTENT` and `MAY_HAVE_DELETION_BRANCH`. Note that when comparing
+two encoded positions, these flags need to be ignored, i.e. encoded positions must be compared using the
+`Cursor.compare` method.
 
 ## Merging two tries
 

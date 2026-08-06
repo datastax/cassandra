@@ -43,8 +43,7 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         super(tail, 0);
         prefixBytes = prefix;
         nextPrefixByte = firstPrefixByte;
-        tail.assertFresh();
-        setPositionAndCheckPrefixDone(tail.encodedPosition()); // initial position with the correct direction
+        setPositionAndCheckPrefixDone(tail.getPositionAndAssertFresh() & ~Cursor.FLAGS_MASK); // initial position with the correct direction
     }
 
     long completeAdvanceInTail(long position)
@@ -113,10 +112,16 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         return setPositionAndCheckPrefixDone(nextPosition);
     }
 
-    private long setPositionAndCheckPrefixDone(long position)
+    long setPositionAndCheckPrefixDone(long position)
     {
         if (nextPrefixByte == ByteSource.END_OF_STREAM)
+        {
             setAttachmentPoint(position);
+            // Replace position with source's adjusted position to inherit its flags (e.g. MAY_HAVE_CONTENT_BIT).
+            // The prefix itself has no content; only the source does.
+            position = toAdjustedDepth(source.encodedPosition());
+            return completeAdvanceInTail(position);
+        }
 
         currentPosition = position;
         return position;
@@ -256,6 +261,8 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         {
             super(prefix, contentBranch);
             this.deletionBranch = deletionBranch != null ? new PrefixedCursor.Range<>(prefix, deletionBranch) : null;
+            // redo this after deletionBranch has been set.
+            maybeAddDeletionBranchFlag(currentPosition);
         }
 
         DeletionAwareSeparately(DeletionAwareSeparately<T, D> copyFrom, Direction direction)
@@ -268,12 +275,37 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
             this.deletionBranch = Cursor.isRootPosition(copyFrom.encodedPosition())
                                   ? copyFrom.deletionBranch // no need to take tailCursor as we do that when we return it
                                   : null;
+            // redo this after deletionBranch has been set.
+            maybeAddDeletionBranchFlag(currentPosition);
+        }
+
+        @Override
+        long completeAdvanceInTail(long position)
+        {
+            return super.completeAdvanceInTail(position & ~MAY_HAVE_DELETION_BRANCH_BIT);
+        }
+
+        @Override
+        long setPositionAndCheckPrefixDone(long position)
+        {
+            position = super.setPositionAndCheckPrefixDone(position);
+            // Check this after going through the super path to ensure the bit doesn't get wiped out by completeAdvanceInTail.
+            return maybeAddDeletionBranchFlag(position);
+        }
+
+        private long maybeAddDeletionBranchFlag(long position)
+        {
+            if (Cursor.isRootPosition(position) && deletionBranch != null)
+                return currentPosition |= MAY_HAVE_DELETION_BRANCH_BIT;
+            else
+                return position;
         }
 
         @Override
         public RangeCursor<D> deletionBranchCursor(Direction direction)
         {
-            return Cursor.isRootPosition(encodedPosition()) && deletionBranch != null
+            // We have already verified in maybeAddDeletionBranchFlag if we should report it and we can trust the flag.
+            return (currentPosition & MAY_HAVE_DELETION_BRANCH_BIT) != 0
                    ? deletionBranch.tailCursor(direction)
                    : null;
         }

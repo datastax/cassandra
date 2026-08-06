@@ -686,7 +686,7 @@ public abstract class InMemoryReadTrie<T>
         final InMemoryReadTrie<T> trie;
         int currentNode;
         int currentFullNode;
-        private long currentPosition;
+        protected long currentPosition;
         protected int depth;
         protected T content;
         final Direction direction;
@@ -1237,16 +1237,22 @@ public abstract class InMemoryReadTrie<T>
                         // There's no reason to delay going to the position of the content.
                         currentPosition |= ON_RETURN_PATH_BIT;
                         content = trie.getContent(node);
+                        currentPosition |= MAY_HAVE_CONTENT_BIT;
                     }
                 }
                 else
+                {
                     content = trie.getContent(node);
+                    currentPosition |= MAY_HAVE_CONTENT_BIT;
+                }
 
                 currentNode = NONE;
             }
             else if (offset(node) == PREFIX_OFFSET)
             {
                 content = processPrefix(node, depth, transition);
+                if (content != null)
+                    currentPosition |= MAY_HAVE_CONTENT_BIT;
                 currentNode = trie.getChildOfPrefixNode(node);
             }
             else
@@ -1294,14 +1300,16 @@ public abstract class InMemoryReadTrie<T>
         long descendInto(int child, int transition)
         {
             ++depth;
-            currentPosition = Cursor.encode(depth, transition, direction);
+            long pos = Cursor.encode(depth, transition, direction);
+            currentPosition = pos;
             setCurrentNodeAndApplyPrefixes(child, depth, transition, false);
             return currentPosition;
         }
 
         long descendIntoChain(int child, int transition)
         {
-            return setNodeState(Cursor.encode(++depth, transition, direction), null, child, child);
+            long pos = Cursor.encode(++depth, transition, direction);
+            return setNodeState(pos, null, child, child);
         }
 
         long setNodeState(long nextPosition, T nodeContent, int fullNode, int node)
@@ -1310,7 +1318,7 @@ public abstract class InMemoryReadTrie<T>
             content = nodeContent;
             currentFullNode = fullNode;
             currentNode = node;
-            return nextPosition;
+            return currentPosition;
         }
 
         /// Used for debugging, dumps a string representation of the current node.
@@ -1433,7 +1441,7 @@ public abstract class InMemoryReadTrie<T>
                 }
             }
 
-            T content = source.content();
+            T content = (source.encodedPosition() & Cursor.MAY_HAVE_CONTENT_BIT) != 0 ? source.content() : null;
             if (content != null)
             {
                 if (type != null)
