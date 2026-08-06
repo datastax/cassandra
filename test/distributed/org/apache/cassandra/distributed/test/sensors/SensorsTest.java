@@ -76,12 +76,15 @@ public class SensorsTest extends TestBaseImpl
     // Sensor header constants per table
     private static final String WRITE_TBL = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL;
     private static final String READ_TBL = "READ_BYTES_REQUEST." + KEYSPACE + "." + TBL;
+    private static final String READ_LATENCY_TIER_TBL = "READ_LATENCY_TIER_REQUEST." + KEYSPACE + "." + TBL;
     private static final String WRITE_COUNTER = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_COUNTER;
     private static final String WRITE_2I = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_2I;
     private static final String READ_2I = "READ_BYTES_REQUEST." + KEYSPACE + "." + TBL_2I;
+    private static final String READ_LATENCY_TIER_2I = "READ_LATENCY_TIER_REQUEST." + KEYSPACE + "." + TBL_2I;
     private static final String INDEX_WRITE_2I = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_2I;
     private static final String WRITE_SAI = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_SAI;
     private static final String READ_SAI = "READ_BYTES_REQUEST." + KEYSPACE + "." + TBL_SAI;
+    private static final String READ_LATENCY_TIER_SAI = "READ_LATENCY_TIER_REQUEST." + KEYSPACE + "." + TBL_SAI;
     private static final String INDEX_WRITE_SAI = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_SAI;
     private static final String WRITE_COL = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_COL;
     private static final String INDEX_WRITE_COL = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_COL;
@@ -204,13 +207,13 @@ public class SensorsTest extends TestBaseImpl
         List<Object[]> result = new ArrayList<>();
         result.add(new Object[]{ "tbl: insert", noPrep, write, new String[]{ WRITE_TBL }, true });
         result.add(new Object[]{ "tbl_counter: counter update", noPrep, counter, new String[]{ WRITE_COUNTER }, true });
-        result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL }, true });
-        result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL }, false });
-        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, READ_TBL }, true });
+        result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_LATENCY_TIER_TBL }, true });
+        result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_LATENCY_TIER_TBL }, false });
+        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, READ_TBL, READ_LATENCY_TIER_TBL }, true });
         result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL }, true });
         result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL }, true });
-        result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL }, true });
-        result.add(new Object[]{ "tbl: range read (no paging)", new String[]{ write }, range, new String[]{ READ_TBL }, false });
+        result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_LATENCY_TIER_TBL }, true });
+        result.add(new Object[]{ "tbl: range read (no paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_LATENCY_TIER_TBL }, false });
         return result;
     }
 
@@ -264,8 +267,8 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ "2i: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, INDEX_WRITE_2I }, true });
         result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, INDEX_WRITE_2I }, true });
         result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I }, true });
+        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, READ_2I, READ_LATENCY_TIER_2I, INDEX_WRITE_2I }, true });
+        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, READ_2I, READ_LATENCY_TIER_2I, INDEX_WRITE_2I }, true });
         result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, INDEX_WRITE_2I, WRITE_SAI, INDEX_WRITE_SAI }, true });
         result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, INDEX_WRITE_2I, WRITE_SAI, INDEX_WRITE_SAI }, true });
         return result;
@@ -307,8 +310,8 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ "sai: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, INDEX_WRITE_SAI }, true });
         result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, INDEX_WRITE_SAI }, true });
         result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
+        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, READ_SAI, READ_LATENCY_TIER_SAI, INDEX_WRITE_SAI }, true });
+        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, READ_SAI, READ_LATENCY_TIER_SAI, INDEX_WRITE_SAI }, true });
         return result;
     }
 
@@ -373,12 +376,12 @@ public class SensorsTest extends TestBaseImpl
                                                             "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
+        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, READ_2I, READ_LATENCY_TIER_2I, INDEX_WRITE_2I }, true });
+        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, READ_2I, READ_LATENCY_TIER_2I, INDEX_WRITE_2I }, true });
+        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, READ_2I, READ_LATENCY_TIER_2I, INDEX_WRITE_2I }, true });
+        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, READ_SAI, READ_LATENCY_TIER_SAI, INDEX_WRITE_SAI }, true });
+        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, READ_SAI, READ_LATENCY_TIER_SAI, INDEX_WRITE_SAI }, true });
+        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, READ_SAI, READ_LATENCY_TIER_SAI, INDEX_WRITE_SAI }, true });
         return result;
     }
 

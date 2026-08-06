@@ -68,6 +68,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ReadLatencyTier;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Type;
@@ -449,13 +450,23 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         ResultMessage.Rows msg;
+        long coordinatorStartNanos = System.nanoTime();
         try (PartitionIterator data = query.execute(options.getConsistency(), queryState, queryStartNanoTime))
         {
             msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset);
         }
         RequestSensors sensors = RequestTracker.instance.get();
-        Context context = Context.from(this.table);
-        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+        if (sensors != null)
+        {
+            ReadLatencyTier coordinatorTier = ReadLatencyTier.fromNanos(System.nanoTime() - coordinatorStartNanos);
+            Context context = Context.from(this.table);
+            // Fold coordinator execution time into READ_LATENCY_TIER via max so the rate limiter receives a single
+            // "request cost" signal regardless of where the time was spent (replica execution vs. coordinator
+            // result merging, ordering, or filtering).
+            sensors.setSensorIf(context, Type.READ_LATENCY_TIER, coordinatorTier.value(), (current, candidate) -> candidate > current);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_LATENCY_TIER);
+        }
         return msg;
     }
 
@@ -585,6 +596,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         // in memory all the rows that will be discarded by the offset. Key-based paging is also disabled if the offset
         // is explicitly set to zero.
         ResultMessage.Rows msg;
+        long coordinatorStartNanos = System.nanoTime();
         try (PartitionIterator partitions = userOffset == NO_OFFSET
                                           ? pager.fetchPage(pageSize, queryStartNanoTime)
                                           : pager.readAll(pageSize, queryStartNanoTime))
@@ -593,9 +605,17 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
 
         RequestSensors sensors = RequestTracker.instance.get();
-        Context context = Context.from(this.table);
-        Type sensorType = Type.READ_BYTES;
-        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, sensorType);
+        if (sensors != null)
+        {
+            ReadLatencyTier coordinatorTier = ReadLatencyTier.fromNanos(System.nanoTime() - coordinatorStartNanos);
+            Context context = Context.from(this.table);
+            // Fold coordinator execution time into READ_LATENCY_TIER via max so the rate limiter receives a single
+            // "request cost" signal regardless of where the time was spent (replica execution vs. coordinator
+            // result merging, ordering, or filtering).
+            sensors.setSensorIf(context, Type.READ_LATENCY_TIER, coordinatorTier.value(), (current, candidate) -> candidate > current);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_LATENCY_TIER);
+        }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
@@ -638,14 +658,28 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         Selectors selectors = selection.newSelectors(options);
         ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, userOffset);
 
+        long coordinatorStartNanos = System.nanoTime();
         try (ReadExecutionController executionController = query.executionController())
         {
             if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))
             {
+                ResultMessage.Rows msg;
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
-                    return processResults(data, options, selectors, nowInSec, userLimit, userOffset);
+                    msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset);
                 }
+                RequestSensors sensors = RequestTracker.instance.get();
+                if (sensors != null)
+                {
+                    ReadLatencyTier coordinatorTier = ReadLatencyTier.fromNanos(System.nanoTime() - coordinatorStartNanos);
+                    Context context = Context.from(this.table);
+                    // Fold coordinator execution time into READ_LATENCY_TIER via max so the rate limiter receives
+                    // a single "request cost" signal regardless of where the time was spent.
+                    sensors.setSensorIf(context, Type.READ_LATENCY_TIER, coordinatorTier.value(), (current, candidate) -> candidate > current);
+                    SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+                    SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_LATENCY_TIER);
+                }
+                return msg;
             }
 
             QueryPager pager = getPager(query, options);

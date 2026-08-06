@@ -23,6 +23,8 @@ import java.util.Objects;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.AtomicDouble;
 
+import org.apache.cassandra.utils.DoubleBinaryPredicate;
+
 /**
  * Tracks the {@link #value} for a given measurement of a given {@link Type} and {@link Context}, during any
  * request/response cycle.
@@ -31,7 +33,7 @@ import com.google.common.util.concurrent.AtomicDouble;
  * and values are managed by the {@link RequestSensors} and {@link SensorsRegistry} classes, more specifically:
  * <ul>
  *     <li>In order to track a given measurement for a given request/response, register a sensor of the related type via
- *     {@link RequestSensors#registerSensor(Type)}.</li>
+ *     {@link RequestSensors#registerSensor(Context context, Type)}.</li>
  *     <li>Once registered, the sensor lifecycle spans across multiple request/response cycles, and its "global"
  *     value can be accessed via {@link SensorsRegistry}.</li>
  * </ul>
@@ -52,10 +54,38 @@ public class Sensor
         this.hashCode = Objects.hash(context, type);
     }
 
+    /**
+     * Atomically adds the specified amount to the current measured value of this sensor.
+     *
+     * @param value The amount to increment by.
+     */
     @VisibleForTesting
     public void increment(double value)
     {
         this.value.addAndGet(value);
+    }
+
+    /**
+     * Atomically sets the current value to {@code candidate} if
+     * {@code predicate.test(current, candidate)} returns {@code true}.
+     * Retries transparently on CAS contention until either the predicate
+     * rejects the update or the swap succeeds.
+     *
+     * @param candidate the value to conditionally store
+     * @param predicate a function of {@code (currentValue, candidate)} returning
+     *                  {@code true} if the update should occur
+     */
+    @VisibleForTesting
+    public void setIf(double candidate, DoubleBinaryPredicate predicate)
+    {
+        double current;
+        do
+        {
+            current = value.get();
+            if (!predicate.test(current, candidate))
+                return;
+        }
+        while (!value.compareAndSet(current, candidate));
     }
 
     public Context getContext()

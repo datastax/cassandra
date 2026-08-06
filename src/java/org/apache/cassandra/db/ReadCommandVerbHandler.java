@@ -29,9 +29,10 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ReadLatencyTier;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
@@ -70,18 +71,23 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
 
         ReadResponse response;
+        long readStageStartNanos = System.nanoTime();
         try (ReadExecutionController controller = command.executionController(message.trackRepairedData());
              UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
             response = command.createResponse(iterator, controller.getRepairedDataInfo());
         }
-
         if (!command.complete())
         {
             Tracing.trace("Discarding partial response to {} (timed out)", message.from());
             MessagingService.instance().metrics.recordDroppedMessage(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
             return;
         }
+
+        long readStageElapsedNanos = System.nanoTime() - readStageStartNanos;
+        ReadLatencyTier tier = ReadLatencyTier.fromNanos(readStageElapsedNanos);
+        requestSensors.registerSensor(context, Type.READ_LATENCY_TIER);
+        requestSensors.setSensorIf(context, Type.READ_LATENCY_TIER, tier.value(), (current, candidate) -> current == 0);
 
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
         int size = reply.currentPayloadSize(MessagingService.current_version);
