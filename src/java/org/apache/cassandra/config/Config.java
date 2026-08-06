@@ -895,6 +895,9 @@ public class Config
     public volatile int sai_indexes_per_table_fail_threshold = -1;
     public volatile int sai_indexes_total_warn_threshold = -1;
     public volatile int sai_indexes_total_fail_threshold = -1;
+    // Trusted custom index implementations guardrail (cassandra.trusted_index_implementations)
+    public volatile int trusted_indexes_per_table_warn_threshold = -1;
+    public volatile int trusted_indexes_per_table_fail_threshold = -1;
     public volatile int materialized_views_per_table_warn_threshold = -1;
     public volatile int materialized_views_per_table_fail_threshold = -1;
     public volatile int page_size_warn_threshold = -1;

@@ -59,6 +59,9 @@ public class NettyStreamingChannel extends ChannelInboundHandlerAdapter implemen
 
     @VisibleForTesting
     static final AttributeKey<Boolean> TRANSFERRING_FILE_ATTR = valueOf("transferringFile");
+
+    public static final AttributeKey<Integer> STREAMING_VERSION_ATTR = valueOf("streamingVersion");
+
     final Channel channel;
 
     /**
@@ -122,6 +125,12 @@ public class NettyStreamingChannel extends ChannelInboundHandlerAdapter implemen
     public StreamingDataInputPlus in()
     {
         return in;
+    }
+
+    int streamingVersion(int defaultVersion)
+    {
+        Integer channelStreamingVersion = channel.attr(STREAMING_VERSION_ATTR).get();
+        return channelStreamingVersion == null ? defaultVersion : channelStreamingVersion;
     }
 
     public StreamingDataOutputPlus acquireOut()

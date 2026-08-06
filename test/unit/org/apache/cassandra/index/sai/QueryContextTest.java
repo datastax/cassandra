@@ -23,9 +23,11 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Assert;
 import org.junit.Assume;
+import org.junit.Before;
 import org.junit.Test;
 
-import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -39,6 +41,12 @@ public class QueryContextTest extends SAITester.Versioned
 {
     private static final int EXPIRING_ROW_TTL_SECONDS = 5;
     private static final int EXPIRING_ROW_WAIT_SECONDS = EXPIRING_ROW_TTL_SECONDS + 1;
+
+    @Before
+    public void disableSkipIndexesOnFullPK()
+    {
+        CassandraRelevantProperties.SKIP_INDEXES_ON_FULL_PRIMARY_KEYS.setBoolean(false);
+    }
 
     @Test
     public void testSkinnyTable()
@@ -1076,7 +1084,7 @@ public class QueryContextTest extends SAITester.Versioned
         assertRowsIgnoringOrder(execute(query), rows);
 
         // Get an index searcher for the query
-        PartitionRangeReadCommand command = (PartitionRangeReadCommand) parseReadCommand(query);
+        ReadCommand command = parseReadCommand(query);
         StorageAttachedIndexQueryPlan plan = (StorageAttachedIndexQueryPlan) command.indexQueryPlan();
         Assert.assertNotNull(plan);
         StorageAttachedIndexSearcher searcher = plan.searcherFor(command);

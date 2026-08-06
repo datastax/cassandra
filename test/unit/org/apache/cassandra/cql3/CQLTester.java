@@ -71,6 +71,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.service.ClientWarn;
@@ -1860,21 +1862,37 @@ public abstract class CQLTester
         return QueryProcessor.parseStatement(formattedQuery, ClientState.forInternalCalls());
     }
 
-    protected ReadCommand parseReadCommand(String query)
+    protected ReadQuery parseReadQuery(String query)
     {
         SelectStatement select = (SelectStatement) parseStatement(query);
-        ReadQuery readQuery = select.getQuery(QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
-        Assertions.assertThat(readQuery).isInstanceOf(ReadCommand.class);
-        return  (ReadCommand) readQuery;
+        return select.getQuery(QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
     }
 
-    protected List<SinglePartitionReadCommand> parseReadCommandGroup(String query)
+    protected ReadCommand parseReadCommand(String query)
     {
-        SelectStatement select = (SelectStatement) parseStatement(query);
-        ReadQuery readQuery = select.getQuery(QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+        ReadQuery readQuery = parseReadQuery(query);
+
+        // if it's already a ReadCommand, return it directly
+        if (readQuery instanceof ReadCommand)
+            return (ReadCommand) readQuery;
+
+        // if it's a SinglePartitionReadCommand.Group, extract the single command, or fail if it's not single-command
+        if (readQuery instanceof SinglePartitionReadCommand.Group)
+        {
+            SinglePartitionReadCommand.Group commandGroup = (SinglePartitionReadCommand.Group) readQuery;
+            List<SinglePartitionReadCommand> commands = commandGroup.queries;
+            Assertions.assertThat(commands).as("Expected exactly 1 command in query: %s", query).hasSize(1);
+            return commands.get(0);
+        }
+
+        return Assertions.fail("Unexpected query type %s for query: %s", readQuery.getClass().getName(), query);
+    }
+
+    protected SinglePartitionReadCommand.Group parseReadCommandGroup(String query)
+    {
+        ReadQuery readQuery = parseReadQuery(query);
         Assertions.assertThat(readQuery).isInstanceOf(SinglePartitionReadCommand.Group.class);
-        SinglePartitionReadCommand.Group commands = (SinglePartitionReadCommand.Group) readQuery;
-        return commands.queries;
+        return (SinglePartitionReadCommand.Group) readQuery;
     }
 
     protected ResultMessage.Prepared prepare(String query) throws Throwable
@@ -3630,5 +3648,29 @@ public abstract class CQLTester
         return DatabaseDescriptor.shouldUseAdaptiveCompressionByDefault()
                ? AdaptiveCompressor.class.getName()
                : LZ4Compressor.class.getName();
+    }
+
+    @FunctionalInterface
+    public interface ThrowingConsumer<T>
+    {
+        void accept(T t) throws Throwable;
+    }
+
+    public void withLogAppender(Class<?> clazz, ThrowingConsumer<ListAppender<ILoggingEvent>> logAppenderConsumer) throws Throwable
+    {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(clazz);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        try
+        {
+            logAppenderConsumer.accept(appender);
+        }
+        finally
+        {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 }

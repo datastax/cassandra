@@ -65,7 +65,9 @@ public class NettyStreamingConnectionFactory implements StreamingChannel.Factory
                 result.awaitUninterruptibly(); // initiate has its own timeout, so this is "guaranteed" to return relatively promptly
                 if (result.isSuccess())
                 {
-                    Channel channel = result.getNow().success().channel;
+                    StreamingSuccess success = result.getNow().success();
+                    Channel channel = success.channel;
+                    channel.attr(NettyStreamingChannel.STREAMING_VERSION_ATTR).set(success.messagingVersion);
                     NettyStreamingChannel streamingChannel = new NettyStreamingChannel(channel, kind);
                     if (kind == StreamingChannel.Kind.CONTROL)
                     {

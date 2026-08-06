@@ -288,6 +288,11 @@ public enum CassandraRelevantProperties
     COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
     COUNTER_LOCK_NUM_STRIPES_PER_THREAD("cassandra.counter_lock.num_stripes_per_thread", "1024"),
     CRYPTO_PROVIDER_CLASS_NAME("cassandra.crypto_provider_class_name"),
+    /**
+     * Name of a custom implementation of {@link org.apache.cassandra.batchlog.BatchlogManagerInterceptor}
+     * that observes every mutation replayed by batchlog recovery.
+     */
+    CUSTOM_BATCHLOG_MANAGER_INTERCEPTOR_CLASS("cassandra.custom_batchlog_manager_interceptor_class"),
     /** Which class to use for coordinator client request metrics */
     CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY("cassandra.custom_client_request_metrics_provider_class"),
     /** Which class to use for failure detection */
@@ -952,6 +957,12 @@ public enum CassandraRelevantProperties
     SIZE_RECORDER_INTERVAL("cassandra.size_recorder_interval", "300"),
 
     SKIP_DEFAULT_ROLE_SETUP("cassandra.skip_default_role_setup"),
+    /**
+     * Whether to skip secondary indexes when the query specifies full primary keys.
+     * In principle, there is no reason to prefer using the indexes in such queries,
+     * and this exists just as a feature gate.
+     */
+    SKIP_INDEXES_ON_FULL_PRIMARY_KEYS("cassandra.index.skip_on_full_primary_keys", "true"),
     SKIP_MUTATING_STATS_AFTER_ZCS("cassandra.skip_mutating_stats_after_zcs"),
     /**
      * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
@@ -1108,6 +1119,13 @@ public enum CassandraRelevantProperties
      * To provide a provider to a different implementation of the truncate statement.
      */
     TRUNCATE_STATEMENT_PROVIDER("cassandra.truncate_statement_provider"),
+    /**
+     * Comma-separated list of fully qualified class names of custom index implementations that are trusted by the
+     * operator. Each listed class can be referenced in {@code CREATE CUSTOM INDEX ... USING} by its simple class
+     * name (case-insensitively), like it is possible for {@code StorageAttachedIndex}, and is limited by the
+     * {@code trusted_indexes_per_table} guardrail.
+     */
+    TRUSTED_INDEX_IMPLEMENTATIONS("cassandra.trusted_index_implementations"),
     TYPE_UDT_CONFLICT_BEHAVIOR("cassandra.type.udt.conflict_behavior"),
     // See org.apache.cassandra.db.compaction.unified.Controller for the definition of the UCS parameters
     UCS_ADAPTIVE_COSTS_READ_MULTIPLIER("unified_compaction.costs_read_multiplier", "0.1"),

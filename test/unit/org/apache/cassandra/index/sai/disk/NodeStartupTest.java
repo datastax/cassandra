@@ -271,7 +271,7 @@ public class NodeStartupTest extends SAITester
     }
 
     @Test
-    public void startupOrderingTest() throws Throwable
+    public void startupOrderingTest() throws Exception
     {
         populator.populate(this);
 

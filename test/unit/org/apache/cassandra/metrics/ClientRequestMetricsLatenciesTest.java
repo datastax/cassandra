@@ -160,21 +160,18 @@ public class ClientRequestMetricsLatenciesTest
                                                   clientMetrics.readMetrics,
                                                   clientMetrics.readMetricsForLevel(QUORUM),
                                                   clientMetrics.casWriteMetrics,
-                                                  clientMetrics.allRequestsMetrics,
                                                   clientMetrics.writeMetricsForLevel(SERIAL));
             processQueryAndCheckMetricsWereBumped("UPDATE %1$s.%2$s SET v2=123 WHERE k=7 AND v1=7 IF v2=71;",
                                                   cl,
                                                   clientMetrics.readMetrics,
                                                   clientMetrics.readMetricsForLevel(QUORUM),
                                                   clientMetrics.casWriteMetrics,
-                                                  clientMetrics.allRequestsMetrics,
                                                   clientMetrics.writeMetricsForLevel(SERIAL));
             processQueryAndCheckMetricsWereBumped("UPDATE %1$s.%2$s SET v2=123 WHERE k=7 AND v1=7 IF v2=7;",
                                                   cl,
                                                   clientMetrics.readMetrics,
                                                   clientMetrics.readMetricsForLevel(QUORUM),
                                                   clientMetrics.casWriteMetrics,
-                                                  clientMetrics.allRequestsMetrics,
                                                   clientMetrics.writeMetricsForLevel(SERIAL));
         });
     }
@@ -185,13 +182,11 @@ public class ClientRequestMetricsLatenciesTest
         processQueryAndCheckMetricsWereBumped("SELECT * FROM %1$s.%2$s WHERE k=7 AND v1=7;",
                                               SERIAL,
                                               clientMetrics.casReadMetrics,
-                                              clientMetrics.allRequestsMetrics,
                                               clientMetrics.readMetrics,
                                               clientMetrics.readMetricsForLevel(SERIAL));
         processQueryAndCheckMetricsWereBumped("SELECT * FROM %1$s.%2$s WHERE k=7 AND v1=7;",
                                               LOCAL_SERIAL,
                                               clientMetrics.casReadMetrics,
-                                              clientMetrics.allRequestsMetrics,
                                               clientMetrics.readMetrics,
                                               clientMetrics.readMetricsForLevel(LOCAL_SERIAL));
     }
@@ -226,7 +221,6 @@ public class ClientRequestMetricsLatenciesTest
                                                       clientMetrics.readMetrics,
                                                       clientMetrics.readMetricsForLevel(QUORUM),
                                                       clientMetrics.casWriteMetrics,
-                                                      clientMetrics.allRequestsMetrics,
                                                       clientMetrics.writeMetricsForLevel(SERIAL),
                                                       clientMetrics.viewWriteMetrics);
                 processQueryAndCheckMetricsWereBumped("UPDATE %1$s.%2$s SET v2=123 WHERE k=7 AND v1=7 IF v2=7;",
@@ -234,7 +228,6 @@ public class ClientRequestMetricsLatenciesTest
                                                       clientMetrics.readMetrics,
                                                       clientMetrics.readMetricsForLevel(QUORUM),
                                                       clientMetrics.casWriteMetrics,
-                                                      clientMetrics.allRequestsMetrics,
                                                       clientMetrics.writeMetricsForLevel(SERIAL),
                                                       clientMetrics.viewWriteMetrics);
 
@@ -244,14 +237,12 @@ public class ClientRequestMetricsLatenciesTest
                                                       clientMetrics.readMetrics,
                                                       clientMetrics.readMetricsForLevel(QUORUM),
                                                       clientMetrics.casWriteMetrics,
-                                                      clientMetrics.allRequestsMetrics,
                                                       clientMetrics.writeMetricsForLevel(SERIAL));
                 processQueryAndCheckMetricsWereBumped("UPDATE %1$s.%2$s SET v2=123 WHERE k=7 AND v1=7 IF v2=7;",
                                                       cl,
                                                       clientMetrics.readMetrics,
                                                       clientMetrics.readMetricsForLevel(QUORUM),
                                                       clientMetrics.casWriteMetrics,
-                                                      clientMetrics.allRequestsMetrics,
                                                       clientMetrics.writeMetricsForLevel(SERIAL));
 
             });

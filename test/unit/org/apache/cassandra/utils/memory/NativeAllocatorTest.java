@@ -141,10 +141,18 @@ public class NativeAllocatorTest
             allocator.allocate(50, group);
             verifyUsedReclaiming(80, 80);
 
-            // allocate above limit, check we block until "marked blocking"
-            exec.schedule(markBlocking, 10L, TimeUnit.MILLISECONDS);
+            // allocations above the limit dont block, they only track usage;
+            // the limit is enforced before a mutation starts, in awaitRoom()
             Assert.assertEquals(0, pool.blockedOnAllocatingCount.getCount());
             allocator.allocate(30, group);
+            Assert.assertNull(barrier.get());
+            Assert.assertEquals(0, pool.blockedOnAllocatingCount.getCount());
+            verifyUsedReclaiming(110, 110);
+
+            // the wait moved to awaitRoom(): above the limit it blocks until the pool has
+            // room or the group is "marked blocking", exactly as allocate() used to
+            exec.schedule(markBlocking, 10L, TimeUnit.MILLISECONDS);
+            allocator.offHeap().awaitRoom(group);
             Assert.assertNotNull(barrier.get());
             Assert.assertEquals(1, pool.blockedOnAllocatingCount.getCount());
             verifyUsedReclaiming(110, 110);

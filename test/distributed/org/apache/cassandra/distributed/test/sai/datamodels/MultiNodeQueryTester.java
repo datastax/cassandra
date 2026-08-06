@@ -29,6 +29,7 @@ import org.junit.BeforeClass;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.shared.Byteman;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
@@ -69,6 +70,7 @@ abstract class MultiNodeQueryTester extends TestBaseImpl
         // Disable guardrails for anonymous users (no client authentication) This allows the test to avoid
         // being affected by guardrails for anonymous users.
         ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER.setBoolean(false);
+        CassandraRelevantProperties.SKIP_INDEXES_ON_FULL_PRIMARY_KEYS.setBoolean(false);
 
         cluster = Cluster.build(3)
                          .withConfig(config -> config.with(NETWORK, GOSSIP)
