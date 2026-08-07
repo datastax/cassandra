@@ -97,7 +97,7 @@ public class ViewUpdateGenerator
         this.viewMetadata = Schema.instance.getTableMetadata(view.getDefinition().metadata.id);
 
         this.currentViewEntryPartitionKey = new ByteBuffer[viewMetadata.partitionKeyColumns().size()];
-        this.currentViewEntryBuilder = BTreeRow.sortedBuilder();
+        this.currentViewEntryBuilder = PartitionUpdate.rowBuilder(viewMetadata, false, true);
     }
 
     private static ByteBuffer[] extractKeyComponents(DecoratedKey partitionKey, AbstractType<?> type)

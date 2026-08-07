@@ -46,7 +46,7 @@ public class ArrayCell extends AbstractCell<byte[]>
     // available.
     public ArrayCell(ColumnMetadata column, long timestamp, int ttl, long localDeletionTime, byte[] value, CellPath path)
     {
-        this(column, timestamp, ttl, Cell.deletionTimeLongToUnsignedInteger(localDeletionTime), value, path);
+        this(column, timestamp, ttl, CellData.deletionTimeLongToUnsignedInteger(localDeletionTime), value, path);
     }
 
     public ArrayCell(ColumnMetadata column, long timestamp, int ttl, int localDeletionTimeUnsignedInteger, byte[] value, CellPath path)
@@ -103,6 +103,12 @@ public class ArrayCell extends AbstractCell<byte[]>
     public Cell<?> withSkippedValue()
     {
         return new ArrayCell(column, timestamp, ttl, localDeletionTimeUnsignedInteger, EMPTY_BYTE_ARRAY, path);
+    }
+
+    @Override
+    public Cell<?> withPath(CellPath path)
+    {
+        return new ArrayCell(column, timestamp, ttl, localDeletionTimeUnsignedInteger, value, path);
     }
 
     @Override

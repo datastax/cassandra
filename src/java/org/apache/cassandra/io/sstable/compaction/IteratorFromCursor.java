@@ -28,8 +28,8 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker;
@@ -47,13 +47,15 @@ public class IteratorFromCursor implements UnfilteredPartitionIterator
 {
     final TableMetadata metadata;
     final SSTableCursor cursor;
-    final Row.Builder rowBuilder;
+    final Row.Builder rowBuilderStatic;
+    final Row.Builder rowBuilderRegular;
 
     public IteratorFromCursor(TableMetadata metadata, SSTableCursor cursor)
     {
         this.metadata = metadata;
         this.cursor = cursor;
-        this.rowBuilder = BTreeRow.sortedBuilder();
+        this.rowBuilderRegular = PartitionUpdate.rowBuilder(metadata, false, true);
+        this.rowBuilderStatic = metadata.hasStaticColumns() ? PartitionUpdate.rowBuilder(metadata, false, true) : null;
     }
 
     public TableMetadata metadata()
@@ -122,7 +124,7 @@ public class IteratorFromCursor implements UnfilteredPartitionIterator
             this.partitionLevelDeletion = cursor.partitionLevelDeletion();
             if (Clustering.STATIC_CLUSTERING.equals(cursor.clusteringKey()))
             {
-                staticRow = collectRow(cursor, rowBuilder);
+                staticRow = collectRow(cursor, rowBuilderStatic);
             }
             else
             {
@@ -140,7 +142,7 @@ public class IteratorFromCursor implements UnfilteredPartitionIterator
             switch (cursor.type())
             {
                 case ROW:
-                    return collectRow(cursor, rowBuilder);
+                    return collectRow(cursor, rowBuilderRegular);
                 case RANGE_TOMBSTONE:
                     return collectRangeTombstoneMarker(cursor);
                 default:

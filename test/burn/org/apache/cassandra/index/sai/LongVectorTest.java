@@ -28,9 +28,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
+
+import org.apache.cassandra.db.memtable.TrieMemtable;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,9 +49,10 @@ public class LongVectorTest extends SAITester
     private static final int threadCount = 12;
 
     @BeforeClass
-    public static void setShardCount()
+    public static void setUpClass()
     {
         MEMTABLE_SHARD_COUNT.setInt(4 * threadCount);
+        SAITester.setUpClass();
     }
 
     @FunctionalInterface
@@ -59,6 +63,7 @@ public class LongVectorTest extends SAITester
 
     public void testConcurrentOps(Op op) throws ExecutionException, InterruptedException
     {
+        Assert.assertEquals(4 * threadCount, TrieMemtable.getDefaultShardCount());
         createTable(String.format("CREATE TABLE %%s (key int primary key, value vector<float, %s>)", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function': 'dot_product' }");
 

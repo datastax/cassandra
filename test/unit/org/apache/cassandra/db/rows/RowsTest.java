@@ -32,6 +32,8 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.junit.Assert;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -47,6 +49,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.db.CellTest.assertCellsEqual;
 
+@RunWith(Parameterized.class)
 public class RowsTest
 {
     private static final String KEYSPACE = "rows_test";
@@ -55,6 +58,20 @@ public class RowsTest
     private static final ColumnMetadata v;
     private static final ColumnMetadata m;
     private static final Clustering<?> c1;
+
+    enum RowImplementation
+    {
+        BTREE, TRIE_BACKED
+    }
+
+    @Parameterized.Parameter(0)
+    public static RowImplementation implementation;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static RowImplementation[] implementations()
+    {
+        return RowImplementation.values();
+    }
 
     static
     {
@@ -187,7 +204,8 @@ public class RowsTest
         List<DeletionTime> deletions = new LinkedList<>();
         public void update(DeletionTime deletion)
         {
-            deletions.add(deletion);
+            if (!deletion.isLive())
+                deletions.add(deletion);
         }
 
         long columnCount = -1;
@@ -217,7 +235,16 @@ public class RowsTest
 
     private static Row.Builder createBuilder(Clustering<?> c)
     {
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder;
+        switch (implementation)
+        {
+            case TRIE_BACKED:
+                builder = TrieBackedRow.builder(kcvm.regularAndStaticColumns().columns(c == Clustering.STATIC_CLUSTERING));
+                break;
+            case BTREE:
+            default:
+                builder = BTreeRow.unsortedBuilder();
+        }
         builder.newRow(c);
         return builder;
     }
@@ -245,8 +272,7 @@ public class RowsTest
     {
         long now = FBUtilities.nowInSeconds();
         long ts = secondToTs(now);
-        Row.Builder builder = BTreeRow.unsortedBuilder();
-        builder.newRow(c1);
+        Row.Builder builder = createBuilder(c1);
         LivenessInfo liveness = LivenessInfo.create(ts, now);
         builder.addPrimaryKeyLivenessInfo(liveness);
         DeletionTime complexDeletion = DeletionTime.build(ts-1, now);
@@ -255,8 +281,8 @@ public class RowsTest
                                                       BufferCell.live(m, ts, BB1, CellPath.create(BB1)),
                                                       BufferCell.live(m, ts, BB2, CellPath.create(BB2)));
         expectedCells.forEach(builder::addCell);
-        // We need to use ts-1 so the deletion doesn't shadow what we've created
-        Row.Deletion rowDeletion = new Row.Deletion(DeletionTime.build(ts-1, now), false);
+        // We need to use ts-2 so the deletion doesn't shadow what we've created or the complex deletion
+        Row.Deletion rowDeletion = new Row.Deletion(DeletionTime.build(ts-2, now), false);
         builder.addRowDeletion(rowDeletion);
 
         StatsCollector collector = new StatsCollector();
@@ -283,8 +309,7 @@ public class RowsTest
     {
         long now1 = FBUtilities.nowInSeconds();
         long ts1 = secondToTs(now1);
-        Row.Builder r1Builder = BTreeRow.unsortedBuilder();
-        r1Builder.newRow(c1);
+        Row.Builder r1Builder = createBuilder(c1);
         LivenessInfo r1Liveness = LivenessInfo.create(ts1, now1);
         r1Builder.addPrimaryKeyLivenessInfo(r1Liveness);
         DeletionTime r1ComplexDeletion = DeletionTime.build(ts1-1, now1);
@@ -299,8 +324,7 @@ public class RowsTest
 
         long now2 = now1 + 1;
         long ts2 = secondToTs(now2);
-        Row.Builder r2Builder = BTreeRow.unsortedBuilder();
-        r2Builder.newRow(c1);
+        Row.Builder r2Builder = createBuilder(c1);
         LivenessInfo r2Liveness = LivenessInfo.create(ts2, now2);
         r2Builder.addPrimaryKeyLivenessInfo(r2Liveness);
         Cell<?> r2v = BufferCell.live(v, ts2, BB2);
@@ -359,16 +383,14 @@ public class RowsTest
     {
         long now1 = FBUtilities.nowInSeconds();
         long ts1 = secondToTs(now1);
-        Row.Builder r1Builder = BTreeRow.unsortedBuilder();
-        r1Builder.newRow(c1);
+        Row.Builder r1Builder = createBuilder(c1);
         LivenessInfo r1Liveness = LivenessInfo.create(ts1, now1);
         r1Builder.addPrimaryKeyLivenessInfo(r1Liveness);
 
         // mergedData == null
         long now2 = now1 + 1L;
         long ts2 = secondToTs(now2);
-        Row.Builder r2Builder = BTreeRow.unsortedBuilder();
-        r2Builder.newRow(c1);
+        Row.Builder r2Builder = createBuilder(c1);
         LivenessInfo r2Liveness = LivenessInfo.create(ts2, now2);
         r2Builder.addPrimaryKeyLivenessInfo(r2Liveness);
         DeletionTime r2ComplexDeletion = DeletionTime.build(ts2-1, now2);
@@ -413,16 +435,14 @@ public class RowsTest
     {
         long now1 = FBUtilities.nowInSeconds();
         long ts1 = secondToTs(now1);
-        Row.Builder r1Builder = BTreeRow.unsortedBuilder();
-        r1Builder.newRow(c1);
+        Row.Builder r1Builder = createBuilder(c1);
         LivenessInfo r1Liveness = LivenessInfo.create(ts1, now1);
         r1Builder.addPrimaryKeyLivenessInfo(r1Liveness);
 
         // mergedData == null
         long now2 = now1 + 1L;
         long ts2 = secondToTs(now2);
-        Row.Builder r2Builder = BTreeRow.unsortedBuilder();
-        r2Builder.newRow(c1);
+        Row.Builder r2Builder = createBuilder(c1);
         LivenessInfo r2Liveness = LivenessInfo.create(ts2, now2);
         r2Builder.addPrimaryKeyLivenessInfo(r2Liveness);
         DeletionTime r2ComplexDeletion = DeletionTime.build(ts2-1, now2);
@@ -525,7 +545,7 @@ public class RowsTest
 
         Assert.assertEquals(expectedDeletion, merged.deletion());
         Assert.assertEquals(LivenessInfo.EMPTY, merged.primaryKeyLivenessInfo());
-        Assert.assertEquals(0, merged.columns().size());
+        Assert.assertEquals(0, merged.columnCount());
     }
 
 
@@ -547,13 +567,11 @@ public class RowsTest
         long ts1 = secondToTs(now1);
         long ldt = now1 + 1000;
 
-        Row.Builder r1Builder = BTreeRow.unsortedBuilder();
-        r1Builder.newRow(c1);
+        Row.Builder r1Builder = createBuilder(c1);
         LivenessInfo originalLiveness = LivenessInfo.withExpirationTime(ts1, 100, ldt);
         r1Builder.addPrimaryKeyLivenessInfo(originalLiveness);
 
-        Row.Builder r2Builder = BTreeRow.unsortedBuilder();
-        r2Builder.newRow(c1);
+        Row.Builder r2Builder = createBuilder(c1);
         LivenessInfo loweredTTL = LivenessInfo.withExpirationTime(ts1, 50, ldt);
         r2Builder.addPrimaryKeyLivenessInfo(loweredTTL);
 
@@ -610,102 +628,10 @@ public class RowsTest
     // Make a dummy row (empty clustering) with the provided cells, that are assumed to be in order
     private static Row makeDummyRow(Cell<?> ... cells)
     {
-        Row.Builder builder = BTreeRow.sortedBuilder();
-        builder.newRow(Clustering.EMPTY);
+        Row.Builder builder = createBuilder(Clustering.EMPTY);
         for (Cell<?> cell : cells)
             builder.addCell(cell);
 
         return builder.build();
-    }
-
-    @Test
-    public void testLegacyCellIterator()
-    {
-        // Creates a table with
-        //   - 3 Simple columns: a, c and e
-        //   - 2 Complex columns: b and d
-        TableMetadata metadata =
-            TableMetadata.builder("dummy_ks", "dummy_tbl")
-                         .addPartitionKeyColumn("k", BytesType.instance)
-                         .addRegularColumn("a", BytesType.instance)
-                         .addRegularColumn("b", MapType.getInstance(Int32Type.instance, BytesType.instance, true))
-                         .addRegularColumn("c", BytesType.instance)
-                         .addRegularColumn("d", MapType.getInstance(Int32Type.instance, BytesType.instance, true))
-                         .addRegularColumn("e", BytesType.instance)
-                         .build();
-
-        ColumnMetadata a = metadata.getColumn(new ColumnIdentifier("a", false));
-        ColumnMetadata b = metadata.getColumn(new ColumnIdentifier("b", false));
-        ColumnMetadata c = metadata.getColumn(new ColumnIdentifier("c", false));
-        ColumnMetadata d = metadata.getColumn(new ColumnIdentifier("d", false));
-        ColumnMetadata e = metadata.getColumn(new ColumnIdentifier("e", false));
-
-        Row row;
-
-        // Row with only simple columns
-
-        row = makeDummyRow(liveCell(a),
-                           liveCell(c),
-                           liveCell(e));
-
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, false),
-                        liveCell(a),
-                        liveCell(c),
-                        liveCell(e));
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, true),
-                        liveCell(e),
-                        liveCell(c),
-                        liveCell(a));
-
-        // Row with only complex columns
-
-        row = makeDummyRow(liveCell(b, 1),
-                           liveCell(b, 2),
-                           liveCell(d, 3),
-                           liveCell(d, 4));
-
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, false),
-                        liveCell(b, 1),
-                        liveCell(b, 2),
-                        liveCell(d, 3),
-                        liveCell(d, 4));
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, true),
-                        liveCell(d, 4),
-                        liveCell(d, 3),
-                        liveCell(b, 2),
-                        liveCell(b, 1));
-
-        // Row with mixed simple and complex columns
-
-        row = makeDummyRow(liveCell(a),
-                           liveCell(c),
-                           liveCell(e),
-                           liveCell(b, 1),
-                           liveCell(b, 2),
-                           liveCell(d, 3),
-                           liveCell(d, 4));
-
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, false),
-                        liveCell(a),
-                        liveCell(b, 1),
-                        liveCell(b, 2),
-                        liveCell(c),
-                        liveCell(d, 3),
-                        liveCell(d, 4),
-                        liveCell(e));
-
-        assertCellOrder(row.cellsInLegacyOrder(metadata, true),
-                        liveCell(e),
-                        liveCell(d, 4),
-                        liveCell(d, 3),
-                        liveCell(c),
-                        liveCell(b, 2),
-                        liveCell(b, 1),
-                        liveCell(a));
     }
 }

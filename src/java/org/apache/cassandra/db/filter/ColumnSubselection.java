@@ -77,6 +77,9 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
 
     protected abstract CellPath comparisonPath();
 
+    public abstract CellPath startInclusive();
+    public abstract CellPath endInclusive();
+
     public int compareTo(ColumnSubselection other)
     {
         assert other.column().name.equals(column().name);
@@ -137,6 +140,15 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
                 return 0;
         }
 
+        public CellPath startInclusive()
+        {
+            return from;
+        }
+        public CellPath endInclusive()
+        {
+            return to;
+        }
+
         @Override
         protected String toString(boolean cql, Redaction redaction)
         {
@@ -171,6 +183,15 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
         public int compareInclusionOf(CellPath path)
         {
             return column.cellPathComparator().compare(path, element);
+        }
+
+        public CellPath startInclusive()
+        {
+            return element;
+        }
+        public CellPath endInclusive()
+        {
+            return element;
         }
 
         @Override

@@ -16,18 +16,18 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Arrays;
+import java.util.Collection;
+
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
 
-import java.util.Arrays;
-import java.util.Collection;
-
 import org.apache.cassandra.config.DataStorageSpec.LongBytesBound;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.index.sai.SAITester;
 
 /// This is a regression test for CNDB-16363.
@@ -73,7 +73,7 @@ public class EstimatedRowCountTest extends SAITester
             DatabaseDescriptor.setLocalReadSizeWarnThreshold(null);
             DatabaseDescriptor.setLocalReadSizeFailThreshold(null);
 
-            TrieMemtable.SHARD_COUNT = numShards;
+            AbstractShardedMemtable.SHARDED_MEMTABLE_CONFIG.setDefaultShardCount("" + numShards);
             createTable("CREATE TABLE %s (k int, c int, n int, PRIMARY KEY(k, c))");
             createIndex("CREATE CUSTOM INDEX n_idx ON %s (n) USING 'StorageAttachedIndex'");
             createIndex("CREATE CUSTOM INDEX c_idx ON %s (c) USING 'StorageAttachedIndex'");

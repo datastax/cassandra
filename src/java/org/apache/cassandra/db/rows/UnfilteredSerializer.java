@@ -549,7 +549,7 @@ public class UnfilteredSerializer
         int flags = in.readUnsignedByte();
         assert !isEndOfPartition(flags) && kind(flags) == Unfiltered.Kind.ROW && isExtended(flags) : flags;
         int extendedFlags = in.readUnsignedByte();
-        Row.Builder builder = BTreeRow.sortedBuilder();
+        Row.Builder builder = helper.rowBuilder(true, true);
         builder.newRow(Clustering.STATIC_CLUSTERING);
         return deserializeRowBody(in, header, helper, flags, extendedFlags, builder);
     }
@@ -679,7 +679,7 @@ public class UnfilteredSerializer
                 if (complexDeletion.localDeletionTime() < 0)
                 {
                     if (MessagingService.Version.supportsExtendedDeletionTime(helper.version))
-                        complexDeletion = DeletionTime.build(complexDeletion.markedForDeleteAt(), Cell.deletionTimeUnsignedIntegerToLong((int) complexDeletion.localDeletionTime()));
+                        complexDeletion = DeletionTime.build(complexDeletion.markedForDeleteAt(), CellData.deletionTimeUnsignedIntegerToLong((int) complexDeletion.localDeletionTime()));
                     else
                         complexDeletion = DeletionTime.build(complexDeletion.markedForDeleteAt(), Cell.INVALID_DELETION_TIME);
                 }

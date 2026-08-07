@@ -31,13 +31,10 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
@@ -53,8 +50,6 @@ import org.apache.cassandra.utils.memory.MemtablePool;
 import org.apache.cassandra.utils.memory.NativePool;
 import org.apache.cassandra.utils.memory.SlabPool;
 import org.github.jamm.Unmetered;
-
-import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
 
 /**
  * A memtable that uses memory tracked and maybe allocated via a MemtableAllocator from a MemtablePool.
@@ -88,7 +83,7 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
      * the estimate is updated only whenever the number of operations on the memtable increases significantly from the
      * last update. This estimate is not very accurate but should be ok for planning or diagnostic purposes.
      */
-    private volatile MemtableAverageRowSize estimatedAverageRowSize;
+    protected volatile MemtableAverageRowSize estimatedAverageRowSize;
 
     @VisibleForTesting
     static MemtablePool createMemtableAllocatorPool()
@@ -130,9 +125,10 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
     public AbstractAllocatorMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(metadataRef, commitLogLowerBound);
-        this.allocator = MEMORY_POOL.newAllocator(metadataRef.toString());
-        this.initialComparator = metadata.get().comparator;
-        this.initialFactory = metadata().params.memtable.factory();
+        TableMetadata tableMetadata = metadataRef.get();
+        this.allocator = MEMORY_POOL.newAllocator(tableMetadata.toString());
+        this.initialComparator = tableMetadata.comparator;
+        this.initialFactory = tableMetadata.params.memtable.factory();
         this.owner = owner;
         scheduleFlush();
     }
@@ -140,22 +136,6 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
     public MemtableAllocator getAllocator()
     {
         return allocator;
-    }
-
-    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
-    {
-        int total = 0;
-        for (var iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
-        {
-            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
-            {
-                Unfiltered uRow = it.next();
-                if (uRow.isRow())
-                    total++;
-            }
-        }
-
-        return total;
     }
 
     @Override
@@ -200,8 +180,9 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         switch (reason)
         {
         case SCHEMA_CHANGE:
-            return initialComparator != metadata().comparator // If the CF comparator has changed, because our partitions reference the old one
-                   || !initialFactory.equals(metadata().params.memtable.factory()); // If a different type of memtable is requested
+            TableMetadata tableMetadata = metadata.get(); // do not use metadata() as this may be overridden
+            return initialComparator != tableMetadata.comparator // If the CF comparator has changed, because our partitions reference the old one
+                   || !initialFactory.equals(tableMetadata.params.memtable.factory()); // If a different type of memtable is requested
         case OWNED_RANGES_CHANGE:
             return false; // by default we don't use the local ranges, thus this has no effect
         default:
@@ -264,7 +245,16 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         liveDataSize.addAndGet(1024L * 1024 * 1024 * 1024 * 1024);
     }
 
-@Override
+    /**
+     * For testing only. Overwrite every buffer that this memtable releases on discard.
+     */
+    @VisibleForTesting
+    public void overwriteAllData()
+    {
+        allocator.overwriteAllData();
+    }
+
+    @Override
     public void addMemoryUsageTo(MemoryUsage stats)
     {
         stats.ownershipRatioOnHeap += getAllocator().onHeap().ownershipRatio();

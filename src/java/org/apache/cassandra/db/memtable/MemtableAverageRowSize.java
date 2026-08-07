@@ -24,6 +24,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 class MemtableAverageRowSize
 {
@@ -31,7 +32,6 @@ class MemtableAverageRowSize
 
     public final long rowSize;
     public final long operations;
-
 
     public MemtableAverageRowSize(Memtable memtable)
     {
@@ -41,25 +41,28 @@ class MemtableAverageRowSize
         long rowCount = 0;
         long totalSize = 0;
 
-        try (var partitionsIter = memtable.partitionIterator(columnFilter, range, SSTableReadsListener.NOOP_LISTENER))
+        try (OpOrder.Group protectData = memtable.readOrdering().start())
         {
-            while (partitionsIter.hasNext() && rowCount < MAX_ROWS)
+            try (var partitionsIter = memtable.partitionIterator(columnFilter, range, SSTableReadsListener.NOOP_LISTENER))
             {
-                UnfilteredRowIterator rowsIter = partitionsIter.next();
-                while (rowsIter.hasNext() && rowCount < MAX_ROWS)
+                while (partitionsIter.hasNext() && rowCount < MAX_ROWS)
                 {
-                    Unfiltered uRow = rowsIter.next();
-                    if (uRow.isRow())
+                    UnfilteredRowIterator rowsIter = partitionsIter.next();
+                    while (rowsIter.hasNext() && rowCount < MAX_ROWS)
                     {
-                        rowCount++;
-                        totalSize += ((Row) uRow).dataSize();
+                        Unfiltered uRow = rowsIter.next();
+                        if (uRow.isRow())
+                        {
+                            rowCount++;
+                            totalSize += ((Row) uRow).dataSize();
+                        }
                     }
                 }
             }
+            this.operations = memtable.operationCount();
+            this.rowSize = (rowCount > 0)
+                           ? totalSize / rowCount
+                           : 0;
         }
-        this.operations = memtable.operationCount();
-        this.rowSize = (rowCount > 0)
-                       ? totalSize / rowCount
-                       : 0;
     }
 }

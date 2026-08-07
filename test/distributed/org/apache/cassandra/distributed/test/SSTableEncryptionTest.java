@@ -134,7 +134,9 @@ public class SSTableEncryptionTest extends TestBaseImpl
     public void shouldEncryptSensitiveData() throws Exception
     {
         try (Cluster cluster = builder().withNodes(1)
-                                        .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                        .withDataDirCount(1)
+                                        .withConfig(config -> config.with(GOSSIP).with(NETWORK)
+                                                                    .set("column_index_size", "0KiB")) // index all rows to force sensitive key in row index
                                         .start())
         {
             // given tables with and without encryption
@@ -149,8 +151,13 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(Bytes.indexOf(nonEncryptedTable.sstableBytes, sensitiveBytes)).isNotEqualTo(-1);
             assertThat(Bytes.indexOf(encryptedTable.sstableBytes, sensitiveBytes)).isEqualTo(-1);
             // sensitive key should not be present in encrypted partition index
-            assertThat(Bytes.indexOf(nonEncryptedTable.partitionIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
             assertThat(Bytes.indexOf(encryptedTable.partitionIndexBytes, sensitiveBytes)).isEqualTo(-1);
+            // BTI does not list full keys so we usually won't find sensitive key without encryption either
+            // assertThat(Bytes.indexOf(nonEncryptedTable.partitionIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
+            // sensitive key should not be present in encrypted row index
+            assertThat(Bytes.indexOf(encryptedTable.rowIndexBytes, sensitiveBytes)).isEqualTo(-1);
+            // BTI does not list full keys so we usually won't find sensitive key without encryption either
+            // assertThat(Bytes.indexOf(nonEncryptedTable.rowIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
 
 
             // indexes with encryption should pass the checksum check
@@ -283,6 +290,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
         List<String> sstablePaths = getPathsFor(cluster, keyspace, tableName, SSTableFormat.Components.DATA);
         List<String> partitionIndexPaths = getPathsFor(cluster, keyspace, tableName, BtiFormat.Components.PARTITION_INDEX);
         List<String> rowIndexPaths = getPathsFor(cluster, keyspace, tableName, BtiFormat.Components.ROW_INDEX);
+        assertEquals(1, sstablePaths.size());
 
         String sstablePath = sstablePaths.get(0);
         byte[] sstableBytes = Files.readAllBytes(Path.of(sstablePath));

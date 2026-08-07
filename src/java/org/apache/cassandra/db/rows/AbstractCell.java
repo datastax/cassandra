@@ -20,12 +20,12 @@ package org.apache.cassandra.db.rows;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
-import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.DeletionPurger;
-import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.MarshalException;
@@ -48,21 +48,6 @@ public abstract class AbstractCell<V> extends Cell<V>
     public boolean isCounterCell()
     {
         return !isTombstone() && column.isCounterColumn();
-    }
-
-    public boolean isLive(long nowInSec)
-    {
-        return localDeletionTime() == NO_DELETION_TIME || (ttl() != NO_TTL && nowInSec < localDeletionTime());
-    }
-
-    public boolean isTombstone()
-    {
-        return localDeletionTime() != NO_DELETION_TIME && ttl() == NO_TTL;
-    }
-
-    public boolean isExpiring()
-    {
-        return ttl() != NO_TTL;
     }
 
     public Cell<?> markCounterLocalToBeCleared()
@@ -98,12 +83,6 @@ public abstract class AbstractCell<V> extends Cell<V>
         return this;
     }
 
-
-    public Cell<?> purgeDataOlderThan(long timestamp)
-    {
-        return this.timestamp() < timestamp ? null : this;
-    }
-
     @Override
     public Cell<?> clone(ByteBufferCloner cloner)
     {
@@ -117,14 +96,11 @@ public abstract class AbstractCell<V> extends Cell<V>
         return new BufferCell(column, isTombstone() ? newTimestamp - 1 : newTimestamp, ttl(), localDeletionTime(), buffer(), path());
     }
 
+    @Override
     public int dataSize()
     {
         CellPath path = path();
-        return TypeSizes.sizeof(timestamp())
-               + TypeSizes.sizeof(ttl())
-               + TypeSizes.sizeof(localDeletionTime())
-               + valueSize()
-               + (path == null ? 0 : path.dataSize());
+        return dataSizeWithoutPath() + (path == null ? 0 : path.dataSize());
     }
 
     @Override
@@ -190,7 +166,18 @@ public abstract class AbstractCell<V> extends Cell<V>
                && left.ttl() == right.ttl()
                && left.localDeletionTime() == right.localDeletionTime()
                && ValueAccessor.equals(left.value(), left.accessor(), right.value(), right.accessor())
-               && Objects.equals(left.path(), right.path());
+               && pathsEqual(left.column, left.path(), right.path());
+    }
+
+    private static boolean pathsEqual(ColumnMetadata column, CellPath path1, CellPath path2)
+    {
+        if (path1 == path2)
+            return true;
+        if (path1 == null || path2 == null)
+            return false; // already true if both null
+
+        assert column.isComplex();
+        return ((MultiCellCapableType<?>)column.type).nameComparator().compare(path1.get(0), path2.get(0)) == 0;
     }
 
     @Override
@@ -223,7 +210,7 @@ public abstract class AbstractCell<V> extends Cell<V>
             CollectionType<?> ct = (CollectionType<?>) type;
             return String.format("[%s[%s]=%s %s]",
                                  column().name,
-                                 ct.nameComparator().getString(path().get(0)),
+                                 path() == null ? "?" : ct.nameComparator().getString(path().get(0)),
                                  isTombstone() ? "<tombstone>" : ct.valueComparator().getString(value(), accessor()),
                                  livenessInfoString());
         }

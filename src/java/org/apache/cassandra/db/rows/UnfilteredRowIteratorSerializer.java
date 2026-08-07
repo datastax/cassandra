@@ -230,7 +230,7 @@ public class UnfilteredRowIteratorSerializer
         final SerializationHeader sHeader = header.sHeader;
         return new AbstractUnfilteredRowIterator(metadata, header.key, header.partitionDeletion, sHeader.columns(), header.staticRow, header.isReversed, sHeader.stats())
         {
-            private final Row.Builder builder = BTreeRow.sortedBuilder();
+            private final Row.Builder builder = helper.rowBuilder(false, true);
 
             protected Unfiltered computeNext()
             {

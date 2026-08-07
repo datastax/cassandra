@@ -31,6 +31,7 @@ import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.NativeCell;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.OpOrder.Group;
 import org.apache.cassandra.utils.concurrent.Semaphore;
@@ -209,6 +210,14 @@ public class NativeAllocator extends MemtableAllocator
             MemoryUtil.free(region.peer, region.capacity);
 
         super.setDiscarded();
+    }
+
+    @Override
+    public void overwriteAllData()
+    {
+        assert !isLive();
+        for (Region region : regions)
+            ByteBufferUtil.overwriteWithRandomBytes(MemoryUtil.getByteBuffer(region.peer, region.capacity));
     }
 
     // used to ensure we don't keep loads of race allocated regions around indefinitely. keeps the total bound on wasted memory low.
