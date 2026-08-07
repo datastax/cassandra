@@ -22,12 +22,16 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.annotation.Nullable;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.marshal.BytesType;
@@ -37,8 +41,10 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -116,6 +122,29 @@ public class MemtableNestedPutSkipsRoomWaitTest
                 index.putNested(update(tmIndex), UpdateTransaction.NO_OP, g);
             }
             public void onUpdated(Row existing, Row updated) {}
+
+            @Override
+            public void startRow(Clustering clustering,
+                                 @Nullable LivenessInfo existingLiveness,
+                                 @Nullable Row.Deletion existingDeletion,
+                                 LivenessInfo updatedLiveness,
+                                 Row.Deletion updatedDeletion)
+            {
+
+            }
+
+            @Override
+            public void onCellUpdate(@Nullable Cell<?> original, @Nullable Cell<?> merged)
+            {
+
+            }
+
+            @Override
+            public void onComplexColumnDeletion(ColumnMetadata column, DeletionTime deletionTime)
+            {
+
+            }
+
             public void commit() {}
         };
 
