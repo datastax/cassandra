@@ -615,9 +615,9 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
     public static class TrieFactory implements PartitionUpdate.Factory
     {
         @Override
-        public Row.Builder unsortedRowBuilder(TableMetadata metadata, boolean isStatic)
+        public Row.Builder rowBuilder(Columns columns, boolean dataIsSorted)
         {
-            return BTreeRow.unsortedBuilder();
+            return dataIsSorted ? BTreeRow.sortedBuilder() : BTreeRow.unsortedBuilder();
         }
 
         @Override

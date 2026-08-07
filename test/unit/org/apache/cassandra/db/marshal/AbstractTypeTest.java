@@ -1184,7 +1184,6 @@ public class AbstractTypeTest
             try (DataInputBuffer in = new DataInputBuffer(out.getData()))
             {
                 Row.Builder builder = implementation == RowImplementation.BTREE ? BTreeRow.sortedBuilder() : TrieBackedRow.builder(rightTable.regularAndStaticColumns().columns(rightRow.isStatic()));
-                builder.addPrimaryKeyLivenessInfo(rightRow.primaryKeyLivenessInfo());
                 Row leftRow = (Row) UnfilteredSerializer.serializer.deserialize(in, leftHeader, leftHelper, builder);
                 ComplexColumnData leftData1 = leftRow.getComplexColumnData(leftColumn1);
                 ComplexColumnData leftData2 = leftRow.getComplexColumnData(leftColumn2);
@@ -1220,7 +1219,6 @@ public class AbstractTypeTest
             try (DataInputBuffer in = new DataInputBuffer(out.getData()))
             {
                 Row.Builder builder = implementation == RowImplementation.BTREE ? BTreeRow.sortedBuilder() : TrieBackedRow.builder(rightTable.regularAndStaticColumns().columns(rightRow.isStatic()));
-                builder.addPrimaryKeyLivenessInfo(rightRow.primaryKeyLivenessInfo());
                 Row leftRow = (Row) UnfilteredSerializer.serializer.deserialize(in, leftHeader, leftHelper, builder);
                 Cell leftData = (Cell) leftRow.getColumnData(leftColumn);
                 Cell rightData = (Cell) rightRow.getColumnData(rightColumn);
@@ -1245,7 +1243,6 @@ public class AbstractTypeTest
             try (DataInputBuffer in = new DataInputBuffer(out.getData()))
             {
                 Row.Builder builder = implementation == RowImplementation.BTREE ? BTreeRow.sortedBuilder() : TrieBackedRow.builder(rightTable.regularAndStaticColumns().columns(rightRow.isStatic()));
-                builder.addPrimaryKeyLivenessInfo(rightRow.primaryKeyLivenessInfo());
                 Row leftRow = (Row) UnfilteredSerializer.serializer.deserialize(in, leftHeader, leftHelper, builder);
                 ComplexColumnData leftData = leftRow.getComplexColumnData(leftColumn);
                 ComplexColumnData rightData = rightRow.getComplexColumnData(rightColumn);
