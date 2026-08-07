@@ -1236,6 +1236,8 @@ public class TrieBackedRow extends AbstractRow
             this.columns = builder.columns;
             this.clustering = builder.clustering;
             this.columnIds = builder.columnIds;
+            data = newTrie();
+            mutator = makeMutator(data);
             try
             {
                 mutator.apply(builder.data);
