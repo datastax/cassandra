@@ -600,9 +600,9 @@ public class BTreePartitionUpdate extends AbstractBTreePartition implements Part
     public static class BTreeFactory implements PartitionUpdate.Factory
     {
         @Override
-        public Row.Builder unsortedRowBuilder(TableMetadata metadata, boolean isStatic)
+        public Row.Builder rowBuilder(Columns columns, boolean dataIsSorted)
         {
-            return BTreeRow.unsortedBuilder();
+            return dataIsSorted ? BTreeRow.sortedBuilder() : BTreeRow.unsortedBuilder();
         }
 
         @Override

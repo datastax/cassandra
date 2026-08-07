@@ -44,7 +44,6 @@ import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
@@ -740,7 +739,7 @@ public class DataResolverTest extends AbstractReadResponseTest
 
         long[] ts = {100, 200};
 
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(cfm2, false, false);
         builder.newRow(Clustering.EMPTY);
         builder.addComplexDeletion(m, DeletionTime.build(ts[0] - 1, nowInSec));
         builder.addCell(mapCell(0, 0, ts[0]));
@@ -792,7 +791,7 @@ public class DataResolverTest extends AbstractReadResponseTest
 
         long[] ts = {100, 200};
 
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(cfm2, false, false);
         builder.newRow(Clustering.EMPTY);
         builder.addComplexDeletion(m, DeletionTime.build(ts[0] - 1, nowInSec));
         builder.addCell(mapCell(0, 0, ts[0]));
@@ -837,7 +836,7 @@ public class DataResolverTest extends AbstractReadResponseTest
         long[] ts = {100, 200};
 
         // map column
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(cfm2, false, false);
         builder.newRow(Clustering.EMPTY);
         DeletionTime expectedCmplxDelete = DeletionTime.build(ts[0] - 1, nowInSec);
         builder.addComplexDeletion(m, expectedCmplxDelete);
@@ -887,7 +886,7 @@ public class DataResolverTest extends AbstractReadResponseTest
         long[] ts = {100, 200};
 
         // cleared map column
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(cfm2, false, false);
         builder.newRow(Clustering.EMPTY);
         builder.addComplexDeletion(m, DeletionTime.build(ts[0] - 1, nowInSec));
 

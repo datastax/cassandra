@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -56,7 +57,7 @@ public class UnfilteredDeserializer
         this.helper = helper;
         this.header = header;
         this.clusteringDeserializer = new ClusteringPrefix.Deserializer(metadata.comparator, in, header);
-        this.builder = BTreeRow.sortedBuilder();
+        this.builder = PartitionUpdate.rowBuilder(metadata, false, true);
     }
 
     public static UnfilteredDeserializer create(TableMetadata metadata,

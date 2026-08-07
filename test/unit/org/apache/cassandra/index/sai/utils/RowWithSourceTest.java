@@ -27,8 +27,9 @@ import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.ArrayCell;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.CellPath;
@@ -40,6 +41,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.HeapCloner;
 
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
@@ -91,7 +93,7 @@ public class RowWithSourceTest {
         complexCell = new ArrayCell(complexColumn, System.currentTimeMillis(), Cell.NO_TTL, Cell.NO_DELETION_TIME, value, complexCellPath);
         cell = new ArrayCell(column, System.currentTimeMillis(), Cell.NO_TTL, Cell.NO_DELETION_TIME, value, null);
         // Use unsorted builder to avoid the need to manually sort cells here
-        var builder = BTreeRow.unsortedBuilder();
+        var builder = PartitionUpdate.rowBuilder(tableMetadata, false, false);
         builder.newRow(Clustering.EMPTY);
         builder.addCell(complexCell);
         builder.addCell(cell);
@@ -309,6 +311,8 @@ public class RowWithSourceTest {
     @Test
     public void testTransformAndFilter()
     {
+        // Only valid for BTreeRow as trie-backed-ones' transformAndFilter wraps the input row
+        Assume.assumeTrue(tableMetadata.params.memtable.factory.partitionUpdateFactory() instanceof BTreePartitionUpdate.BTreeFactory);
         assertNull(rowWithSource.transformAndFilter(li -> li, RowWithSourceTest::toNull));
         assertSame(rowWithSource, rowWithSource.transformAndFilter(li -> li, RowWithSourceTest::unchanged));
     }

@@ -28,6 +28,7 @@ import com.google.common.collect.Lists;
 
 import net.openhft.chronicle.core.util.ThrowingFunction;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.CounterMutation;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
@@ -642,11 +643,16 @@ public interface PartitionUpdate extends Partition
         DeletionTime partitionLevelDeletion();
     }
 
+    static Row.Builder rowBuilder(TableMetadata metadata, boolean isStatic, boolean dataIsSorted)
+    {
+        return metadata.params.memtable.factory.partitionUpdateFactory().rowBuilder(isStatic ? metadata.staticColumns() : metadata.regularColumns(), dataIsSorted);
+    }
+
     interface Factory
     {
-        Row.Builder unsortedRowBuilder(TableMetadata metadata, boolean isStatic);
-
         Builder builder(TableMetadata metadata, DecoratedKey partitionKey, RegularAndStaticColumns columns, int initialRowCapacity);
+
+        Row.Builder rowBuilder(Columns columns, boolean dataIsSorted);
 
         /**
          * Creates a empty immutable partition update.

@@ -34,7 +34,6 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.SetType;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.Row;
@@ -43,7 +42,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
 
 /// Tests for [PartitionUpdate#affectedColumnCount] and [PartitionUpdate#affectedRowCount].
 @RunWith(Parameterized.class)
@@ -114,10 +113,12 @@ public class AffectedColumnCountTest
     public void testAffectedColumnCountWithSingleSimpleCell()
     {
         PartitionUpdate.Builder builder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);
-        
-        Row row = BTreeRow.singleCellRow(Clustering.make(ByteBufferUtil.bytes(1)),
-                                         BufferCell.live(r1, 1000, ByteBufferUtil.bytes(100)));
-        builder.add(row);
+
+        Row.Builder rowBuilder = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
+        rowBuilder.newRow(Clustering.make(ByteBufferUtil.bytes(1)));
+        rowBuilder.addCell(BufferCell.live(r1, 1000, ByteBufferUtil.bytes(100)));
+
+        builder.add(rowBuilder.build());
         PartitionUpdate update = builder.build();
 
         // Should count 1 cell
@@ -130,7 +131,7 @@ public class AffectedColumnCountTest
     {
         PartitionUpdate.Builder updateBuilder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);
         
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
         builder.newRow(Clustering.make(ByteBufferUtil.bytes(1)));
         builder.addCell(BufferCell.live(r1, 1000, ByteBufferUtil.bytes(100)));
         builder.addCell(BufferCell.live(r2, 1000, ByteBufferUtil.bytes(200)));
@@ -149,7 +150,7 @@ public class AffectedColumnCountTest
     {
         PartitionUpdate.Builder updateBuilder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);
         
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = partitionUpdateFactory.rowBuilder(metadata.staticColumns(), false);
         builder.newRow(Clustering.STATIC_CLUSTERING);
         builder.addCell(BufferCell.live(s1, 1000, ByteBufferUtil.bytes(100)));
         builder.addCell(BufferCell.live(s2, 1000, ByteBufferUtil.bytes(200)));
@@ -167,7 +168,7 @@ public class AffectedColumnCountTest
     {
         PartitionUpdate.Builder updateBuilder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);
         
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
         builder.newRow(Clustering.make(ByteBufferUtil.bytes(1)));
         
         // Add cells to a complex column (set)
@@ -189,13 +190,13 @@ public class AffectedColumnCountTest
         PartitionUpdate.Builder updateBuilder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);
         
         // Add static row
-        Row.Builder staticBuilder = BTreeRow.unsortedBuilder();
+        Row.Builder staticBuilder = partitionUpdateFactory.rowBuilder(metadata.staticColumns(), false);
         staticBuilder.newRow(Clustering.STATIC_CLUSTERING);
         staticBuilder.addCell(BufferCell.live(s1, 1010, ByteBufferUtil.bytes(100)));
         updateBuilder.add(staticBuilder.build());
         
         // Add regular row with simple and complex columns
-        Row.Builder regularBuilder = BTreeRow.unsortedBuilder();
+        Row.Builder regularBuilder = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
         regularBuilder.newRow(Clustering.make(ByteBufferUtil.bytes(1)));
         regularBuilder.addCell(BufferCell.live(r1, 1000, ByteBufferUtil.bytes(100)));
         regularBuilder.addCell(BufferCell.live(r2, 1001, ByteBufferUtil.bytes(200)));
@@ -298,7 +299,7 @@ public class AffectedColumnCountTest
                                              DeletionTime.build(1000, FBUtilities.nowInSeconds())));
         
         // Add a row with cells
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
         builder.newRow(Clustering.make(ByteBufferUtil.bytes(20)));
         builder.addCell(BufferCell.live(r1, 1000, ByteBufferUtil.bytes(100)));
         builder.addCell(BufferCell.live(r2, 1000, ByteBufferUtil.bytes(200)));
@@ -318,13 +319,13 @@ public class AffectedColumnCountTest
         PartitionUpdate.Builder updateBuilder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);
         
         // Add first row
-        Row.Builder builder1 = BTreeRow.unsortedBuilder();
+        Row.Builder builder1 = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
         builder1.newRow(Clustering.make(ByteBufferUtil.bytes(1)));
         builder1.addCell(BufferCell.live(r1, 1000, ByteBufferUtil.bytes(100)));
         updateBuilder.add(builder1.build());
         
         // Add second row
-        Row.Builder builder2 = BTreeRow.unsortedBuilder();
+        Row.Builder builder2 = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
         builder2.newRow(Clustering.make(ByteBufferUtil.bytes(2)));
         builder2.addCell(BufferCell.live(r2, 1000, ByteBufferUtil.bytes(200)));
         builder2.addCell(BufferCell.live(r3, 1000, ByteBufferUtil.bytes(300)));
@@ -352,7 +353,7 @@ public class AffectedColumnCountTest
     {
         PartitionUpdate.Builder updateBuilder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);
 
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
         builder.newRow(Clustering.make(ByteBufferUtil.bytes(1)));
 
         // Add a complex column deletion (marker)
@@ -374,7 +375,7 @@ public class AffectedColumnCountTest
     {
         PartitionUpdate.Builder updateBuilder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);
 
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
         builder.newRow(Clustering.make(ByteBufferUtil.bytes(1)));
 
         // Add a complex column deletion (marker) at timestamp 1000
