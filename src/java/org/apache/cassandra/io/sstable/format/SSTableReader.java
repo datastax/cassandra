@@ -800,7 +800,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public Interval<PartitionPosition, SSTableReader> getInterval()
     {
         if (interval == null)
-            interval = Interval.create(first, last, this); // races are benign
+            interval = Interval.create(getFirst(), getLast(), this); // races are benign; use getFirst/Last to allow overrides
         return interval;
     }
 
