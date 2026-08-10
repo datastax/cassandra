@@ -40,6 +40,7 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
@@ -170,7 +171,7 @@ public class RowIteratorMergeListener<E extends Endpoints<E>>
     {
         if (currentRows[i] == null)
         {
-            currentRows[i] = PartitionUpdate.rowBuilder(command.metadata(), clustering == Clustering.STATIC_CLUSTERING, true);
+            currentRows[i] = BTreeRow.sortedBuilder();
             currentRows[i].newRow(clustering);
         }
         return currentRows[i];

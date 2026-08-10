@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.apache.cassandra.db.marshal.ValueAccessor;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -56,8 +55,6 @@ public class DeserializationHelper
     private final boolean hasDroppedColumns;
     private final Map<ByteBuffer, DroppedColumn> droppedColumns;
     private DroppedColumn currentDroppedComplex;
-    private final PartitionUpdate.Factory partitionUpdateFactory;
-    private final RegularAndStaticColumns regularAndStaticColumns;
 
 
     public DeserializationHelper(TableMetadata metadata, int version, Flag flag, ColumnFilter columnsToFetch)
@@ -67,8 +64,6 @@ public class DeserializationHelper
         this.columnsToFetch = columnsToFetch;
         this.droppedColumns = metadata.droppedColumns;
         this.hasDroppedColumns = droppedColumns.size() > 0;
-        this.partitionUpdateFactory = metadata.params.memtable.factory.partitionUpdateFactory();
-        this.regularAndStaticColumns = columnsToFetch != null ? columnsToFetch.fetchedColumns() : metadata.regularAndStaticColumns();
     }
 
     public DeserializationHelper(TableMetadata metadata, int version, Flag flag)
@@ -151,10 +146,5 @@ public class DeserializationHelper
         return flag == Flag.FROM_REMOTE || (flag == Flag.LOCAL && CounterContext.instance().shouldClearLocal(value, accessor))
                ? CounterContext.instance().clearAllLocal(value, accessor)
                : value;
-    }
-
-    public Row.Builder rowBuilder(boolean isStatic, boolean dataIsSorted)
-    {
-        return partitionUpdateFactory.rowBuilder(regularAndStaticColumns.columns(isStatic), dataIsSorted);
     }
 }

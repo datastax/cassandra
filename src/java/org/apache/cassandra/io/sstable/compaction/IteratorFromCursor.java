@@ -28,8 +28,8 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker;
@@ -54,8 +54,8 @@ public class IteratorFromCursor implements UnfilteredPartitionIterator
     {
         this.metadata = metadata;
         this.cursor = cursor;
-        this.rowBuilderRegular = PartitionUpdate.rowBuilder(metadata, false, true);
-        this.rowBuilderStatic = metadata.hasStaticColumns() ? PartitionUpdate.rowBuilder(metadata, true, true) : null;
+        this.rowBuilderRegular = BTreeRow.sortedBuilder();
+        this.rowBuilderStatic = metadata.hasStaticColumns() ? BTreeRow.sortedBuilder() : null;
     }
 
     public TableMetadata metadata()

@@ -25,7 +25,6 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.Row;
@@ -78,7 +77,7 @@ public abstract class SSTableSimpleIterator extends AbstractIterator<Unfiltered>
         {
             super(metadata, in, helper);
             this.header = header;
-            this.builder = PartitionUpdate.rowBuilder(metadata, false, true);
+            this.builder = BTreeRow.sortedBuilder();
         }
 
         public Row readStaticRow() throws IOException

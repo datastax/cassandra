@@ -549,7 +549,7 @@ public class UnfilteredSerializer
         int flags = in.readUnsignedByte();
         assert !isEndOfPartition(flags) && kind(flags) == Unfiltered.Kind.ROW && isExtended(flags) : flags;
         int extendedFlags = in.readUnsignedByte();
-        Row.Builder builder = helper.rowBuilder(true, true);
+        Row.Builder builder = BTreeRow.sortedBuilder();
         builder.newRow(Clustering.STATIC_CLUSTERING);
         return deserializeRowBody(in, header, helper, flags, extendedFlags, builder);
     }
