@@ -325,8 +325,11 @@ public class BTreeComplexColumn extends ComplexColumnData
         if (this == other)
             return true;
 
-        if(!(other instanceof BTreeComplexColumn))
+        if(!(other instanceof ComplexColumnData))
             return false;
+
+        if(!(other instanceof BTreeComplexColumn))
+            return other.equals(this);
 
         BTreeComplexColumn that = (BTreeComplexColumn)other;
         return this.column().equals(that.column())

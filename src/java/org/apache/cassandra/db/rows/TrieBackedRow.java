@@ -1285,6 +1285,9 @@ public class TrieBackedRow extends AbstractRow
         @Override
         public void addPrimaryKeyLivenessInfo(LivenessInfo info)
         {
+            if (info.isEmpty())
+                return;
+
             DeletionTime rowDeletion = TrieTombstoneMarker.applicableDeletionAtRoot(data);
             if (rowDeletion != null && rowDeletion.deletes(info))
                 return;
@@ -1326,7 +1329,7 @@ public class TrieBackedRow extends AbstractRow
             assert cell.column().isStatic() == (clustering == Clustering.STATIC_CLUSTERING) : "Column is " + cell.column() + ", clustering = " + clustering;
             CellPath path = cell.path();
             ByteComparable key = cellKey(columnIds, cell.column, path);
-            Preconditions.checkArgument(key != MISSING_COLUMN_KEY, "Column {} not present in row columns set.", cell.column);
+            Preconditions.checkArgument(key != MISSING_COLUMN_KEY, "Column %s not present in row columns set.", cell.column);
 
             try
             {

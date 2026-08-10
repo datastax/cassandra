@@ -557,7 +557,7 @@ public class TrieBackedPartition implements Partition
         @Override
         public RegularAndStaticColumns columns()
         {
-            return selection != null ? selection.fetchedColumns() : metadata.regularAndStaticColumns();
+            return selection != null ? selection.fetchedColumns() : TrieBackedPartition.this.columns;
         }
 
         @Override

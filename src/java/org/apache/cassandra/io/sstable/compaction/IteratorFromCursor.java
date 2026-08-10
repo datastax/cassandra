@@ -55,7 +55,7 @@ public class IteratorFromCursor implements UnfilteredPartitionIterator
         this.metadata = metadata;
         this.cursor = cursor;
         this.rowBuilderRegular = PartitionUpdate.rowBuilder(metadata, false, true);
-        this.rowBuilderStatic = metadata.hasStaticColumns() ? PartitionUpdate.rowBuilder(metadata, false, true) : null;
+        this.rowBuilderStatic = metadata.hasStaticColumns() ? PartitionUpdate.rowBuilder(metadata, true, true) : null;
     }
 
     public TableMetadata metadata()
