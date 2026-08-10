@@ -306,7 +306,10 @@ public class MultiRangeReadCommand extends ReadCommand implements MultiPartition
     @Override
     protected void recordReadLatency(TableMetrics metric, long latencyNanos)
     {
-        metric.rangeLatency.addNano(latencyNanos);
+        if (recordIndexLatency())
+            metric.indexLatency.addNano(latencyNanos);
+        else
+            metric.rangeLatency.addNano(latencyNanos);
     }
 
     @Override

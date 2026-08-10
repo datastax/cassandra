@@ -419,6 +419,11 @@ public enum CassandraRelevantProperties
      */
     SKIP_INDEXES_ON_FULL_PRIMARY_KEYS("cassandra.index.skip_on_full_primary_keys", "true"),
 
+    /**
+     * Whether to use a separate histogram for the latencies of indexed queries. Enabled by default.
+     */
+    SEPARATE_INDEX_LATENCY_HISTOGRAM_ENABLED("cassandra.index.separate_latency_histogram.enabled", "true"),
+
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
 

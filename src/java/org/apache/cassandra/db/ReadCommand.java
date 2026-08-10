@@ -578,6 +578,11 @@ public abstract class ReadCommand extends AbstractReadQuery
     protected abstract void recordReadRequest(TableMetrics metric);
     protected abstract void recordReadLatency(TableMetrics metric, long latencyNanos);
 
+    protected boolean recordIndexLatency()
+    {
+        return indexQueryPlan != null && CassandraRelevantProperties.SEPARATE_INDEX_LATENCY_HISTOGRAM_ENABLED.getBoolean();
+    }
+
     public ReadExecutionController executionController(boolean trackRepairedStatus)
     {
         return ReadExecutionController.forCommand(this, trackRepairedStatus);

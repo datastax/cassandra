@@ -155,6 +155,7 @@ public class TableMetrics
     public final static Optional<LatencyMetrics> GLOBAL_READ_LATENCY = EXPORT_GLOBAL_METRICS ? Optional.of(new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Read")) : Optional.empty();
     public final static Optional<LatencyMetrics> GLOBAL_WRITE_LATENCY = EXPORT_GLOBAL_METRICS ? Optional.of(new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Write")) : Optional.empty();
     public final static Optional<LatencyMetrics> GLOBAL_RANGE_LATENCY = EXPORT_GLOBAL_METRICS ? Optional.of(new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Range")) : Optional.empty();
+    public final static Optional<LatencyMetrics> GLOBAL_INDEX_LATENCY = EXPORT_GLOBAL_METRICS ? Optional.of(new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Index")) : Optional.empty();
 
     /** Total amount of data stored in the memtable that resides on-heap, including column related overhead and partitions overwritten. */
     public final Gauge<Long> memtableOnHeapDataSize;
@@ -201,6 +202,8 @@ public class TableMetrics
     public final TableLatencyMetrics readLatency;
     /** (Local) range slice metrics */
     public final TableLatencyMetrics rangeLatency;
+    /** (Local) index read metrics */
+    public final TableLatencyMetrics indexLatency;
     /** (Local) write metrics */
     public final TableLatencyMetrics writeLatency;
     /** The number of single partition read requests, including those dropped due to timeouts */
@@ -792,6 +795,7 @@ public class TableMetrics
         readLatency = createLatencyMetrics("Read", cfs.getKeyspaceMetrics().readLatency, GLOBAL_READ_LATENCY);
         writeLatency = createLatencyMetrics("Write", cfs.getKeyspaceMetrics().writeLatency, GLOBAL_WRITE_LATENCY);
         rangeLatency = createLatencyMetrics("Range", cfs.getKeyspaceMetrics().rangeLatency, GLOBAL_RANGE_LATENCY);
+        indexLatency = createLatencyMetrics("Index", cfs.getKeyspaceMetrics().indexLatency, GLOBAL_INDEX_LATENCY);
 
         readRequests = createTableCounter("ReadRequests");
         rangeRequests = createTableCounter("RangeRequests");

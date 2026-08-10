@@ -75,6 +75,8 @@ public class KeyspaceMetrics
     public final LatencyMetrics readLatency;
     /** (Local) range slice metrics */
     public final LatencyMetrics rangeLatency;
+    /** (Local) index read metrics */
+    public final LatencyMetrics indexLatency;
     /** (Local) write metrics */
     public final LatencyMetrics writeLatency;
     /** Histogram of the number of sstable data files accessed per read */
@@ -237,6 +239,7 @@ public class KeyspaceMetrics
         readLatency = createLatencyMetrics("Read");
         writeLatency = createLatencyMetrics("Write");
         rangeLatency = createLatencyMetrics("Range");
+        indexLatency = createLatencyMetrics("Index");
 
         // create histograms for TableMetrics to replicate updates to
         sstablesPerReadHistogram = createKeyspaceHistogram("SSTablesPerReadHistogram", true);

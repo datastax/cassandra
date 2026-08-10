@@ -416,9 +416,13 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         return StorageProxy.read(Group.one(this), consistency, queryState, queryStartNanoTime);
     }
 
+    @Override
     protected void recordReadLatency(TableMetrics metric, long latencyNanos)
     {
-        metric.readLatency.addNano(latencyNanos);
+        if (recordIndexLatency())
+            metric.indexLatency.addNano(latencyNanos);
+        else
+            metric.readLatency.addNano(latencyNanos);
     }
 
     protected void recordReadRequest(TableMetrics metric)

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.metrics;
 
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -29,6 +30,8 @@ import org.apache.cassandra.utils.Throwables;
 
 import javax.management.ObjectName;
 
+import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.AbstractQueryMetrics.makeName;
+import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.QueryKind;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.*;
 
@@ -213,7 +216,11 @@ public class IndexMetricsTest extends AbstractMetricsTest
     private void assertMetricExistsIfEnabled(boolean shouldExist, String metricName, String table, String index, String metricType)
     {
         ObjectName name = objectName(metricName, KEYSPACE, table, index, metricType);
+        assertMetricsExistsIfEnabled(shouldExist, name);
+    }
 
+    private void assertMetricsExistsIfEnabled(boolean shouldExist, ObjectName name)
+    {
         if (shouldExist)
             assertMetricExists(name);
         else
@@ -233,11 +240,14 @@ public class IndexMetricsTest extends AbstractMetricsTest
     private void assertTableQueryMetricsExistsIfEnabled(boolean shouldExist, String metricName, String table)
     {
         ObjectName name = objectNameNoIndex(metricName, KEYSPACE, table, "PerQuery");
+        assertMetricsExistsIfEnabled(shouldExist, name);
+    }
 
-        if (shouldExist)
-            assertMetricExists(name);
-        else
-            assertMetricDoesNotExist(name);
+    private void assertPerQueryKindMetricExistsIfEnabled(boolean shouldExist, String metricName, String table, TableQueryMetrics.QueryKind kind)
+    {
+        String type = makeName(TableQueryMetrics.PerQuery.METRIC_TYPE, kind);
+        ObjectName name = objectNameNoIndex(metricName, KEYSPACE, table, type);
+        assertMetricsExistsIfEnabled(shouldExist, name);
     }
 
     private void assertIndexQueryCount(String index, long expectedCount)
@@ -466,14 +476,17 @@ public class IndexMetricsTest extends AbstractMetricsTest
     @Test
     public void testHistogramMetricsEnabledAndDisabled()
     {
-        testHistogramMetrics(false);
-        testHistogramMetrics(true);
+        testHistogramMetrics(false, false);
+        testHistogramMetrics(false, true);
+        testHistogramMetrics(true, false);
+        testHistogramMetrics(true, true);
     }
 
-    private void testHistogramMetrics(boolean histogramsEnabled)
+    private void testHistogramMetrics(boolean histogramsEnabled, boolean perQueryKindEnabled)
     {
-        // Set the property before creating any indexes
+        // Set the properties before creating any indexes
         CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.setBoolean(histogramsEnabled);
+        CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.setBoolean(perQueryKindEnabled);
 
         try
         {
@@ -519,7 +532,11 @@ public class IndexMetricsTest extends AbstractMetricsTest
             assertColumnQueryMetricsExistsIfEnabled(histogramsEnabled, "TermsLookupLatency", table, indexV2);
 
             // Test QueryLatency timer (TableQueryMetrics.PerQuery - table-level metric, no index name)
-            assertTableQueryMetricsExistsIfEnabled(histogramsEnabled, "QueryLatency", table);
+            for (QueryKind kind : QueryKind.values())
+            {
+                boolean shouldExist = histogramsEnabled && (perQueryKindEnabled || kind == QueryKind.ALL);
+                assertPerQueryKindMetricExistsIfEnabled(shouldExist, "QueryLatency", table, kind);
+            }
 
             // Verify that other PerQuery histograms are always enabled (not affected by the flag)
             assertTableQueryMetricsExistsIfEnabled(true, "SSTableIndexesHit", table);
