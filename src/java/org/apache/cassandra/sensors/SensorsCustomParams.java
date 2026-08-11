@@ -92,6 +92,17 @@ public final class SensorsCustomParams
         Preconditions.checkNotNull(sensors);
         Preconditions.checkNotNull(response);
 
+        UCUCalculator calculator = SensorsFactory.instance.getUCUCalculator();
+        if (calculator != null)
+        {
+            for (Sensor ucuSensor : sensors.getSensors(s -> s.getType() == Type.UCU))
+            {
+                Context context = ucuSensor.getContext();
+                double ucuValue = calculator.computeReplicaUCU(sensors, context);
+                sensors.incrementSensor(context, Type.UCU, ucuValue);
+            }
+        }
+
         for (Sensor sensor : sensors.getSensors(ignored -> true))
             addSensorToInternodeResponse(response, sensor, valueFunction);
     }

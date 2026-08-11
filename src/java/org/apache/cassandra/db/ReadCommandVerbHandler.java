@@ -59,6 +59,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
         Context context = Context.from(command);
         requestSensors.registerSensor(context, Type.READ_BYTES);
+        requestSensors.registerSensor(context, Type.UCU);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 

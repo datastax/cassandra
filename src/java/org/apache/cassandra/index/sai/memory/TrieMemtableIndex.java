@@ -210,7 +210,10 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
 
         RequestSensors sensors = requestTracker.get();
         if (sensors != null)
+        {
             sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+            sensors.registerSensor(sensorContext, Type.UCU);
+        }
         rangeIndexes[boundaries.getShardForKey(key)].add(key,
                                                          clustering,
                                                          value,
@@ -243,7 +246,10 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
 
         RequestSensors sensors = requestTracker.get();
         if (sensors != null)
+        {
             sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+            sensors.registerSensor(sensorContext, Type.UCU);
+        }
 
         // The terms inserted into the index could still be the same in the case of certain analyzer configs.
         // We don't know yet though, and instead of eagerly determining it, we leave it to the index to handle it.
@@ -272,7 +278,10 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     {
         RequestSensors sensors = requestTracker.get();
         if (sensors != null)
+        {
             sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+            sensors.registerSensor(sensorContext, Type.UCU);
+        }
 
         // We defer on comparing old and new values here. Instead, we rely on the index to do the comparison and then
         // have custom logic in the aggregator to ensure that we properly add/keep new values and remove old values

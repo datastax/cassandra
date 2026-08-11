@@ -502,6 +502,7 @@ public class StorageProxy implements StorageProxyMBean
         sensors.registerSensor(context, Type.WRITE_BYTES); // tracks user table + system.paxos write bytes (see comment above)
         sensors.registerSensor(context, Type.READ_BYTES);  // tracks user table + system.paxos read bytes (see comment above)
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES); // track secondary index write bytes on commit
+        sensors.registerSensor(context, Type.UCU);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         try
@@ -1115,6 +1116,7 @@ public class StorageProxy implements StorageProxyMBean
                     if (pu.metadata().isIndex()) continue;
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
                     sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.UCU);
                 }
 
                 if (mutation instanceof CounterMutation)
@@ -1420,6 +1422,7 @@ public class StorageProxy implements StorageProxyMBean
                 if (pu.metadata().isIndex()) continue;
                 sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
                 sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.UCU);
             }
         }
 
@@ -2011,6 +2014,7 @@ public class StorageProxy implements StorageProxyMBean
         RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
         Context context = Context.from(group.metadata());
         requestSensors.registerSensor(context, Type.READ_BYTES);
+        requestSensors.registerSensor(context, Type.UCU);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
@@ -2389,6 +2393,7 @@ public class StorageProxy implements StorageProxyMBean
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
         Context context = Context.from(command);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.UCU);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 

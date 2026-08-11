@@ -19,16 +19,16 @@
 package org.apache.cassandra.sensors;
 
 /**
- * The type of the measurement a {@link Sensor} refers to.
+ * Abstraction for calculating UCU (Unified Compute Unit) scalar values.
  */
-public enum Type
+public interface UCUCalculator
 {
-    INTERNODE_BYTES,
-
-    READ_BYTES,
-
-    WRITE_BYTES,
-    INDEX_WRITE_BYTES,
-
-    UCU
+    /**
+     * Calculates the Replica-level UCU for a given sensor context based on recorded request sensors.
+     *
+     * @param sensors the request sensors containing recorded measurements
+     * @param context the context (keyspace, table) for which to compute UCU
+     * @return the calculated UCU value
+     */
+    double computeReplicaUCU(RequestSensors sensors, Context context);
 }

@@ -48,6 +48,7 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
         // INDEX_WRITE_BYTES is not registered here because prepare only writes to system.paxos, which has no indexes.
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.UCU);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);

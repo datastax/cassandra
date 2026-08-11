@@ -1654,6 +1654,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 {
                     Context puContext = Context.from(this.metadata.get());
                     sensors.registerSensor(puContext, Type.WRITE_BYTES);
+                    sensors.registerSensor(puContext, Type.UCU);
                     sensors.incrementSensor(puContext, Type.WRITE_BYTES, dataSize);
                 }
             }

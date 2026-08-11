@@ -456,6 +456,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         RequestSensors sensors = RequestTracker.instance.get();
         Context context = Context.from(this.table);
         SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.UCU);
         return msg;
     }
 
@@ -594,8 +595,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         RequestSensors sensors = RequestTracker.instance.get();
         Context context = Context.from(this.table);
-        Type sensorType = Type.READ_BYTES;
-        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, sensorType);
+        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.UCU);
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.

@@ -132,6 +132,7 @@ public class UpdateStatement extends ModificationStatement
         SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.INDEX_WRITE_BYTES);
         // CAS updates incorporate read sensors
         SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.UCU);
 
         return result;
     }
