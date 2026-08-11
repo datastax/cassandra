@@ -402,6 +402,13 @@ public class TableMetrics
     public final TableMeter coordinatorReadSizeWarnings;
     public final TableMeter coordinatorReadSizeAborts;
     public final TableHistogram coordinatorReadSize;
+    public final TableHistogram coordinatorRangeReadSize;
+    public final TableHistogram coordinatorRangeReadSizeWithIndex;
+    public final TableHistogram coordinatorRangeReadSizeWithoutIndex;
+    public final TableHistogram coordinatorSingleReadSize;
+    public final TableHistogram coordinatorSingleReadSizeWithIndex;
+    public final TableHistogram coordinatorSingleReadSizeWithoutIndex;
+
 
     public final TableMeter localReadSizeWarnings;
     public final TableMeter localReadSizeAborts;
@@ -1119,6 +1126,13 @@ public class TableMetrics
         coordinatorReadSizeWarnings = createTableMeter("CoordinatorReadSizeWarnings", cfs.getKeyspaceMetrics().coordinatorReadSizeWarnings);
         coordinatorReadSizeAborts = createTableMeter("CoordinatorReadSizeAborts", cfs.getKeyspaceMetrics().coordinatorReadSizeAborts);
         coordinatorReadSize = createTableHistogram("CoordinatorReadSize", cfs.getKeyspaceMetrics().coordinatorReadSize, false);
+        coordinatorRangeReadSize = createTableHistogram("CoordinatorRangeReadSize", cfs.getKeyspaceMetrics().coordinatorRangeReadSize, false);
+        coordinatorRangeReadSizeWithIndex = createTableHistogram("CoordinatorRangeReadSizeWithIndex", cfs.getKeyspaceMetrics().coordinatorRangeReadSizeWithIndex, false);
+        coordinatorRangeReadSizeWithoutIndex = createTableHistogram("CoordinatorRangeReadSizeWithoutIndex", cfs.getKeyspaceMetrics().coordinatorRangeReadSizeWithoutIndex, false);
+        coordinatorSingleReadSize = createTableHistogram("CoordinatorSingleReadSize", cfs.getKeyspaceMetrics().coordinatorSingleReadSize, false);
+        coordinatorSingleReadSizeWithIndex = createTableHistogram("CoordinatorSingleReadSizeWithIndex", cfs.getKeyspaceMetrics().coordinatorSingleReadSizeWithIndex, false);
+        coordinatorSingleReadSizeWithoutIndex = createTableHistogram("CoordinatorSingleReadSizeWithoutIndex", cfs.getKeyspaceMetrics().coordinatorSingleReadSizeWithoutIndex, false);
+
 
         localReadSizeWarnings = createTableMeter("LocalReadSizeWarnings", cfs.getKeyspaceMetrics().localReadSizeWarnings);
         localReadSizeAborts = createTableMeter("LocalReadSizeAborts", cfs.getKeyspaceMetrics().localReadSizeAborts);
