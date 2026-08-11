@@ -30,7 +30,9 @@ import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
 import static org.junit.Assert.*;
 
@@ -42,7 +44,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
 
     /// Number of flushes before compaction. Each flush produces one SSTable. With only
     /// [CassandraOnHeapGraph#MIN_PQ_ROWS] rows per flush the memory limit is not reached,
-    /// so each SSTable contains exactly one segment — asserted in [#measureDiskUsage].
+    /// so each SSTable contains exactly one segment — asserted in [#measurePostFlushAndPostCompaction].
     private static final int NUM_FLUSHES = 2;
 
     /// TERMS_DATA delta from EC (jvector format 4) to FB (jvector format 6) per segment:
@@ -53,6 +55,12 @@ public class VectorFormatDiskUsageTest extends VectorTester
     /// FB writes: start-header + footer-header + FOOTER_SIZE(=Long+Int=12)          = 604 bytes
     /// Δ = 604 − 292 = 312 bytes per segment
     private static final long EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT = 312L;
+
+    /// `PQVectors.write` writes two extra ints — `vectorCount` and `subspaceCount` — before the
+    /// per-vector data that `ProductQuantization.write` (the FusedPQ codebook-only path) does not.
+    /// This means the fixed overhead `F` in EC PQ files is 8 bytes larger than in FB FusedPQ PQ files:
+    ///   F_EC = F_FB + PQVECTORS_EXTRA_HEADER_BYTES
+    private static final long PQVECTORS_EXTRA_HEADER_BYTES = 2L * Integer.BYTES;
 
     @BeforeClass
     public static void setUpClass()
@@ -116,17 +124,15 @@ public class VectorFormatDiskUsageTest extends VectorTester
     @Test
     public void testDiskUsageECvsFB()
     {
-        testDiskUsageECvsFB(false);
-        testDiskUsageECvsFB(true);
+        DiskMeasurement[] ec = measurePostFlushAndPostCompaction(Version.EC, "EC", null);
+        DiskMeasurement[] fb = measurePostFlushAndPostCompaction(Version.FB, "FB", null);
+
+        verifyECvsFB(ec[0], fb[0], "preCompaction");
+        verifyECvsFB(ec[1], fb[1], "postCompaction");
     }
 
-    private void testDiskUsageECvsFB(boolean compact)
+    private void verifyECvsFB(DiskMeasurement ec, DiskMeasurement fb, String phase)
     {
-        String phase = compact ? "postCompaction" : "preCompaction";
-
-        DiskMeasurement ec = measureDiskUsage(Version.EC, "EC-" + phase, compact);
-        DiskMeasurement fb = measureDiskUsage(Version.FB, "FB-" + phase, compact);
-
         assertTrue("EC index must have non-zero disk usage", ec.totalBytes > 0);
         assertTrue("FB index must have non-zero disk usage", fb.totalBytes > 0);
 
@@ -155,29 +161,26 @@ public class VectorFormatDiskUsageTest extends VectorTester
     @Test
     public void testDiskGrowthAcrossVersions()
     {
-        testDiskGrowthAcrossVersions(false);
-        testDiskGrowthAcrossVersions(true);
-    }
-
-    private void testDiskGrowthAcrossVersions(boolean compact)
-    {
-        String name = compact ? "postCompaction" : "preCompaction";
-        DiskMeasurement latest = measureDiskUsage(Version.LATEST, Version.LATEST + "-" + name, compact);
+        DiskMeasurement[] latest = measurePostFlushAndPostCompaction(Version.LATEST, Version.LATEST.toString(), null);
 
         for (Version version : Version.ALL)
         {
             if (version == Version.LATEST || !version.onOrAfter(Version.JVECTOR_EARLIEST))
                 continue;
 
-            DiskMeasurement older = measureDiskUsage(version, version + "-" + name, compact);
+            DiskMeasurement[] older = measurePostFlushAndPostCompaction(version, version.toString(), null);
 
-            double diskGrowthPercent = 100.0 * (latest.totalBytes - older.totalBytes) / older.totalBytes;
+            for (int i = 0; i < 2; i++)
+            {
+                String phase = i == 0 ? "preCompaction" : "postCompaction";
+                double diskGrowthPercent = 100.0 * (latest[i].totalBytes - older[i].totalBytes) / older[i].totalBytes;
 
-            logger.debug("  {} → {} {}  : {} → {} bytes ({} %)",
-                         version, Version.LATEST, name, older.totalBytes, latest.totalBytes,
-                         String.format("%.4f", diskGrowthPercent));
+                logger.debug("  {} → {} {}  : {} → {} bytes ({} %)",
+                        version, Version.LATEST, phase, older[i].totalBytes, latest[i].totalBytes,
+                        String.format("%.4f", diskGrowthPercent));
 
-            verifyTotalDiskGrowthUnder5Percent(diskGrowthPercent, version + " → " + Version.LATEST + ' ' + name);
+                verifyTotalDiskGrowthUnder5Percent(diskGrowthPercent, version + " → " + Version.LATEST + ' ' + phase);
+            }
         }
     }
 
@@ -235,7 +238,6 @@ public class VectorFormatDiskUsageTest extends VectorTester
                 diskGrowthPercent < 5.0);
     }
 
-    /// Snapshot of per-component file sizes and segment count for one index build.
     private static class DiskMeasurement
     {
         final long totalBytes;
@@ -316,18 +318,14 @@ public class VectorFormatDiskUsageTest extends VectorTester
         }
     }
 
-    /// Builds a fresh table at `version`, writes [#NUM_FLUSHES] × [CassandraOnHeapGraph#MIN_PQ_ROWS]
-    /// vectors in separate flushes, then either returns the pre-compaction measurement
-    /// (`compact == false`) or runs major compaction first (`compact == true`).
-    ///
-    /// Each flush produces one SSTable with one segment (one graph in TERMS_DATA), so
-    /// pre-compaction there are [#NUM_FLUSHES] segments across [#NUM_FLUSHES] SSTables;
-    /// post-compaction there is exactly 1 segment in 1 SSTable.
-    private DiskMeasurement measureDiskUsage(Version version, String label, boolean compact)
+    private DiskMeasurement[] measurePostFlushAndPostCompaction(Version version, String label, String indexOptions)
     {
         SAIUtil.setCurrentVersion(version);
         createTable("CREATE TABLE %s (pk int, v vector<float, " + DIMENSION + ">, PRIMARY KEY(pk))");
-        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        String createIndex = "CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'";
+        if (indexOptions != null)
+            createIndex += " WITH OPTIONS = " + indexOptions;
+        String indexName = createIndex(createIndex);
         disableCompaction();
 
         for (int flush = 0; flush < NUM_FLUSHES; flush++)
@@ -338,9 +336,14 @@ public class VectorFormatDiskUsageTest extends VectorTester
             flush();
         }
 
-        if (compact)
-            compact();
+        DiskMeasurement afterFlush = snapshot(indexName, label + "-flush", false);
+        compact();
+        DiskMeasurement afterCompact = snapshot(indexName, label + "-compact", true);
+        return new DiskMeasurement[]{ afterFlush, afterCompact };
+    }
 
+    private DiskMeasurement snapshot(String indexName, String label, boolean compact)
+    {
         StorageAttachedIndex sai = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(indexName);
         assertNotNull("Index not found: " + indexName, sai);
         IndexContext indexContext = sai.getIndexContext();
@@ -355,8 +358,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
         List<SSTableIndex> sstableIndexes = List.copyOf(indexContext.getView().getIndexes());
         int totalSegments = sstableIndexes.stream().mapToInt(s -> s.getSegments().size()).sum();
         int expectedSegments = compact ? 1 : NUM_FLUSHES;
-        assertEquals("Expected " + expectedSegments + " segment(s) " + label,
-                expectedSegments, totalSegments);
+        assertEquals("Expected " + expectedSegments + " segment(s) " + label, expectedSegments, totalSegments);
 
         logger.debug("[{}] diskUsage()                : {} ({} segment(s))", label, totalDiskBytes, totalSegments);
         logger.debug("[{}] TERMS_DATA component bytes : {}", label, graphComponentBytes);
@@ -374,6 +376,129 @@ public class VectorFormatDiskUsageTest extends VectorTester
                 .completionMarkerBytes(completionMarkerBytes)
                 .segmentCount(totalSegments)
                 .build();
+    }
+
+    /// Regression test for the FusedPQ compaction bug - CNDB-18842
+    ///
+    /// CompactionGraph unconditionally wrote full PQVectors (codebook + N×m
+    /// per-vector codes) to the PQ file even when FusedPQ was active, duplicating on disk
+    /// the same codes already embedded in TERMS_DATA. The flush path ([CassandraOnHeapGraph])
+    /// was already correct: with FusedPQ it writes only the codebook to the PQ file.
+    @Test
+    public void testFusedPQPqFileContainsCodebookOnlyAfterFlushAndCompaction()
+    {
+        // FusedPQ should be always run with hierarchy and parallel graph writing enabled
+        String hierarchyOptions = "{'" + IndexWriterConfig.ENABLE_HIERARCHY + "': 'true'}";
+        SAIUtil.setParallelEncodingWriting(true);
+
+        try
+        {
+            // The PQ file size follows:
+            //
+            //   EC (PQVectors.write):           pqBytes(N) = F_EC + N×m
+            //   FB FusedPQ (PQ.write codebook): pqBytes    = F_FB          (independent of N)
+            //
+            //   F  = fixed overhead: SAI header + SAI PQ header (magic/version/unitVectors/type) + PQ codebook body
+            //   m  = bytes per PQ-encoded vector (compressedVectorSize), from VectorSourceModel
+            //   N  = number of indexed vectors in the segment
+            //
+            // F_EC ≠ F_FB: PQVectors.write prepends the codebook write with two extra ints before the
+            // per-vector data — vectorCount (4 bytes) + subspaceCount (4 bytes) — that
+            // ProductQuantization.write (codebook only) does not write.
+            // Therefore, F_EC = F_FB + 8.
+            //
+            // m is statically known: the test uses no explicit source-model option, so
+            // VectorSourceModel.OTHER applies. For DIMENSION=128, defaultPQBytesFor(128)
+            // falls in the 64 < D <= 200 branch → m = (int)(128 * 0.5) = 64 bytes.
+            //
+            // Each flushed SSTable has N = MIN_PQ_ROWS vectors.
+            // The compacted SSTable has N = NUM_FLUSHES × MIN_PQ_ROWS vectors.
+            //
+            // EC:
+            //   ecFlush.pqBytes / NUM_FLUSHES  = F_EC + MIN_PQ_ROWS × m
+            //   ecCompact.pqBytes              = F_EC + NUM_FLUSHES × MIN_PQ_ROWS × m
+            //
+            // FB FusedPQ:
+            //   fbFlush.pqBytes / NUM_FLUSHES  = F_FB = F_EC - 8
+            //   fbCompact.pqBytes              = F_FB = F_EC - 8  (independent of N)
+            int m = VectorSourceModel.OTHER.compressionProvider.apply(DIMENSION).getCompressedSize();
+
+            DiskMeasurement[] ec = measurePostFlushAndPostCompaction(Version.EC, "EC", hierarchyOptions);
+            DiskMeasurement ecFlush = ec[0], ecCompact = ec[1];
+
+            long ecFlushPqBytesPerSegment = ecFlush.pqBytes / NUM_FLUSHES;
+            // The extra vectors compaction adds over a single flush: (NUM_FLUSHES-1) × MIN_PQ_ROWS
+            long extraVectors = (long) (NUM_FLUSHES - 1) * CassandraOnHeapGraph.MIN_PQ_ROWS;
+            // Derive the measured m from EC observations and cross-check against the static value.
+            long measuredM = (ecCompact.pqBytes - ecFlushPqBytesPerSegment) / extraVectors;
+            assertEquals("Measured per-vector PQ code bytes from EC must match VectorSourceModel.OTHER formula",
+                    m, measuredM);
+            long expectedEcCompactPqBytes = ecFlushPqBytesPerSegment + extraVectors * m;
+
+            // FB + FusedPQ enabled via -D flag + hierarchy + parallel graph writing.
+            SAIUtil.setEnableFused(true);
+            try
+            {
+                DiskMeasurement[] fb = measurePostFlushAndPostCompaction(Version.FB, "FB", hierarchyOptions);
+                DiskMeasurement fbFlush = fb[0], fbCompact = fb[1];
+
+                long fbFlushPqBytesPerSegment = fbFlush.pqBytes / NUM_FLUSHES;
+
+                logger.info("EC flush    PQ bytes/segment : {}", ecFlushPqBytesPerSegment);
+                logger.info("EC compact  PQ bytes (actual)  : {}", ecCompact.pqBytes);
+                logger.info("EC compact  PQ bytes (expected, m={} per vector): {}", m, expectedEcCompactPqBytes);
+                logger.info("FB flush    PQ bytes/segment : {}", fbFlushPqBytesPerSegment);
+                logger.info("FB compact  PQ bytes         : {}", fbCompact.pqBytes);
+
+                assertEquals("EC compacted PQ must equal F + NUM_FLUSHES×MIN_PQ_ROWS×m " +
+                                "(full PQVectors, size scales linearly with N)",
+                        expectedEcCompactPqBytes, ecCompact.pqBytes);
+
+                verifyFusedPQPqFileIsCodebookOnly(ecFlushPqBytesPerSegment, ecCompact.pqBytes,
+                        fbFlushPqBytesPerSegment, fbCompact.pqBytes, m);
+
+                verifyFusedPQSearchWorks();
+            }
+            finally
+            {
+                SAIUtil.setEnableFused(false);
+            }
+        }
+        finally
+        {
+            SAIUtil.setParallelEncodingWriting(false);
+        }
+    }
+
+    private static void verifyFusedPQPqFileIsCodebookOnly(long ecFlushPqBytesPerSegment, long ecCompactPqBytes,
+                                                          long fbFlushPqBytesPerSegment, long fbCompactPqBytes,
+                                                          int m)
+    {
+        assertFusedPqSavings("flush PQ/segment", ecFlushPqBytesPerSegment,
+                (long) CassandraOnHeapGraph.MIN_PQ_ROWS * m, fbFlushPqBytesPerSegment);
+
+        assertEquals("FB-FusedPQ compacted PQ must equal FB-FusedPQ flushed PQ/segment " +
+                        "(both codebook-only, F; bug wrote F + N×m on compaction).",
+                fbFlushPqBytesPerSegment, fbCompactPqBytes);
+
+        assertFusedPqSavings("compact PQ", ecCompactPqBytes,
+                (long) NUM_FLUSHES * CassandraOnHeapGraph.MIN_PQ_ROWS * m, fbCompactPqBytes);
+    }
+
+    private static void assertFusedPqSavings(String label, long ecBytes, long perVectorBytes, long actualFb)
+    {
+        long expected = ecBytes - perVectorBytes - PQVECTORS_EXTRA_HEADER_BYTES;
+        assertEquals("FB-FusedPQ " + label + " must be exactly N×m + PQVECTORS_EXTRA_HEADER_BYTES smaller than EC " +
+                        "(codebook only vs full PQVectors)",
+                expected, actualFb);
+    }
+
+    private void verifyFusedPQSearchWorks()
+    {
+        int limit = 10;
+        var results = execute("SELECT pk FROM %s ORDER BY v ANN OF ? LIMIT ?", randomVectorBoxed(DIMENSION), limit);
+        assertEquals("ANN search must return " + limit + " results on FB-FusedPQ compacted index",
+                limit, results.size());
     }
 
     private long componentSize(IndexContext indexContext,
