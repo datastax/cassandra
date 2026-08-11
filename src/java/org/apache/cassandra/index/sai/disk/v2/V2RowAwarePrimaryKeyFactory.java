@@ -196,7 +196,13 @@ public class V2RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             // clusterings, then return the result of this without
             // needing to compare the clusterings.
             cmp = partitionKey().compareTo(o.partitionKey());
-            if (cmp != 0 || !hasClustering() || !o.hasClustering())
+            if (cmp != 0)
+                return cmp;
+            if (o.clustering().kind() == Clustering.STATIC_CLUSTERING.kind() && clustering.kind() != Clustering.STATIC_CLUSTERING.kind())
+                return 1;
+            if (clustering.kind() == Clustering.STATIC_CLUSTERING.kind() && o.clustering().kind() != Clustering.STATIC_CLUSTERING.kind())
+                return -1;
+            if (!hasClustering() || !o.hasClustering())
                 return cmp;
             return clusteringComparator.compare(clustering(), o.clustering());
         }
