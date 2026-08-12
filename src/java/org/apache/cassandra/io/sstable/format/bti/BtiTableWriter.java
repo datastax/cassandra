@@ -87,6 +87,12 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         super(builder, lifecycleNewTracker, owner);
     }
 
+    @VisibleForTesting
+    IndexWriter indexWriter()
+    {
+        return indexWriter;
+    }
+
     @Override
     protected TrieIndexEntry createRowIndexEntry(DecoratedKey key, DeletionTime partitionLevelDeletion, long finishResult) throws IOException
     {
@@ -197,53 +203,84 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         @Nullable
         private final TableMetrics tableMetrics;
 
+        // Encryption-only metadata handed to the index FileHandle builders when encryption is enabled;
+        // the builders keep this same instance until FileHandle.Builder.complete() takes its own shared
+        // copy, so it must stay open for the writer's whole lifetime and be released on cleanup.
+        // Null when encryption is not used.
+        @Nullable
+        final CompressionMetadata indexEncryptionMetadata;
+
         IndexWriter(Builder b, SequentialWriter dataWriter)
         {
             super(b);
-            
+
             // Check if encryption is enabled (following trie-index pattern)
             boolean compression = b.getComponents().contains(SSTableFormat.Components.COMPRESSION_INFO);
             TableMetadata metadata = b.getTableMetadataRef().getLocal();
             CompressionParams params = metadata.params.compression;
             ICompressor encryptor = compression ? params.getSstableCompressor().encryptionOnly() : null;
-            
-            if (encryptor != null)
-            {
-                // Create encrypted writers and configure FileHandle builders for encryption
-                CompressionMetadata compressionMetadata = CompressionMetadata.encryptedOnly(params);
-                rowIndexWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.ROW_INDEX), 
-                                                               b.getIOOptions().writerOptions, 
-                                                               encryptor);
-                rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
-                                                  .withMmappedRegionsCache(b.getMmappedRegionsCache())
-                                                  .withCompressionMetadata(compressionMetadata)
-                                                  .maybeEncrypted(true);
-                
-                partitionIndexWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX), 
-                                                                    b.getIOOptions().writerOptions, 
-                                                                    encryptor);
-                partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
-                                                        .withMmappedRegionsCache(b.getMmappedRegionsCache())
-                                                        .withCompressionMetadata(compressionMetadata)
-                                                        .maybeEncrypted(true);
-            }
-            else
-            {
-                // Create regular writers
-                rowIndexWriter = new SequentialWriter(descriptor.fileFor(Components.ROW_INDEX), b.getIOOptions().writerOptions);
-                rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
-                                                  .withMmappedRegionsCache(b.getMmappedRegionsCache());
-                partitionIndexWriter = new SequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX), b.getIOOptions().writerOptions);
-                partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
-                                                        .withMmappedRegionsCache(b.getMmappedRegionsCache());
-            }
-            partitionIndex = new PartitionIndexBuilder(partitionIndexWriter, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
 
-            // register listeners to be alerted when the data files are flushed
-            partitionIndexWriter.setPostFlushListener(partitionIndex::markPartitionIndexSynced);
-            rowIndexWriter.setPostFlushListener(partitionIndex::markRowIndexSynced);
-            dataWriter.setPostFlushListener(partitionIndex::markDataSynced);
+            // Build into locals so that a failure partway through construction can release whatever was
+            // already created: SortedTableWriter's constructor only sees a null indexWriter in that case
+            // and cannot close any of it (including the bloom filter created by the super constructor).
+            CompressionMetadata encryptionMetadata = null;
+            SequentialWriter riWriter = null;
+            SequentialWriter piWriter = null;
+            PartitionIndexBuilder pIndexBuilder = null;
+            try
+            {
+                if (encryptor != null)
+                {
+                    // Create encrypted writers and configure FileHandle builders for encryption
+                    encryptionMetadata = CompressionMetadata.encryptedOnly(params);
+                    riWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.ROW_INDEX),
+                                                             b.getIOOptions().writerOptions,
+                                                             encryptor);
+                    rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
+                                                      .withMmappedRegionsCache(b.getMmappedRegionsCache())
+                                                      .withCompressionMetadata(encryptionMetadata)
+                                                      .maybeEncrypted(true);
 
+                    piWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX),
+                                                             b.getIOOptions().writerOptions,
+                                                             encryptor);
+                    partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
+                                                            .withMmappedRegionsCache(b.getMmappedRegionsCache())
+                                                            .withCompressionMetadata(encryptionMetadata)
+                                                            .maybeEncrypted(true);
+                }
+                else
+                {
+                    // Create regular writers
+                    riWriter = new SequentialWriter(descriptor.fileFor(Components.ROW_INDEX), b.getIOOptions().writerOptions);
+                    rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
+                                                      .withMmappedRegionsCache(b.getMmappedRegionsCache());
+                    piWriter = new SequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX), b.getIOOptions().writerOptions);
+                    partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
+                                                            .withMmappedRegionsCache(b.getMmappedRegionsCache());
+                }
+                pIndexBuilder = new PartitionIndexBuilder(piWriter, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
+
+                // register listeners to be alerted when the data files are flushed
+                piWriter.setPostFlushListener(pIndexBuilder::markPartitionIndexSynced);
+                riWriter.setPostFlushListener(pIndexBuilder::markRowIndexSynced);
+                dataWriter.setPostFlushListener(pIndexBuilder::markDataSynced);
+            }
+            catch (RuntimeException | Error ex)
+            {
+                Throwables.closeNonNullAndAddSuppressed(ex, pIndexBuilder, piWriter, riWriter, encryptionMetadata, bf);
+                throw ex;
+            }
+            indexEncryptionMetadata = encryptionMetadata;
+            rowIndexWriter = riWriter;
+            partitionIndexWriter = piWriter;
+            partitionIndex = pIndexBuilder;
+
+            // Everything from here on must not throw and must not open further resources: a failure past
+            // the catch above would leak all of the above, since this instance never reaches the caller
+            // and doPostCleanup never runs. In particular the bloom filter memory accounting must stay
+            // last -- doPostCleanup's matching decrement does not run on the construction-failure path,
+            // so the increment may only happen once construction can no longer fail.
 
             // The per-table bloom filter memory is tracked when:
             // 1. Periodic early open: Opens incomplete sstables when size threshold is hit during writing.
@@ -393,7 +430,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         {
             if (tableMetrics != null && bf != null)
                 tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.getAndAdd(-bf.offHeapSize());
-            return Throwables.close(accumulate, bf, partitionIndex, rowIndexWriter, partitionIndexWriter);
+            return Throwables.close(accumulate, bf, partitionIndex, rowIndexWriter, partitionIndexWriter, indexEncryptionMetadata);
         }
     }
 
