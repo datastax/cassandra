@@ -25,8 +25,10 @@ import org.junit.Before;
 import org.junit.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -225,5 +227,54 @@ public class ActiveRequestSensorsTest
         assertThat(allSensors).hasSize(4);
         assertThat(allSensors).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context1, type2).get(),
                                                          sensors.getSensor(context2, type1).get(), sensors.getSensor(context2, type2).get());
+    }
+
+    @Test
+    public void testSetSensorIfUpdatesValueWhenPredicateIsTrue()
+    {
+        context1Sensors.registerSensor(context1, type1);
+        context1Sensors.setSensorIf(context1, type1, 4.0, (current, candidate) -> candidate > current);
+        assertThat(context1Sensors.getSensor(context1, type1)).hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(4.0));
+    }
+
+    @Test
+    public void testSetSensorIfNoOpWhenPredicateIsFalse()
+    {
+        context1Sensors.registerSensor(context1, type1);
+        context1Sensors.incrementSensor(context1, type1, 5.0);
+        context1Sensors.setSensorIf(context1, type1, 2.0, (current, candidate) -> candidate > current);
+        assertThat(context1Sensors.getSensor(context1, type1)).hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(5.0));
+    }
+
+    @Test
+    public void testSetSensorIfNoOpWhenSensorNotRegistered()
+    {
+        // no registerSensor call — setSensorIf must not throw and must leave the (absent) sensor untouched
+        context1Sensors.setSensorIf(context1, type1, 4.0, (current, candidate) -> candidate > current);
+        assertThat(context1Sensors.getSensor(context1, type1)).isEmpty();
+    }
+
+    @Test
+    public void testSetSensorIfKeepsMaxAcrossMultipleCalls()
+    {
+        context1Sensors.registerSensor(context1, type1);
+        context1Sensors.setSensorIf(context1, type1, 2.0, (current, candidate) -> candidate > current);
+        context1Sensors.setSensorIf(context1, type1, 5.0, (current, candidate) -> candidate > current);
+        context1Sensors.setSensorIf(context1, type1, 3.0, (current, candidate) -> candidate > current);
+        assertThat(context1Sensors.getSensor(context1, type1)).hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(5.0));
+    }
+
+    @Test
+    public void testSyncAllRespectsTypeShouldSyncToRegistry()
+    {
+        context1Sensors.registerSensor(context1, Type.READ_BYTES);
+        context1Sensors.incrementSensor(context1, Type.READ_BYTES, 100.0);
+        context1Sensors.registerSensor(context1, Type.READ_LATENCY_TIER);
+        context1Sensors.incrementSensor(context1, Type.READ_LATENCY_TIER, 3.0);
+
+        context1Sensors.syncAllSensors();
+
+        verify(sensorsRegistry, times(1)).incrementSensor(eq(context1), eq(Type.READ_BYTES), eq(100.0));
+        verify(sensorsRegistry, never()).incrementSensor(eq(context1), eq(Type.READ_LATENCY_TIER), anyDouble());
     }
 }

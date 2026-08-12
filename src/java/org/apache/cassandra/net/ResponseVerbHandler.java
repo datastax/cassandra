@@ -33,6 +33,7 @@ import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.AbstractPaxosCallback;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.DoubleBinaryPredicate;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
@@ -97,6 +98,7 @@ public class ResponseVerbHandler implements IVerbHandler
             ReadCallback<?, ?> readCallback = (ReadCallback<?, ?>) callbackInfo.callback;
             Context context = Context.from(readCallback.command());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
+            setSensorAsMax(sensors, context, Type.READ_LATENCY_TIER, message);
         }
         // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo.
         // INDEX_WRITE_BYTES is not tracked here: prepare/propose only write to system.paxos, which has no indexes.
@@ -124,5 +126,33 @@ public class ResponseVerbHandler implements IVerbHandler
 
         double sensorValue = SensorsCustomParams.sensorValueFromInternodeResponse(message, customParam.get());
         sensors.incrementSensor(context, type, sensorValue);
+    }
+
+    /**
+     * Sets the sensor for the given context and type to the maximum of its current value
+     * and the value encoded in the replica response message. Used for sensors where the
+     * coordinator should report the worst-case replica value rather than a sum
+     * (e.g. READ_LATENCY_TIER). The sensor must be pre-registered by the caller alongside
+     * the other sensors for the request — for single-partition reads this happens in
+     * {@code StorageProxy.read(SinglePartitionReadCommand.Group, ...)}, and for range
+     * reads in {@code StorageProxy.getRangeSlice}. If the sensor is absent this method
+     * is a no-op. Safe under concurrent invocation from the REQUEST_RESPONSE thread pool
+     * via the atomic CAS loop in {@link Sensor#setIf(double, DoubleBinaryPredicate)}.
+     */
+    private void setSensorAsMax(RequestSensors sensors, Context context, Type type, Message<?> message)
+    {
+        Optional<Sensor> sensor = sensors.getSensor(context, type);
+        if (sensor.isEmpty())
+            return;
+
+        Optional<String> customParam = SensorsCustomParams.paramForRequestSensor(sensor.get());
+        if (customParam.isEmpty())
+            return;
+
+        double replicaValue = SensorsCustomParams.sensorValueFromInternodeResponse(message, customParam.get());
+        if (replicaValue <= 0)
+            return;
+
+        sensors.setSensorIf(context, type, replicaValue, (current, candidate) -> candidate > current);
     }
 }

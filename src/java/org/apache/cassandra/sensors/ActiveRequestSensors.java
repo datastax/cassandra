@@ -32,6 +32,8 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.utils.DoubleBinaryPredicate;
+
 /**
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
  * point to create and modify sensors. More specifically:
@@ -99,6 +101,13 @@ public class ActiveRequestSensors implements RequestSensors
             sensor.increment(value);
     }
 
+    public synchronized void setSensorIf(Context context, Type type, double candidate, DoubleBinaryPredicate predicate)
+    {
+        Sensor sensor = getSensorFast(context, type);
+        if (sensor != null)
+            sensor.setIf(candidate, predicate);
+    }
+
     public synchronized void syncAllSensors()
     {
         sensors.values().forEach(types -> {
@@ -107,6 +116,9 @@ public class ActiveRequestSensors implements RequestSensors
                 if (types[i] != null)
                 {
                     Sensor sensor = types[i];
+                    if (!sensor.getType().shouldSyncToRegistry)
+                        continue;
+
                     double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
                     double update = sensor.getValue() - current;
                     if (update == 0d)

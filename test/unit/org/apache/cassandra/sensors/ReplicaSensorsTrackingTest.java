@@ -61,6 +61,7 @@ import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.ResponseVerbHandler;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.sensors.ReadLatencyTier;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.paxos.AbstractPaxosCallback;
@@ -165,7 +166,9 @@ public class ReplicaSensorsTrackingTest
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(command);
         requestSensors.registerSensor(context, Type.READ_BYTES);
+        requestSensors.registerSensor(context, Type.READ_LATENCY_TIER);
         Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
+        Sensor actualLatencySensor = requestSensors.getSensor(context, Type.READ_LATENCY_TIER).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -175,11 +178,23 @@ public class ReplicaSensorsTrackingTest
         final DigestResolver<EndpointsForToken, ReplicaPlan.ForTokenRead> resolver = new DigestResolver<>(command, plan, startNanos, QueryInfoTracker.ReadTracker.NOOP);
         final ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> callback = new ReadCallback<>(resolver, command, plan, startNanos);
 
-        // mimic a sensor to be used in replica response
+        // mimic READ_BYTES sensors for replica responses (sum semantics)
         Sensor mockingReadSensor = new mockingSensor(context, Type.READ_BYTES);
         mockingReadSensor.increment(11.0);
 
-        assertReplicaSensorsTracked(readRequest, callback, Pair.create(actualReadSensor, mockingReadSensor));
+        // mimic READ_LATENCY_TIER sensors per replica with distinct tiers (max semantics)
+        // tiers: 2, 4, 3 — coordinator must converge to 4 regardless of arrival order
+        Sensor[] mockingLatencySensors = {
+            new mockingSensor(context, Type.READ_LATENCY_TIER),
+            new mockingSensor(context, Type.READ_LATENCY_TIER),
+            new mockingSensor(context, Type.READ_LATENCY_TIER)
+        };
+        mockingLatencySensors[0].increment(ReadLatencyTier.TIER_2.value());
+        mockingLatencySensors[1].increment(ReadLatencyTier.TIER_4.value());
+        mockingLatencySensors[2].increment(ReadLatencyTier.TIER_3.value());
+
+        assertReplicaSensorsTracked(readRequest, callback, actualLatencySensor, mockingLatencySensors,
+                                    Pair.create(actualReadSensor, mockingReadSensor));
     }
 
     @Test
@@ -365,11 +380,34 @@ public class ReplicaSensorsTrackingTest
     @SafeVarargs
     private void assertReplicaSensorsTracked(Message<?> request, RequestCallback<?> callback, Pair<Sensor, Sensor>... trackingToReplicaSensors) throws InterruptedException
     {
-        assertReplicaSensorsTracked(request, callback, false, trackingToReplicaSensors);
+        assertReplicaSensorsTracked(request, callback, false, null, null, trackingToReplicaSensors);
     }
 
     @SafeVarargs
     private void assertReplicaSensorsTracked(Message<?> request, RequestCallback<?> callback, boolean allowHints, Pair<Sensor, Sensor>... trackingToReplicaSensors) throws InterruptedException
+    {
+        assertReplicaSensorsTracked(request, callback, allowHints, null, null, trackingToReplicaSensors);
+    }
+
+    /**
+     * Overload that additionally verifies max-aggregated latency sensors inside the latch window.
+     *
+     * @param actualLatencySensor   the coordinator-side tracking sensor for READ_LATENCY_TIER
+     * @param mockingLatencySensors one per replica (same order as {@code targets}), each holding the
+     *                              tier value that replica will report
+     */
+    @SafeVarargs
+    private void assertReplicaSensorsTracked(Message<?> request, RequestCallback<?> callback,
+                                             Sensor actualLatencySensor, Sensor[] mockingLatencySensors,
+                                             Pair<Sensor, Sensor>... trackingToReplicaSensors) throws InterruptedException
+    {
+        assertReplicaSensorsTracked(request, callback, false, actualLatencySensor, mockingLatencySensors, trackingToReplicaSensors);
+    }
+
+    @SafeVarargs
+    private void assertReplicaSensorsTracked(Message<?> request, RequestCallback<?> callback, boolean allowHints,
+                                             Sensor actualLatencySensor, Sensor[] mockingLatencySensors,
+                                             Pair<Sensor, Sensor>... trackingToReplicaSensors) throws InterruptedException
     {
         for (Pair<Sensor, Sensor> pair : trackingToReplicaSensors)
         {
@@ -379,11 +417,17 @@ public class ReplicaSensorsTrackingTest
             assertThat(replicaSensor.getValue()).isGreaterThan(0);
         }
 
+        double runningMaxTier = 0;
+
         // sensors should be incremented with each response
         for (int responses = 1; responses <= targets.size(); responses++)
         {
-            simulateResponseFromReplica(targets.get(responses - 1), request, callback, allowHints, Arrays.stream(trackingToReplicaSensors).map(Pair::right).toArray(Sensor[]::new));
-            // don't wait indefinitely if the test is stuck. Delay the assertion of the await results to give a better change of a meaningful error by virtue of the core test assertion
+            Sensor latencySensorForReplica = mockingLatencySensors != null ? mockingLatencySensors[responses - 1] : null;
+            Sensor[] replicaSensors = buildReplicaSensors(trackingToReplicaSensors, latencySensorForReplica);
+            simulateResponseFromReplica(targets.get(responses - 1), request, callback, allowHints, replicaSensors);
+
+            // don't wait indefinitely if the test is stuck. Delay the assertion of the await results to give a better
+            // chance of a meaningful error by virtue of the core test assertion
             boolean awaitResult = onResponseAboutToStartSignal[responses - 1].await(1, TimeUnit.SECONDS);
             for (Pair<Sensor, Sensor> pair : trackingToReplicaSensors)
             {
@@ -392,7 +436,23 @@ public class ReplicaSensorsTrackingTest
                 assertThat(trackingSensor.getValue()).isEqualTo(replicaSensor.getValue() * responses);
                 assertThat(awaitResult).isTrue();
             }
+
+            // verify running max for latency sensor inside the latch window
+            if (actualLatencySensor != null && latencySensorForReplica != null)
+            {
+                runningMaxTier = Math.max(runningMaxTier, latencySensorForReplica.getValue());
+                assertThat(actualLatencySensor.getValue()).isEqualTo(runningMaxTier);
+            }
+
             onResponseStartSignal[responses - 1].countDown();
+        }
+
+        // After all replicas have responded, assert the final latency tier equals the max across all replicas,
+        // not the sum — this explicitly guards against max/sum confusion.
+        if (actualLatencySensor != null && mockingLatencySensors != null)
+        {
+            double expectedMax = Arrays.stream(mockingLatencySensors).mapToDouble(Sensor::getValue).max().orElse(0);
+            assertThat(actualLatencySensor.getValue()).isEqualTo(expectedMax);
         }
 
         // reset tracking sensors for next assertions, if any
@@ -401,6 +461,20 @@ public class ReplicaSensorsTrackingTest
             Sensor trackingSensor = pair.left;
             trackingSensor.reset();
         }
+    }
+
+    /**
+     * Builds the sensor array to pass to {@link #simulateResponseFromReplica}: the sum-tracked sensors
+     * followed by the optional per-replica latency sensor.
+     */
+    private Sensor[] buildReplicaSensors(Pair<Sensor, Sensor>[] trackingToReplicaSensors, Sensor latencySensor)
+    {
+        Sensor[] sumSensors = Arrays.stream(trackingToReplicaSensors).map(Pair::right).toArray(Sensor[]::new);
+        if (latencySensor == null)
+            return sumSensors;
+        Sensor[] all = Arrays.copyOf(sumSensors, sumSensors.length + 1);
+        all[sumSensors.length] = latencySensor;
+        return all;
     }
 
     private void simulateResponseFromReplica(Replica replica, Message<?> request, RequestCallback<?> callback, boolean allowHints, Sensor... sensor)
@@ -424,7 +498,7 @@ public class ReplicaSensorsTrackingTest
     private Message<?> createResponseMessageWithSensor(Verb requestVerb, InetAddressAndPort from, long id, Sensor... sensors)
     {
         if (requestVerb == Verb.READ_REQ)
-            return createReadResponseMessage(from, id, sensors[0]);
+            return createReadResponseMessage(from, id, sensors);
         else if (requestVerb == Verb.MUTATION_REQ)
             return createResponseMessage(Verb.MUTATION_RSP, NoPayload.noPayload, from, id, sensors);
         else if (requestVerb == Verb.COUNTER_MUTATION_REQ)
@@ -443,7 +517,7 @@ public class ReplicaSensorsTrackingTest
             throw new IllegalArgumentException("Unsupported verb: " + requestVerb);
     }
 
-    private Message<ReadResponse> createReadResponseMessage(InetAddressAndPort from, long id, Sensor readSensor)
+    private Message<ReadResponse> createReadResponseMessage(InetAddressAndPort from, long id, Sensor... sensors)
     {
         ReadResponse response = new ReadResponse()
         {
@@ -486,11 +560,12 @@ public class ReplicaSensorsTrackingTest
             }
         };
 
-        return Message.builder(Verb.READ_RSP, response)
-                      .from(from)
-                      .withId(id)
-                      .withCustomParam(SensorsCustomParams.paramForRequestSensor(readSensor).get(), SensorsCustomParams.sensorValueAsBytes(readSensor.getValue()))
-                      .build();
+        Message.Builder<ReadResponse> builder = Message.builder(Verb.READ_RSP, response)
+                                                       .from(from)
+                                                       .withId(id);
+        for (Sensor sensor : sensors)
+            builder.withCustomParam(SensorsCustomParams.paramForRequestSensor(sensor).get(), SensorsCustomParams.sensorValueAsBytes(sensor.getValue()));
+        return builder.build();
     }
 
     private <T> Message<T> createResponseMessage(Verb responseVerb, T payload, InetAddressAndPort from, long id, Sensor... sensors)
