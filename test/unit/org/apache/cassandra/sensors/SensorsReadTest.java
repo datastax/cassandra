@@ -440,7 +440,7 @@ public class SensorsReadTest
 
         // assert READ_BYTES
         Optional<String> expectedRequestParam = SensorsCustomParams.paramForRequestSensor(bytesRegistrySensor);
-        Optional<String> expectedGlobalParam = SensorsCustomParams.paramForRequestSensor(bytesRegistrySensor);
+        Optional<String> expectedGlobalParam = SensorsCustomParams.paramForGlobalSensor(bytesRegistrySensor);
         assertThat(expectedRequestParam).isPresent();
         assertThat(expectedGlobalParam).isPresent();
 
@@ -452,13 +452,17 @@ public class SensorsReadTest
         double requestReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(requestParam));
         double tableReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(globalParam));
         assertThat(requestReadBytes).isEqualTo(bytesSensor.getValue());
-        assertThat(tableReadBytes).isEqualTo(bytesSensor.getValue());
+        // The global sensor accumulates values across requests, so it could be greater than this request bytes:
+        assertThat(tableReadBytes).isGreaterThanOrEqualTo(requestReadBytes);
 
         // assert READ_LATENCY_TIER
         assertThat(latencySensor.getValue()).isBetween(ReadLatencyTier.TIER_1.value(), ReadLatencyTier.TIER_5.value());
         Optional<String> latencyParam = SensorsCustomParams.paramForRequestSensor(latencySensor);
+        Optional<String> latencyGlobalParam = SensorsCustomParams.paramForGlobalSensor(latencySensor);
         assertThat(latencyParam).isPresent();
+        assertThat(latencyGlobalParam).isPresent();
         assertThat(message.header.customParams()).containsKey(latencyParam.get());
+        assertThat(message.header.customParams()).doesNotContainKey(latencyGlobalParam.get());
         double encodedTier = SensorsTestUtil.bytesToDouble(message.header.customParams().get(latencyParam.get()));
         assertThat(encodedTier).isEqualTo(latencySensor.getValue());
     }

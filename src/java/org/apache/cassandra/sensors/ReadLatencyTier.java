@@ -30,11 +30,11 @@ package org.apache.cassandra.sensors;
  */
 public enum ReadLatencyTier
 {
-    TIER_1(1,           0L,              Bounds.MILLIS_1),
-    TIER_2(2,   Bounds.MILLIS_1,        Bounds.MILLIS_10),
-    TIER_3(3,   Bounds.MILLIS_10,       Bounds.MILLIS_50),
-    TIER_4(4,   Bounds.MILLIS_50,       Bounds.MILLIS_200),
-    TIER_5(5,   Bounds.MILLIS_200,      Long.MAX_VALUE);
+    TIER_1(1, 0L, Bounds.MILLIS_1),
+    TIER_2(2, Bounds.MILLIS_1, Bounds.MILLIS_10),
+    TIER_3(3, Bounds.MILLIS_10, Bounds.MILLIS_50),
+    TIER_4(4, Bounds.MILLIS_50, Bounds.MILLIS_200),
+    TIER_5(5, Bounds.MILLIS_200, Long.MAX_VALUE);
 
     /**
      * Tier transition point constants. Names reflect the human-readable millisecond value of each boundary;
@@ -45,16 +45,26 @@ public enum ReadLatencyTier
      */
     public static final class Bounds
     {
-        /** 1 ms expressed in nanoseconds. */
-        public static final long MILLIS_1   =   1_000_000L;
-        /** 10 ms expressed in nanoseconds. */
-        public static final long MILLIS_10  =  10_000_000L;
-        /** 50 ms expressed in nanoseconds. */
-        public static final long MILLIS_50  =  50_000_000L;
-        /** 200 ms expressed in nanoseconds. */
+        /**
+         * 1 ms expressed in nanoseconds.
+         */
+        public static final long MILLIS_1 = 1_000_000L;
+        /**
+         * 10 ms expressed in nanoseconds.
+         */
+        public static final long MILLIS_10 = 10_000_000L;
+        /**
+         * 50 ms expressed in nanoseconds.
+         */
+        public static final long MILLIS_50 = 50_000_000L;
+        /**
+         * 200 ms expressed in nanoseconds.
+         */
         public static final long MILLIS_200 = 200_000_000L;
 
-        private Bounds() {}
+        private Bounds()
+        {
+        }
     }
 
     private final int value;

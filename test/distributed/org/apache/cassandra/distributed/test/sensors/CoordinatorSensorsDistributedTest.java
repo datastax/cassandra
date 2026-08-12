@@ -93,7 +93,7 @@ public class CoordinatorSensorsDistributedTest extends TestBaseImpl
             AtomicReference<Map<String, ByteBuffer>> payloadRef = new AtomicReference<>();
             cluster.get(1).acceptsOnInstance(
                     (IIsolatedExecutor.SerializableConsumer<AtomicReference<Map<String, ByteBuffer>>>)
-                    ref -> ref.set(executeWithoutPaging(query)))
+                    ref -> ref.set(executeWithPageSize(query, PageSize.NONE)))
                    .accept(payloadRef);
 
             Map<String, ByteBuffer> payload = payloadRef.get();
@@ -129,7 +129,7 @@ public class CoordinatorSensorsDistributedTest extends TestBaseImpl
             AtomicReference<Map<String, ByteBuffer>> payloadRef = new AtomicReference<>();
             cluster.get(1).acceptsOnInstance(
                     (IIsolatedExecutor.SerializableConsumer<AtomicReference<Map<String, ByteBuffer>>>)
-                    ref -> ref.set(executeWithPaging(query, 1)))
+                    ref -> ref.set(executeWithPageSize(query, PageSize.inRows(1))))
                    .accept(payloadRef);
 
             Map<String, ByteBuffer> payload = payloadRef.get();
@@ -148,39 +148,19 @@ public class CoordinatorSensorsDistributedTest extends TestBaseImpl
     // -------------------------------------------------------------------------
 
     /**
-     * Executes a SELECT via {@link SelectStatement#execute} with {@link PageSize#NONE}, forcing
-     * {@code canSkipPaging == true} and the {@code execute(ReadQuery, ...)} non-paging branch.
+     * Executes a SELECT via {@link SelectStatement#execute} with the given {@link PageSize}.
+     * Pass {@link PageSize#NONE} to force {@code canSkipPaging == true} (non-paging branch), or
+     * {@link PageSize#inRows(int)} to force {@code canSkipPaging == false} (paging branch).
      * Returns the CQL response custom payload.
      */
-    private static Map<String, ByteBuffer> executeWithoutPaging(String query)
+    private static Map<String, ByteBuffer> executeWithPageSize(String query, PageSize pageSize)
     {
         QueryHandler.Prepared prepared = QueryProcessor.prepareInternal(query);
         QueryOptions options = QueryOptions.create(
                 ConsistencyLevel.ONE,
                 null,
                 false,
-                PageSize.NONE,
-                null,
-                null,
-                ProtocolVersion.CURRENT,
-                prepared.keyspace);
-        return prepared.statement.execute(
-                QueryProcessor.internalQueryState(), options, System.nanoTime()).getCustomPayload();
-    }
-
-    /**
-     * Executes a SELECT via {@link SelectStatement#execute} with {@link PageSize#inRows(int)}, forcing
-     * {@code canSkipPaging == false} and the {@code execute(Pager, ...)} paging branch.
-     * Returns the CQL response custom payload.
-     */
-    private static Map<String, ByteBuffer> executeWithPaging(String query, int pageSize)
-    {
-        QueryHandler.Prepared prepared = QueryProcessor.prepareInternal(query);
-        QueryOptions options = QueryOptions.create(
-                ConsistencyLevel.ONE,
-                null,
-                false,
-                PageSize.inRows(pageSize),
+                pageSize,
                 null,
                 null,
                 ProtocolVersion.CURRENT,
