@@ -24,6 +24,7 @@ import java.util.EnumSet;
 import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -72,7 +73,7 @@ public class V9OnDiskFormat extends V8OnDiskFormat
     @Override
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
-        assert primaryKeyFactory instanceof RowAwarePrimaryKeyFactory;
+        Preconditions.checkArgument(primaryKeyFactory instanceof RowAwarePrimaryKeyFactory);
         RowAwarePrimaryKeyFactory rowAwareFactory = (RowAwarePrimaryKeyFactory) primaryKeyFactory;
         return rowAwareFactory.hasClustering ? new WidePrimaryKeyMap.Factory(perSSTableComponents, rowAwareFactory, sstable)
                                              : new SkinnyPrimaryKeyMap.Factory(perSSTableComponents, rowAwareFactory, sstable);
