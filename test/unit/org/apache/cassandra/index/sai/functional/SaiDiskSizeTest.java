@@ -79,7 +79,7 @@ public class SaiDiskSizeTest extends SAITester
                               {
                                   case "aa":
                                       return Stream.of(
-                                      new Object[]{ v, 24768, 24989, "pk", 1 },
+                                      new Object[]{ v, 24989, 24989, "pk", 1 },
                                       new Object[]{ v, 26026, 26181, "pk, v_int", 2 },
                                       new Object[]{ v, 28526, 26603, "pk, v_int", 100 });
                                   case "ba":
@@ -98,6 +98,7 @@ public class SaiDiskSizeTest extends SAITester
                                       new Object[]{ v, 59133, 57249, "pk, v_int", 100 });
                                   case "ed":
                                   case "fa":
+                                  case "fb":
                                       return Stream.of(
                                       new Object[]{ v, 134777, 132849, "pk", 1 },
                                       new Object[]{ v, 118465, 116546, "pk, v_int", 2 },
