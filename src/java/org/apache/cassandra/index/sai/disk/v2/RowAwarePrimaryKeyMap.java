@@ -81,11 +81,11 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final FileHandle termsTrie;
         private final IPartitioner partitioner;
         private final ClusteringComparator clusteringComparator;
-        private final RowAwarePrimaryKeyFactory primaryKeyFactory;
+        private final V2RowAwarePrimaryKeyFactory primaryKeyFactory;
         private final SSTableId<?> sstableId;
         private final boolean hasStaticColumns;
 
-        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, RowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
+        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, V2RowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
             FileHandle token = null;
             FileHandle termsDataBlockOffsets = null;
@@ -160,7 +160,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     private final LongArray rowIdToToken;
     private final SortedTermsReader.Cursor cursor;
     private final IPartitioner partitioner;
-    private final RowAwarePrimaryKeyFactory primaryKeyFactory;
+    private final V2RowAwarePrimaryKeyFactory primaryKeyFactory;
     private final ClusteringComparator clusteringComparator;
     private final SSTableId<?> sstableId;
     private final boolean hasStaticColumns;
@@ -168,7 +168,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     private RowAwarePrimaryKeyMap(LongArray rowIdToToken,
                                   SortedTermsReader.Cursor cursor,
                                   IPartitioner partitioner,
-                                  RowAwarePrimaryKeyFactory primaryKeyFactory,
+                                  V2RowAwarePrimaryKeyFactory primaryKeyFactory,
                                   ClusteringComparator clusteringComparator,
                                   SSTableId<?> sstableId,
                                   boolean hasStaticColumns)

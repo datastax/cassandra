@@ -38,9 +38,9 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.util.IOUtils;
 
-public class SSTableComponentsWriter implements PerSSTableWriter
+public class V9SSTableComponentsWriter implements PerSSTableWriter
 {
-    protected static final Logger logger = LoggerFactory.getLogger(SSTableComponentsWriter.class);
+    protected static final Logger logger = LoggerFactory.getLogger(V9SSTableComponentsWriter.class);
 
     /**
      * Default block shift value for partition keys.
@@ -82,7 +82,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     private long partitionRowCount = 0;
 
     @SuppressWarnings("resource")
-    public SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
+    public V9SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
     {
         this.perSSTableComponents = perSSTableComponents;
         this.metadataWriter = new MetadataWriter(perSSTableComponents);

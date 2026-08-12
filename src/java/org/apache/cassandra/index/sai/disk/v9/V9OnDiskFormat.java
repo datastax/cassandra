@@ -67,14 +67,14 @@ public class V9OnDiskFormat extends V8OnDiskFormat
     @Override
     public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator)
     {
-        return new RowAwarePrimaryKeyFactory(comparator);
+        return new V9RowAwarePrimaryKeyFactory(comparator);
     }
 
     @Override
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
-        Preconditions.checkArgument(primaryKeyFactory instanceof RowAwarePrimaryKeyFactory);
-        RowAwarePrimaryKeyFactory rowAwareFactory = (RowAwarePrimaryKeyFactory) primaryKeyFactory;
+        Preconditions.checkArgument(primaryKeyFactory instanceof V9RowAwarePrimaryKeyFactory);
+        V9RowAwarePrimaryKeyFactory rowAwareFactory = (V9RowAwarePrimaryKeyFactory) primaryKeyFactory;
         return rowAwareFactory.hasClustering ? new WidePrimaryKeyMap.Factory(perSSTableComponents, rowAwareFactory, sstable)
                                              : new SkinnyPrimaryKeyMap.Factory(perSSTableComponents, rowAwareFactory, sstable);
     }
@@ -82,7 +82,7 @@ public class V9OnDiskFormat extends V8OnDiskFormat
     @Override
     public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException
     {
-        return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
+        return new V9SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
     }
 
     @Override

@@ -24,6 +24,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.disk.v2.V2RowAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -32,9 +33,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * Factory for creating row aware primary keys, which does not use the token as prefix in byte comparison.
  * Thus, the byte comparables are not prefixed with tokens and allowing better compression.
  */
-public class RowAwarePrimaryKeyFactory extends org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory
+public class V9RowAwarePrimaryKeyFactory extends V2RowAwarePrimaryKeyFactory
 {
-    public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
+    public V9RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
     {
         super(clusteringComparator);
     }
@@ -51,7 +52,7 @@ public class RowAwarePrimaryKeyFactory extends org.apache.cassandra.index.sai.di
         return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
     }
 
-    private class RowAwarePrimaryKey extends org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory.RowAwarePrimaryKey
+    private class RowAwarePrimaryKey extends V2RowAwarePrimaryKeyFactory.RowAwarePrimaryKey
     {
         private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering<?> clustering, Supplier<PrimaryKey> primaryKeySupplier)
         {

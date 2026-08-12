@@ -38,13 +38,13 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * A row-aware {@link PrimaryKey.Factory}. This creates {@link PrimaryKey} instances that are
  * sortable by {@link DecoratedKey} and {@link Clustering}.
  */
-public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
+public class V2RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     protected final ClusteringComparator clusteringComparator;
     public final boolean hasClustering;
 
 
-    public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
+    public V2RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
     {
         this.clusteringComparator = clusteringComparator;
         this.hasClustering = clusteringComparator.size() > 0;

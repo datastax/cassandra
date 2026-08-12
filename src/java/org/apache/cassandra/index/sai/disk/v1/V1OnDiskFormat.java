@@ -182,7 +182,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     @Override
     public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException
     {
-        return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
+        return new V1SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
     }
 
     @Override

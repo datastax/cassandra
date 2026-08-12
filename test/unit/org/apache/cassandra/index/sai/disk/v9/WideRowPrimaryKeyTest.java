@@ -42,9 +42,9 @@ public class WideRowPrimaryKeyTest extends AbstractPrimaryKeyTest
         IndexDescriptor indexDescriptor = newClusteringIndexDescriptor(compositePartitionMultipleClusteringAsc);
         IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
 
-        SSTableComponentsWriter writer = new SSTableComponentsWriter(components);
+        V9SSTableComponentsWriter writer = new V9SSTableComponentsWriter(components);
 
-        RowAwarePrimaryKeyFactory factory = new RowAwarePrimaryKeyFactory(compositePartitionMultipleClusteringAsc.comparator);
+        V9RowAwarePrimaryKeyFactory factory = new V9RowAwarePrimaryKeyFactory(compositePartitionMultipleClusteringAsc.comparator);
 
         int rows = nextInt(1000, 10000);
         PrimaryKey[] keys = new PrimaryKey[rows];

@@ -33,6 +33,9 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.v1.V1SSTableComponentsWriter;
+import org.apache.cassandra.index.sai.disk.v2.V2SSTableComponentsWriter;
+import org.apache.cassandra.index.sai.disk.v9.V9SSTableComponentsWriter;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
@@ -77,19 +80,19 @@ public abstract class SegmentFlushingFailureTest extends SAITester
 
     private static final Injection v1sstableComponentsWriterFailure =
             newFailureOnEntry("sstableComponentsWriterFailure",
-                              org.apache.cassandra.index.sai.disk.v1.SSTableComponentsWriter.class,
+                              V1SSTableComponentsWriter.class,
                               "complete",
                               RuntimeException.class);
 
     private static final Injection v2sstableComponentsWriterFailure =
     newFailureOnEntry("sstableComponentsWriterFailure",
-                      org.apache.cassandra.index.sai.disk.v2.SSTableComponentsWriter.class,
+                      V2SSTableComponentsWriter.class,
                       "complete",
                       RuntimeException.class);
 
     private static final Injection v9sstableComponentsWriterFailure =
     newFailureOnEntry("sstableComponentsWriterFailure",
-                      org.apache.cassandra.index.sai.disk.v9.SSTableComponentsWriter.class,
+                      V9SSTableComponentsWriter.class,
                       "complete",
                       RuntimeException.class);
 

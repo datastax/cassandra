@@ -87,14 +87,14 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     @Override
     public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator)
     {
-        return new RowAwarePrimaryKeyFactory(comparator);
+        return new V2RowAwarePrimaryKeyFactory(comparator);
     }
 
     @Override
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
-        assert primaryKeyFactory instanceof RowAwarePrimaryKeyFactory;
-        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, (RowAwarePrimaryKeyFactory) primaryKeyFactory, sstable);
+        assert primaryKeyFactory instanceof V2RowAwarePrimaryKeyFactory;
+        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, (V2RowAwarePrimaryKeyFactory) primaryKeyFactory, sstable);
     }
 
     @Override
@@ -113,7 +113,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     @Override
     public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException
     {
-        return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
+        return new V2SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
     }
 
     @Override

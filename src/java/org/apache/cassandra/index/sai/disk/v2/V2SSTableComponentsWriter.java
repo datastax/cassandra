@@ -35,9 +35,9 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.util.IOUtils;
 
-public class SSTableComponentsWriter implements PerSSTableWriter
+public class V2SSTableComponentsWriter implements PerSSTableWriter
 {
-    protected static final Logger logger = LoggerFactory.getLogger(SSTableComponentsWriter.class);
+    protected static final Logger logger = LoggerFactory.getLogger(V2SSTableComponentsWriter.class);
 
     private final IndexComponents.ForWrite perSSTableComponents;
     private final MetadataWriter metadataWriter;
@@ -45,7 +45,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     private final NumericValuesWriter blockFPWriter;
     private final SortedTermsWriter sortedTermsWriter;
 
-    public SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
+    public V2SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
     {
         this.perSSTableComponents = perSSTableComponents;
         this.metadataWriter = new MetadataWriter(perSSTableComponents);

@@ -36,9 +36,9 @@ import org.apache.lucene.util.IOUtils;
 /**
  * Writes all SSTable-attached index token and offset structures.
  */
-public class SSTableComponentsWriter implements PerSSTableWriter
+public class V1SSTableComponentsWriter implements PerSSTableWriter
 {
-    protected static final Logger logger = LoggerFactory.getLogger(SSTableComponentsWriter.class);
+    protected static final Logger logger = LoggerFactory.getLogger(V1SSTableComponentsWriter.class);
 
     private final IndexComponents.ForWrite perSSTableComponents;
     private final NumericValuesWriter tokenWriter;
@@ -47,7 +47,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
 
     private long currentKeyPartitionOffset;
 
-    public SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
+    public V1SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
     {
         this.perSSTableComponents = perSSTableComponents;
         this.metadataWriter = new MetadataWriter(perSSTableComponents);

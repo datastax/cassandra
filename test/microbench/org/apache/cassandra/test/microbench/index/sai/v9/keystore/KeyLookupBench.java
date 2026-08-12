@@ -42,8 +42,8 @@ import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v9.RowAwarePrimaryKeyFactory;
-import org.apache.cassandra.index.sai.disk.v9.SSTableComponentsWriter;
+import org.apache.cassandra.index.sai.disk.v9.V9RowAwarePrimaryKeyFactory;
+import org.apache.cassandra.index.sai.disk.v9.V9SSTableComponentsWriter;
 import org.apache.cassandra.index.sai.disk.v9.WidePrimaryKeyMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -129,11 +129,11 @@ public class KeyLookupBench
 
         indexDescriptor = IndexDescriptor.empty(descriptor, metadata.comparator);
 
-        SSTableComponentsWriter.setPartitionBlockShift(partitionBlockShift);
-        SSTableComponentsWriter.setClusteringBlockShift(clusteringBlockShift);
+        V9SSTableComponentsWriter.setPartitionBlockShift(partitionBlockShift);
+        V9SSTableComponentsWriter.setClusteringBlockShift(clusteringBlockShift);
         Assert.assertTrue("Version must be at least GA", Version.current(keyspaceName).onOrAfter(Version.GA));
         PerSSTableWriter writer = Version.current(keyspaceName).onDiskFormat().newPerSSTableWriter(indexDescriptor);
-        RowAwarePrimaryKeyFactory factory = new RowAwarePrimaryKeyFactory(metadata.comparator);
+        V9RowAwarePrimaryKeyFactory factory = new V9RowAwarePrimaryKeyFactory(metadata.comparator);
 
         PrimaryKey[] primaryKeys = generatePrimaryKeys(factory);
         Arrays.sort(primaryKeys);
@@ -167,7 +167,7 @@ public class KeyLookupBench
         return primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
     }
 
-    private PrimaryKey[] generatePrimaryKeys(RowAwarePrimaryKeyFactory factory)
+    private PrimaryKey[] generatePrimaryKeys(V9RowAwarePrimaryKeyFactory factory)
     {
         PrimaryKey[] primaryKeys = new PrimaryKey[rows];
         int partition = 0;
