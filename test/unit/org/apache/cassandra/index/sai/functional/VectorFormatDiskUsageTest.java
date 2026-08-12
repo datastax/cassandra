@@ -142,10 +142,10 @@ public class VectorFormatDiskUsageTest extends VectorTester
         logger.debug("  EC {}  diskUsage() : {} ({} segments)", phase, ec.totalBytes, ec.segmentCount);
         logger.debug("  FB {}  diskUsage() : {} ({} segments)", phase, fb.totalBytes, fb.segmentCount);
         logger.debug("  Total disk usage growth {}  : +{} bytes ({} %)",
-                phase, fb.totalBytes - ec.totalBytes, String.format("%.4f", diskGrowthPercent));
+                     phase, fb.totalBytes - ec.totalBytes, String.format("%.4f", diskGrowthPercent));
         logger.debug("  TERMS_DATA delta {}  : {} (expected {} × {} = {})",
-                phase, termsDataDelta, NUM_FLUSHES, EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT,
-                NUM_FLUSHES * EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT);
+                     phase, termsDataDelta, NUM_FLUSHES, EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT,
+                     NUM_FLUSHES * EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT);
 
         verifyComponentAccounting(ec, fb, phase);
         verifyTermsDataDelta(termsDataDelta, ec.segmentCount, phase);
@@ -176,8 +176,8 @@ public class VectorFormatDiskUsageTest extends VectorTester
                 double diskGrowthPercent = 100.0 * (latest[i].totalBytes - older[i].totalBytes) / older[i].totalBytes;
 
                 logger.debug("  {} → {} {}  : {} → {} bytes ({} %)",
-                        version, Version.LATEST, phase, older[i].totalBytes, latest[i].totalBytes,
-                        String.format("%.4f", diskGrowthPercent));
+                             version, Version.LATEST, phase, older[i].totalBytes, latest[i].totalBytes,
+                             String.format("%.4f", diskGrowthPercent));
 
                 verifyTotalDiskGrowthUnder5Percent(diskGrowthPercent, version + " → " + Version.LATEST + ' ' + phase);
             }
@@ -188,9 +188,9 @@ public class VectorFormatDiskUsageTest extends VectorTester
     private static void verifyComponentAccounting(DiskMeasurement ec, DiskMeasurement fb, String phase)
     {
         assertEquals("EC " + phase + ": totalBytes must equal sum of all per-index components",
-                ec.totalBytes, ec.termsDataBytes + ec.pqBytes + ec.metaBytes + ec.postingListsBytes + ec.completionMarkerBytes);
+                     ec.totalBytes, ec.termsDataBytes + ec.pqBytes + ec.metaBytes + ec.postingListsBytes + ec.completionMarkerBytes);
         assertEquals("FB " + phase + ": totalBytes must equal sum of all per-index components",
-                fb.totalBytes, fb.termsDataBytes + fb.pqBytes + fb.metaBytes + fb.postingListsBytes + fb.completionMarkerBytes);
+                     fb.totalBytes, fb.termsDataBytes + fb.pqBytes + fb.metaBytes + fb.postingListsBytes + fb.completionMarkerBytes);
     }
 
     /// The TERMS_DATA delta must equal exactly [#EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT] × segmentCount.
@@ -199,19 +199,19 @@ public class VectorFormatDiskUsageTest extends VectorTester
     {
         long expected = EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT * segmentCount;
         assertEquals("TERMS_DATA delta " + phase + " must equal " + EXPECTED_TERMS_DATA_DELTA_PER_SEGMENT
-                        + " bytes × " + segmentCount + " segment(s) = " + expected
-                        + " (jvector format 4→6 header layout change only)",
-                expected, actualTermsDataDelta);
+                     + " bytes × " + segmentCount + " segment(s) = " + expected
+                     + " (jvector format 4→6 header layout change only)",
+                     expected, actualTermsDataDelta);
     }
 
     private static void verifyUnchangedComponents(DiskMeasurement ec, DiskMeasurement fb, String phase)
     {
         assertEquals("PQ component size must be the same for EC and FB (" + phase + ')',
-                ec.pqBytes, fb.pqBytes);
+                     ec.pqBytes, fb.pqBytes);
         assertEquals("POSTING_LISTS must be the same size for EC and FB (" + phase + ')',
-                ec.postingListsBytes, fb.postingListsBytes);
+                     ec.postingListsBytes, fb.postingListsBytes);
         assertEquals("COLUMN_COMPLETION_MARKER must be the same size for EC and FB (" + phase + ')',
-                ec.completionMarkerBytes, fb.completionMarkerBytes);
+                     ec.completionMarkerBytes, fb.completionMarkerBytes);
     }
 
     /// META grows by exactly 8 bytes per segment EC → FB (a `totalTermCount` long added in ED).
@@ -221,11 +221,11 @@ public class VectorFormatDiskUsageTest extends VectorTester
                                            long actualTermsDataDelta, String phase)
     {
         assertEquals("FB META must be exactly " + Long.BYTES + " bytes × " + ec.segmentCount
-                        + " segment(s) larger than EC META (" + phase + ')',
-                ec.metaBytes + (long) Long.BYTES * ec.segmentCount, fb.metaBytes);
+                     + " segment(s) larger than EC META (" + phase + ')',
+                     ec.metaBytes + (long) Long.BYTES * ec.segmentCount, fb.metaBytes);
         assertEquals("FB.totalBytes must equal ec.totalBytes + TERMS_DATA delta + 8 × segmentCount(" + phase + ')',
-                ec.totalBytes + actualTermsDataDelta + (long) Long.BYTES * ec.segmentCount,
-                fb.totalBytes);
+                     ec.totalBytes + actualTermsDataDelta + (long) Long.BYTES * ec.segmentCount,
+                     fb.totalBytes);
     }
 
     /// Total disk usage must grow by less than 5% between consecutive format versions.
@@ -234,8 +234,8 @@ public class VectorFormatDiskUsageTest extends VectorTester
     private static void verifyTotalDiskGrowthUnder5Percent(double diskGrowthPercent, String phase)
     {
         assertTrue(String.format("Total disk usage growth %s must be < 5%% but was %.4f%%",
-                        phase, diskGrowthPercent),
-                diskGrowthPercent < 5.0);
+                                 phase, diskGrowthPercent),
+                   diskGrowthPercent < 5.0);
     }
 
     private static class DiskMeasurement
@@ -368,14 +368,14 @@ public class VectorFormatDiskUsageTest extends VectorTester
         logger.debug("[{}] COMPLETION_MARKER bytes    : {}", label, completionMarkerBytes);
 
         return new DiskMeasurement.Builder()
-                .totalBytes(totalDiskBytes)
-                .termsDataBytes(graphComponentBytes)
-                .pqBytes(pqComponentBytes)
-                .metaBytes(metaComponentBytes)
-                .postingListsBytes(postingListsBytes)
-                .completionMarkerBytes(completionMarkerBytes)
-                .segmentCount(totalSegments)
-                .build();
+               .totalBytes(totalDiskBytes)
+               .termsDataBytes(graphComponentBytes)
+               .pqBytes(pqComponentBytes)
+               .metaBytes(metaComponentBytes)
+               .postingListsBytes(postingListsBytes)
+               .completionMarkerBytes(completionMarkerBytes)
+               .segmentCount(totalSegments)
+               .build();
     }
 
     /// Regression test for the FusedPQ compaction bug - CNDB-18842
@@ -432,7 +432,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
             // Derive the measured m from EC observations and cross-check against the static value.
             long measuredM = (ecCompact.pqBytes - ecFlushPqBytesPerSegment) / extraVectors;
             assertEquals("Measured per-vector PQ code bytes from EC must match VectorSourceModel.OTHER formula",
-                    m, measuredM);
+                         m, measuredM);
             long expectedEcCompactPqBytes = ecFlushPqBytesPerSegment + extraVectors * m;
 
             // FB + FusedPQ enabled via -D flag + hierarchy + parallel graph writing.
@@ -451,11 +451,11 @@ public class VectorFormatDiskUsageTest extends VectorTester
                 logger.info("FB compact  PQ bytes         : {}", fbCompact.pqBytes);
 
                 assertEquals("EC compacted PQ must equal F + NUM_FLUSHES×MIN_PQ_ROWS×m " +
-                                "(full PQVectors, size scales linearly with N)",
-                        expectedEcCompactPqBytes, ecCompact.pqBytes);
+                             "(full PQVectors, size scales linearly with N)",
+                             expectedEcCompactPqBytes, ecCompact.pqBytes);
 
                 verifyFusedPQPqFileIsCodebookOnly(ecFlushPqBytesPerSegment, ecCompact.pqBytes,
-                        fbFlushPqBytesPerSegment, fbCompact.pqBytes, m);
+                                                  fbFlushPqBytesPerSegment, fbCompact.pqBytes, m);
 
                 verifyFusedPQSearchWorks();
             }
@@ -475,22 +475,22 @@ public class VectorFormatDiskUsageTest extends VectorTester
                                                           int m)
     {
         assertFusedPqSavings("flush PQ/segment", ecFlushPqBytesPerSegment,
-                (long) CassandraOnHeapGraph.MIN_PQ_ROWS * m, fbFlushPqBytesPerSegment);
+                             (long) CassandraOnHeapGraph.MIN_PQ_ROWS * m, fbFlushPqBytesPerSegment);
 
         assertEquals("FB-FusedPQ compacted PQ must equal FB-FusedPQ flushed PQ/segment " +
-                        "(both codebook-only, F; bug wrote F + N×m on compaction).",
-                fbFlushPqBytesPerSegment, fbCompactPqBytes);
+                     "(both codebook-only, F; bug wrote F + N×m on compaction).",
+                     fbFlushPqBytesPerSegment, fbCompactPqBytes);
 
         assertFusedPqSavings("compact PQ", ecCompactPqBytes,
-                (long) NUM_FLUSHES * CassandraOnHeapGraph.MIN_PQ_ROWS * m, fbCompactPqBytes);
+                             (long) NUM_FLUSHES * CassandraOnHeapGraph.MIN_PQ_ROWS * m, fbCompactPqBytes);
     }
 
     private static void assertFusedPqSavings(String label, long ecBytes, long perVectorBytes, long actualFb)
     {
         long expected = ecBytes - perVectorBytes - PQVECTORS_EXTRA_HEADER_BYTES;
         assertEquals("FB-FusedPQ " + label + " must be exactly N×m + PQVECTORS_EXTRA_HEADER_BYTES smaller than EC " +
-                        "(codebook only vs full PQVectors)",
-                expected, actualFb);
+                     "(codebook only vs full PQVectors)",
+                     expected, actualFb);
     }
 
     private void verifyFusedPQSearchWorks()
@@ -498,18 +498,18 @@ public class VectorFormatDiskUsageTest extends VectorTester
         int limit = 10;
         var results = execute("SELECT pk FROM %s ORDER BY v ANN OF ? LIMIT ?", randomVectorBoxed(DIMENSION), limit);
         assertEquals("ANN search must return " + limit + " results on FB-FusedPQ compacted index",
-                limit, results.size());
+                     limit, results.size());
     }
 
     private long componentSize(IndexContext indexContext,
                                IndexComponentType type)
     {
         return indexContext.getView().getIndexes()
-                .stream()
-                .mapToLong(idx -> {
-                    IndexComponents.ForRead perIndex = idx.usedPerIndexComponents();
-                    return perIndex.has(type) ? perIndex.get(type).file().length() : 0L;
-                })
-                .sum();
+                           .stream()
+                           .mapToLong(idx -> {
+                               IndexComponents.ForRead perIndex = idx.usedPerIndexComponents();
+                               return perIndex.has(type) ? perIndex.get(type).file().length() : 0L;
+                           })
+                           .sum();
     }
 }
