@@ -705,7 +705,7 @@ public final class SchemaKeyspace
 
     public static void addTableParamsToRowBuilder(TableParams params, Row.SimpleBuilder builder)
     {
-        addTableParamsToRowBuilder(params, Tables, builder);
+        addTableParamsToRowBuilder(params, tablesTableMetadata(), builder);
     }
 
     private static void addTableParamsToRowBuilder(TableParams params, TableMetadata schemaTable, Row.SimpleBuilder builder)
@@ -974,7 +974,7 @@ public final class SchemaKeyspace
                                               .add("where_clause", view.whereClause.toCQLString())
                                               .add("id", table.id.asUUID());
 
-        addTableParamsToRowBuilder(table.params, Views, rowBuilder);
+        addTableParamsToRowBuilder(table.params, viewsTableMetadata(), rowBuilder);
 
         if (includeColumns)
         {
