@@ -402,7 +402,7 @@ public class CassandraXMLJUnitResultFormatter implements JUnitResultFormatter, X
         if (test != null)
         {
             endTest(test);
-            failedTests.put(createDescription(test), getFailureOrError(t, getFilteredTrace(t)));
+            mergeOrPutFailure(createDescription(test), t, getFilteredTrace(t));
         }
     }
 
@@ -420,7 +420,7 @@ public class CassandraXMLJUnitResultFormatter implements JUnitResultFormatter, X
         if (test != null)
         {
             endTest(test);
-            failedTests.put(createDescription(test), getFailureOrError(t, getFilteredTrace(t)));
+            mergeOrPutFailure(createDescription(test), t, getFilteredTrace(t));
         }
     }
 
@@ -446,7 +446,12 @@ public class CassandraXMLJUnitResultFormatter implements JUnitResultFormatter, X
         if (!testElements.containsKey(classCaseDesc))
         {
             Element classElement = createTestCaseElement(TestSuite.class.getName(), formatName(curSuiteName), 0);
-            rootElement.appendChild(classElement);
+            // Only include the class-level testcase in the XML output when no individual test cases
+            // are present (e.g., all failures happened in @BeforeClass/@AfterClass).  When real
+            // test cases already exist, the element is still tracked internally for time-accounting
+            // but is NOT appended to rootElement to avoid producing a spurious extra <testcase>.
+            if (testElements.isEmpty())
+                rootElement.appendChild(classElement);
             testElements.put(classCaseDesc, classElement);
         }
     }
@@ -527,6 +532,31 @@ public class CassandraXMLJUnitResultFormatter implements JUnitResultFormatter, X
         nested.appendChild(trace);
 
         return nested;
+    }
+
+    /**
+     * If a failure/error element already exists for {@code desc}, append the new throwable's message
+     * to it (preserving both messages in one status child per the JUnit XML spec).
+     * Otherwise create a fresh element and store it.
+     */
+    private void mergeOrPutFailure(String desc, Throwable t, String trace)
+    {
+        Element existing = failedTests.get(desc);
+        if (existing != null)
+        {
+            // Append the additional message to the existing element's ATTR_MESSAGE attribute.
+            final String message = t.getMessage();
+            if (message != null && !message.isEmpty())
+            {
+                String prev = existing.getAttribute(ATTR_MESSAGE);
+                existing.setAttribute(ATTR_MESSAGE, prev.isEmpty() ? message : prev + " | " + message);
+            }
+            existing.appendChild(doc.createTextNode("\n--- additional error ---\n" + trace));
+        }
+        else
+        {
+            failedTests.put(desc, getFailureOrError(t, trace));
+        }
     }
 
     private void maybeAddForbiddenEntriesFailureElement(String desc, NavigableMap<Long, Throwable> forbiddenEntries)
