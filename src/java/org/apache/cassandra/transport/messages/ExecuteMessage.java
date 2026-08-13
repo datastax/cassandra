@@ -177,11 +177,12 @@ public class ExecuteMessage extends Message.Request
             Optional<Stage> asyncStage = Stage.fromStatement(statement);
             if (asyncStage.isPresent())
             {
-                // Execution will continue on a new thread, but Dispatcher already called CoordinatorWarnings.init
-                // on the current thread; the Dispatcher.processRequest request.execute() callback must call
-                // CoordinatorWarnings.done() on the same thread that called init(). Reset CoordinatorWarnings on the
-                // current thread, and init on the new thread. See CNDB-13432 and CNDB-10759.
-                CoordinatorWarnings.reset();
+                // Execution will continue on a new thread. Dispatcher.processRequest calls CoordinatorWarnings.init()
+                // and CoordinatorWarnings.done() on the NTR thread. For async execution, warnings are collected on the
+                // async stage thread, so we must also call CoordinatorWarnings.init()/done() there. The NTR-thread
+                // done() call will see an empty STATE (no warnings collected on NTR thread) and is harmless.
+                // See CNDB-13432 and CNDB-10759.
+                //
                 // Capture ExecutorLocals (including ClientWarn.State) to propagate to the async stage thread
                 // so that warnings generated during query execution are properly captured.
                 ExecutorLocals executorLocals = ExecutorLocals.current();
@@ -191,6 +192,7 @@ public class ExecuteMessage extends Message.Request
                                                    // Restore ExecutorLocals on the async stage thread
                                                    try (Closeable ignored = executorLocals.get())
                                                    {
+                                                       Response response;
                                                        try
                                                        {
                                                            if (isTrackable())
@@ -205,12 +207,21 @@ public class ExecuteMessage extends Message.Request
                                                                ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
                                                                throw new OverloadedException("Query timed out before it could start");
                                                            }
+                                                           response = handleRequest(queryState, requestTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime);
                                                        }
                                                        catch (Exception e)
                                                        {
-                                                           return handleException(queryState, finalPrepared, e);
+                                                           response = handleException(queryState, finalPrepared, e);
                                                        }
-                                                       return handleRequest(queryState, requestTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime);
+                                                       finally
+                                                       {
+                                                           if (isTrackable())
+                                                           {
+                                                               CoordinatorWarnings.done();
+                                                               CoordinatorWarnings.reset();
+                                                           }
+                                                       }
+                                                       return response;
                                                    }
                                                });
             }

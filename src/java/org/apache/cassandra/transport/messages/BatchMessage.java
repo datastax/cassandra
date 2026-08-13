@@ -240,14 +240,15 @@ public class BatchMessage extends Message.Request
             Optional<Stage> asyncStage = Stage.fromStatement(batch);
             if (asyncStage.isPresent())
             {
-                // Execution will continue on a new thread, but Dispatcher already called CoordinatorWarnings.init
-                // on the current thread; the Dispatcher.processRequest request.execute() callback must call
-                // CoordinatorWarnings.done() on the same thread that called init(). Reset CoordinatorWarnings on the
-                // current thread, and init on the new thread. See CNDB-13432 and CNDB-10759.
-                CoordinatorWarnings.reset();
+                // Execution will continue on a new thread. Dispatcher.processRequest calls CoordinatorWarnings.init()
+                // and CoordinatorWarnings.done() on the NTR thread. For async execution, warnings are collected on the
+                // async stage thread, so we must also call CoordinatorWarnings.init()/done() there. The NTR-thread
+                // done() call will see an empty STATE (no warnings collected on NTR thread) and is harmless.
+                // See CNDB-13432 and CNDB-10759.
                 List<QueryHandler.Prepared> finalPrepared = prepared;
                 return asyncStage.get().submit(() ->
                                                {
+                                                   Response response;
                                                    try
                                                    {
                                                        if (isTrackable())
@@ -262,12 +263,21 @@ public class BatchMessage extends Message.Request
                                                            ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
                                                            throw new OverloadedException("Query timed out before it could start");
                                                        }
+                                                       response = handleRequest(state, requestTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
                                                    }
                                                    catch (Exception e)
                                                    {
-                                                       return handleException(state, finalPrepared, e);
+                                                       response = handleException(state, finalPrepared, e);
                                                    }
-                                                   return handleRequest(state, requestTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
+                                                   finally
+                                                   {
+                                                       if (isTrackable())
+                                                       {
+                                                           CoordinatorWarnings.done();
+                                                           CoordinatorWarnings.reset();
+                                                       }
+                                                   }
+                                                   return response;
                                                });
             }
             else
