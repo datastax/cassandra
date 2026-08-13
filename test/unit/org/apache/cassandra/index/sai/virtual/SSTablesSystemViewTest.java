@@ -88,34 +88,38 @@ public class SSTablesSystemViewTest extends SAITester
 
         // flush the memtable and verify the new record in the virtual table
         flush();
-        Object[] row1 = row(v1IndexName, 1, "v1", 1L, 0L, 0L);
+        SSTableId id1 = currentIdsSorted()[0];
+        Object[] row1 = row(v1IndexName, id1, "v1", 1L, 0L, 0L);
         assertRows(execute(SELECT), row1);
 
         // flush a second memtable and verify both the old and the new record in the virtual table
         execute(insert, 2, 20, 200, 2000);
         execute(insert, 3, 30, 300, 3000);
         flush();
-        Object[] row2 = row(v1IndexName, 2, "v1", 2L, 0L, 1L);
+        SSTableId id2 = currentIdsSorted()[1];
+        Object[] row2 = row(v1IndexName, id2, "v1", 2L, 0L, 1L);
         assertRows(execute(SELECT), row1, row2);
 
         // create a second index, this should create a new additional entry in the table for each sstable
         String v2IndexName = createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
-        Object[] row3 = row(v2IndexName, 1, "v2", 1L, 0L, 0L);
-        Object[] row4 = row(v2IndexName, 2, "v2", 2L, 0L, 1L);
+        Object[] row3 = row(v2IndexName, id1, "v2", 1L, 0L, 0L);
+        Object[] row4 = row(v2IndexName, id2, "v2", 2L, 0L, 1L);
         assertRows(execute(SELECT), row1, row2, row3, row4);
 
         // create a new sstable that only contains data for the second index, this should add only one new entry
         execute(insert, 4, 40, null, 4000);
         flush();
-        Object[] row5 = row(v2IndexName, 3, "v2", 1L, 0L, 0L);
+        SSTableId id3 = currentIdsSorted()[2];
+        Object[] row5 = row(v2IndexName, id3, "v2", 1L, 0L, 0L);
         assertRows(execute(SELECT), row1, row2, row3, row4, row5);
 
         // create a new sstable with rows with contents for either one of the indexes or the other
         execute(insert, 5, 50, 500, null);
         execute(insert, 6, 60, null, 6000);
         flush();
-        Object[] row6 = row(v1IndexName, 4, "v1", 1L, 0L, 0L);
-        Object[] row7 = row(v2IndexName, 4, "v2", 1L, 1L, 1L);
+        SSTableId id4 = currentIdsSorted()[3];
+        Object[] row6 = row(v1IndexName, id4, "v1", 1L, 0L, 0L);
+        Object[] row7 = row(v2IndexName, id4, "v2", 1L, 1L, 1L);
         assertRows(execute(SELECT), row1, row2, row6, row3, row4, row5, row7);
 
         // compact the table and verify that the virtual table has a single entry per index
@@ -123,9 +127,10 @@ public class SSTablesSystemViewTest extends SAITester
         waitForCompactions();
         // Compaction may result in sstables with generation 5 or 6. Try both.
         // key 4, key 6 are not indexable on v1
-        Object[] row8 = row(v1IndexName, 5, 6, "v1", 4L, 0L, 5L);
+        SSTableId[] ids5 = currentIdsSorted();
+        Object[] row8 = row(v1IndexName, ids5, "v1", 4L, 0L, 5L);
         // key 5 is not indexable on v2
-        Object[] row9 = row(v2IndexName, 5, 6, "v2", 5L, 1L, 5L);
+        Object[] row9 = row(v2IndexName, ids5, "v2", 5L, 1L, 5L);
         assertRows(execute(SELECT), row8, row9);
 
         // drop the first index and verify that there are not entries for it in the table
@@ -135,6 +140,30 @@ public class SSTablesSystemViewTest extends SAITester
         // drop the base table and verify that the virtual table is empty
         dropTable("DROP TABLE %s");
         assertEmpty(execute(SELECT));
+    }
+
+    private SSTableId[] currentIdsSorted()
+    {
+        return getCurrentColumnFamilyStore().getLiveSSTables().stream()
+                                           .map(sst -> sst.descriptor.id)
+                                           .sorted(SSTableIdFactory.COMPARATOR)
+                                           .toArray(SSTableId[]::new);
+    }
+
+    private Object[] row(String indexName,
+                         SSTableId[] ids,
+                         String columnName,
+                         long cellCount,
+                         long minSSTableRowId,
+                         long maxSSTableRowId) throws Exception
+    {
+        for (SSTableId id : ids)
+        {
+            Object[] r = row(indexName, id, columnName, cellCount, minSSTableRowId, maxSSTableRowId);
+            if (r != null)
+                return r;
+        }
+        return null;
     }
 
     private Object[] row(String indexName,

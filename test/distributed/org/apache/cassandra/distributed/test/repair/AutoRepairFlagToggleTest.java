@@ -223,7 +223,17 @@ public class AutoRepairFlagToggleTest extends TestBaseImpl
             cluster.get(1).shutdown().get();
 
             CassandraRelevantProperties.AUTOREPAIR_ENABLE.setBoolean(false);
-            cluster.get(1).startup();
+            // startup() will trigger CommitLog replay which hits the persisted auto_repair column
+            // and calls killJVM() via JVMStabilityInspector. In the in-JVM dtest harness this
+            // throws InstanceShutdown; absorb it and proceed to check the logs.
+            try
+            {
+                cluster.get(1).startup();
+            }
+            catch (Exception ignored)
+            {
+                // InstanceShutdown or similar expected when auto_repair is persisted but disabled
+            }
 
             assertTrue("Expected 'Unknown column auto_repair during deserialization' in logs",
                        cluster.get(1).logs().grep("Unknown column auto_repair during deserialization")
