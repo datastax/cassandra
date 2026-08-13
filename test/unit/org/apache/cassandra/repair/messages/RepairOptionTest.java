@@ -38,6 +38,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -189,6 +190,77 @@ public class RepairOptionTest
         options.put(RepairOption.FORCE_REPAIR_KEY, "false");
         option = RepairOption.parse(options, Murmur3Partitioner.instance);
         Assert.assertFalse(option.isForcedRepair());
+    }
+
+    @Test
+    public void testTenantIdAndRepairTypeParsed()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(RepairOption.TENANT_ID_KEY, "tenant-abc-123");
+        options.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+
+        RepairOption option = RepairOption.parse(options, Murmur3Partitioner.instance);
+
+        assertEquals("tenant-abc-123", option.getTenantId());
+        assertEquals("continuous", option.getRepairType());
+    }
+
+    @Test
+    public void testTenantIdAndRepairTypeAbsentByDefault()
+    {
+        RepairOption option = RepairOption.parse(new HashMap<>(), Murmur3Partitioner.instance);
+
+        assertNull(option.getTenantId());
+        assertNull(option.getRepairType());
+    }
+
+    @Test
+    public void testTenantIdSetRepairTypeAbsent()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(RepairOption.TENANT_ID_KEY, "tenant-abc-123");
+
+        RepairOption option = RepairOption.parse(options, Murmur3Partitioner.instance);
+
+        assertEquals("tenant-abc-123", option.getTenantId());
+        assertNull(option.getRepairType());
+    }
+
+    @Test
+    public void testToStringIncludesTenantFieldsWhenSet()
+    {
+        DatabaseDescriptor.daemonInitialization();
+        Map<String, String> options = new HashMap<>();
+        options.put(RepairOption.TENANT_ID_KEY, "tenant-abc-123");
+        options.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+
+        String result = RepairOption.parse(options, Murmur3Partitioner.instance).toString();
+
+        assertTrue(result.contains("tenantId: tenant-abc-123"));
+        assertTrue(result.contains("repairType: continuous"));
+    }
+
+    @Test
+    public void testToStringOmitsTenantFieldsWhenAbsent()
+    {
+        DatabaseDescriptor.daemonInitialization();
+        String result = RepairOption.parse(new HashMap<>(), Murmur3Partitioner.instance).toString();
+
+        assertFalse(result.contains("tenantId"));
+        assertFalse(result.contains("repairType"));
+    }
+
+    @Test
+    public void testTenantFieldsNotInAsMap()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(RepairOption.TENANT_ID_KEY, "tenant-abc-123");
+        options.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+
+        Map<String, String> asMap = RepairOption.parse(options, Murmur3Partitioner.instance).asMap();
+
+        assertFalse(asMap.containsKey(RepairOption.TENANT_ID_KEY));
+        assertFalse(asMap.containsKey(RepairOption.REPAIR_TYPE_KEY));
     }
 
     private void assertParseThrowsIllegalArgumentExceptionWithMessage(Map<String, String> optionsToParse, String expectedErrorMessage)

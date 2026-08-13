@@ -185,7 +185,11 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         // exception should be ignored
         if (error instanceof SomeRepairFailedException)
             return;
-        logger.error("Repair {} failed:", parentSession, error);
+        if (options.getTenantId() != null)
+            logger.error("Repair {} failed [tenant: {}, type: {}, keyspace: {}]:",
+                         parentSession, options.getTenantId(), options.getRepairType(), keyspace, error);
+        else
+            logger.error("Repair {} failed:", parentSession, error);
 
         StorageMetrics.repairExceptions.inc();
         String errorMessage = String.format("Repair command #%d failed with error %s", cmd, error.getMessage());
