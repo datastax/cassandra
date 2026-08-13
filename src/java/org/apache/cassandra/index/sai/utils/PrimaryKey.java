@@ -159,6 +159,16 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable, ByteCom
     }
 
     /**
+     * Return whether this primary key represents a static row (i.e., its clustering is
+     * {@link Clustering#STATIC_CLUSTERING}).
+     */
+    default boolean isStaticRow()
+    {
+        Clustering<?> c = clustering();
+        return c != null && c.kind() == Clustering.Kind.STATIC_CLUSTERING;
+    }
+
+    /**
      * Load the primary key from the {@link Supplier<PrimaryKey>} (if one
      * is available) and fully populate the primary key.
      *
