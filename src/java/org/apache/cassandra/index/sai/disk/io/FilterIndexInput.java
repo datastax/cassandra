@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
 
-import org.apache.lucene.index.CorruptIndexException;
 
 public abstract class FilterIndexInput extends IndexInputReader
 {
