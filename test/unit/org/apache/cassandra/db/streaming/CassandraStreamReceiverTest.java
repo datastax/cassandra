@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.streaming;
 
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -26,6 +27,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.streaming.StreamSession;
 import org.mockito.Mock;
@@ -48,9 +50,20 @@ public class CassandraStreamReceiverTest extends CQLTester
     private static final String CDC_MV_TABLE = "cdc_mv_table";
     private static final String NO_CDC_MV_TABLE = "no_cdc_mv_table";
 
+    @BeforeClass
+    public static void setUpClass()
+    {
+        CQLTester.setUpClass();
+        // ViewManager.dropView() → SystemDistributedKeyspace.setViewRemoved() requires
+        // system_distributed to be registered; mirror what StorageService.joinTokenRing() does.
+        StorageService.instance.setUpDistributedSystemKeyspaces();
+    }
+
     @Before
     public void setup()
     {
+        // Enable CDC globally so that hasCDC(cfs) sees it (cdcRequiresWriteCommitLog depends on it).
+        DatabaseDescriptor.setCDCEnabled(true);
         // Set cdc_on_repair_enabled materialized_views_on_repair to true
         DatabaseDescriptor.setCDCOnRepairEnabled(true);
         DatabaseDescriptor.setMaterializedViewsOnRepairEnabled(true);
