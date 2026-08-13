@@ -64,9 +64,12 @@ public class AutoRepairTablePropertyTest extends TestBaseImpl
         // Ensure AUTOREPAIR_ENABLE is true so the auto_repair column exists in the schema
         CassandraRelevantProperties.AUTOREPAIR_ENABLE.setBoolean(true);
 
-        // Configure a single-node cluster with auto_repair enabled
+        // Configure a single-node cluster with auto_repair enabled.
+        // Use NONE storage_compatibility_mode so tablesTableMetadata()/viewsTableMetadata()
+        // return the full Tables/Views schema (with auto_repair column) rather than TablesLegacy.
         cluster = Cluster.build(1)
                          .withConfig(config -> config
+                                 .set("storage_compatibility_mode", "NONE")
                                  .set("auto_repair",
                                       ImmutableMap.of(
                                               "repair_type_overrides",

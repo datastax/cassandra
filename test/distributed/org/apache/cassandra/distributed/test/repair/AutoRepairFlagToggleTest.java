@@ -53,7 +53,10 @@ public class AutoRepairFlagToggleTest extends TestBaseImpl
         try (Cluster cluster = Cluster.build(1)
                                       .withConfig(config -> config
                                               .with(Feature.GOSSIP, Feature.NETWORK)
-                                              .set("enable_materialized_views", true))
+                                              .set("enable_materialized_views", true)
+                                              // Use NONE so tablesTableMetadata()/viewsTableMetadata() return
+                                              // the full Tables/Views schema containing the auto_repair column.
+                                              .set("storage_compatibility_mode", "NONE"))
                                       .start())
         {
             // Create a test keyspace and table
@@ -136,7 +139,8 @@ public class AutoRepairFlagToggleTest extends TestBaseImpl
 
         try (Cluster cluster = Cluster.build(1)
                                       .withConfig(config -> config
-                                              .with(Feature.GOSSIP, Feature.NETWORK))
+                                              .with(Feature.GOSSIP, Feature.NETWORK)
+                                              .set("storage_compatibility_mode", "NONE"))
                                       .start())
         {
             // Create a test keyspace and table
@@ -163,7 +167,7 @@ public class AutoRepairFlagToggleTest extends TestBaseImpl
                     ConsistencyLevel.LOCAL_ONE);
             assertTrue("auto_repair_priority table should NOT exist when flag is disabled", priorityResultBefore.length == 0);
 
-            // Phase 2: Restart with AUTOREPAIR_ENABLE=true
+            // Phase 2: Restart with AUTOREPAIR_ENABLE=true.
             cluster.get(1).nodetoolResult("drain").asserts().success();
             cluster.get(1).shutdown().get();
             CassandraRelevantProperties.AUTOREPAIR_ENABLE.setBoolean(true);
@@ -202,7 +206,8 @@ public class AutoRepairFlagToggleTest extends TestBaseImpl
 
         try (Cluster cluster = Cluster.build(1)
                                       .withConfig(config -> config
-                                              .with(Feature.GOSSIP, Feature.NETWORK))
+                                              .with(Feature.GOSSIP, Feature.NETWORK)
+                                              .set("storage_compatibility_mode", "NONE"))
                                       .start())
         {
             // Enable scheduling before creating tables so auto_repair data is written to system_schema
