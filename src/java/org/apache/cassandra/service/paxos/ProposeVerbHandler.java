@@ -59,6 +59,7 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
         // calculate outbound internode bytes before adding the sensor to the response
         int size = reply.currentPayloadSize(MessagingService.current_version);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+        SensorsCustomParams.computeUCU(sensors);
         sensors.syncAllSensors();
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());

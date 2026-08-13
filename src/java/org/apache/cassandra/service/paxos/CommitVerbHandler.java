@@ -56,6 +56,8 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
 
         // no need to calculate outbound internode bytes because the response is NoPayload
+        SensorsCustomParams.computeUCU(sensors);
+        sensors.syncAllSensors();
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }

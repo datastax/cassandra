@@ -212,6 +212,9 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         if (sensors != null)
         {
             sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+            // UCU is registered here for consistency with other sensors; its value is computed by UCUCalculator
+            // in SensorsCustomParams.computeUCU() once all other sensor increments for
+            // this request are complete, ensuring the computation reflects the full request cost.
             sensors.registerSensor(sensorContext, Type.UCU);
         }
         rangeIndexes[boundaries.getShardForKey(key)].add(key,
@@ -248,6 +251,9 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         if (sensors != null)
         {
             sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+            // UCU is registered here for consistency with other sensors; its value is computed by UCUCalculator
+            // in SensorsCustomParams.computeUCU() once all other sensor increments for
+            // this request are complete, ensuring the computation reflects the full request cost.
             sensors.registerSensor(sensorContext, Type.UCU);
         }
 
@@ -280,6 +286,9 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         if (sensors != null)
         {
             sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+            // UCU is registered here for consistency with other sensors; its value is computed by UCUCalculator
+            // in SensorsCustomParams.computeUCU() once all other sensor increments for
+            // this request are complete, ensuring the computation reflects the full request cost.
             sensors.registerSensor(sensorContext, Type.UCU);
         }
 

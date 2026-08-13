@@ -61,21 +61,23 @@ public class CoordinatorUCUTest
         coordinatorSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         coordinatorSensors.registerSensor(context, Type.UCU);
 
-        // Simulate replica 1 response sending UCU = 150.0
+        // Simulate replica 1 response: 150 READ_BYTES → UCU = 150.0 (default weight 1.0)
         RequestSensors replica1Sensors = SensorsFactory.instance.createRequestSensors(ks);
         replica1Sensors.registerSensor(context, Type.READ_BYTES);
         replica1Sensors.registerSensor(context, Type.UCU);
         replica1Sensors.incrementSensor(context, Type.READ_BYTES, 150.0);
+        SensorsCustomParams.computeUCU(replica1Sensors);
 
         Message.Builder<NoPayload> builder1 = Message.builder(Verb._TEST_1, noPayload).withId(1);
         SensorsCustomParams.addSensorsToInternodeResponse(replica1Sensors, builder1);
         Message<NoPayload> msg1 = builder1.build();
 
-        // Simulate replica 2 response sending UCU = 200.0
+        // Simulate replica 2 response: 200 WRITE_BYTES → UCU = 200.0 (default weight 1.0)
         RequestSensors replica2Sensors = SensorsFactory.instance.createRequestSensors(ks);
         replica2Sensors.registerSensor(context, Type.WRITE_BYTES);
         replica2Sensors.registerSensor(context, Type.UCU);
         replica2Sensors.incrementSensor(context, Type.WRITE_BYTES, 200.0);
+        SensorsCustomParams.computeUCU(replica2Sensors);
 
         Message.Builder<NoPayload> builder2 = Message.builder(Verb._TEST_2, noPayload).withId(2);
         SensorsCustomParams.addSensorsToInternodeResponse(replica2Sensors, builder2);

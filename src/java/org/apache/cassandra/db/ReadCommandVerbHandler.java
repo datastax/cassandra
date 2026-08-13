@@ -87,6 +87,9 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
         int size = reply.currentPayloadSize(MessagingService.current_version);
         requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+        // Compute UCU before syncing so the registry receives the correct UCU value in one shot.
+        // UCU must be computed after all other sensor increments for this request are complete.
+        SensorsCustomParams.computeUCU(requestSensors);
         requestSensors.syncAllSensors();
         SensorsCustomParams.addSensorsToInternodeResponse(requestSensors, reply);
 

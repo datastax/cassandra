@@ -169,6 +169,9 @@ public class SensorsIndexWriteTest
         assertThat(lastMessage.header.customParams()).containsKey(indexWriteParam);
         double encodedValue = SensorsTestUtil.bytesToDouble(lastMessage.header.customParams().get(indexWriteParam));
         assertThat(encodedValue).isEqualTo(indexWriteSensor.getValue());
+
+        // UCU = (WRITE_BYTES + INDEX_WRITE_BYTES) * 1.0 (default weights)
+        assertUCUSensorSyncedToRegistry(context, writeSensor.getValue() + indexWriteSensor.getValue());
     }
 
     /**
@@ -208,6 +211,9 @@ public class SensorsIndexWriteTest
         assertThat(lastMessage.header.customParams()).containsKey(indexWriteParam);
         double encodedValue = SensorsTestUtil.bytesToDouble(lastMessage.header.customParams().get(indexWriteParam));
         assertThat(encodedValue).isEqualTo(indexWriteSensor.getValue());
+
+        // UCU = (WRITE_BYTES + INDEX_WRITE_BYTES) * 1.0 (default weights)
+        assertUCUSensorSyncedToRegistry(context, writeSensor.getValue() + indexWriteSensor.getValue());
     }
 
     @Test
@@ -252,6 +258,11 @@ public class SensorsIndexWriteTest
         String requestParam = SensorsCustomParams.paramForRequestSensor(saiSensor).get();
         String globalParam = SensorsCustomParams.paramForGlobalSensor(saiRegistrySensor).get();
         assertResponseSensors(saiSensor.getValue(), saiRegistrySensor.getValue(), requestParam, globalParam);
+
+        // UCU = (WRITE_BYTES + INDEX_WRITE_BYTES) * 1.0 (default weights); registry must reflect the computed value.
+        Sensor saiWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.WRITE_BYTES);
+        double expectedUCU = saiWriteSensor.getValue() + saiSensor.getValue();
+        assertUCUSensorSyncedToRegistry(saiContext, expectedUCU);
     }
 
     @Test
@@ -300,6 +311,11 @@ public class SensorsIndexWriteTest
         String indexRequestParam = SensorsCustomParams.paramForRequestSensor(secondaryIndexSensor).get();
         String indexGlobalParam = SensorsCustomParams.paramForGlobalSensor(secondaryIndexRegistrySensor).get();
         assertResponseSensors(secondaryIndexSensor.getValue(), secondaryIndexRegistrySensor.getValue(), indexRequestParam, indexGlobalParam);
+
+        // UCU = (WRITE_BYTES + INDEX_WRITE_BYTES) * 1.0 (default weights); registry must reflect the computed value.
+        Sensor secondaryIndexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(secondaryIndexContext, Type.WRITE_BYTES);
+        double expectedUCU = secondaryIndexWriteSensor.getValue() + secondaryIndexSensor.getValue();
+        assertUCUSensorSyncedToRegistry(secondaryIndexContext, expectedUCU);
     }
 
     private static void handleMutation(Mutation mutation)
@@ -330,5 +346,20 @@ public class SensorsIndexWriteTest
         double globalBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedGlobalParam));
         assertThat(requestBytes).isEqualTo(requestValue);
         assertThat(globalBytes).isEqualTo(registryValue);
+    }
+
+    /**
+     * Asserts that the UCU sensor value equals {@code expectedUCU} on both the thread-local request sensor and the
+     * global {@link SensorsRegistry}, and that both are encoded correctly in the last captured response message.
+     */
+    private void assertUCUSensorSyncedToRegistry(Context context, double expectedUCU)
+    {
+        Sensor ucuRequest = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.UCU);
+        assertThat(ucuRequest.getValue()).isEqualTo(expectedUCU);
+        Sensor ucuRegistry = SensorsTestUtil.getRegistrySensor(context, Type.UCU);
+        assertThat(ucuRegistry.getValue()).isEqualTo(expectedUCU);
+        String ucuRequestParam = SensorsCustomParams.paramForRequestSensor(ucuRequest).get();
+        String ucuGlobalParam = SensorsCustomParams.paramForGlobalSensor(ucuRegistry).get();
+        assertResponseSensors(ucuRequest.getValue(), ucuRegistry.getValue(), ucuRequestParam, ucuGlobalParam);
     }
 }

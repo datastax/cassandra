@@ -131,6 +131,7 @@ public class SensorsWriteTest
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
 
         double writeSensorSum = 0;
+        double ucuSum = 0;
         for (int j = 0; j < 10; j++)
         {
             Mutation m = new RowUpdateBuilder(store.metadata(), j, String.valueOf(j))
@@ -142,10 +143,13 @@ public class SensorsWriteTest
             Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
             assertThat(registrySensor).isEqualTo(localSensor);
             writeSensorSum += localSensor.getValue();
+            ucuSum += localSensor.getValue(); // UCU = WRITE_BYTES * 1.0 (default weights)
 
             // check global registry is synchronized
             assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
             assertResponseSensors(localSensor, registrySensor);
+
+            assertUCUSensorSyncedToRegistry(context, localSensor.getValue(), ucuSum);
         }
     }
 
@@ -156,6 +160,7 @@ public class SensorsWriteTest
         Context context = new Context(KEYSPACE1, CF_STANDARD_CLUSTERING, store.metadata.id.toString());
 
         double writeSensorSum = 0;
+        double ucuSum = 0;
         for (int j = 0; j < 10; j++)
         {
             Mutation m = new RowUpdateBuilder(store.metadata(), j, String.valueOf(j))
@@ -168,10 +173,13 @@ public class SensorsWriteTest
             Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
             assertThat(registrySensor).isEqualTo(localSensor);
             writeSensorSum += localSensor.getValue();
+            ucuSum += localSensor.getValue(); // UCU = WRITE_BYTES * 1.0 (default weights)
 
             // check global registry is synchronized
             assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
             assertResponseSensors(localSensor, registrySensor);
+
+            assertUCUSensorSyncedToRegistry(context, localSensor.getValue(), ucuSum);
         }
     }
 
@@ -222,6 +230,9 @@ public class SensorsWriteTest
         assertThat(registrySensor).isEqualTo(localSensor);
         assertThat(registrySensor.getValue()).isEqualTo(localSensor.getValue() + singleRowWriteBytes);
         assertResponseSensors(localSensor, registrySensor);
+
+        // UCU = WRITE_BYTES * 1.0 (default weights); registry = singleRowWriteBytes (first request) + 10x (second request)
+        assertUCUSensorSyncedToRegistry(context, localSensor.getValue(), singleRowWriteBytes + localSensor.getValue());
     }
 
     @Test
@@ -265,6 +276,10 @@ public class SensorsWriteTest
 
         assertResponseSensors(localSensor1, registrySensor1);
         assertResponseSensors(localSensor2, registrySensor2);
+
+        // UCU = WRITE_BYTES * 1.0 per context
+        assertUCUSensorSyncedToRegistry(context1, localSensor1.getValue());
+        assertUCUSensorSyncedToRegistry(context2, localSensor2.getValue());
     }
 
     @Test
@@ -288,6 +303,9 @@ public class SensorsWriteTest
         Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
         assertResponseSensors(localSensor, registrySensor);
+
+        // UCU = WRITE_BYTES * 1.0 (default weights)
+        assertUCUSensorSyncedToRegistry(context, localSensor.getValue());
     }
 
     @Test
@@ -308,6 +326,10 @@ public class SensorsWriteTest
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isZero();
 
+        // UCU = WRITE_BYTES * 1.0 (READ_BYTES is 0 on first prepare)
+        double ucu1 = writeSensor.getValue();
+        assertUCUSensorSyncedToRegistry(context, ucu1);
+
         // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
         handlePaxosPrepare(proposal);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
@@ -315,6 +337,11 @@ public class SensorsWriteTest
         Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
         assertThat(registryReadSensor).isEqualTo(readSensor);
         assertReadResponseSensors(readSensor, registryReadSensor);
+        writeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+
+        // UCU = READ_BYTES + WRITE_BYTES (both non-zero on second prepare); registry accumulates from first call
+        double ucu2 = readSensor.getValue() + writeSensor.getValue();
+        assertUCUSensorSyncedToRegistry(context, ucu2, ucu1 + ucu2);
     }
 
     @Test
@@ -335,13 +362,28 @@ public class SensorsWriteTest
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isZero();
 
-        // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
-        handlePaxosPropose(proposal);
+        // UCU = WRITE_BYTES * 1.0 (READ_BYTES is 0 on first propose)
+        double ucu1 = writeSensor.getValue();
+        assertUCUSensorSyncedToRegistry(context, ucu1);
+
+        // Second propose uses a larger payload so its WRITE_BYTES differs from the first, ensuring that
+        // using a stale writeSensor reference would produce the wrong ucu2 and fail the assertion.
+        PartitionUpdate largerUpdate = new RowUpdateBuilder(store.metadata(), 0, "0")
+                                      .add("val", "a-longer-value-to-produce-more-write-bytes")
+                                      .buildUpdate();
+        Commit largerProposal = Commit.newProposal(UUIDGen.getTimeUUID(), largerUpdate);
+        handlePaxosPropose(largerProposal);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);
         Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
         assertThat(registryReadSensor).isEqualTo(readSensor);
         assertReadResponseSensors(readSensor, registryReadSensor);
+        writeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(writeSensor.getValue()).isGreaterThan(ucu1); // larger payload means more write bytes
+
+        // UCU = READ_BYTES + WRITE_BYTES (both non-zero on second propose); registry accumulates from first call
+        double ucu2 = readSensor.getValue() + writeSensor.getValue();
+        assertUCUSensorSyncedToRegistry(context, ucu2, ucu1 + ucu2);
     }
 
     @Test
@@ -359,6 +401,9 @@ public class SensorsWriteTest
         Sensor registryWriteSensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registryWriteSensor).isEqualTo(writeSensor);
         assertResponseSensors(writeSensor, registryWriteSensor);
+
+        // UCU = WRITE_BYTES * 1.0 (no read in commit phase)
+        assertUCUSensorSyncedToRegistry(context, writeSensor.getValue());
 
         // No read is done in the commit phase
         assertThat(RequestTracker.instance.get().getSensor(context, Type.READ_BYTES)).isEmpty();
@@ -431,5 +476,29 @@ public class SensorsWriteTest
         double globalBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(globalParam));
         assertThat(requestBytes).isEqualTo(requestSensor.getValue());
         assertThat(globalBytes).isEqualTo(registrySensor.getValue());
+    }
+
+    /**
+     * Asserts that the UCU request sensor equals {@code expectedRequestUCU}, the global registry sensor equals
+     * {@code expectedRegistryUCU}, and that both values are encoded correctly in the last internode response message.
+     * Use this overload in looping tests where the registry accumulates across iterations.
+     */
+    private void assertUCUSensorSyncedToRegistry(Context context, double expectedRequestUCU, double expectedRegistryUCU)
+    {
+        Sensor ucuRequest = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.UCU);
+        assertThat(ucuRequest.getValue()).isEqualTo(expectedRequestUCU);
+        Sensor ucuRegistry = SensorsTestUtil.getRegistrySensor(context, Type.UCU);
+        assertThat(ucuRegistry.getValue()).isEqualTo(expectedRegistryUCU);
+        assertResponseSensors(ucuRequest, ucuRegistry);
+    }
+
+    /**
+     * Asserts that the UCU sensor request-level value equals {@code expectedUCU}, that the global registry
+     * has been updated to the same value, and that the UCU param in the last internode response message
+     * also carries that value. Use this overload when only a single request has been issued (registry == request).
+     */
+    private void assertUCUSensorSyncedToRegistry(Context context, double expectedUCU)
+    {
+        assertUCUSensorSyncedToRegistry(context, expectedUCU, expectedUCU);
     }
 }

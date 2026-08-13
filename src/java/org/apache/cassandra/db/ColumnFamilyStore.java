@@ -1654,6 +1654,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 {
                     Context puContext = Context.from(this.metadata.get());
                     sensors.registerSensor(puContext, Type.WRITE_BYTES);
+                    // UCU is registered here for consistency with other sensors; its value is computed by UCUCalculator
+                    // in SensorsCustomParams.computeUCU() once all other sensor increments for
+                    // this request are complete, ensuring the computation reflects the full request cost.
                     sensors.registerSensor(puContext, Type.UCU);
                     sensors.incrementSensor(puContext, Type.WRITE_BYTES, dataSize);
                 }

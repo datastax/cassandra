@@ -104,6 +104,8 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.READ_BYTES, 100.0);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 200.0);
         sensors.incrementSensor(context, Type.INDEX_WRITE_BYTES, 50.0);
+        // UCU = (100 + 200 + 50) * 1.0 = 350.0 (default weights)
+        SensorsCustomParams.computeUCU(sensors);
 
         Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_1, noPayload).withId(1);
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);

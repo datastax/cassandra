@@ -79,6 +79,34 @@ public final class SensorsCustomParams
     }
 
     /**
+     * Computes the UCU value for every UCU sensor registered in {@code sensors} and increments each sensor by the
+     * computed value. Must be called <em>after</em> all other sensor increments for the request are complete and
+     * <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
+     * {@code syncAllSensors()} calls earlier in the request path skip UCU (its value is 0 until this method runs,
+     * so the delta is 0 and the registry is not touched), the final sync after this call is the one that delivers
+     * the correct UCU value to the global {@link SensorsRegistry}.
+     * Must also be called before {@link #addSensorsToInternodeResponse} so the response message carries the
+     * correct UCU value.
+     *
+     * @param sensors the request sensors for the current request
+     */
+    public static void computeUCU(RequestSensors sensors)
+    {
+        Preconditions.checkNotNull(sensors);
+
+        UCUCalculator calculator = SensorsFactory.instance.getUCUCalculator();
+        if (calculator == null)
+            return;
+
+        for (Sensor ucuSensor : sensors.getSensors(s -> s.getType() == Type.UCU))
+        {
+            Context context = ucuSensor.getContext();
+            double ucuValue = calculator.computeReplicaUCU(sensors, context);
+            sensors.incrementSensor(context, Type.UCU, ucuValue);
+        }
+    }
+
+    /**
      * Iterate over all sensors in the {@link RequestSensors} and encodes each sensor value by applying the given
      * {@param valueFunction} in the internode response message as custom parameters.
      *
@@ -91,17 +119,6 @@ public final class SensorsCustomParams
     {
         Preconditions.checkNotNull(sensors);
         Preconditions.checkNotNull(response);
-
-        UCUCalculator calculator = SensorsFactory.instance.getUCUCalculator();
-        if (calculator != null)
-        {
-            for (Sensor ucuSensor : sensors.getSensors(s -> s.getType() == Type.UCU))
-            {
-                Context context = ucuSensor.getContext();
-                double ucuValue = calculator.computeReplicaUCU(sensors, context);
-                sensors.incrementSensor(context, Type.UCU, ucuValue);
-            }
-        }
 
         for (Sensor sensor : sensors.getSensors(ignored -> true))
             addSensorToInternodeResponse(response, sensor, valueFunction);
