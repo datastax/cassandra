@@ -69,24 +69,14 @@ public class TrackingIndexFileUtils extends IndexFileUtils
         }
 
         @Override
-        public void close()
+        public synchronized void close()
         {
-            try
-            {
-                super.close();
-            }
-            finally
-            {
-                final String creationStackTrace = openInputs.remove(this);
+            super.close();
+            final String creationStackTrace = openInputs.remove(this);
 
-                if (!closedInputs.add(this))
-                {
-                    Assert.fail("Input closed more than once: " + this);
-                }
-                if (creationStackTrace == null)
-                {
-                    Assert.fail("Closed unregistered input: " + this);
-                }
+            if (closedInputs.add(this) && creationStackTrace == null)
+            {
+                Assert.fail("Closed unregistered input: " + this);
             }
         }
 
