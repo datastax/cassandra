@@ -23,6 +23,8 @@ import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
 
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -93,7 +95,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     @Override
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
-        assert primaryKeyFactory instanceof V2RowAwarePrimaryKeyFactory;
+        Preconditions.checkArgument(primaryKeyFactory instanceof V2RowAwarePrimaryKeyFactory);
         return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, (V2RowAwarePrimaryKeyFactory) primaryKeyFactory, sstable);
     }
 
