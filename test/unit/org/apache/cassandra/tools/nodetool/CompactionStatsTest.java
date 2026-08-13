@@ -210,16 +210,16 @@ public class CompactionStatsTest extends CQLTester
              NonThrowingCloseable c2 = CompactionManager.instance.active.onOperationStart(nonCompactionHolder))
         {
             String stdout = waitForNumberOfPendingTasks(2, "compactionstats", "-V");
-            assertThat(stdout).containsPattern("keyspace\\s+table\\s+task id\\s+completion ratio\\s+kind\\s+progress\\s+sstables\\s+total\\s+unit\\s+target directory");
-            String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
+            assertThat(stdout).containsPattern("keyspace\\s+table\\s+task id\\s+completion ratio\\s+kind\\s+progress\\s+sstables\\s+total\\s+total compressed\\s+unit\\s+target directory");
+            String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
                                                         CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
-                                                        OperationType.COMPACTION, bytesCompacted, sstables.size(), bytesTotal, AbstractTableOperation.Unit.BYTES,
+                                                        OperationType.COMPACTION, bytesCompacted, sstables.size(), bytesTotal, "n/a", AbstractTableOperation.Unit.BYTES,
                                                         targetDirectory);
             assertThat(stdout).containsPattern(expectedStatsPattern);
 
-            String expectedStatsPatternForNonCompaction = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
+            String expectedStatsPatternForNonCompaction = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
                                                                         CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
-                                                                        OperationType.COMPACTION, bytesCompacted, sstables.size(), bytesTotal, AbstractTableOperation.Unit.BYTES);
+                                                                        OperationType.COMPACTION, bytesCompacted, sstables.size(), bytesTotal, "n/a", AbstractTableOperation.Unit.BYTES);
             assertThat(stdout).containsPattern(expectedStatsPatternForNonCompaction);
         }
         waitForNumberOfPendingTasks(0, "compactionstats", "-V");
@@ -305,15 +305,15 @@ public class CompactionStatsTest extends CQLTester
              NonThrowingCloseable c2 = CompactionManager.instance.active.onOperationStart(nonCompactionHolder))
         {
             String stdout = waitForNumberOfPendingTasks(2, "compactionstats", "--vtable", "--human-readable");
-            assertThat(stdout).containsPattern("keyspace\\s+table\\s+task id\\s+completion ratio\\s+kind\\s+progress\\s+sstables\\s+total\\s+unit\\s+target directory");
-            String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
+            assertThat(stdout).containsPattern("keyspace\\s+table\\s+task id\\s+completion ratio\\s+kind\\s+progress\\s+sstables\\s+total\\s+total compressed\\s+unit\\s+target directory");
+            String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
                                                         CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
-                                                        OperationType.COMPACTION, "123 bytes", sstables.size(), "120.56 KiB", AbstractTableOperation.Unit.BYTES,
+                                                        OperationType.COMPACTION, "123 bytes", sstables.size(), "120.56 KiB", "n/a", AbstractTableOperation.Unit.BYTES,
                                                         targetDirectory);
             assertThat(stdout).containsPattern(expectedStatsPattern);
-            String expectedStatsPatternForNonCompaction = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
+            String expectedStatsPatternForNonCompaction = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
                                                                         CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
-                                                                        OperationType.CLEANUP, "123 bytes", sstables.size(), "120.56 KiB", AbstractTableOperation.Unit.BYTES);
+                                                                        OperationType.CLEANUP, "123 bytes", sstables.size(), "120.56 KiB", "n/a", AbstractTableOperation.Unit.BYTES);
             assertThat(stdout).containsPattern(expectedStatsPatternForNonCompaction);
         }
         waitForNumberOfPendingTasks(0, "compactionstats", "--vtable", "--human-readable");
