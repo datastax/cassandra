@@ -22,15 +22,19 @@ import java.util.Random;
 
 import com.google.common.collect.ImmutableList;
 
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameter;
 import org.junit.runners.Parameterized.Parameters;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -63,6 +67,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 @RunWith(Parameterized.class)
 public class MemtableNegativeReleasedCQLReproTest extends CQLTester
 {
+    private static StorageCompatibilityMode savedMode;
+
+    @BeforeClass
+    public static void setUpClass()
+    {
+        // 'skiplist_sharded' is a CC5-only memtable type that is blocked by mapCC5KeyToCC4ClassName()
+        // when storage_compatibility_mode is HCD_1 or CASSANDRA_4. Switch to NONE for this test so
+        // all three parameterized memtable types (skiplist, skiplist_sharded, trie) can be created.
+        savedMode = DatabaseDescriptor.getStorageCompatibilityMode();
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.NONE);
+        CQLTester.setUpClass();
+    }
+
+    @AfterClass
+    public static void tearDownClass()
+    {
+        DatabaseDescriptor.setStorageCompatibilityMode(savedMode);
+    }
+
     @Parameter
     public String memtableClass;
 
