@@ -36,7 +36,7 @@ public class CompactionParamsTest
 
         assertThatThrownBy(() -> CompactionParams.classFromName(ClassLoadingTestNonAssignable.class.getName()))
         .isInstanceOf(ConfigurationException.class)
-        .hasMessageContaining("is not derived from AbstractReplicationStrategy");
+        .hasMessageContaining(ClassLoadingTestNonAssignable.class.getName());
 
         assertThat(ClassLoadingTestSupport.wasInitialized(ClassLoadingTestNonAssignable.class)).isFalse();
     }
