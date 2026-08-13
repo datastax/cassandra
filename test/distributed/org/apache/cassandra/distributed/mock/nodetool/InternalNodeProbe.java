@@ -186,6 +186,8 @@ public class InternalNodeProbe extends NodeProbe
                 return metrics.sstablesDropppedFromCompactions;
             case "TotalCompactionsCompleted":
                 return metrics.totalCompactionsCompleted;
+            case "CompressedBytesCompacted":
+                return metrics.compressedBytesCompacted;
             default:
                 throw new RuntimeException("Unknown compaction metric: " + metricName);
         }
