@@ -24,14 +24,17 @@ import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.paxos.Commit;
 
 /**
@@ -82,6 +85,13 @@ public interface Mutator
                                                            Runnable callback,
                                                            WriteType writeType,
                                                            long queryStartNanoTime);
+
+    /**
+     * Performs a CAS (LWT) operation coordinated on the local node and returns the result of its read.
+     */
+    RowIterator mutateCas(TableMetadata metadata, DecoratedKey key, QueryInfoTracker.LWTWriteTracker lwtTracker,
+                          ClientRequestsMetrics metrics, CASRequest request, ConsistencyLevel consistencyForPaxos,
+                          ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime);
 
     /**
      * Used for LWT mutation at the last (COMMIT) phase of Paxos.

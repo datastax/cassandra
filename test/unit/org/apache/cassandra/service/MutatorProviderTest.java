@@ -28,14 +28,17 @@ import junit.framework.TestCase;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.service.paxos.Commit;
 
@@ -61,6 +64,12 @@ public class MutatorProviderTest extends TestCase
 
         @Override
         public AbstractWriteResponseHandler<IMutation> mutateStandard(Mutation mutation, ConsistencyLevel consistencyLevel, String localDataCenter, StorageProxy.WritePerformer writePerformer, Runnable callback, WriteType writeType, long queryStartNanoTime)
+        {
+            return null;
+        }
+
+        @Override
+        public RowIterator mutateCas(TableMetadata metadata, DecoratedKey key, QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics, CASRequest request, ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime)
         {
             return null;
         }
