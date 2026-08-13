@@ -179,6 +179,11 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
     public Iterable<Cell<?>> cells();
 
     /**
+     * @return the number of cells in this row.
+     */
+    public int cellsCount();
+
+    /**
      * A collection of the ColumnData representation of this row, for columns with some data (possibly not live) present
      * <p>
      * The data is returned in column order.
