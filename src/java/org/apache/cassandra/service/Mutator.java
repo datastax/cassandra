@@ -89,9 +89,9 @@ public interface Mutator
     /**
      * Performs a CAS (LWT) operation coordinated on the local node and returns the result of its read.
      */
-    RowIterator mutateCas(String keyspaceName, DecoratedKey key, CASRequest request, ConsistencyLevel consistencyForPaxos,
-                          ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime,
-                          QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics, TableMetadata metadata);
+    RowIterator mutateCas(TableMetadata metadata, DecoratedKey key, QueryInfoTracker.LWTWriteTracker lwtTracker,
+                          ClientRequestsMetrics metrics, CASRequest request, ConsistencyLevel consistencyForPaxos,
+                          ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime);
 
     /**
      * Used for LWT mutation at the last (COMMIT) phase of Paxos.

@@ -69,7 +69,7 @@ public class MutatorProviderTest extends TestCase
         }
 
         @Override
-        public RowIterator mutateCas(String keyspaceName, DecoratedKey key, CASRequest request, ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime, QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics, TableMetadata metadata)
+        public RowIterator mutateCas(TableMetadata metadata, DecoratedKey key, QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics, CASRequest request, ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime)
         {
             return null;
         }

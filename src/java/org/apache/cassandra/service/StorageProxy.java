@@ -203,9 +203,9 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         @Override
-        public RowIterator mutateCas(String keyspaceName, DecoratedKey key, CASRequest request, ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime, QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics, TableMetadata metadata)
+        public RowIterator mutateCas(TableMetadata metadata, DecoratedKey key, QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics, CASRequest request, ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime)
         {
-            return defaultCas(keyspaceName, key, request, consistencyForPaxos, consistencyForCommit, state, nowInSeconds, queryStartNanoTime, lwtTracker, metrics, metadata);
+            return defaultCas(metadata, key, request, consistencyForPaxos, consistencyForCommit, state, nowInSeconds, queryStartNanoTime, lwtTracker, metrics);
         }
 
         @Override
@@ -513,7 +513,7 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
 
-            return mutator.mutateCas(keyspaceName, key, request, consistencyForPaxos, consistencyForCommit, state, nowInSeconds, queryStartNanoTime, lwtTracker, metrics, metadata);
+            return mutator.mutateCas(metadata, key, lwtTracker, metrics, request, consistencyForPaxos, consistencyForCommit, state, nowInSeconds, queryStartNanoTime);
         }
         catch (CasWriteUnknownResultException e)
         {
@@ -561,10 +561,10 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static RowIterator defaultCas(String keyspaceName, DecoratedKey key, CASRequest request, ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime, QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics, TableMetadata metadata)
+    private static RowIterator defaultCas(TableMetadata metadata, DecoratedKey key, CASRequest request, ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, QueryState state, int nowInSeconds, long queryStartNanoTime, QueryInfoTracker.LWTWriteTracker lwtTracker, ClientRequestsMetrics metrics)
     {
-        consistencyForPaxos.validateForCas(keyspaceName, state);
-        consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName, state);
+        consistencyForPaxos.validateForCas(metadata.keyspace, state);
+        consistencyForCommit.validateForCasCommit(Keyspace.open(metadata.keyspace).getReplicationStrategy(), metadata.keyspace, state);
 
         Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer = () ->
         {
