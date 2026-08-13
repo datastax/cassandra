@@ -10188,6 +10188,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=IndexInfo,n
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=IndexInfo,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -10202,6 +10207,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=IndexInfo,n
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=IndexInfo,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -11065,6 +11075,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_r
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -11079,6 +11094,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_r
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -11942,6 +11962,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_r
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -11956,6 +11981,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_r
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -12819,6 +12849,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,nam
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -12833,6 +12868,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,nam
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -13696,6 +13736,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -13710,6 +13755,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -14573,6 +14623,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_history,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -14587,6 +14642,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_history,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -15450,6 +15510,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -15464,6 +15529,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -16327,6 +16397,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -16341,6 +16416,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -17204,6 +17284,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -17218,6 +17303,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -18081,6 +18171,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -18095,6 +18190,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -18958,6 +19058,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -18972,6 +19077,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -19835,6 +19945,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,na
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -19849,6 +19964,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,na
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -20712,6 +20832,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_st
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_statements,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -20726,6 +20851,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_st
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_statements,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -21589,6 +21719,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,nam
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -21603,6 +21738,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,nam
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -22466,6 +22606,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estima
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estimates,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -22480,6 +22625,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estima
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estimates,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -23343,6 +23493,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_act
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_activity_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -23357,6 +23512,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_act
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_activity_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -24220,6 +24380,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estim
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estimates,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -24234,6 +24399,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estim
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estimates,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -25097,6 +25267,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -25111,6 +25286,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -25974,6 +26154,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -25988,6 +26173,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -26851,6 +27041,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=view_builds
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=view_builds_in_progress,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -27728,6 +27923,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=networ
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=network_permissions,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -29482,6 +29682,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_m
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_members,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -29496,6 +29701,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_m
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_members,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -30359,6 +30569,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_p
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_permissions,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -30373,6 +30588,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_p
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_permissions,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -31236,6 +31456,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -31250,6 +31475,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -32990,6 +33220,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=repair_history,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -33867,6 +34102,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=view_build_status,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -34744,6 +34984,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggr
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggregates,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -34758,6 +35003,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggr
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggregates,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -35621,6 +35871,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=colu
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=columns,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -35635,6 +35890,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=colu
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=columns,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -36498,6 +36758,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=drop
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=dropped_columns,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -37375,6 +37640,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=func
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=functions,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -37389,6 +37659,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=func
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=functions,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -38252,6 +38527,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=inde
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=indexes,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -38266,6 +38546,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=inde
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=indexes,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -39129,6 +39414,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keys
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keyspaces,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -39143,6 +39433,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keys
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keyspaces,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -40006,6 +40301,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tabl
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tables,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -40020,6 +40320,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tabl
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tables,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -40883,6 +41188,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=trig
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=triggers,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -40897,6 +41207,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=trig
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=triggers,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -41760,6 +42075,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=type
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=types,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -41774,6 +42094,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=type
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=types,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -42637,6 +42962,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=view
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=views,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -42651,6 +42981,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=view
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=views,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -43514,6 +43849,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=even
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=events,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -43528,6 +43868,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=even
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=events,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -44391,6 +44736,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sess
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sessions,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -44405,6 +44755,11 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sess
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sessions,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -45267,7 +45622,12 @@ org.apache.cassandra.metrics:type=ColumnFamily,name=BloomFilterOffHeapMemoryUsed
     returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,name=BytesAnticompacted:
   attributes:
-  - {access: read-only, name: Value, type: java.lang.Object}
+  - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -45281,7 +45641,12 @@ org.apache.cassandra.metrics:type=ColumnFamily,name=BytesFlushed:
     returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,name=BytesMutatedAnticompaction:
   attributes:
-  - {access: read-only, name: Value, type: java.lang.Object}
+  - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -57150,6 +57515,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=Blo
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -57164,6 +57534,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=Byt
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -58231,6 +58606,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,n
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -58245,6 +58625,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,n
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -59312,6 +59697,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -59326,6 +59716,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -60393,6 +60788,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=Bloom
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -60407,6 +60807,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=Bytes
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -61474,6 +61879,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=B
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -61488,6 +61898,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=B
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -62555,6 +62970,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -62569,6 +62989,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -63636,6 +64061,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=BloomFi
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -63650,6 +64080,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=BytesFl
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -64717,6 +65152,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=BloomFi
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -64731,6 +65171,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=BytesFl
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -65798,6 +66243,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=B
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -65812,6 +66262,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=B
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -66879,6 +67334,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,nam
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -66893,6 +67353,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,nam
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -67960,6 +68425,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=BloomFi
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -67974,6 +68444,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=BytesFl
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -69041,6 +69516,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=Bloo
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -69055,6 +69535,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=Byte
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -70122,6 +70607,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statement
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statements,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -70136,6 +70626,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statement
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statements,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -71203,6 +71698,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=Bloom
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -71217,6 +71717,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=Bytes
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -72284,6 +72789,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,nam
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -72298,6 +72808,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,nam
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -73365,6 +73880,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity_v
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -73379,6 +73899,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity_v
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -74446,6 +74971,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,na
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -74460,6 +74990,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,na
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -75527,6 +76062,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -75541,6 +76081,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -76608,6 +77153,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges_v2,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -76622,6 +77172,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges_v2,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -77689,6 +78244,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_pro
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_progress,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -77703,6 +78263,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_pro
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_progress,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -78770,6 +79335,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permi
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permissions,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -78784,6 +79354,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permi
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permissions,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -79851,6 +80426,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=resource_role
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=resource_role_permissons_index,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -80932,6 +81512,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -80946,6 +81531,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -82013,6 +82603,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissi
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissions,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -82027,6 +82622,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissi
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissions,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -83094,6 +83694,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=Bl
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -83108,6 +83713,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=By
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -84175,6 +84785,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=parent
 org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=parent_repair_history,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -85256,6 +85871,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair
 org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair_history,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -85270,6 +85890,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair
 org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair_history,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -86337,6 +86962,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=view_b
 org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=view_build_status,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -87418,6 +88048,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -87432,6 +88067,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -88499,6 +89139,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,nam
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -88513,6 +89158,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,nam
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -89580,6 +90230,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_col
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_columns,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -89594,6 +90249,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_col
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_columns,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -90661,6 +91321,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,n
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -90675,6 +91340,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,n
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -91742,6 +92412,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,nam
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -91756,6 +92431,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,nam
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -92823,6 +93503,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,n
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -92837,6 +93522,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,n
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -93904,6 +94594,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -93918,6 +94613,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -94985,6 +95685,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,na
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -94999,6 +95704,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,na
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -96066,6 +96776,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -96080,6 +96795,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -97147,6 +97867,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -97161,6 +97886,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -98228,6 +98958,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name
 org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -98242,6 +98977,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name
 org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -99309,6 +100049,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,na
 org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,name=BytesAnticompacted:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -99323,6 +100068,11 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,na
 org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,name=BytesMutatedAnticompaction:
   attributes:
   - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -100389,7 +101139,12 @@ org.apache.cassandra.metrics:type=Table,name=BloomFilterOffHeapMemoryUsed:
     returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,name=BytesAnticompacted:
   attributes:
-  - {access: read-only, name: Value, type: java.lang.Object}
+  - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
@@ -100403,7 +101158,12 @@ org.apache.cassandra.metrics:type=Table,name=BytesFlushed:
     returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,name=BytesMutatedAnticompaction:
   attributes:
-  - {access: read-only, name: Value, type: java.lang.Object}
+  - {access: read-only, name: Count, type: long}
+  - {access: read-only, name: FifteenMinuteRate, type: double}
+  - {access: read-only, name: FiveMinuteRate, type: double}
+  - {access: read-only, name: MeanRate, type: double}
+  - {access: read-only, name: OneMinuteRate, type: double}
+  - {access: read-only, name: RateUnit, type: java.lang.String}
   operations:
   - name: objectName
     parameters: []
