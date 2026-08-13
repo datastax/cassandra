@@ -90,6 +90,9 @@ public class AutoRepairSchedulerStatsHelper extends TestBaseImpl
                          .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(1, numTokens))
                          .withConfig(config -> config
                                                .set("num_tokens", numTokens)
+                                               // Use NONE so tablesTableMetadata() returns the full Tables schema
+                                               // (with auto_repair column) and AuthKeyspace creates cidr_groups.
+                                               .set("storage_compatibility_mode", "NONE")
                                                .set("auto_repair",
                                                     ImmutableMap.of(
                                                     "repair_type_overrides",
