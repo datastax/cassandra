@@ -26,6 +26,9 @@ import java.util.Optional;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -44,7 +47,18 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public final class SensorsCustomParams
 {
+    private static final Logger logger = LoggerFactory.getLogger(SensorsCustomParams.class);
+
     private static final SensorEncoder SENSOR_ENCODER = SensorsFactory.instance.createSensorEncoder();
+
+    private static final UCUCalculator UCU_CALCULATOR = initUCUCalculator();
+
+    private static UCUCalculator initUCUCalculator()
+    {
+        UCUCalculator calculator = SensorsFactory.instance.getUCUCalculator();
+        logger.info("UCUCalculator loaded: {}", calculator != null ? calculator.getClass().getName() : "null");
+        return calculator;
+    }
 
     private SensorsCustomParams()
     {
@@ -94,14 +108,13 @@ public final class SensorsCustomParams
     {
         Preconditions.checkNotNull(sensors);
 
-        UCUCalculator calculator = SensorsFactory.instance.getUCUCalculator();
-        if (calculator == null)
+        if (UCU_CALCULATOR == null)
             return;
 
         for (Sensor ucuSensor : sensors.getSensors(s -> s.getType() == Type.UCU))
         {
             Context context = ucuSensor.getContext();
-            double ucuValue = calculator.computeReplicaUCU(sensors, context);
+            double ucuValue = UCU_CALCULATOR.computeReplicaUCU(sensors, context);
             sensors.incrementSensor(context, Type.UCU, ucuValue);
         }
     }
