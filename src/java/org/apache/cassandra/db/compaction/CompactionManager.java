@@ -534,6 +534,15 @@ public class CompactionManager implements CompactionManagerMBean
                                            final boolean reinsertOverflowedTTL, int jobs)
     throws InterruptedException, ExecutionException
     {
+        return performScrub(cfs, skipCorrupted, checkData,
+                            reinsertOverflowedTTL ? Scrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : Scrubber.OverwriteTTLMode.NONE,
+                            jobs);
+    }
+
+    public AllSSTableOpStatus performScrub(final ColumnFamilyStore cfs, final boolean skipCorrupted, final boolean checkData,
+                                           final Scrubber.OverwriteTTLMode overwriteTTLMode, int jobs)
+    throws InterruptedException, ExecutionException
+    {
         return parallelAllSSTableOperation(cfs, new OneSSTableOperation()
         {
             @Override
@@ -545,7 +554,7 @@ public class CompactionManager implements CompactionManagerMBean
             @Override
             public void execute(LifecycleTransaction input)
             {
-                scrubOne(cfs, input, skipCorrupted, checkData, reinsertOverflowedTTL, active);
+                scrubOne(cfs, input, skipCorrupted, checkData, overwriteTTLMode, active);
             }
         }, jobs, OperationType.SCRUB, TableOperation.StopTrigger.SCRUB);
     }
@@ -1237,7 +1246,14 @@ public class CompactionManager implements CompactionManagerMBean
     @VisibleForTesting
     void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData, boolean reinsertOverflowedTTL, TableOperationObserver activeCompactions)
     {
-        try (Scrubber scrubber = new Scrubber(cfs, modifier, skipCorrupted, checkData, reinsertOverflowedTTL);
+        scrubOne(cfs, modifier, skipCorrupted, checkData,
+                 reinsertOverflowedTTL ? Scrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : Scrubber.OverwriteTTLMode.NONE,
+                 activeCompactions);
+    }
+
+    void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData, Scrubber.OverwriteTTLMode overwriteTTLMode, TableOperationObserver activeCompactions)
+    {
+        try (Scrubber scrubber = new Scrubber(cfs, modifier, skipCorrupted, checkData, overwriteTTLMode);
              NonThrowingCloseable c = activeCompactions.onOperationStart(scrubber.getScrubInfo()))
         {
             scrubber.scrub();

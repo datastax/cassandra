@@ -107,7 +107,9 @@ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeTrue;
@@ -917,7 +919,7 @@ public class ScrubTest
                 { //make sure the next scrub fails
                     overrideWithGarbage(indexCfs.getLiveSSTables().iterator().next(), ByteBufferUtil.bytes(1L), ByteBufferUtil.bytes(2L), (byte)0x7A);
                 }
-                CompactionManager.AllSSTableOpStatus result = indexCfs.scrub(false, false, false, true, false, 0);
+                CompactionManager.AllSSTableOpStatus result = indexCfs.scrub(false, false, Scrubber.OverwriteTTLMode.NONE, true, false, 0);
                 assertEquals(failure ?
                              CompactionManager.AllSSTableOpStatus.ABORTED :
                              CompactionManager.AllSSTableOpStatus.SUCCESSFUL,
@@ -996,7 +998,7 @@ public class ScrubTest
 
             cfs.loadNewSSTables();
 
-            cfs.scrub(true, true, false, false, false, 1);
+            cfs.scrub(true, true, Scrubber.OverwriteTTLMode.NONE, false, false, 1);
 
             UntypedResultSet rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
             assertNotNull(rs);
@@ -1012,4 +1014,140 @@ public class ScrubTest
             DatabaseDescriptor.setPartitionerUnsafe(oldPart);
         }
     }
+
+    // ---- stripTTL tests -------------------------------------------------------
+
+    /**
+     * Rows written with a TTL have their expiry metadata removed by a stripTTL scrub.
+     * Before scrub: ttl(v) returns a positive value.
+     * After scrub: ttl(v) returns null — the row is now permanent.
+     */
+    @Test
+    public void testScrubStripTTLSimpleColumn() throws Exception
+    {
+        QueryProcessor.process(String.format(
+            "CREATE TABLE \"%s\".strip_ttl_simple (k int PRIMARY KEY, v text)", ksName),
+            ConsistencyLevel.ONE);
+
+        // Insert 5 rows with a TTL
+        for (int i = 0; i < 5; i++)
+            QueryProcessor.executeInternal(String.format(
+                "INSERT INTO \"%s\".strip_ttl_simple (k, v) VALUES (%d, 'val%d') USING TTL 3600", ksName, i, i));
+
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("strip_ttl_simple");
+        cfs.forceBlockingFlush(UNIT_TESTS);
+
+        // Before scrub: all rows should have a TTL > 0
+        UntypedResultSet before = QueryProcessor.executeInternal(
+            String.format("SELECT k, v, ttl(v) FROM \"%s\".strip_ttl_simple", ksName));
+        assertNotNull(before);
+        assertEquals(5, before.size());
+        for (UntypedResultSet.Row row : before)
+            assertTrue("Expected ttl(v) > 0 before scrub", row.getInt("ttl(v)") > 0);
+
+        // Scrub with OverwriteTTLMode.NO_TTL to strip all TTL metadata
+        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+        cfs.loadNewSSTables();
+
+        // After scrub: all rows still present, ttl(v) is now null (permanent)
+        UntypedResultSet after = QueryProcessor.executeInternal(
+            String.format("SELECT k, v, ttl(v) FROM \"%s\".strip_ttl_simple", ksName));
+        assertNotNull(after);
+        assertEquals("All 5 rows should still be present after stripTTL scrub", 5, after.size());
+        for (UntypedResultSet.Row row : after)
+            assertFalse("Expected ttl(v) to be null after stripTTL scrub", row.has("ttl(v)"));
+    }
+
+    /**
+     * Rows without a TTL should pass through a stripTTL scrub unchanged.
+     */
+    @Test
+    public void testScrubStripTTLNoOpOnNonExpiringRows() throws Exception
+    {
+        QueryProcessor.process(String.format(
+            "CREATE TABLE \"%s\".strip_ttl_noop (k int PRIMARY KEY, v text)", ksName),
+            ConsistencyLevel.ONE);
+
+        for (int i = 0; i < 3; i++)
+            QueryProcessor.executeInternal(String.format(
+                "INSERT INTO \"%s\".strip_ttl_noop (k, v) VALUES (%d, 'permanent%d')", ksName, i, i));
+
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("strip_ttl_noop");
+        cfs.forceBlockingFlush(UNIT_TESTS);
+
+        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+        cfs.loadNewSSTables();
+
+        UntypedResultSet after = QueryProcessor.executeInternal(
+            String.format("SELECT k, v FROM \"%s\".strip_ttl_noop", ksName));
+        assertNotNull(after);
+        assertEquals("Non-TTL rows should be unchanged after stripTTL scrub", 3, after.size());
+    }
+
+    /**
+     * TTL stripping on a static column: mirrors testNoTTLStatic from DSE TTLTest.
+     */
+    @Test
+    public void testScrubStripTTLStaticColumn() throws Exception
+    {
+        QueryProcessor.process(String.format(
+            "CREATE TABLE \"%s\".strip_ttl_static (k int, c int, v int, s int static, PRIMARY KEY(k, c))", ksName),
+            ConsistencyLevel.ONE);
+
+        QueryProcessor.executeInternal(String.format(
+            "INSERT INTO \"%s\".strip_ttl_static (k, c, v) VALUES (0, 1, 10)", ksName));
+        QueryProcessor.executeInternal(String.format(
+            "INSERT INTO \"%s\".strip_ttl_static (k, s) VALUES (0, 7) USING TTL 3600", ksName));
+
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("strip_ttl_static");
+        cfs.forceBlockingFlush(UNIT_TESTS);
+
+        // TTL should be present before scrub
+        UntypedResultSet before = QueryProcessor.executeInternal(
+            String.format("SELECT s, ttl(s) FROM \"%s\".strip_ttl_static", ksName));
+        assertTrue("Expected TTL > 0 on static column before scrub", before.one().getInt("ttl(s)") > 0);
+
+        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+        cfs.loadNewSSTables();
+
+        // TTL should be gone after scrub, data still present
+        UntypedResultSet after = QueryProcessor.executeInternal(
+            String.format("SELECT s, ttl(s) FROM \"%s\".strip_ttl_static", ksName));
+        assertNotNull(after);
+        assertEquals(7, after.one().getInt("s"));
+        assertFalse("Expected TTL to be null after stripTTL scrub on static column",
+                    after.one().has("ttl(s)"));
+    }
+
+    /**
+     * When stripTTL=false (default), rows with a TTL should be scrubbed normally and keep their TTL.
+     * This ensures the default behaviour is not broken.
+     */
+    @Test
+    public void testScrubDefaultDoesNotStripTTL() throws Exception
+    {
+        QueryProcessor.process(String.format(
+            "CREATE TABLE \"%s\".strip_ttl_default (k int PRIMARY KEY, v text)", ksName),
+            ConsistencyLevel.ONE);
+
+        for (int i = 0; i < 3; i++)
+            QueryProcessor.executeInternal(String.format(
+                "INSERT INTO \"%s\".strip_ttl_default (k, v) VALUES (%d, 'val%d') USING TTL 3600", ksName, i, i));
+
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("strip_ttl_default");
+        cfs.forceBlockingFlush(UNIT_TESTS);
+
+        // Normal scrub — stripTTL=false
+        CompactionManager.instance.performScrub(cfs, false, true, 1);
+        cfs.loadNewSSTables();
+
+        UntypedResultSet after = QueryProcessor.executeInternal(
+            String.format("SELECT k, v, ttl(v) FROM \"%s\".strip_ttl_default", ksName));
+        assertNotNull(after);
+        assertEquals(3, after.size());
+        for (UntypedResultSet.Row row : after)
+            assertTrue("TTL should still be present when scrub is run without stripTTL", row.getInt("ttl(v)") > 0);
+    }
+
+
 }

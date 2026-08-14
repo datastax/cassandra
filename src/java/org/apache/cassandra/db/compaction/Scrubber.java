@@ -41,6 +41,8 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
@@ -74,6 +76,7 @@ import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.utils.memory.HeapCloner;
 
 public class Scrubber implements Closeable
@@ -84,7 +87,7 @@ public class Scrubber implements Closeable
     private final boolean isOffline;
     private final File destination;
     private final boolean skipCorrupted;
-    private final boolean reinsertOverflowedTTLRows;
+    private final OverwriteTTLMode overwriteTTLMode;
 
     private final boolean isCommutative;
     private final boolean isIndex;
@@ -101,11 +104,22 @@ public class Scrubber implements Closeable
     private int emptyPartitions;
 
     private NegativeLocalDeletionInfoMetrics negativeLocalDeletionInfoMetrics = new NegativeLocalDeletionInfoMetrics();
+    private OverwritenTTLInfoMetrics overwritenTTLInfoMetrics = new OverwritenTTLInfoMetrics();
 
     private final OutputHandler outputHandler;
 
     private static final Comparator<Partition> partitionComparator = Comparator.comparing(Partition::partitionKey);
     private final SortedSet<Partition> outOfOrder = new TreeSet<>(partitionComparator);
+
+    public enum OverwriteTTLMode
+    {
+        // Do nothing
+        NONE,
+        // Reinserts overflowed TTLs. See CASSANDRA-14092
+        REINSERT_OVERFLOWED_TTL,
+        // Remove any TTL from data
+        NO_TTL
+    }
 
     public Scrubber(CompactionRealm realm, LifecycleTransaction transaction, boolean skipCorrupted, boolean checkData)
     {
@@ -115,7 +129,14 @@ public class Scrubber implements Closeable
     public Scrubber(CompactionRealm realm, LifecycleTransaction transaction, boolean skipCorrupted, boolean checkData,
                     boolean reinsertOverflowedTTLRows)
     {
-        this(realm, transaction, transaction.isOffline(), skipCorrupted, new OutputHandler.LogOutput(), checkData, reinsertOverflowedTTLRows);
+        this(realm, transaction, transaction.isOffline(), skipCorrupted, new OutputHandler.LogOutput(), checkData,
+             reinsertOverflowedTTLRows ? OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : OverwriteTTLMode.NONE);
+    }
+
+    public Scrubber(CompactionRealm realm, LifecycleTransaction transaction, boolean skipCorrupted, boolean checkData,
+                    OverwriteTTLMode overwriteTTLMode)
+    {
+        this(realm, transaction, transaction.isOffline(), skipCorrupted, new OutputHandler.LogOutput(), checkData, overwriteTTLMode);
     }
 
     @SuppressWarnings("resource")
@@ -125,7 +146,7 @@ public class Scrubber implements Closeable
                     boolean skipCorrupted,
                     OutputHandler outputHandler,
                     boolean checkData,
-                    boolean reinsertOverflowedTTLRows)
+                    OverwriteTTLMode overwriteTTLMode)
     {
         this.realm = realm;
         this.transaction = transaction;
@@ -133,7 +154,7 @@ public class Scrubber implements Closeable
         this.sstable = transaction.onlyOne();
         this.outputHandler = outputHandler;
         this.skipCorrupted = skipCorrupted;
-        this.reinsertOverflowedTTLRows = reinsertOverflowedTTLRows;
+        this.overwriteTTLMode = overwriteTTLMode;
 
         List<SSTableReader> toScrub = Collections.singletonList(sstable);
 
@@ -174,8 +195,10 @@ public class Scrubber implements Closeable
 
         this.scrubInfo = new ScrubInfo(dataFile, sstable, fileAccessLock.readLock());
 
-        if (reinsertOverflowedTTLRows)
+        if (overwriteTTLMode == OverwriteTTLMode.REINSERT_OVERFLOWED_TTL)
             outputHandler.output("Starting scrub with reinsert overflowed TTL option");
+        else if (overwriteTTLMode != OverwriteTTLMode.NONE)
+            outputHandler.output("Starting scrub with option: " + overwriteTTLMode.toString());
     }
 
     private ScrubPartitionIterator openIndexIterator()
@@ -399,6 +422,8 @@ public class Scrubber implements Closeable
             outputHandler.output("Scrub of " + sstable + " complete: " + goodPartitions + " partitions in new sstable and " + emptyPartitions + " empty (tombstoned) partitions dropped");
             if (negativeLocalDeletionInfoMetrics.fixedRows > 0)
                 outputHandler.output("Fixed " + negativeLocalDeletionInfoMetrics.fixedRows + " rows with overflowed local deletion time.");
+            if (overwritenTTLInfoMetrics.NOTTLOverwrittenRows > 0)
+                outputHandler.output("Overwrote " + overwritenTTLInfoMetrics.NOTTLOverwrittenRows + " rows with NO_TTL.");
             if (badPartitions > 0)
                 outputHandler.warn("Unable to recover " + badPartitions + " partitions that were skipped.  You can attempt manual recovery from the pre-scrub snapshot.  You can also run nodetool repair to transfer the data from a healthy replica, if any");
         }
@@ -446,16 +471,28 @@ public class Scrubber implements Closeable
     }
 
     /**
-     * Only wrap with {@link FixNegativeLocalDeletionTimeIterator} if {@link #reinsertOverflowedTTLRows} option
+     * Only wrap with {@link FixNegativeLocalDeletionTimeIterator} if {@link OverwriteTTLMode#REINSERT_OVERFLOWED_TTL} option
      * is specified
      */
     @SuppressWarnings("resource")
     private UnfilteredRowIterator getIterator(DecoratedKey key)
     {
         RowMergingSSTableIterator rowMergingIterator = new RowMergingSSTableIterator(SSTableIdentityIterator.create(sstable, dataFile, key));
-        return reinsertOverflowedTTLRows ? new FixNegativeLocalDeletionTimeIterator(rowMergingIterator,
-                                                                                    outputHandler,
-                                                                                    negativeLocalDeletionInfoMetrics) : rowMergingIterator;
+
+        UnfilteredRowIterator res;
+        switch (overwriteTTLMode)
+        {
+            case REINSERT_OVERFLOWED_TTL:
+                res = new FixNegativeLocalDeletionTimeIterator(rowMergingIterator, outputHandler, negativeLocalDeletionInfoMetrics);
+                break;
+            case NO_TTL:
+                res = Transformation.apply(rowMergingIterator, new NoTTLTransformer(outputHandler, realm.metadata(), overwritenTTLInfoMetrics));
+                break;
+            default:
+                res = rowMergingIterator;
+        }
+
+        return res;
     }
 
     private boolean indexAvailable()
@@ -618,6 +655,97 @@ public class Scrubber implements Closeable
     public class NegativeLocalDeletionInfoMetrics
     {
         public volatile int fixedRows = 0;
+    }
+
+    public class OverwritenTTLInfoMetrics
+    {
+        public volatile int NOTTLOverwrittenRows = 0;
+    }
+
+    private static class NoTTLTransformer extends Transformation<UnfilteredRowIterator>
+    {
+        private final TableMetadata metadata;
+        private final OutputHandler outputHandler;
+        private final OverwritenTTLInfoMetrics overwritenTTLInfoMetrics;
+
+        public NoTTLTransformer(OutputHandler outputHandler, TableMetadata metadata, OverwritenTTLInfoMetrics overwritenTTLInfoMetrics)
+        {
+            this.metadata = metadata;
+            this.outputHandler = outputHandler;
+            this.overwritenTTLInfoMetrics = overwritenTTLInfoMetrics;
+        }
+
+        @Override
+        public Row applyToStatic(Row row)
+        {
+            return removeTTL(row);
+        }
+
+        @Override
+        protected Row applyToRow(Row row)
+        {
+            return removeTTL(row);
+        }
+
+        // Rewrites the row replacing expiring liveness/cells with permanent equivalents, preserving timestamp and value.
+        protected Row removeTTL(Row row)
+        {
+            boolean ttlWasOverwritten = false;
+            Row.Builder builder = BTreeRow.sortedBuilder();
+            builder.newRow(row.clustering());
+
+            // Handle primary key liveness info — remove TTL if present
+            LivenessInfo livenessInfo = row.primaryKeyLivenessInfo();
+            if (livenessInfo.isExpiring())
+            {
+                builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(livenessInfo.timestamp(), LivenessInfo.NO_TTL, FBUtilities.nowInSeconds()));
+                ttlWasOverwritten = true;
+            }
+            else
+                builder.addPrimaryKeyLivenessInfo(livenessInfo);
+
+            // Preserve row deletion
+            builder.addRowDeletion(row.deletion());
+
+            // Process all columns as there can be cell level TTL
+            for (ColumnData cd : row)
+            {
+                if (cd.column().isSimple())
+                {
+                    Cell<?> cell = (Cell<?>) cd;
+                    if (cell.isExpiring())
+                    {
+                        builder.addCell(BufferCell.live(cell.column(), cell.timestamp(), cell.buffer(), cell.path()));
+                        ttlWasOverwritten = true;
+                    }
+                    else
+                        builder.addCell(cell);
+                }
+                else
+                {
+                    ComplexColumnData complexData = (ComplexColumnData) cd;
+                    builder.addComplexDeletion(complexData.column(), complexData.complexDeletion());
+                    for (Cell<?> cell : complexData)
+                    {
+                        if (cell.isExpiring())
+                        {
+                            builder.addCell(BufferCell.live(cell.column(), cell.timestamp(), cell.buffer(), cell.path()));
+                            ttlWasOverwritten = true;
+                        }
+                        else
+                            builder.addCell(cell);
+                    }
+                }
+            }
+
+            if (ttlWasOverwritten)
+            {
+                outputHandler.debug(String.format("Found row with TTL to remove: %s", row.toString(metadata, false)));
+                overwritenTTLInfoMetrics.NOTTLOverwrittenRows++;
+            }
+
+            return builder.build();
+        }
     }
 
     /**
