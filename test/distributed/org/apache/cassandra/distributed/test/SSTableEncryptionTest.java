@@ -259,6 +259,51 @@ public class SSTableEncryptionTest extends TestBaseImpl
         }
     }
 
+    @Test
+    public void shouldNotLeakCompressionMetadataOnFlushAndCompaction() throws Exception
+    {
+        try (Cluster cluster = builder().withNodes(1)
+                                        .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                        .start())
+        {
+            // given a table with data encrypted using local key
+            String keyspace = createKeyspace(cluster);
+            Path secretKey = createLocalSecretKey(cluster);
+            String table = createEncryptedTable(cluster, keyspace, secretKey);
+
+            // write through the flush path twice so that the subsequent major compaction has work to do;
+            // both the flush and the compaction create BTI writers with encrypted index components
+            insertAndFlush(cluster, keyspace, table, 10);
+            insertAndFlush(cluster, keyspace, table, 10);
+            cluster.get(1).nodetoolResult("compact", keyspace, table).asserts().success();
+
+            cluster.schemaChange(String.format("DROP TABLE %s.%s", keyspace, table));
+
+            // all writers are gone by now; force garbage collection so that any CompressionMetadata
+            // whose reference was not released gets flagged by the reference reaper.
+            // Note this check is best-effort: System.gc() is advisory and the reaper logs
+            // asynchronously, so a regression may occasionally go unnoticed here — the deterministic
+            // guard is BtiTableWriterEncryptionTest, this test covers the end-to-end wiring
+            cluster.get(1).runOnInstance(() -> {
+                for (int i = 0; i < 5; i++)
+                {
+                    System.gc();
+                    try
+                    {
+                        Thread.sleep(200);
+                    }
+                    catch (InterruptedException e)
+                    {
+                        throw new RuntimeException(e);
+                    }
+                }
+            });
+
+            List<String> leaks = cluster.get(1).logs().grep("LEAK DETECTED.*ChunkOffsetMemory").getResult();
+            assertThat(leaks).isEmpty();
+        }
+    }
+
     private TestTable createTableWithSampleData(Cluster cluster, String keyspace, String tableDefSuffix) throws IOException
     {
         String tableName = randomTableName();
