@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
 import javax.annotation.Nullable;
 import javax.management.AttributeNotFoundException;
 import javax.management.InstanceNotFoundException;
@@ -164,6 +165,12 @@ public class SAITester extends CQLTester
     public static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
 
     public static final PrimaryKey.Factory TEST_FACTORY = Version.current(KEYSPACE).onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
+
+    // Row-aware TEST_FACTORY that runs up to FA format version and does not use clustered row aware
+    public static final PrimaryKey.Factory ROW_AWARE_TEST_FACTORY = (Version.current(KEYSPACE).onOrAfter(Version.GA)
+                                                                     ? Version.FA
+                                                                     : Version.current(KEYSPACE))
+                                                                    .onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
     static
     {
@@ -740,7 +747,8 @@ public class SAITester extends CQLTester
     {
         Set<File> indexFiles = indexFiles();
 
-        for (IndexComponentType indexComponentType : Version.current(KEYSPACE).onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType indexComponentType : Version.current(KEYSPACE).onDiskFormat()
+                                                            .perSSTableComponentTypes(currentTableMetadata().hasClustering()))
         {
             Set<File> tableFiles = componentFiles(indexFiles, new Component(SSTableFormat.Components.Types.CUSTOM, Version.current(KEYSPACE).fileNameFormatter().format(indexComponentType, (String)null, 0)));
             assertEquals(tableFiles.toString(), perSSTableFiles, tableFiles.size());

@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.io.sstable.Component;
@@ -186,8 +187,12 @@ public interface IndexComponents
     {
         return isPerIndexGroup()
                ? onDiskFormat().perIndexComponentTypes(context())
-               : onDiskFormat().perSSTableComponentTypes();
+               : onDiskFormat().perSSTableComponentTypes(hasClustering());
     }
+
+    boolean hasClustering();
+
+    ClusteringComparator comparator();
 
     default ByteComparable.Version byteComparableVersionFor(IndexComponentType component)
     {
