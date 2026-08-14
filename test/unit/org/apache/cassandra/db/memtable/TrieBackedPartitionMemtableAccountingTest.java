@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.db.partitions;
+package org.apache.cassandra.db.memtable;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -38,9 +38,10 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.SetType;
-import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
-import org.apache.cassandra.db.memtable.TrieCellData;
-import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.TrieBackedPartition;
+import org.apache.cassandra.db.partitions.TriePartitionUpdate;
+import org.apache.cassandra.db.partitions.TriePartitionUpdater;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellData;
@@ -365,7 +366,7 @@ public class TrieBackedPartitionMemtableAccountingTest
                 updateUnreleasable += getUnreleasableSize(update.staticRow(), partition.staticRow(), exsDeletion, updDeletion);
 
                 OpOrder.Group writeOp = opOrder.getCurrent();
-                TrieMemtable.mergeUpdate(trie, allocator, TriePartitionUpdate.asTrieUpdate(update).trie, indexer, writeOp, updater);
+                TrieMemtable.mergeUpdate(trie, allocator, TriePartitionUpdate.asMergableTrieWithoutPartitionPrefix(update), indexer, writeOp, updater);
                 opOrder.newBarrier().issue();
 
                 assertThat(allocator.onHeap().owns()).isGreaterThanOrEqualTo(0L);
@@ -399,7 +400,7 @@ public class TrieBackedPartitionMemtableAccountingTest
                 TriePartitionUpdate update = TriePartitionUpdate.fromIterator(iter);
                 opOrder.newBarrier().issue();
                 OpOrder.Group writeOp = opOrder.getCurrent();
-                TrieMemtable.mergeUpdate(recreatedTrie, recreatedAllocator, TriePartitionUpdate.asTrieUpdate(update).trie, indexer, writeOp, recreatedUpdater);
+                TrieMemtable.mergeUpdate(recreatedTrie, recreatedAllocator, TriePartitionUpdate.asMergableTrieWithoutPartitionPrefix(update), indexer, writeOp, recreatedUpdater);
             }
             CellReuseTest.verifyFreeCellsMatchUnreachable(recreatedTrie);
 

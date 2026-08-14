@@ -240,6 +240,7 @@ public class TrieMemtable extends AbstractShardedMemtable
     }
 
     @Override
+    @VisibleForTesting
     public void overwriteAllData()
     {
         super.overwriteAllData();
@@ -834,13 +835,12 @@ public class TrieMemtable extends AbstractShardedMemtable
     }
 
     /// Merge an update into the given data trie using the given helpers. Extracted to separate method for testing.
-    @VisibleForTesting
-    public static int mergeUpdate(InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> dataTrie,
-                                  MemtableAllocator allocator,
-                                  DeletionAwareTrie<Object, TrieTombstoneMarker> updateTrie,
-                                  UpdateTransaction indexer,
-                                  OpOrder.Group opGroup,
-                                  TriePartitionUpdater updater)
+    static int mergeUpdate(InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> dataTrie,
+                           MemtableAllocator allocator,
+                           DeletionAwareTrie<Object, TrieTombstoneMarker> updateTrie,
+                           UpdateTransaction indexer,
+                           OpOrder.Group opGroup,
+                           TriePartitionUpdater updater)
     {
         indexer.start();
         // Add the initial trie size on the first operation. This technically isn't correct (other shards
@@ -959,6 +959,7 @@ public class TrieMemtable extends AbstractShardedMemtable
     }
 
     @Override
+    @VisibleForTesting
     public long unusedReservedOnHeapMemory()
     {
         long size = 0;
@@ -1024,8 +1025,7 @@ public class TrieMemtable extends AbstractShardedMemtable
     }
 
     /// Trie serializer, used for mapping trie data cells to and from the various database objects.
-    @VisibleForTesting
-    public static class TrieSerializer implements ContentSerializer<Object>
+    static class TrieSerializer implements ContentSerializer<Object>
     {
         final CellDataBufferManager manager;
         final MemtableShard owner;
@@ -1393,9 +1393,11 @@ public class TrieMemtable extends AbstractShardedMemtable
         abstract void abortMutation();
 
         /// See [MemoryManager#unusedReservedOnHeapMemory]
+        @VisibleForTesting
         abstract long unusedReservedOnHeapMemory();
 
         /// See [ContentManager#releaseReferencesUnsafe]
+        @VisibleForTesting
         abstract void releaseReferencesUnsafe();
     }
 
@@ -1404,8 +1406,7 @@ public class TrieMemtable extends AbstractShardedMemtable
     /// This option stores data in ByteBuffers allocated by the given [MemtableBufferAllocator] and keeps a list of the
     /// ByteBuffers it returned in a long-lived [ContentManagerPojo].
     /// It has on-heap presence that is proportional to the number of large data values.
-    @VisibleForTesting
-    public static class SlabBufferManager extends CellDataBufferManager
+    static class SlabBufferManager extends CellDataBufferManager
     {
         final MemtableBufferAllocator allocator;
         final long bufferSizeOnHeap;
@@ -1465,12 +1466,14 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
 
         @Override
+        @VisibleForTesting
         long unusedReservedOnHeapMemory()
         {
             return buffers.unusedReservedOnHeapMemory();
         }
 
         @Override
+        @VisibleForTesting
         void releaseReferencesUnsafe()
         {
             buffers.releaseReferencesUnsafe();

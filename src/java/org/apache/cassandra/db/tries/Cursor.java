@@ -412,37 +412,55 @@ interface Cursor<T>
     /// @return the content, null if the trie is exhausted
     default T advanceToContent(ResettingTransitionsReceiver receiver)
     {
+        return receiver != null ? advanceToContentWithReceiver(receiver) : advanceToContent();
+    }
+
+    private T advanceToContentWithReceiver(ResettingTransitionsReceiver receiver)
+    {
         long prevPosition = encodedPosition();
         while (true)
         {
             long currPosition = advanceMultiple(receiver);
             if (isExhausted(currPosition))
                 return null;
-            if (receiver != null)
+
+            if (ascended(currPosition, prevPosition))
             {
-                if (ascended(currPosition, prevPosition))
+                int depth = depth(currPosition);
+                if (depth > 0)
                 {
-                    int depth = depth(currPosition);
-                    if (depth > 0)
-                    {
-                        receiver.resetPathLength(depth - 1);
-                        receiver.addPathByte(incomingTransition(currPosition));
-                    }
-                    else
-                    {
-                        receiver.resetPathLength(0);
-                    }
+                    receiver.resetPathLength(depth - 1);
+                    receiver.addPathByte(incomingTransition(currPosition));
                 }
                 else
-                    receiver.addPathByte(incomingTransition(currPosition));
-
-                if (isOnReturnPath(currPosition))
-                    receiver.onReturnPath();
+                {
+                    receiver.resetPathLength(0);
+                }
             }
+            else
+                receiver.addPathByte(incomingTransition(currPosition));
+
+            if (isOnReturnPath(currPosition))
+                receiver.onReturnPath();
+
             T content = content(this, currPosition);
             if (content != null)
                 return content;
             prevPosition = currPosition;
+        }
+    }
+
+    private T advanceToContent()
+    {
+        while (true)
+        {
+            long currPosition = advanceMultiple(null);
+            if (isExhausted(currPosition))
+                return null;
+
+            T content = content(this, currPosition);
+            if (content != null)
+                return content;
         }
     }
 

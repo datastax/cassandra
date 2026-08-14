@@ -125,7 +125,7 @@ class RangesCursor implements TrieSetCursor
             {
                 // Unspecified bounds are the same as empty string, inclusive.
                 assert destIndex == 0 || destIndex == arrayLength - 1;
-                sources[destIndex] = ByteSource.Peekable.EMPTY;
+                sources[destIndex] = ByteSource.EMPTY;
                 nextPositions[destIndex] = maybeOnReturnPath(sources, ENDS_AFTER, direction, rootPosition, destIndex);
             }
         }

@@ -26,7 +26,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 /// are mapped to special ids, and the special id mapping itself.
 public interface ContentSerializer<T> extends MemoryManager
 {
-    int OFFSET_SPECIAL = InMemoryTrie.offset(~0);
+    int OFFSET_SPECIAL = InMemoryReadTrie.offset(~0);
 
     /// Returns a negative special id if the given content should be stored as a special value, 0 or larger if the value
     /// should be serialized.

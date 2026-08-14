@@ -47,6 +47,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.db.partitions.TrieBackedPartition;
+import org.apache.cassandra.db.tries.BaseTrie;
 import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
@@ -714,7 +715,7 @@ public class TrieBackedRow extends AbstractRow
     /// columns, including fully deleted ones.
     public static int countColumns(DeletionAwareTrie<Object, TrieTombstoneMarker> data)
     {
-        class Counter implements Trie.ValueConsumer<Object>
+        class Counter implements BaseTrie.ValueConsumer<Object>
         {
             int count = 0;
 
@@ -762,7 +763,7 @@ public class TrieBackedRow extends AbstractRow
 
         boolean mayFilterColumns = filter != null && (!filter.fetchesAllColumns(isStatic()) || !filter.allFetchedColumnsAreQueried());
         // When merging sstable data in Row.Merger#merge(), rowDeletion is removed if it doesn't supersede activeDeletion.
-        boolean mayHaveDeleted = !activeDeletion.isLive() && activeDeletion.supersedes(deletion.time());
+        boolean mayHaveDeleted = activeDeletion.supersedes(deletion.time());
         if (!mayFilterColumns && !mayHaveDeleted && droppedColumns.isEmpty())
             return this;
 
@@ -798,7 +799,6 @@ public class TrieBackedRow extends AbstractRow
             if (isEmpty(filteredData))
                 return null;
 
-            // TODO: Should we use `fetched` for `columns`? Note the ids cannot change.
             return TrieBackedRow.create(columns, columnIds, clustering, filteredData);
         }
         catch (TrieSpaceExhaustedException e)

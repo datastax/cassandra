@@ -274,6 +274,7 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
     }
 
     @Override
+    @VisibleForTesting
     public long unusedReservedOnHeapMemory()
     {
         return allocator.unusedReservedOnHeapMemory();

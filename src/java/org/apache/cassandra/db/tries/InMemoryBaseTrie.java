@@ -222,7 +222,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         switch (offset(node))
         {
             case PREFIX_OFFSET:
-                assert false : "attachChild cannot be used on content nodes.";
+                throw new AssertionError("attachChild cannot be used on content nodes.");
             case SPARSE_OFFSET:
                 // If the node is already copied (e.g. this is not the first child being modified), there's no need to copy
                 // it again.
@@ -251,7 +251,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         switch (offset(node))
         {
             case PREFIX_OFFSET:
-                assert false : "attachChild cannot be used on content nodes.";
+                throw new AssertionError("attachChild cannot be used on content nodes.");
             case SPARSE_OFFSET:
                 return attachChildToSparse(node, trans, newChild);
             case SPLIT_OFFSET:
@@ -1613,96 +1613,102 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     {
         if (isNull(node))
             return addContent(transformer.apply(null, value), contentAfterBranch);
-
-        if (isLeaf(node))
+        else if (isLeaf(node))
+            return applyContentToLeaf(node, value, contentAfterBranch, transformer);
+        else if (offset(node) == PREFIX_OFFSET)
+            return applyContentToPrefix(node, value, contentAfterBranch, transformer);
+        else
         {
-            int contentId = node;
-
-            if (contentAfterBranch == shouldPresentAfterBranch(node))
-            {
-                T existingContent = getContent(contentId);
-                T newContent = transformer.apply(existingContent, value);
-
-                if (newContent == existingContent)
-                    return contentId;
-                if (newContent != null)
-                {
-                    return setContent(contentId, newContent);
-                }
-                else
-                {
-                    releaseContent(contentId);
-                    return NONE;
-                }
-            }
-            else
-            {
-                T newContent = transformer.apply(null, value);
-
-                // We already have content, but we also need to add content on the other side of the branch.
-                if (newContent == null)
-                    return contentId; // we are not adding anything, leave existing node.
-
-                // Convert this to prefix node to be able to store both.
-                return createPrefixNode(contentId, addContent(newContent, contentAfterBranch), NONE, false);
-            }
-        }
-
-        if (offset(node) == PREFIX_OFFSET)
-        {
-            int contentOffset = contentAfterBranch ? PREFIX_ALTERNATE_OFFSET : PREFIX_CONTENT_OFFSET;
-            int contentId = getIntVolatile(node + contentOffset);
-
-            assert isNullOrLeaf(contentId) : "Content after branch cannot be used toghether with alternate branch";
-            T existingContent = isNull(contentId) ? null : getContent(contentId);
-            T newContent = transformer.apply(existingContent, value);
-            if (newContent == existingContent)
+            T newContent = transformer.apply(null, value);
+            if (newContent == null)
                 return node;
+            else
+                return createContentNode(addContent(newContent, contentAfterBranch), node, false);
+        }
+    }
 
+    private <R> int applyContentToLeaf(int node, R value, boolean contentAfterBranch, UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    {
+        int contentId = node;
+
+        if (contentAfterBranch == shouldPresentAfterBranch(node))
+        {
+            T existingContent = getContent(contentId);
+            T newContent = transformer.apply(existingContent, value);
+
+            if (newContent == existingContent)
+                return contentId;
             if (newContent != null)
             {
-                if (!isNull(contentId))
-                {
-                    int newId = setContent(contentId, newContent);
-                    if (newId != contentId)
-                        putIntVolatile(node + contentOffset, newId);
-                }
-                else
-                    putIntVolatile(node + contentOffset, addContent(newContent, contentAfterBranch));
-                return node;
+                return setContent(contentId, newContent);
             }
             else
             {
                 releaseContent(contentId);
-                int otherContentOffset = contentAfterBranch ? PREFIX_CONTENT_OFFSET : PREFIX_ALTERNATE_OFFSET;
-
-                if (!isNull(getIntVolatile(node + otherContentOffset)))
-                {
-                    // keep the prefix node for the other content / alternate path
-                    putIntVolatile(node + contentOffset, NONE);
-                    return node;
-                }
-
-                int b = getUnsignedByte(node + PREFIX_FLAGS_OFFSET);
-                if (b < CELL_SIZE)
-                {
-                    // embedded prefix node
-                    return node - PREFIX_OFFSET + b;
-                }
-                else
-                {
-                    // separate prefix node. recycle it as it's no longer needed
-                    recycleCell(node);
-                    return getIntVolatile(node + PREFIX_POINTER_OFFSET);
-                }
+                return NONE;
             }
         }
-
-        T newContent = transformer.apply(null, value);
-        if (newContent == null)
-            return node;
         else
-            return createContentNode(addContent(newContent, contentAfterBranch), node, false);
+        {
+            T newContent = transformer.apply(null, value);
+
+            // We already have content, but we also need to add content on the other side of the branch.
+            if (newContent == null)
+                return contentId;
+
+            // Convert this to prefix node to be able to store both.
+            return createPrefixNode(contentId, addContent(newContent, contentAfterBranch), NONE, false);
+        }
+    }
+
+    private <R> int applyContentToPrefix(int node, R value, boolean contentAfterBranch, UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    {
+        int contentOffset = contentAfterBranch ? PREFIX_ALTERNATE_OFFSET : PREFIX_CONTENT_OFFSET;
+        int contentId = getIntVolatile(node + contentOffset);
+
+        assert isNullOrLeaf(contentId) : "Content after branch cannot be used toghether with alternate branch";
+        T existingContent = isNull(contentId) ? null : getContent(contentId);
+        T newContent = transformer.apply(existingContent, value);
+        if (newContent == existingContent)
+            return node;
+
+        if (newContent != null)
+        {
+            if (!isNull(contentId))
+            {
+                int newId = setContent(contentId, newContent);
+                if (newId != contentId)
+                    putIntVolatile(node + contentOffset, newId);
+            }
+            else
+                putIntVolatile(node + contentOffset, addContent(newContent, contentAfterBranch));
+            return node;
+        }
+        else
+        {
+            releaseContent(contentId);
+            int otherContentOffset = contentAfterBranch ? PREFIX_CONTENT_OFFSET : PREFIX_ALTERNATE_OFFSET;
+
+            if (!isNull(getIntVolatile(node + otherContentOffset)))
+            {
+                // keep the prefix node for the other content / alternate path
+                putIntVolatile(node + contentOffset, NONE);
+                return node;
+            }
+
+            int b = getUnsignedByte(node + PREFIX_FLAGS_OFFSET);
+            if (b < CELL_SIZE)
+            {
+                // embedded prefix node
+                return node - PREFIX_OFFSET + b;
+            }
+            else
+            {
+                // separate prefix node. recycle it as it's no longer needed
+                recycleCell(node);
+                return getIntVolatile(node + PREFIX_POINTER_OFFSET);
+            }
+        }
     }
 
     void completeMutation()

@@ -86,7 +86,7 @@ abstract class MergeCursor<T, C extends Cursor<T>, U, D extends Cursor<U>, R> im
         atC1 = cmp <= 0;
         atC2 = cmp >= 0;
         if (atC1 && atC2)
-        return currentPosition = Cursor.unionFlagsMatchingPositions(c1pos, c2pos);
+            return currentPosition = Cursor.unionFlagsMatchingPositions(c1pos, c2pos);
         else
             return currentPosition = atC1 ? c1pos : c2pos;
     }

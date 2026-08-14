@@ -128,7 +128,7 @@ public class ExpirationDateOverflowHandling
 
     private static String getMaxExpirationDateTS()
     {
-        return CellData.getVersionedMaxDeletiontionTime() == Cell.MAX_DELETION_TIME_2038_LEGACY_CAP ? "2038-01-19T03:14:06+00:00"
-                                                                                                : "2106-02-07T06:28:13+00:00";
+        return CellData.getVersionedMaxDeletiontionTime() == CellData.MAX_DELETION_TIME_2038_LEGACY_CAP ? "2038-01-19T03:14:06+00:00"
+                                                                                                        : "2106-02-07T06:28:13+00:00";
     }
 }

@@ -202,6 +202,14 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         return asTrieUpdate(update).trie.prefixedBy(update.partitionKey());
     }
 
+    /**
+     * Return the given update's trie representation without the partition prefix. Used for testing.
+     */
+    public static DeletionAwareTrie<Object, TrieTombstoneMarker> asMergableTrieWithoutPartitionPrefix(PartitionUpdate update)
+    {
+        return asTrieUpdate(update).trie;
+    }
+
     @Override
     public TriePartitionUpdate withUpdatedTimestamps(long newTimestamp)
     {
@@ -555,9 +563,8 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             if (update instanceof Cell)
             {
-                assert existing == null || existing instanceof Cell;
                 Cell<?> updateCell = (Cell<?>) update;
-                Cell<?> existingCell = (Cell<?>) existing;
+                Cell<?> existingCell = (Cell<?>) existing; // existing must be either null or a cell
                 Cells.collectStats(updateCell, statsCollector);
                 Cell<?> reconciled;
                 if (existingCell == null)
@@ -580,11 +587,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             }
             else if (update instanceof LivenessInfo)
             {
-                assert existing == null || existing instanceof LivenessInfo;
                 LivenessInfo rowUpdate = (LivenessInfo) update;
-                LivenessInfo existingRow = (LivenessInfo) existing;
+                LivenessInfo existingRow = (LivenessInfo) existing; // existing must be either null or LivenessIndo
                 statsCollector.update(rowUpdate);
-                // Note: even though we use LivenessInfo.merge, it returns one of its arguments which is RowData
                 LivenessInfo reconciled;
 
                 if (existingRow == null)

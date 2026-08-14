@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.tries;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import static org.apache.cassandra.db.tries.ContentSerializer.OFFSET_SPECIAL;
 import static org.apache.cassandra.db.tries.InMemoryReadTrie.offset;
 
@@ -207,12 +209,14 @@ class ContentManagerBytes<T> implements ContentManager<T>
     }
 
     @Override
+    @VisibleForTesting
     public long unusedReservedOnHeapMemory()
     {
         return serializer.unusedReservedOnHeapMemory();
     }
 
     @Override
+    @VisibleForTesting
     public void releaseReferencesUnsafe()
     {
         serializer.releaseReferencesUnsafe();

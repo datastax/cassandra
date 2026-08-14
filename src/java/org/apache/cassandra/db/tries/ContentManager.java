@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.tries;
 
+import com.google.common.annotations.VisibleForTesting;
+
 /// Content manager for in-memory tries. Deals with allocation, access and recycling of trie content, mapping objects
 /// to and from leaf pointers in the trie.
 public interface ContentManager<T> extends MemoryManager
@@ -72,6 +74,7 @@ public interface ContentManager<T> extends MemoryManager
     ///
     /// If similar functionality is required for non-test purposes, a version of this should be developed that only
     /// releases references on barrier-complete lists.
+    @VisibleForTesting
     void releaseReferencesUnsafe();
 
     /// Returns the number of values in the trie

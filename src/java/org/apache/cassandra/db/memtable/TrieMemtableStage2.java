@@ -846,6 +846,7 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
     }
 
     @Override
+    @VisibleForTesting
     public long unusedReservedOnHeapMemory()
     {
         long size = 0;

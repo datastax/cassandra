@@ -148,6 +148,11 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         return duplicatableSource.duplicate();
     }
 
+    void assertNotExhausted()
+    {
+        assert !Cursor.isExhausted(currentPosition) : "tailTrie called on exhausted cursor";
+    }
+
     static class Plain<T> extends PrefixedCursor<T, Cursor<T>> implements Cursor<T>
     {
         Plain(ByteComparable prefix, Cursor<T> tail)
@@ -163,7 +168,7 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         @Override
         public Cursor<T> tailCursor(Direction direction)
         {
-            assert !Cursor.isExhausted(currentPosition) : "tailTrie called on exhausted cursor";
+            assertNotExhausted();
 
             if (prefixDone())
                 return source.tailCursor(direction);
@@ -203,7 +208,7 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         @Override
         public RangeCursor<S> tailCursor(Direction direction)
         {
-            assert !Cursor.isExhausted(currentPosition) : "tailTrie called on exhausted cursor";
+            assertNotExhausted();
 
             if (prefixDone())
                 return source.tailCursor(direction);
@@ -239,7 +244,7 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         @Override
         public DeletionAwareCursor<T, D> tailCursor(Direction direction)
         {
-            assert !Cursor.isExhausted(currentPosition) : "tailTrie called on exhausted cursor";
+            assertNotExhausted();
 
             if (prefixDone())
                 return source.tailCursor(direction);
@@ -304,6 +309,8 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         @Override
         public RangeCursor<D> deletionBranchCursor(Direction direction)
         {
+            assertNotExhausted();
+
             // We have already verified in maybeAddDeletionBranchFlag if we should report it and we can trust the flag.
             return (currentPosition & MAY_HAVE_DELETION_BRANCH_BIT) != 0
                    ? deletionBranch.tailCursor(direction)
@@ -313,6 +320,8 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
         @Override
         public DeletionAwareCursor<T, D> tailCursor(Direction direction)
         {
+            assertNotExhausted();
+
             // Always wrap, to promote live path to deletion-aware if it is not, and to make sure no deletion path is
             // presented, if it already is.
             return new DeletionAwareSeparately<>(this, direction);

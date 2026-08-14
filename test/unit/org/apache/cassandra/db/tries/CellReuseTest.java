@@ -416,7 +416,7 @@ public class CellReuseTest
         @Override
         public void releaseSpecial(int id)
         {
-
+            // no release
         }
 
         @Override
@@ -465,7 +465,7 @@ public class CellReuseTest
         @Override
         public void releaseReferencesUnsafe()
         {
-
+            // no release
         }
 
         @Override
@@ -489,13 +489,13 @@ public class CellReuseTest
         @Override
         public void completeMutation()
         {
-
+            // no release
         }
 
         @Override
         public void abortMutation()
         {
-
+            // no release
         }
 
         @Override

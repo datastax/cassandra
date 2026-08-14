@@ -301,7 +301,7 @@ public abstract class Rows
         Iterator<ColumnData> a = existing.iterator();
         Iterator<ColumnData> b = update.iterator();
         ColumnData nexta = a.hasNext() ? a.next() : null, nextb = b.hasNext() ? b.next() : null;
-        while (nexta != null | nextb != null)
+        while (nexta != null || nextb != null)
         {
             int comparison = nexta == null ? 1 : nextb == null ? -1 : nexta.column.compareTo(nextb.column);
             ColumnData cura = comparison <= 0 ? nexta : null;

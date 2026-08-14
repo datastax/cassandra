@@ -324,40 +324,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
                 RangeCursor<E> incomingAlternateBranch = DeletionAwareCursor.deletionBranchCursor(mutationCursor, position);
                 if (incomingAlternateBranch != null || existingAlternateBranch != NONE)
                 {
-                    int updatedAlternateBranch = existingAlternateBranch;
-                    RangeCursor<D> ourDeletionBranch;
-                    if (!deletionsAtFixedPoints && existingAlternateBranch == NONE && state.existingFullNode() != NONE)
-                    {
-                        // Move any covered deletion branches up to this depth so that we can correctly merge the
-                        // incoming deletions.
-                        updatedAlternateBranch = hoistOurDeletionBranches();
-                    }
-                    ourDeletionBranch = ((InMemoryDeletionAwareTrie<T, D>) state.trie()).makeRangeCursor(Direction.FORWARD, updatedAlternateBranch);
-
-                    if (!deletionsAtFixedPoints && incomingAlternateBranch == null)
-                    {
-                        // The incoming cursor has no deletions here, but it may have some below this point.
-                        // Switch to deletion branch to transform them to be rooted here.
-                        // (Note: this will cause a lot of processing of unproductive branches.)
-                        incomingAlternateBranch = new DeletionAwareCursor.DeletionsTrieCursor<>(mutationCursor.tailCursor(Direction.FORWARD));
-                    }
-
-                    if (incomingAlternateBranch != null)
-                    {
-                        // Duplicate cursor as we need it for both deletion and data branches.
-                        RangeCursor<E> deletionBranch = incomingAlternateBranch.tailCursor(Direction.FORWARD);
-
-                        // Delete data that is covered by the new deletions.
-                        applyDeletions(incomingAlternateBranch);
-
-                        // Merge the deletions into our deletion branch.
-                        updatedAlternateBranch = mergeDeletionBranch(updatedAlternateBranch, deletionBranch);
-                    }
-
-                    // Continue processing to also insert the incoming data at this branch.
-                    // Note that this will also apply the incoming content to this node and advance the mutation cursor
-                    // to the position after this branch.
-                    applyDataUnderDeletion(ourDeletionBranch);
+                    int updatedAlternateBranch = applyDeletionBranch(existingAlternateBranch, incomingAlternateBranch);
 
                     // Ascend and apply alternate branch.
                     state.alternateBranchToAttach = updatedAlternateBranch;
@@ -376,6 +343,45 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
                 assert state.currentDepth == depth : "Unexpected change to applyState. Concurrent trie modification?";
             }
             return this;
+        }
+
+        private int applyDeletionBranch(int existingAlternateBranch, RangeCursor<E> incomingAlternateBranch) throws TrieSpaceExhaustedException
+        {
+            int updatedAlternateBranch = existingAlternateBranch;
+            RangeCursor<D> ourDeletionBranch;
+            if (!deletionsAtFixedPoints && existingAlternateBranch == NONE && state.existingFullNode() != NONE)
+            {
+                // Move any covered deletion branches up to this depth so that we can correctly merge the
+                // incoming deletions.
+                updatedAlternateBranch = hoistOurDeletionBranches();
+            }
+            ourDeletionBranch = ((InMemoryDeletionAwareTrie<T, D>) state.trie()).makeRangeCursor(Direction.FORWARD, updatedAlternateBranch);
+
+            if (!deletionsAtFixedPoints && incomingAlternateBranch == null)
+            {
+                // The incoming cursor has no deletions here, but it may have some below this point.
+                // Switch to deletion branch to transform them to be rooted here.
+                // (Note: this will cause a lot of processing of unproductive branches.)
+                incomingAlternateBranch = new DeletionAwareCursor.DeletionsTrieCursor<>(mutationCursor.tailCursor(Direction.FORWARD));
+            }
+
+            if (incomingAlternateBranch != null)
+            {
+                // Duplicate cursor as we need it for both deletion and data branches.
+                RangeCursor<E> deletionBranch = incomingAlternateBranch.tailCursor(Direction.FORWARD);
+
+                // Delete data that is covered by the new deletions.
+                applyDeletions(incomingAlternateBranch);
+
+                // Merge the deletions into our deletion branch.
+                updatedAlternateBranch = mergeDeletionBranch(updatedAlternateBranch, deletionBranch);
+            }
+
+            // Continue processing to also insert the incoming data at this branch.
+            // Note that this will also apply the incoming content to this node and advance the mutation cursor
+            // to the position after this branch.
+            applyDataUnderDeletion(ourDeletionBranch);
+            return updatedAlternateBranch;
         }
 
         private void applyDataUnderDeletion(RangeCursor<D> ourDeletionBranch) throws TrieSpaceExhaustedException

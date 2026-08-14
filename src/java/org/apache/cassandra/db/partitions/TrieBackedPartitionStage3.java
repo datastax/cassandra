@@ -54,7 +54,6 @@ import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryBaseTrie;
 import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
-import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.RangeTrie;
 import org.apache.cassandra.db.tries.TrieEntriesIterator;
 import org.apache.cassandra.db.tries.TrieSet;
@@ -739,7 +738,7 @@ public class TrieBackedPartitionStage3 implements Partition
 
     /// Resolver for operations with trie-backed partitions. We don't permit any overwrites/merges.
     @SuppressWarnings("rawtypes")
-    private static final InMemoryTrie.UpsertTransformer NO_CONFLICT_RESOLVER =
+    private static final InMemoryBaseTrie.UpsertTransformer NO_CONFLICT_RESOLVER =
             (existing, update) ->
             {
                 if (existing != null)
@@ -749,19 +748,19 @@ public class TrieBackedPartitionStage3 implements Partition
 
     /// Resolver for data in trie-backed partitions. We don't permit any overwrites/merges.
     @SuppressWarnings("unchecked")
-    public static InMemoryTrie.UpsertTransformer<Object, Object> noConflictInData()
+    public static InMemoryBaseTrie.UpsertTransformer<Object, Object> noConflictInData()
     {
         return NO_CONFLICT_RESOLVER;
     }
 
     /// Tombstone merging resolver. Even though we don't support overwrites, we get requests to add the two sides
     /// of a boundary separately and must join them.
-    private static final InMemoryTrie.UpsertTransformer<TrieTombstoneMarker, TrieTombstoneMarker> MERGE_TOMBSTONE_RANGES =
+    private static final InMemoryBaseTrie.UpsertTransformer<TrieTombstoneMarker, TrieTombstoneMarker> MERGE_TOMBSTONE_RANGES =
         (existing, update) -> existing != null ? existing.mergeWith(update) : update;
 
     /// Tombstone merging resolver. Even though we don't support overwrites, we get requests to add the two sides
     /// of a boundary separately and must join them.
-    public static InMemoryTrie.UpsertTransformer<TrieTombstoneMarker, TrieTombstoneMarker> mergeTombstoneRanges()
+    public static InMemoryBaseTrie.UpsertTransformer<TrieTombstoneMarker, TrieTombstoneMarker> mergeTombstoneRanges()
     {
         return MERGE_TOMBSTONE_RANGES;
     }
@@ -770,7 +769,7 @@ public class TrieBackedPartitionStage3 implements Partition
 
     /// Resolver for applying incoming deletions to existing data in trie-backed partitions. We assume that the data is
     /// not affected by the deletion.
-    public static InMemoryTrie.UpsertTransformer<Object, TrieTombstoneMarker> noIncomingSelfDeletion()
+    public static InMemoryBaseTrie.UpsertTransformer<Object, TrieTombstoneMarker> noIncomingSelfDeletion()
     {
         return IGNORE_UPDATE;
     }

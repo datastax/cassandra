@@ -205,12 +205,12 @@ public class TrieColumnFilter
                                   TrieColumnFilter::resolve);
     }
 
-    static final Covering INCLUDED = new Covering(true, false, null);
-    static final Boundary INCLUDED_START = new Boundary(null, INCLUDED, INCLUDED);
-    static final Boundary INCLUDED_END = new Boundary(INCLUDED, null, INCLUDED);
-    static final Covering DROP_VALUE = new Covering(true, true, null);
-    static final Boundary DROP_VALUE_START = new Boundary(null, DROP_VALUE, DROP_VALUE);
-    static final Boundary DROP_VALUE_END = new Boundary(DROP_VALUE, null, DROP_VALUE);
+    private static final Covering INCLUDED = new Covering(true, false, null);
+    private static final Boundary INCLUDED_START = new Boundary(null, INCLUDED, INCLUDED);
+    private static final Boundary INCLUDED_END = new Boundary(INCLUDED, null, INCLUDED);
+    private static final Covering DROP_VALUE = new Covering(true, true, null);
+    private static final Boundary DROP_VALUE_START = new Boundary(null, DROP_VALUE, DROP_VALUE);
+    private static final Boundary DROP_VALUE_END = new Boundary(DROP_VALUE, null, DROP_VALUE);
 
     static final Marker MARKER = new Marker();
 
@@ -285,22 +285,22 @@ public class TrieColumnFilter
             throw new AssertionError("Unknown data in trie: " + data);
     }
 
-    static abstract class FilterState implements RangeState<FilterState>
+    interface FilterState extends RangeState<FilterState>
     {
-        abstract boolean included();
+        boolean included();
 
-        abstract boolean dropsValue();
+        boolean dropsValue();
 
-        abstract TrieTombstoneMarker.Covering applicableDeletion();
+        TrieTombstoneMarker.Covering applicableDeletion();
 
-        abstract FilterState mergeWith(FilterState existing);
+        FilterState mergeWith(FilterState existing);
     }
 
-    static class Covering extends FilterState
+    static class Covering implements FilterState
     {
-        final boolean included;
-        final boolean dropsValue;
-        final TrieTombstoneMarker.Covering applicableDeletion;
+        private final boolean included;
+        private final boolean dropsValue;
+        private final TrieTombstoneMarker.Covering applicableDeletion;
 
         Covering(boolean included, boolean dropsValue, TrieTombstoneMarker.Covering applicableDeletion)
         {
@@ -310,25 +310,25 @@ public class TrieColumnFilter
         }
 
         @Override
-        boolean included()
+        public boolean included()
         {
             return included;
         }
 
         @Override
-        boolean dropsValue()
+        public boolean dropsValue()
         {
             return dropsValue;
         }
 
         @Override
-        TrieTombstoneMarker.Covering applicableDeletion()
+        public TrieTombstoneMarker.Covering applicableDeletion()
         {
             return applicableDeletion;
         }
 
         @Override
-        FilterState mergeWith(FilterState existing)
+        public FilterState mergeWith(FilterState existing)
         {
             if (existing == null)
                 return this;
@@ -390,28 +390,28 @@ public class TrieColumnFilter
         }
     }
 
-    static class Marker extends FilterState
+    static class Marker implements FilterState
     {
         @Override
-        boolean included()
+        public boolean included()
         {
             return false;
         }
 
         @Override
-        boolean dropsValue()
+        public boolean dropsValue()
         {
             return false;
         }
 
         @Override
-        TrieTombstoneMarker.Covering applicableDeletion()
+        public TrieTombstoneMarker.Covering applicableDeletion()
         {
             return null;
         }
 
         @Override
-        FilterState mergeWith(FilterState existing)
+        public FilterState mergeWith(FilterState existing)
         {
             if (existing == null)
                 return this;
@@ -455,7 +455,7 @@ public class TrieColumnFilter
         }
     }
 
-    static class Boundary extends FilterState
+    static class Boundary implements FilterState
     {
         final Marker marker;
         final Covering left;
@@ -478,29 +478,29 @@ public class TrieColumnFilter
         }
 
         @Override
-        boolean included()
+        public boolean included()
         {
             return appliesToPoint.included();
         }
 
         @Override
-        boolean dropsValue()
+        public boolean dropsValue()
         {
             return appliesToPoint.dropsValue();
         }
 
         @Override
-        TrieTombstoneMarker.Covering applicableDeletion()
+        public TrieTombstoneMarker.Covering applicableDeletion()
         {
             return appliesToPoint.applicableDeletion();
         }
 
         @Override
-        FilterState mergeWith(FilterState existing)
+        public FilterState mergeWith(FilterState existing)
         {
             if (existing == null)
                 return this;
-            if (existing instanceof Marker)
+            else if (existing instanceof Marker)
             {
                 Marker other = (Marker) existing;
                 if (this.marker == other)
@@ -508,7 +508,7 @@ public class TrieColumnFilter
                 else
                     return new Boundary(other, left, right, appliesToPoint);
             }
-            if (existing instanceof Covering)
+            else if (existing instanceof Covering)
             {
                 Covering other = (Covering) existing;
                 Covering l = other.mergeWithCovering(left);
@@ -519,15 +519,18 @@ public class TrieColumnFilter
                     return marker;
                 return new Boundary(marker, l, r, left == appliesToPoint ? l : r);
             }
-            Boundary other = (Boundary) existing;
-            Covering l = left != null ? left.mergeWithCovering(other.left) : other.left;
-            Covering r = right != null ? right.mergeWithCovering(other.right) : other.right;
-            Marker h = marker != null ? marker : other.marker;
-            if (l == r)
-                return h;
-            if (l == left && r == right && h == marker)
-                return this;
-            return new Boundary(marker, l, r, left == appliesToPoint ? l : r);
+            else
+            {
+                Boundary other = (Boundary) existing;
+                Covering l = left != null ? left.mergeWithCovering(other.left) : other.left;
+                Covering r = right != null ? right.mergeWithCovering(other.right) : other.right;
+                Marker h = marker != null ? marker : other.marker;
+                if (l == r)
+                    return h;
+                if (l == left && r == right && h == marker)
+                    return this;
+                return new Boundary(marker, l, r, left == appliesToPoint ? l : r);
+            }
         }
 
         @Override
