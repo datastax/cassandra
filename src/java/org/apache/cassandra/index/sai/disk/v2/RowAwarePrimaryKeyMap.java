@@ -81,11 +81,11 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final FileHandle termsTrie;
         private final IPartitioner partitioner;
         private final ClusteringComparator clusteringComparator;
-        private final RowAwarePrimaryKeyFactory primaryKeyFactory;
+        private final V2RowAwarePrimaryKeyFactory primaryKeyFactory;
         private final SSTableId<?> sstableId;
         private final boolean hasStaticColumns;
 
-        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, RowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
+        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, V2RowAwarePrimaryKeyFactory primaryKeyFactory, SSTableReader sstable)
         {
             FileHandle token = null;
             FileHandle termsDataBlockOffsets = null;
@@ -103,7 +103,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
 
                 token = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES).createFileHandle();
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
-
                 termsDataBlockOffsets = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS).createFileHandle();
                 termsData = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS).createFileHandle();
                 termsTrie = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
@@ -142,7 +141,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             }
             catch (IOException e)
             {
-                throw new UncheckedIOException(e);
+                throw new UncheckedIOException("Failed to load PrimaryKeyMap for sstable: " + sstableId, e);
             }
         }
 
@@ -163,7 +162,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     private final SortedTermsReader sortedTermsReader;
     private final SortedTermsReader.Cursor cursor;
     private final IPartitioner partitioner;
-    private final RowAwarePrimaryKeyFactory primaryKeyFactory;
+    private final V2RowAwarePrimaryKeyFactory primaryKeyFactory;
     private final ClusteringComparator clusteringComparator;
     private final SSTableId<?> sstableId;
     private final boolean hasStaticColumns;
@@ -172,7 +171,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                   SortedTermsReader sortedTermsReader,
                                   SortedTermsReader.Cursor cursor,
                                   IPartitioner partitioner,
-                                  RowAwarePrimaryKeyFactory primaryKeyFactory,
+                                  V2RowAwarePrimaryKeyFactory primaryKeyFactory,
                                   ClusteringComparator clusteringComparator,
                                   SSTableId<?> sstableId,
                                   boolean hasStaticColumns)
@@ -249,9 +248,9 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         long pointId = cursor.getExactPointId(v -> key.asComparableBytes(v));
         if (pointId >= 0)
             return pointId;
-        long ceiling = cursor.ceiling(v -> key.asComparableBytesMinPrefix(v));
-        // Use min value since -(Long.MIN_VALUE) - 1 == Long.MAX_VALUE.
-        return ceiling < 0 ? Long.MIN_VALUE : -ceiling - 1;
+        long ceiling = cursor.ceiling(key::asComparableBytesMinPrefix);
+        // Use min value since inverting Long.MIN_VALUE gives Long.MAX_VALUE.
+        return ceiling < 0 ? Long.MIN_VALUE : ~ceiling;
     }
 
     @Override
@@ -273,7 +272,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 if (rowId == Long.MIN_VALUE)
                     return -1;
                 else
-                    return -rowId - 1;
+                    return ~rowId;
         }
 
         return cursor.ceiling(key::asComparableBytesMinPrefix);
@@ -284,7 +283,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     {
         return cursor.floor(key::asComparableBytesMaxPrefix);
     }
-
 
     @Override
     public void close() throws IOException

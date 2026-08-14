@@ -3470,7 +3470,7 @@ public abstract class CQLTester
         private long seed;
         private Random random;
 
-        Randomization()
+        public Randomization()
         {
             if (random == null)
             {
