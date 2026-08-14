@@ -146,6 +146,19 @@ public class Scrubber implements Closeable
                     boolean skipCorrupted,
                     OutputHandler outputHandler,
                     boolean checkData,
+                    boolean reinsertOverflowedTTLRows)
+    {
+        this(realm, transaction, isOffline, skipCorrupted, outputHandler, checkData,
+             reinsertOverflowedTTLRows ? OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : OverwriteTTLMode.NONE);
+    }
+
+    @SuppressWarnings("resource")
+    public Scrubber(CompactionRealm realm,
+                    LifecycleTransaction transaction,
+                    boolean isOffline,
+                    boolean skipCorrupted,
+                    OutputHandler outputHandler,
+                    boolean checkData,
                     OverwriteTTLMode overwriteTTLMode)
     {
         this.realm = realm;
