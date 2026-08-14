@@ -858,7 +858,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     public Future<Void> shutdown(boolean graceful)
     {
         inInstancelogger.info("Shutting down instance {} / {}", config.num(), config.broadcastAddress().getHostString());
-        if (!CassandraRelevantProperties.UNSAFE_SYSTEM.getBoolean())
+        if (!CassandraRelevantProperties.UNSAFE_SYSTEM.getBoolean() && !Stage.areMutationExecutorsTerminated())
             flush(SchemaKeyspace.metadata().name);
 
         Future<?> future = async((ExecutorService executor) -> {
