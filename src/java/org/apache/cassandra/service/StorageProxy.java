@@ -610,6 +610,8 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
+            // Sync accumulated replica sensor values (gathered by ResponseVerbHandler) into SensorsRegistry
+            sensors.syncAllSensors();
             final long endTime = System.nanoTime();
             final long latency = endTime - startTimeForMetrics;
             metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
@@ -1136,6 +1138,9 @@ public class StorageProxy implements StorageProxyMBean
             for (AbstractWriteResponseHandler<IMutation> responseHandler : responseHandlers)
                 responseHandler.get();
 
+            // Sync accumulated replica sensor values (gathered by ResponseVerbHandler) into SensorsRegistry
+            sensors.syncAllSensors();
+
             writeTracker.onDone();
         }
         catch (WriteTimeoutException|WriteFailureException ex)
@@ -1427,6 +1432,8 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
+        // Sync accumulated replica sensor values (gathered by ResponseVerbHandler) into SensorsRegistry
+        sensors.syncAllSensors();
     }
 
     public static void updateCoordinatorWriteLatencyTableMetric(Collection<? extends IMutation> mutations, long latency)
@@ -2018,6 +2025,8 @@ public class StorageProxy implements StorageProxyMBean
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
+        // All replica responses have been received by the time read() returns; sync into SensorsRegistry.
+        requestSensors.syncAllSensors();
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
         return PartitionIterators.doOnClose(partitions, readTracker::onDone);
     }
@@ -2400,7 +2409,11 @@ public class StorageProxy implements StorageProxyMBean
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
-        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
+        // Range reads are lazy: sync sensor values once the iterator is fully consumed (all replica responses received).
+        return PartitionIterators.doOnClose(partitions, () -> {
+            sensors.syncAllSensors();
+            readTracker.onDone();
+        });
     }
 
     public Map<String, List<String>> getSchemaVersions()
