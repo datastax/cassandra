@@ -53,8 +53,11 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester.Versioned.RowAwar
     public void setup() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, int_value int, text_value text)");
-        execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
-        execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
+        // Use createIndex() (not execute()) so we wait for the INDEX_BUILD_STARTED flush to complete
+        // before inserting data. The async index build flushes the memtable; if we insert first there
+        // is a race that can produce multiple SSTables.
+        createIndex("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
 
         // Insert a few rows to have first/middle/last and token gaps
         execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 1, 10, "a");
@@ -62,10 +65,10 @@ public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester.Versioned.RowAwar
         execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 2, 30, "c");
         execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 50000, 40, "d");
 
-        // Flush to generate SSTable and SAI components
+        // Flush to generate SSTable and SAI components. Because both indexes are fully built
+        // before any data was inserted, this flush produces exactly one SSTable.
         flush();
 
-        // Obtain the just-flushed SSTable
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
