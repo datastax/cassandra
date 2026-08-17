@@ -35,6 +35,7 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -64,6 +65,7 @@ public class KeyLookupTest extends SaiRandomizedTest
     @Before
     public void setup() throws Exception
     {
+        SAIUtil.setCurrentVersion(Version.GA);
         indexDescriptor = newIndexDescriptor();
     }
 
@@ -898,9 +900,9 @@ public class KeyLookupTest extends SaiRandomizedTest
         try (IndexInput input = components.get(indexComponentType).openInput())
         {
             if (checksum)
-                SAICodecUtils.validateChecksum(input, Version.EARLIEST);
+                SAICodecUtils.validateChecksum(input, Version.GA);
             else
-                SAICodecUtils.validate(input);
+                SAICodecUtils.validate(input, Version.GA);
             return true;
         }
         catch (Throwable ignored)
