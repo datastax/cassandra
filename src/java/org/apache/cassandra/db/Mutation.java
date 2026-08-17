@@ -246,6 +246,9 @@ public class Mutation implements IMutation
         return ks.applyFuture(this, writeOptions, true).thenRun(() -> {
             RequestSensors sensors = requestTracker.get();
             if (sensors != null)
+                // Intermediate sync: pushes WRITE_BYTES and INDEX_WRITE_BYTES deltas to the registry.
+                // UCU is not yet computed at this point (value is 0, delta is 0, sync is a no-op for UCU).
+                // The verb handler calls computeUCU() + syncAllSensors() after this to push the UCU delta.
                 sensors.syncAllSensors();
         });
     }
@@ -256,6 +259,9 @@ public class Mutation implements IMutation
 
         RequestSensors sensors = requestTracker.get();
         if (sensors != null)
+            // Intermediate sync: pushes WRITE_BYTES and INDEX_WRITE_BYTES deltas to the registry.
+            // UCU is not yet computed at this point (value is 0, delta is 0, sync is a no-op for UCU).
+            // The verb handler calls computeUCU() + syncAllSensors() after this to push the UCU delta.
             sensors.syncAllSensors();
     }
 

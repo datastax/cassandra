@@ -90,6 +90,7 @@ public class ResponseVerbHandler implements IVerbHandler
                 if (pu.metadata().isIndex()) continue;
                 incrementSensor(sensors, context, Type.WRITE_BYTES, message);
                 incrementSensor(sensors, context, Type.INDEX_WRITE_BYTES, message);
+                incrementSensor(sensors, context, Type.UCU, message);
             }
         }
         else if (callbackInfo.callback instanceof ReadCallback)
@@ -97,6 +98,7 @@ public class ResponseVerbHandler implements IVerbHandler
             ReadCallback<?, ?> readCallback = (ReadCallback<?, ?>) callbackInfo.callback;
             Context context = Context.from(readCallback.command());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
+            incrementSensor(sensors, context, Type.UCU, message);
         }
         // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo.
         // INDEX_WRITE_BYTES is not tracked here: prepare/propose only write to system.paxos, which has no indexes.
@@ -106,6 +108,7 @@ public class ResponseVerbHandler implements IVerbHandler
             Context context = Context.from(paxosCallback.getMetadata());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+            incrementSensor(sensors, context, Type.UCU, message);
         }
     }
 

@@ -57,6 +57,10 @@ public class CounterMutationCallback implements Runnable
         int replicaMultiplier = replicaCount == 0 ?
                                 1 : // replica count was not explicitly set (default). At the bare minimum, we should send the response accomodating for the local replica (aka. mutation leader) sensor values
                                 replicaCount;
+        // Compute UCU before syncing so the registry receives the correct UCU value in one shot.
+        // UCU must be computed after all other sensor increments for this request are complete.
+        SensorsCustomParams.computeUCU(sensors);
+        sensors.syncAllSensors();
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, s -> s.getValue() * replicaMultiplier, responseBuilder);
         MessagingService.instance().send(responseBuilder.build(), respondToAddress);
     }

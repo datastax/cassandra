@@ -90,6 +90,37 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     }
 
     @Test
+    public void testAddUCUSensorToInternodeResponse()
+    {
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        UUID tableId = UUID.randomUUID();
+        Context context = new Context("ks1", "t1", tableId.toString());
+
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+        sensors.registerSensor(context, Type.UCU);
+
+        sensors.incrementSensor(context, Type.READ_BYTES, 100.0);
+        sensors.incrementSensor(context, Type.WRITE_BYTES, 200.0);
+        sensors.incrementSensor(context, Type.INDEX_WRITE_BYTES, 50.0);
+        // UCU = (100 + 200 + 50) * 1.0 = 350.0 (default weights)
+        SensorsCustomParams.computeUCU(sensors);
+
+        Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_1, noPayload).withId(1);
+        SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);
+
+        Message<NoPayload> msg = builder.build();
+        assertNotNull(msg.header.customParams());
+
+        Sensor ucuSensor = sensors.getSensor(context, Type.UCU).get();
+        String ucuRequestParam = SensorsCustomParams.paramForRequestSensor(ucuSensor).get();
+        assertTrue(msg.header.customParams().containsKey(ucuRequestParam));
+
+        assertEquals(350.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(ucuRequestParam)), 0.0);
+    }
+
+    @Test
     public void testSensorValueAsByteBuffer()
     {
         double d = Double.MAX_VALUE;

@@ -452,6 +452,10 @@ public abstract class CassandraIndex implements Index
                 if (sensors != null)
                 {
                     sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+                    // UCU is registered here for consistency with other sensors; its value is computed by UCUCalculator
+                    // in SensorsCustomParams.computeUCU() once all other sensor increments for
+                    // this request are complete, ensuring the computation reflects the full request cost.
+                    sensors.registerSensor(sensorContext, Type.UCU);
                     // estimate the size of the index entry as the data size of the cell before indexing
                     sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, cell.dataSize());
                 }

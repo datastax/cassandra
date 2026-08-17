@@ -74,4 +74,12 @@ public interface SensorsFactory
     {
         return NOOP_SENSOR_ENCODER;
     }
+
+    /**
+     * Returns the {@link UCUCalculator} used to compute UCU scalar values.
+     */
+    default UCUCalculator getUCUCalculator()
+    {
+        return DefaultUCUCalculator.instance;
+    }
 }

@@ -44,6 +44,7 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         Context context = Context.from(message.payload.update.metadata());
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+        sensors.registerSensor(context, Type.UCU);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
@@ -55,6 +56,8 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
 
         // no need to calculate outbound internode bytes because the response is NoPayload
+        SensorsCustomParams.computeUCU(sensors);
+        sensors.syncAllSensors();
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }
