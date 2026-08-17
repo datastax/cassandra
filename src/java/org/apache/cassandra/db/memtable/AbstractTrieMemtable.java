@@ -340,10 +340,10 @@ public abstract class AbstractTrieMemtable extends AbstractShardedMemtable
 
     /**
      * Base class for memtable shards, providing common fields and operations.
-     * @param <T> The type of the trie data structure used by this shard (must extend InMemoryBaseTrie<Object>)
+     * @param <T> The type of the trie data structure used by this shard (must extend InMemoryBaseTrie)
      * @param <U> The type of the updater used to apply partition updates (must extend BasePartitionUpdater)
      */
-    public static abstract class AbstractMemtableShard<T extends InMemoryBaseTrie<Object>, U extends BasePartitionUpdater>
+    public static abstract class AbstractMemtableShard<T extends InMemoryBaseTrie<?>, U extends BasePartitionUpdater>
     {
         /// Content map for the given shard.
         @VisibleForTesting

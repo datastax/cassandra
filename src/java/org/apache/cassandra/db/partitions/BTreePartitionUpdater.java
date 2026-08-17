@@ -78,17 +78,7 @@ public class BTreePartitionUpdater extends BasePartitionUpdater implements Updat
             ++partitionsAdded;
         }
 
-        try
-        {
-            indexer.start();
-
-            return makeMergedPartition(current, update);
-        }
-        finally
-        {
-            indexer.commit();
-            reportAllocatedMemory();
-        }
+        return makeMergedPartition(current, update);
     }
 
     protected BTreePartitionData makeMergedPartition(BTreePartitionData current, BTreePartitionUpdate update)
