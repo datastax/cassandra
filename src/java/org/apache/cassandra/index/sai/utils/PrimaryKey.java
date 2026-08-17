@@ -31,6 +31,8 @@ import org.apache.cassandra.index.sai.disk.v2.V2RowAwarePrimaryKeyFactory;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
+import static org.apache.cassandra.db.ClusteringPrefix.Kind.STATIC_CLUSTERING;
+
 /**
  * Representation of the primary key for a row consisting of the {@link DecoratedKey} and
  * {@link Clustering} associated with a {@link org.apache.cassandra.db.rows.Row}.
@@ -165,7 +167,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable, ByteCom
     default boolean isStaticRow()
     {
         Clustering<?> c = clustering();
-        return c != null && c.kind() == Clustering.Kind.STATIC_CLUSTERING;
+        return c != null && c.kind() == STATIC_CLUSTERING;
     }
 
     /**
