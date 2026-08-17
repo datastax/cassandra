@@ -100,7 +100,6 @@ public abstract class AbstractMemtable implements Memtable
         return currentOperations.get();
     }
 
-    @Override
     /**
      * Returns the minTS if one available, otherwise NO_MIN_TIMESTAMP.
      * 
@@ -108,6 +107,7 @@ public abstract class AbstractMemtable implements Memtable
      * 
      * @return The minTS or NO_MIN_TIMESTAMP if none available
      */
+    @Override
     public long getMinTimestamp()
     {
         return minTimestamp.get() != EncodingStats.NO_STATS.minTimestamp ? minTimestamp.get() : NO_MIN_TIMESTAMP;

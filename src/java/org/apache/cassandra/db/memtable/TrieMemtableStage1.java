@@ -46,6 +46,7 @@ import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -68,7 +69,16 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 
-/// Previous TrieMemtable implementation, provided for two reasons:
+/// Trie memtable implementation. Improves memory usage, garbage collection efficiency and lookup performance.
+/// The implementation is described in detail in the paper:
+///       https://www.vldb.org/pvldb/vol15/p3359-lambov.pdf
+///
+/// The configuration takes a single parameter:
+/// - shards: the number of shards to split into, defaulting to the number of CPU cores.
+///
+/// Also see [Memtable_API.md](./Memtable_API.md).
+///
+/// This is stage 1 of the TrieMemtable implementation, provided for two reasons:
 ///
 ///   -  to easily compare current and earlier implementations of the trie memtable
 ///   -  to have an option to change a database back to the older implementation if we find a bug or a performance
@@ -85,11 +95,12 @@ import org.apache.cassandra.utils.memory.MemtableAllocator;
 ///     class: TrieMemtableStage1
 /// ```
 /// in `cassandra.yaml` to switch a node to it as default.
+///
 public class TrieMemtableStage1 extends AbstractTrieMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtableStage1.class);
 
-    public static final Factory FACTORY = new TrieMemtableStage1.Factory();
+    public static final Memtable.Factory FACTORY = new TrieMemtableStage1.Factory();
 
     static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
 
@@ -146,7 +157,7 @@ public class TrieMemtableStage1 extends AbstractTrieMemtable
     }
 
     @Override
-    protected AbstractMemtableShard[] getShards()
+    protected MemtableShard[] getShards()
     {
         return shards;
     }
@@ -169,9 +180,9 @@ public class TrieMemtableStage1 extends AbstractTrieMemtable
     }
 
     @Override
-    public MemtableUnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
-                                                                 final DataRange dataRange,
-                                                                 SSTableReadsListener readsListener)
+    public UnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
+                                                         final DataRange dataRange,
+                                                         SSTableReadsListener readsListener)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -240,7 +251,7 @@ public class TrieMemtableStage1 extends AbstractTrieMemtable
         long partitionKeySize = keySize;
         int partitionCount = keyCount;
 
-        return new AbstractFlushablePartitionSet<MemtablePartition>()
+        return new AbstractFlushablePartitionSet<>()
         {
             public Memtable memtable()
             {
@@ -288,7 +299,7 @@ public class TrieMemtableStage1 extends AbstractTrieMemtable
         @VisibleForTesting
         MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics)
         {
-            super(metadata, allocator, metrics, null, InMemoryTrie.shortLived(BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE));
+            super(metadata, allocator, metrics, InMemoryTrie.shortLived(BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE));
         }
 
         @Override

@@ -41,6 +41,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TrieBackedPartitionStage3;
 import org.apache.cassandra.db.partitions.TriePartitionUpdateStage3;
 import org.apache.cassandra.db.partitions.TriePartitionUpdaterStage3;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -70,16 +71,25 @@ import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
 
-/**
- * Trie memtable implementation. Improves memory usage, garbage collection efficiency and lookup performance.
- * The implementation is described in detail in the paper:
- *       https://www.vldb.org/pvldb/vol15/p3359-lambov.pdf
- *
- * The configuration takes a single parameter:
- * - shards: the number of shards to split into, defaulting to the number of CPU cores.
- *
- * Also see Memtable_API.md.
- */
+/// Trie memtable implementation working as a trie map to the row level including range tombstones.
+///
+/// Stage 3 of the TrieMemtable implementation, provided for two reasons:
+///
+///   -  to easily compare current and earlier implementations of the trie memtable
+///   -  to have an option to change a database back to the older implementation if we find a bug or a performance
+///      problem with the new code.
+///
+///
+/// To switch a table to this version, use
+/// ```
+///   ALTER TABLE ... WITH memtable = {'class': 'TrieMemtableStage3'}
+/// ```
+/// or add
+/// ```
+///   memtable:
+///     class: TrieMemtableStage3
+/// ```
+/// in `cassandra.yaml` to switch a node to it as default.
 public class TrieMemtableStage3 extends AbstractTrieMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtableStage3.class);
@@ -87,8 +97,8 @@ public class TrieMemtableStage3 extends AbstractTrieMemtable
     /// Buffer type to use for memtable tries (on- vs off-heap)
     public static final BufferType BUFFER_TYPE = DatabaseDescriptor.getMemtableAllocationType().toBufferType();
 
-    /// Force copy checker (see [InMemoryTrie#apply]) ensuring all modifications apply atomically and consistently to
-    /// the whole partition.
+    /// Force copy checker (see [org.apache.cassandra.db.tries.InMemoryTrie#apply]) ensuring all modifications apply
+    /// atomically and consistently to the whole partition.
     public static final Predicate<InMemoryBaseTrie.NodeFeatures<?>> FORCE_COPY_PARTITION_BOUNDARY =
         features -> TrieBackedPartitionStage3.isPartitionBoundary(features.content());
 
@@ -98,7 +108,8 @@ public class TrieMemtableStage3 extends AbstractTrieMemtable
     private final MemtableShard[] shards;
 
     /// A merged view of the memtable map. Used for partition range queries and flush.
-    /// For efficiency we serve single partition requests off the shard which offers more direct [InMemoryTrie] methods.
+    /// For efficiency we serve single partition requests off the shard which offers more direct
+    /// [org.apache.cassandra.db.tries.InMemoryTrie] methods.
     private final DeletionAwareTrie<Object, TrieTombstoneMarker> mergedTrie;
 
     TrieMemtableStage3(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner, Integer shardCountOption)
@@ -110,7 +121,7 @@ public class TrieMemtableStage3 extends AbstractTrieMemtable
     }
 
     @Override
-    protected AbstractMemtableShard[] getShards()
+    protected MemtableShard[] getShards()
     {
         return shards;
     }
@@ -139,9 +150,9 @@ public class TrieMemtableStage3 extends AbstractTrieMemtable
     }
 
     @Override
-    public MemtableUnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
-                                                                 final DataRange dataRange,
-                                                                 SSTableReadsListener readsListener)
+    public UnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
+                                                         final DataRange dataRange,
+                                                         SSTableReadsListener readsListener)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -360,7 +371,7 @@ public class TrieMemtableStage3 extends AbstractTrieMemtable
         @VisibleForTesting
         MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics, OpOrder opOrder)
         {
-            super(metadata, allocator, metrics, opOrder,
+            super(metadata, allocator, metrics,
                   InMemoryDeletionAwareTrie.longLived(TrieBackedPartitionStage3.BYTE_COMPARABLE_VERSION, BUFFER_TYPE, opOrder));
         }
 

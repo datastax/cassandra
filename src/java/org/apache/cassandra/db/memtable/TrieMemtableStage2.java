@@ -29,7 +29,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
@@ -74,7 +73,9 @@ import org.apache.cassandra.utils.memory.HeapCloner;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
 
-/// Previous TrieMemtable implementation, provided for two reasons:
+/// Trie memtable implementation working as a trie map to the row level, with range deletion data at partition roots.
+///
+/// Stage 2 of the TrieMemtable implementation, provided for two reasons:
 ///
 ///   -  to easily compare current and earlier implementations of the trie memtable
 ///   -  to have an option to change a database back to the older implementation if we find a bug or a performance
@@ -104,8 +105,6 @@ public class TrieMemtableStage2 extends AbstractTrieMemtable
      */
     public static final Predicate<InMemoryBaseTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY = features -> isPartitionBoundary(features.content());
 
-    public static final Predicate<Object> IS_PARTITION_BOUNDARY = TrieMemtableStage2::isPartitionBoundary;
-
     /**
      * Sharded memtable sections. Each is responsible for a contiguous range of the token space (between boundaries[i]
      * and boundaries[i+1]) and is written to by one thread at a time, while reads are carried out concurrently
@@ -128,7 +127,7 @@ public class TrieMemtableStage2 extends AbstractTrieMemtable
     }
 
     @Override
-    protected AbstractMemtableShard[] getShards()
+    protected MemtableShard[] getShards()
     {
         return shards;
     }
@@ -236,7 +235,7 @@ public class TrieMemtableStage2 extends AbstractTrieMemtable
     /**
      * Metadata object signifying the root node of a partition. Holds the deletion information as well as a link
      * to the owning subrange, which is used for compiling statistics and column sets.
-     *
+     * <br/>
      * Descends from MutableDeletionInfo to permit tail tries to be passed directly to TrieBackedPartitionStage2.
      */
     public static class PartitionData extends MutableDeletionInfo
@@ -332,7 +331,7 @@ public class TrieMemtableStage2 extends AbstractTrieMemtable
         int partitionCount = counter.keyCount;
         long partitionKeySize = counter.keySize;
 
-        return new AbstractFlushablePartitionSet<TrieBackedPartitionStage2>()
+        return new AbstractFlushablePartitionSet<>()
         {
             public Memtable memtable()
             {
@@ -376,7 +375,7 @@ public class TrieMemtableStage2 extends AbstractTrieMemtable
         @VisibleForTesting
         MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics, OpOrder opOrder)
         {
-            super(metadata, allocator, metrics, opOrder, 
+            super(metadata, allocator, metrics,
                   InMemoryTrie.longLived(TrieBackedPartitionStage2.BYTE_COMPARABLE_VERSION, BUFFER_TYPE, opOrder));
         }
 

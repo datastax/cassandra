@@ -57,6 +57,7 @@ import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdater;
 import org.apache.cassandra.db.partitions.TriePartitionUpdaterLegacyIndex;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.EncodingStats;
@@ -86,7 +87,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Clock;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -100,8 +100,7 @@ import org.apache.cassandra.utils.memory.NativeAllocator;
 import org.github.jamm.Unmetered;
 
 /// Trie memtable implementation. Improves memory usage, garbage collection efficiency and lookup performance.
-/// The implementation is described in detail in the paper:
-///       [https://www.vldb.org/pvldb/vol15/p3359-lambov.pdf]
+/// The implementation is described in detail in [TrieMemtable.md](./TrieMemtable.md).
 ///
 /// The configuration takes a single parameter:
 /// - shards: the number of shards to split into, defaulting to the number of CPU cores.
@@ -113,8 +112,8 @@ public class TrieMemtable extends AbstractShardedMemtable
     /// Buffer type to use for memtable tries (on- vs off-heap)
     public static final BufferType BUFFER_TYPE = DatabaseDescriptor.getMemtableAllocationType().toBufferType();
 
-    /// Force copy checker (see [InMemoryTrie#apply]) ensuring all modifications apply atomically and consistently to
-    /// the whole partition.
+    /// Force copy checker (see [org.apache.cassandra.db.tries.InMemoryTrie#apply]) ensuring all modifications apply
+    /// atomically and consistently to the whole partition.
     public static final Predicate<InMemoryBaseTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY =
         features -> TrieBackedPartition.isPartitionBoundary(features.content());
 
@@ -137,7 +136,8 @@ public class TrieMemtable extends AbstractShardedMemtable
     private final MemtableShard[] shards;
 
     /// A merged view of the memtable map. Used for partition range queries and flush.
-    /// For efficiency, we serve single partition requests off the shard which offers more direct [InMemoryTrie] methods.
+    /// For efficiency, we serve single partition requests off the shard which offers more direct
+    /// [org.apache.cassandra.db.tries.InMemoryTrie] methods.
     @VisibleForTesting
     final DeletionAwareTrie<Object, TrieTombstoneMarker> mergedTrie;
 
@@ -155,11 +155,6 @@ public class TrieMemtable extends AbstractShardedMemtable
         this.shards = generatePartitionShards(boundaries.shardCount(), actualMetadata, metrics, owner.readOrdering());
         this.mergedTrie = makeMergedTrie(shards);
         logger.trace("Created memtable with {} shards", this.shards.length);
-    }
-
-    private static int autoShardCount()
-    {
-        return 4 * FBUtilities.getAvailableProcessors();
     }
 
     private static MemtableShard[] generatePartitionShards(int splits,
@@ -388,9 +383,9 @@ public class TrieMemtable extends AbstractShardedMemtable
     }
 
     @Override
-    public MemtableUnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
-                                                                 final DataRange dataRange,
-                                                                 SSTableReadsListener readsListener)
+    public UnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
+                                                         final DataRange dataRange,
+                                                         SSTableReadsListener readsListener)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -1387,16 +1382,16 @@ public class TrieMemtable extends AbstractShardedMemtable
         /// If true, the release method will be called when a value is no longer in use
         abstract boolean releaseNeeded();
 
-        /// See [MemoryManager#completeMutation]
+        /// See [org.apache.cassandra.db.tries.MemoryManager#completeMutation]
         abstract void completeMutation();
-        /// See [MemoryManager#abortMutation]
+        /// See [org.apache.cassandra.db.tries.MemoryManager#abortMutation]
         abstract void abortMutation();
 
-        /// See [MemoryManager#unusedReservedOnHeapMemory]
+        /// See [org.apache.cassandra.db.tries.MemoryManager#unusedReservedOnHeapMemory]
         @VisibleForTesting
         abstract long unusedReservedOnHeapMemory();
 
-        /// See [ContentManager#releaseReferencesUnsafe]
+        /// See [org.apache.cassandra.db.tries.ContentManager#releaseReferencesUnsafe]
         @VisibleForTesting
         abstract void releaseReferencesUnsafe();
     }
@@ -1582,7 +1577,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                                                                                             ByteComparable.preencoded(TrieBackedPartition.BYTE_COMPARABLE_VERSION, keyBytes, partitionKeyLength, keyPos - partitionKeyLength),
                                                                                             TrieBackedPartition.BYTE_COMPARABLE_VERSION);
                 columns = metadata.regularAndStaticColumns().columns(clustering == Clustering.STATIC_CLUSTERING);
-                return content.toString() + " at " + clustering.toString(metadata);
+                return content + " at " + clustering.toString(metadata);
             }
             else if (content instanceof PartitionData)
             {
@@ -1590,7 +1585,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                 BufferDecoratedKey key = BufferDecoratedKey.fromByteComparable(ByteComparable.preencoded(TrieBackedPartition.BYTE_COMPARABLE_VERSION, keyBytes, 0, keyPos),
                                                                                TrieBackedPartition.BYTE_COMPARABLE_VERSION,
                                                                                metadata.partitioner);
-                return content.toString() + " at " + metadata.partitionKeyType.getString(key.getKey());
+                return content + " at " + metadata.partitionKeyType.getString(key.getKey());
             }
 
             return content.toString();

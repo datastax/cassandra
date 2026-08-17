@@ -103,13 +103,6 @@ public abstract class AbstractTrieMemtable extends AbstractShardedMemtable
         return colUpdateTimeDelta;
     }
 
-    /**
-     * Returns the minTS if one available, otherwise NO_MIN_TIMESTAMP.
-     *
-     * EncodingStats uses a synthetic epoch TS at 2015. We don't want to leak that (CASSANDRA-18118) so we return NO_MIN_TIMESTAMP instead.
-     *
-     * @return The minTS or NO_MIN_TIMESTAMP if none available
-     */
     @Override
     public long getMinTimestamp()
     {
@@ -376,13 +369,8 @@ public abstract class AbstractTrieMemtable extends AbstractShardedMemtable
 
         protected final TableMetadataRef metadata;
 
-        protected AbstractMemtableShard(TableMetadataRef metadata, TrieMemtableMetricsView metrics, OpOrder opOrder, T data)
-        {
-            this(metadata, AbstractAllocatorMemtable.MEMORY_POOL.newAllocator(metadata.toString()), metrics, opOrder, data);
-        }
-
         @VisibleForTesting
-        protected AbstractMemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics, OpOrder opOrder, T data)
+        protected AbstractMemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics, T data)
         {
             this.metadata = metadata;
             this.columns = RegularAndStaticColumns.NONE;
@@ -522,9 +510,8 @@ public abstract class AbstractTrieMemtable extends AbstractShardedMemtable
 
         /**
          * Common logic for acquiring write lock with metrics tracking.
-         * @return true if lock was acquired without contention
          */
-        protected boolean acquireWriteLock()
+        protected void acquireWriteLock()
         {
             boolean locked = writeLock.tryLock();
             if (locked)
@@ -538,7 +525,6 @@ public abstract class AbstractTrieMemtable extends AbstractShardedMemtable
                 writeLock.lock();
                 metrics.contentionTime.addNano(Clock.Global.nanoTime() - lockStartTime);
             }
-            return locked;
         }
     }
 }
