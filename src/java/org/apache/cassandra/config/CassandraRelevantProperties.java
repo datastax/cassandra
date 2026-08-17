@@ -721,8 +721,17 @@ public enum CassandraRelevantProperties
      * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.BKDIndexMetrics#intersectionLatency}, and
      * {@link org.apache.cassandra.index.sai.metrics.TableQueryMetrics.PerQuery#queryLatency}.
      * Enabled by default.
+     * </p>
+     * Even if this is false, {@link #SAI_ALL_QUERIES_LATENCY_HISTOGRAM_ENABLED} can still enable the generic histogram
+     * for the latency of queries of any kind.
      */
     SAI_HISTOGRAMS_ENABLED("cassandra.sai.metrics.histograms.enabled", "true"),
+
+    /**
+     * Whether to enable the SAI histogram for the latency of queries of any kind if {@link #SAI_HISTOGRAMS_ENABLED}
+     * is not true. Enabled by default.
+     */
+    SAI_ALL_QUERIES_LATENCY_HISTOGRAM_ENABLED("cassandra.sai.metrics.histograms.all_queries.enabled", "true"),
 
     /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.

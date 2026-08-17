@@ -413,7 +413,8 @@ public class TableQueryMetrics
         {
             super(table.keyspace, table.name, METRIC_TYPE, queryKind, filter);
 
-            queryLatency = CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.getBoolean()
+            queryLatency = (CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.getBoolean() ||
+                            (CassandraRelevantProperties.SAI_ALL_QUERIES_LATENCY_HISTOGRAM_ENABLED.getBoolean() && queryKind == QueryKind.ALL))
                            ? Optional.of(Metrics.timer(createMetricName("QueryLatency")))
                            : Optional.empty();
 
