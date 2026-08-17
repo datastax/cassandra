@@ -21,9 +21,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -31,7 +29,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -41,14 +38,13 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
-import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TrieBackedPartitionStage2;
 import org.apache.cassandra.db.partitions.TriePartitionUpdateStage2;
 import org.apache.cassandra.db.partitions.TriePartitionUpdaterStage2;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.Direction;
@@ -69,7 +65,6 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -96,7 +91,7 @@ import org.github.jamm.Unmetered;
 ///     class: TrieMemtableStage2
 /// ```
 /// in `cassandra.yaml` to switch a node to it as default.
-public class TrieMemtableStage2 extends AbstractShardedMemtable
+public class TrieMemtableStage2 extends AbstractTrieMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtableStage2.class);
 
@@ -111,10 +106,6 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
 
     public static final Predicate<Object> IS_PARTITION_BOUNDARY = TrieMemtableStage2::isPartitionBoundary;
 
-    // Set to true when the memtable requests a switch (e.g. for trie size limit being reached) to ensure only one
-    // thread calls cfs.switchMemtableIfCurrent.
-    private final AtomicBoolean switchRequested = new AtomicBoolean(false);
-
     /**
      * Sharded memtable sections. Each is responsible for a contiguous range of the token space (between boundaries[i]
      * and boundaries[i+1]) and is written to by one thread at a time, while reads are carried out concurrently
@@ -128,16 +119,18 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
      */
     private final Trie<Object> mergedTrie;
 
-    @Unmetered
-    private final TrieMemtableMetricsView metrics;
-
     TrieMemtableStage2(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner, Integer shardCountOption)
     {
         super(commitLogLowerBound, metadataRef, owner, shardCountOption);
-        this.metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
         this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics, owner.readOrdering());
         this.mergedTrie = makeMergedTrie(shards);
         logger.trace("Created memtable with {} shards", this.shards.length);
+    }
+
+    @Override
+    protected AbstractMemtableShard[] getShards()
+    {
+        return shards;
     }
 
     private static MemtableShard[] generatePartitionShards(int splits,
@@ -163,182 +156,6 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
         return Trie.mergeDistinct(tries);
     }
 
-    @Override
-    public boolean isClean()
-    {
-        for (MemtableShard shard : shards)
-            if (!shard.isClean())
-                return false;
-        return true;
-    }
-
-    @VisibleForTesting
-    @Override
-    public void switchOut(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
-    {
-        super.switchOut(writeBarrier, commitLogUpperBound);
-
-        for (MemtableShard shard : shards)
-            shard.allocator.setDiscarding();
-    }
-
-    @Override
-    public void discard()
-    {
-        super.discard();
-        // metrics here are not thread safe, but I think we can live with that
-        metrics.lastFlushShardDataSizes.reset();
-        for (MemtableShard shard : shards)
-        {
-            metrics.lastFlushShardDataSizes.update(shard.liveDataSize());
-        }
-        // the buffer release is a longer-running process, do it in a separate loop to not make the metrics update wait
-        for (MemtableShard shard : shards)
-        {
-            shard.allocator.setDiscarded();
-            shard.data.discardBuffers();
-        }
-    }
-
-    /**
-     * Should only be called by ColumnFamilyStore.apply via Keyspace.apply, which supplies the appropriate
-     * OpOrdering.
-     *
-     * commitLogSegmentPosition should only be null if this is a secondary index, in which case it is *expected* to be null
-     */
-    @Override
-    public long performPut(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
-    {
-        DecoratedKey key = update.partitionKey();
-        MemtableShard shard = shards[boundaries.getShardForKey(key)];
-        long colUpdateTimeDelta = shard.put(update, indexer, opGroup);
-
-        if (shard.data.reachedAllocatedSizeThreshold())
-            signalFlushRequired(ColumnFamilyStore.FlushReason.TRIE_LIMIT, true);
-
-        return colUpdateTimeDelta;
-    }
-
-    @Override
-    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
-    {
-        if (!switchRequested.getAndSet(true) || !skipIfSignaled)
-        {
-            logger.info("Scheduling flush for table {} due to {}", this.metadata.get(), flushReason);
-            owner.signalFlushRequired(this, flushReason);
-        }
-    }
-
-    @Override
-    public void addMemoryUsageTo(MemoryUsage stats)
-    {
-        super.addMemoryUsageTo(stats);
-        for (MemtableShard shard : shards)
-        {
-            stats.ownsOnHeap += shard.allocator.onHeap().owns();
-            stats.ownsOffHeap += shard.allocator.offHeap().owns();
-            stats.ownershipRatioOnHeap += shard.allocator.onHeap().ownershipRatio();
-            stats.ownershipRatioOffHeap += shard.allocator.offHeap().ownershipRatio();
-        }
-    }
-
-    @Override
-    public long getLiveDataSize()
-    {
-        long total = 0L;
-        for (MemtableShard shard : shards)
-            total += shard.liveDataSize();
-        return total;
-    }
-
-    @Override
-    public long operationCount()
-    {
-        long total = 0L;
-        for (MemtableShard shard : shards)
-            total += shard.currentOperations();
-        return total;
-    }
-
-    @Override
-    public long partitionCount()
-    {
-        int total = 0;
-        for (MemtableShard shard : shards)
-            total += shard.partitionCount();
-        return total;
-    }
-
-    public int getShardCount()
-    {
-        return shards.length;
-    }
-
-    /**
-     * Returns the minTS if one available, otherwise NO_MIN_TIMESTAMP.
-     *
-     * EncodingStats uses a synthetic epoch TS at 2015. We don't want to leak that (CASSANDRA-18118) so we return NO_MIN_TIMESTAMP instead.
-     *
-     * @return The minTS or NO_MIN_TIMESTAMP if none available
-     */
-    @Override
-    public long getMinTimestamp()
-    {
-        long min = Long.MAX_VALUE;
-        for (MemtableShard shard : shards)
-            min =  EncodingStats.mergeMinTimestamp(min, shard.stats);
-        return min != EncodingStats.NO_STATS.minTimestamp ? min : NO_MIN_TIMESTAMP;
-    }
-
-    @Override
-    public long getMinLocalDeletionTime()
-    {
-        long min = Long.MAX_VALUE;
-        for (MemtableShard shard : shards)
-            min =  EncodingStats.mergeMinLocalDeletionTime(min, shard.stats);
-        return min;
-    }
-
-    @Override
-    public DecoratedKey minPartitionKey()
-    {
-        for (int i = 0; i < shards.length; i++)
-        {
-            MemtableShard shard = shards[i];
-            if (!shard.isClean())
-                return shard.minPartitionKey();
-        }
-        return null;
-    }
-
-    @Override
-    public DecoratedKey maxPartitionKey()
-    {
-        for (int i = shards.length - 1; i >= 0; i--)
-        {
-            MemtableShard shard = shards[i];
-            if (!shard.isClean())
-                return shard.maxPartitionKey();
-        }
-        return null;
-    }
-
-    @Override
-    RegularAndStaticColumns columns()
-    {
-        for (MemtableShard shard : shards)
-            columnsCollector.update(shard.columns);
-        return columnsCollector.get();
-    }
-
-    @Override
-    EncodingStats encodingStats()
-    {
-        for (MemtableShard shard : shards)
-            statsCollector.update(shard.stats);
-        return statsCollector.get();
-    }
-
     static boolean isPartitionBoundary(Object content)
     {
         // In the trie we use PartitionData for the root of a partition, but PartitionUpdates come with DeletionInfo.
@@ -347,9 +164,9 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
     }
 
     @Override
-    public MemtableUnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
-                                                                 final DataRange dataRange,
-                                                                 SSTableReadsListener readsListener)
+    public UnfilteredPartitionIterator partitionIterator(final ColumnFilter columnFilter,
+                                                         final DataRange dataRange,
+                                                         SSTableReadsListener readsListener)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -360,20 +177,15 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
         Trie<Object> subMap = mergedTrie.subtrie(toComparableBound(keyRange.left, includeStart),
                                                  toComparableBound(keyRange.right, !includeStop));
 
-        return new MemtableUnfilteredPartitionIterator(metadata(),
-                                                       allocator.ensureOnHeap(),
-                                                       subMap,
+        TableMetadata metadata = metadata();
+        return new MemtableUnfilteredPartitionIterator(metadata,
+                                                       new PartitionIterator(subMap, metadata, allocator.ensureOnHeap()),
                                                        columnFilter,
                                                        dataRange,
                                                        getMinLocalDeletionTime());
         // Note: the minLocalDeletionTime reported by the iterator is the memtable's minLocalDeletionTime. This is okay
         // because we only need to report a lower bound that will eventually advance, and calculating a more precise
         // bound would be an unnecessary expense.
-    }
-
-    private static ByteComparable toComparableBound(PartitionPosition position, boolean before)
-    {
-        return position == null || position.isMinimum() ? null : position.asComparableBound(before);
     }
 
     public Partition getPartition(DecoratedKey key)
@@ -419,12 +231,7 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
         return p != null ? p.unfilteredIterator() : null;
     }
 
-    private static DecoratedKey getPartitionKeyFromPath(TableMetadata metadata, ByteComparable path)
-    {
-        return BufferDecoratedKey.fromByteComparable(path,
-                                                     TrieBackedPartitionStage2.BYTE_COMPARABLE_VERSION,
-                                                     metadata.partitioner);
-    }
+
 
     /**
      * Metadata object signifying the root node of a partition. Holds the deletion information as well as a link
@@ -559,51 +366,8 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
         };
     }
 
-    public static class MemtableShard
+    public static class MemtableShard extends AbstractMemtableShard<InMemoryTrie<Object>, TriePartitionUpdaterStage2>
     {
-        // The following fields are volatile as we have to make sure that when we
-        // collect results from all sub-ranges, the thread accessing the value
-        // is guaranteed to see the changes to the values.
-
-        // The smallest timestamp for all partitions stored in this shard
-        private volatile long minTimestamp = Long.MAX_VALUE;
-
-        private volatile long liveDataSize = 0;
-
-        private volatile long currentOperations = 0;
-
-        private volatile int partitionCount = 0;
-
-        @Unmetered
-        private final ReentrantLock writeLock = new ReentrantLock(TrieMemtable.SHARD_LOCK_FAIRNESS);
-
-        // Content map for the given shard. This is implemented as a memtable trie which uses the prefix-free
-        // byte-comparable ByteSource representations of the keys to address the partitions.
-        //
-        // This map is used in a single-producer, multi-consumer fashion: only one thread will insert items but
-        // several threads may read from it and iterate over it. Iterators (especially partition range iterators)
-        // may operate for a long period of time and thus iterators should not throw ConcurrentModificationExceptions
-        // if the underlying map is modified during iteration, they should provide a weakly consistent view of the map
-        // instead.
-        //
-        // Also, this data is backed by memtable memory, when accessing it callers must specify if it can be accessed
-        // unsafely, meaning that the memtable will not be discarded as long as the data is used, or whether the data
-        // should be copied on heap for off-heap allocators.
-        @VisibleForTesting
-        final InMemoryTrie<Object> data;
-
-        volatile RegularAndStaticColumns columns;
-
-        volatile EncodingStats stats;
-
-        @Unmetered  // total pool size should not be included in memtable's deep size
-        private final MemtableAllocator allocator;
-
-        @Unmetered
-        private final TrieMemtableMetricsView metrics;
-
-        private final TableMetadataRef metadata;
-
         MemtableShard(TableMetadataRef metadata, TrieMemtableMetricsView metrics, OpOrder opOrder)
         {
             this(metadata, AbstractAllocatorMemtable.MEMORY_POOL.newAllocator(metadata.toString()), metrics, opOrder);
@@ -612,123 +376,37 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
         @VisibleForTesting
         MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics, OpOrder opOrder)
         {
-            this.metadata = metadata;
-            this.data = InMemoryTrie.longLived(TrieBackedPartitionStage2.BYTE_COMPARABLE_VERSION, BUFFER_TYPE, opOrder);
-            this.columns = RegularAndStaticColumns.NONE;
-            this.stats = EncodingStats.NO_STATS;
-            this.allocator = allocator;
-            this.metrics = metrics;
+            super(metadata, allocator, metrics, opOrder, 
+                  InMemoryTrie.longLived(TrieBackedPartitionStage2.BYTE_COMPARABLE_VERSION, BUFFER_TYPE, opOrder));
         }
 
-        public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+        @Override
+        protected TriePartitionUpdaterStage2 createUpdater(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
         {
-            TriePartitionUpdaterStage2 updater = new TriePartitionUpdaterStage2(allocator.cloner(opGroup), indexer, metadata.get(), this);
-            boolean locked = writeLock.tryLock();
-            if (locked)
-            {
-                metrics.uncontendedPuts.inc();
-            }
-            else
-            {
-                metrics.contendedPuts.inc();
-                long lockStartTime = Clock.Global.nanoTime();
-                writeLock.lock();
-                metrics.contentionTime.addNano(Clock.Global.nanoTime() - lockStartTime);
-            }
-            try
-            {
-                indexer.start();
-                // Add the initial trie size on the first operation. This technically isn't correct (other shards
-                // do take their memory share even if they are empty) but doing it during construction may cause
-                // the allocator to block while we are trying to flush a memtable and become a deadlock.
-                long onHeap = data.isEmpty() ? 0 : data.usedSizeOnHeap();
-                long offHeap = data.isEmpty() ? 0 : data.usedSizeOffHeap();
-
-                try
-                {
-                    updater.apply(data, TriePartitionUpdateStage2.asMergableTrie(update));
-                }
-                catch (TrieSpaceExhaustedException e)
-                {
-                    // This should never really happen as a flush would be triggered long before this limit is reached.
-                    throw new AssertionError(e);
-                }
-                finally
-                {
-                    allocator.offHeap().adjust(data.usedSizeOffHeap() - offHeap, opGroup);
-                    allocator.onHeap().adjust((data.usedSizeOnHeap() - onHeap) + updater.heapSize, opGroup);
-                    partitionCount += updater.partitionsAdded;
-                }
-            }
-            finally
-            {
-                indexer.commit();
-                updateMinTimestamp(update.stats().minTimestamp);
-                updateLiveDataSize(updater.dataSize);
-                updateCurrentOperations(update.operationCount());
-
-                columns = columns.mergeTo(update.columns());
-                stats = stats.mergeWith(update.stats());
-
-                writeLock.unlock();
-            }
-            return updater.colUpdateTimeDelta;
+            return new TriePartitionUpdaterStage2(allocator.cloner(opGroup), indexer, metadata.get(), this);
         }
 
-        public boolean isClean()
+        @Override
+        protected void applyUpdate(TriePartitionUpdaterStage2 updater, PartitionUpdate update) throws TrieSpaceExhaustedException
         {
-            return data.isEmpty();
+            updater.apply(data, TriePartitionUpdateStage2.asMergableTrie(update));
         }
 
-        private void updateMinTimestamp(long timestamp)
+        @Override
+        protected int getUpdaterPartitionsAdded(TriePartitionUpdaterStage2 updater)
         {
-            if (timestamp < minTimestamp)
-                minTimestamp = timestamp;
+            return updater.partitionsAdded;
         }
 
-        void updateLiveDataSize(long size)
-        {
-            liveDataSize = liveDataSize + size;
-        }
-
-        private void updateCurrentOperations(long op)
-        {
-            currentOperations = currentOperations + op;
-        }
-
-        public int partitionCount()
-        {
-            return partitionCount;
-        }
-
-        long liveDataSize()
-        {
-            return liveDataSize;
-        }
-
-        long currentOperations()
-        {
-            return currentOperations;
-        }
-
-        private DecoratedKey firstPartitionKey(Direction direction)
+        @Override
+        protected DecoratedKey firstPartitionKey(Direction direction)
         {
             Iterator<Map.Entry<ByteComparable.Preencoded, PartitionData>> iter = data.filteredEntryIterator(direction, PartitionData.class);
             if (!iter.hasNext())
                 return null;
 
             Map.Entry<ByteComparable.Preencoded, PartitionData> entry = iter.next();
-            return getPartitionKeyFromPath(metadata.get(), entry.getKey());
-        }
-
-        public DecoratedKey minPartitionKey()
-        {
-            return firstPartitionKey(Direction.FORWARD);
-        }
-
-        public DecoratedKey maxPartitionKey()
-        {
-            return firstPartitionKey(Direction.REVERSE);
+            return getPartitionKeyFromPath(metadata.get(), entry.getKey(), TrieBackedPartitionStage2.BYTE_COMPARABLE_VERSION);
         }
     }
 
@@ -747,9 +425,10 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
         protected TrieBackedPartitionStage2 mapContent(Object content, Trie<Object> tailTrie, byte[] bytes, int byteLength)
         {
             PartitionData pd = (PartitionData) content;
-            DecoratedKey key = getPartitionKeyFromPath(metadata,
-                                                       ByteComparable.preencoded(TrieBackedPartitionStage2.BYTE_COMPARABLE_VERSION,
-                                                                                 bytes, 0, byteLength));
+            DecoratedKey key = AbstractTrieMemtable.getPartitionKeyFromPath(metadata,
+                                                                            ByteComparable.preencoded(TrieBackedPartitionStage2.BYTE_COMPARABLE_VERSION,
+                                                                                 bytes, 0, byteLength),
+                                                                            TrieBackedPartitionStage2.BYTE_COMPARABLE_VERSION);
             return TrieBackedPartitionStage2.create(key,
                                               pd.columns(),
                                               pd.stats(),
@@ -757,53 +436,6 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
                                               tailTrie,
                                               metadata,
                                               ensureOnHeap);
-        }
-    }
-
-    static class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator implements Memtable.MemtableUnfilteredPartitionIterator
-    {
-        private final TableMetadata metadata;
-        private final Iterator<TrieBackedPartitionStage2> iter;
-        private final ColumnFilter columnFilter;
-        private final DataRange dataRange;
-        private final long minLocalDeletionTime;
-
-        public MemtableUnfilteredPartitionIterator(TableMetadata metadata,
-                                                   EnsureOnHeap ensureOnHeap,
-                                                   Trie<Object> source,
-                                                   ColumnFilter columnFilter,
-                                                   DataRange dataRange,
-                                                   long minLocalDeletionTime)
-        {
-            this.iter = new PartitionIterator(source, metadata, ensureOnHeap);
-            this.metadata = metadata;
-            this.columnFilter = columnFilter;
-            this.dataRange = dataRange;
-            this.minLocalDeletionTime = minLocalDeletionTime;
-        }
-
-        public long getMinLocalDeletionTime()
-        {
-            return minLocalDeletionTime;
-        }
-
-        public TableMetadata metadata()
-        {
-            return metadata;
-        }
-
-        public boolean hasNext()
-        {
-            return iter.hasNext();
-        }
-
-        public UnfilteredRowIterator next()
-        {
-            Partition partition = iter.next();
-            DecoratedKey key = partition.partitionKey();
-            ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
-
-            return filter.getUnfilteredRowIterator(columnFilter, partition);
         }
     }
 
@@ -843,30 +475,5 @@ public class TrieMemtableStage2 extends AbstractShardedMemtable
             TrieMemtableMetricsView metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
             return metrics::release;
         }
-    }
-
-    @Override
-    @VisibleForTesting
-    public long unusedReservedOnHeapMemory()
-    {
-        long size = 0;
-        for (MemtableShard shard : shards)
-        {
-            size += shard.data.unusedReservedOnHeapMemory();
-            size += shard.allocator.unusedReservedOnHeapMemory();
-        }
-        size += this.allocator.unusedReservedOnHeapMemory();
-        return size;
-    }
-
-    /**
-     * Release all recycled content references, including the ones waiting in still incomplete recycling lists.
-     * This is a test method and can cause null pointer exceptions if used on a live trie.
-     */
-    @VisibleForTesting
-    void releaseReferencesUnsafe()
-    {
-        for (MemtableShard shard : shards)
-            shard.data.releaseReferencesUnsafe();
     }
 }
