@@ -1371,29 +1371,21 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         metrics.coordinatorReadSize.update(rowsSize);
 
-        if (isRangeQuery && !isIndexQuery)
+        if (isRangeQuery)
         {
-            metrics.coordinatorRangeReadSize.update(rowsSize); // total range size
-            metrics.coordinatorRangeReadSizeWithoutIndex.update(rowsSize);
-        }
-        else if (isRangeQuery && isIndexQuery)
-        {
-            metrics.coordinatorRangeReadSize.update(rowsSize); // total range size
-            metrics.coordinatorRangeReadSizeWithIndex.update(rowsSize);
-        }
-        else if (!isRangeQuery && !isIndexQuery)
-        {
-            metrics.coordinatorSingleReadSize.update(rowsSize); // total single partition size
-            metrics.coordinatorSingleReadSizeWithoutIndex.update(rowsSize);
-        }
-        else if (!isRangeQuery && isIndexQuery)
-        {
-            metrics.coordinatorSingleReadSize.update(rowsSize); // total single partition size
-            metrics.coordinatorSingleReadSizeWithIndex.update(rowsSize);
+            metrics.coordinatorRangeReadSize.update(rowsSize);
+            if (isIndexQuery)
+                metrics.coordinatorRangeReadSizeWithIndex.update(rowsSize);
+            else
+                metrics.coordinatorRangeReadSizeWithoutIndex.update(rowsSize);
         }
         else
         {
-            noSpamLogger.debug("Unable to report SelectStatement metrics due to unexpected query restrictions: %s.", restrictions);
+            metrics.coordinatorSingleReadSize.update(rowsSize);
+            if (isIndexQuery)
+                metrics.coordinatorSingleReadSizeWithIndex.update(rowsSize);
+            else
+                metrics.coordinatorSingleReadSizeWithoutIndex.update(rowsSize);
         }
     }
 

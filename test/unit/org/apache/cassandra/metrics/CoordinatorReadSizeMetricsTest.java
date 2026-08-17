@@ -17,7 +17,9 @@
 package org.apache.cassandra.metrics;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
+import org.awaitility.Awaitility;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -424,21 +426,8 @@ public class CoordinatorReadSizeMetricsTest
     private static void waitForIndexQueryable()
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE);
-        long deadline = System.currentTimeMillis() + 30_000;
-        while (System.currentTimeMillis() < deadline)
-        {
-            if (cfs.indexManager.listIndexes().stream().allMatch(idx -> cfs.indexManager.isIndexQueryable(idx)))
-                return;
-            try
-            {
-                Thread.sleep(100);
-            }
-            catch (InterruptedException e)
-            {
-                Thread.currentThread().interrupt();
-                return;
-            }
-        }
-        throw new RuntimeException("Timed out waiting for index to become queryable on " + KEYSPACE + '.' + TABLE);
+        Awaitility.await()
+                  .atMost(30, TimeUnit.SECONDS)
+                  .until(() -> cfs.indexManager.listIndexes().stream().allMatch(idx -> cfs.indexManager.isIndexQueryable(idx)));
     }
 }
