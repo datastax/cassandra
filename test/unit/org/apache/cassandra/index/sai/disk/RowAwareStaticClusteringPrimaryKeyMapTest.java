@@ -63,9 +63,12 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
     {
         // Create a table with static columns and clustering columns
         createTable("CREATE TABLE %s (pk int, ck int, static_value text static, int_value int, text_value text, PRIMARY KEY (pk, ck)) WITH CLUSTERING ORDER BY (ck ASC)");
-        execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
-        execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
-        execute("CREATE CUSTOM INDEX static_index ON %s(static_value) USING 'StorageAttachedIndex'");
+        // Use createIndex() (not execute()) so we wait for the INDEX_BUILD_STARTED flush to complete
+        // before inserting data. The async index build flushes the memtable; if we insert first there
+        // is a race that can produce multiple SSTables.
+        createIndex("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX static_index ON %s(static_value) USING 'StorageAttachedIndex'");
 
         // Insert data with static columns
         // Partition pk=1: static row + multiple regular rows
@@ -84,10 +87,10 @@ public class RowAwareStaticClusteringPrimaryKeyMapTest extends SAITester.Version
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1000, 2, 1002, "c2");
         execute("INSERT INTO %s (pk, ck, int_value, text_value) VALUES (?, ?, ?, ?)", 1000, 3, 1003, "c3");
 
-        // Flush to generate SSTable and SAI components
+        // Flush to generate SSTable and SAI components. Because all indexes are fully built
+        // before any data was inserted, this flush produces exactly one SSTable.
         flush();
 
-        // Obtain the just-flushed SSTable
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
