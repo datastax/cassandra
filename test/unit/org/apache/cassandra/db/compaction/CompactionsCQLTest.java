@@ -998,6 +998,7 @@ public class CompactionsCQLTest extends CQLTester
     private void loadTestSStables(ColumnFamilyStore cfs, File ksDir) throws IOException
     {
         Keyspace.open(cfs.getKeyspaceName()).getColumnFamilyStore(cfs.name).truncateBlocking();
+        LifecycleTransaction.waitForDeletions(); // wait for async deletion of truncated sstables before importing
         for (File cfDir : cfs.getDirectories().getCFDirectories())
         {
             File tableDir = new File(ksDir, cfs.name);
