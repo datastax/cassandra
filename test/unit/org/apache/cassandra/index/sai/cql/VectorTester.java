@@ -21,8 +21,12 @@ package org.apache.cassandra.index.sai.cql;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
+
+import org.apache.cassandra.cql3.CqlBuilder;
 
 import org.apache.commons.lang.reflect.FieldUtils;
 import org.junit.Before;
@@ -182,31 +186,35 @@ public class VectorTester extends SAITester
 
     /**
      * Builds a CREATE CUSTOM INDEX DDL string for a vector column.
-     * When {@code enableFused} is true, {@code 'enable_hierarchy': 'true'} is appended so that
-     * every FusedPQ run exercises the hierarchical graph code path — the two features must
-     * always be tested together.
+     * When {@code enableHierarchy} is true, {@code 'enable_hierarchy': 'true'} is appended to the
+     * index options.
      *
-     * @param table        the table placeholder, typically {@code "%s"}
-     * @param column       the vector column name
-     * @param extraOptions additional options such as {@code "'similarity_function': 'euclidean'"},
-     *                     or {@code null} for none
-     * @param enableFused  whether FusedPQ is enabled for this test run
+     * <p>Callers that run with FusedPQ enabled <em>must</em> pass {@code true} here, because FusedPQ
+     * requires the hierarchical graph. The two features are inseparable in production and must
+     * always be co-tested.
+     *
+     * @param table           the table placeholder, typically {@code "%s"}
+     * @param column          the vector column name
+     * @param extraOptions    a map of additional index options, or {@code null} for none
+     * @param enableHierarchy whether to include {@code 'enable_hierarchy': 'true'} in the DDL
      */
-    protected static String vectorIndexDDL(String table, String column, String extraOptions, boolean enableFused)
+    protected static String vectorIndexDDL(String table, String column, Map<String, String> extraOptions, boolean enableHierarchy)
     {
-        StringBuilder opts = new StringBuilder();
+        Map<String, String> options = new LinkedHashMap<>();
         if (extraOptions != null)
-            opts.append(extraOptions);
-        if (enableFused)
-        {
-            if (opts.length() > 0)
-                opts.append(", ");
-            opts.append("'enable_hierarchy': 'true'");
-        }
-        if (opts.length() > 0)
-            return "CREATE CUSTOM INDEX ON " + table + '(' + column + ") USING 'StorageAttachedIndex'"
-                   + " WITH OPTIONS = {" + opts + '}';
-        return "CREATE CUSTOM INDEX ON " + table + '(' + column + ") USING 'StorageAttachedIndex'";
+            options.putAll(extraOptions);
+        if (enableHierarchy)
+            options.put("enable_hierarchy", "true");
+
+        CqlBuilder builder = new CqlBuilder();
+        builder.append("CREATE CUSTOM INDEX ON ")
+               .append(table)
+               .append('(')
+               .append(column)
+               .append(") USING 'StorageAttachedIndex'");
+        if (!options.isEmpty())
+            builder.append(" WITH OPTIONS = ").append(options);
+        return builder.toString();
     }
 
     /**
@@ -290,13 +298,16 @@ public class VectorTester extends SAITester
         /**
          * Like {@link #vectorIndexDDL(String, String)} but merges additional index options.
          *
+         * <p>Hierarchy should always be enabled when FusedPQ is active, so the two must always be
+         * co-tested.
+         *
          * @param table        the table placeholder, typically {@code "%s"}
          * @param column       the vector column name
-         * @param extraOptions additional options to include, e.g. {@code "'similarity_function': 'euclidean'"},
-         *                     or {@code null} for none
+         * @param extraOptions a map of additional index options, or {@code null} for none
          */
-        protected String vectorIndexDDL(String table, String column, String extraOptions)
+        protected String vectorIndexDDL(String table, String column, Map<String, String> extraOptions)
         {
+            // FusedPQ requires the hierarchical graph — always enable hierarchy together with fused.
             return VectorTester.vectorIndexDDL(table, column, extraOptions, ENABLE_FUSED);
         }
     }

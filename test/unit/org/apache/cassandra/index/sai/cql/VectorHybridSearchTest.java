@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Map;
 import java.util.stream.IntStream;
 
 import org.junit.Test;
@@ -133,7 +134,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     public void testHybridSearchSeqLogicForMappingPKsBackToRowIds() throws Throwable
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex(vectorIndexDDL("%s", "vec", "'similarity_function' : 'euclidean'"));
+        createIndex(vectorIndexDDL("%s", "vec", Map.of("similarity_function", "euclidean")));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // Insert rows into two sstables. The rows are interleaved to ensure binary search is less efficient, which
@@ -166,7 +167,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
         // This test requires the non-bruteforce route
         setMaxBruteForceRows(0);
         createTable("CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex(vectorIndexDDL("%s", "vec", "'similarity_function' : 'euclidean'"));
+        createIndex(vectorIndexDDL("%s", "vec", Map.of("similarity_function", "euclidean")));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         execute("INSERT INTO %s (pk, val, vec) VALUES (1, 'A', [1, 1])");

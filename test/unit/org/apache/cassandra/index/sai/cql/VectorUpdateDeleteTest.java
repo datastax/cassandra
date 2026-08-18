@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Map;
+
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -648,7 +650,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
         // Use euclidean distance to more easily verify correctness of caching
-        createIndex(vectorIndexDDL("%s", "vec", "'similarity_function' : 'euclidean'"));
+        createIndex(vectorIndexDDL("%s", "vec", Map.of("similarity_function", "euclidean")));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // We will search for [11,11]
@@ -989,7 +991,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     public void testMemtableInsertSearchUpdateSearchHandling()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, embedding vector<float, 5>)");
-        createIndex(vectorIndexDDL("%s", "embedding", "'similarity_function': 'dot_product', 'source_model': 'OTHER'"));
+        createIndex(vectorIndexDDL("%s", "embedding", Map.of("similarity_function", "dot_product", "source_model", "OTHER")));
 
         // Insert initial data
         execute("INSERT INTO %s (id, embedding) VALUES ('row1', [0.1, 0.1, 0.1, 0.1, 0.1])");
