@@ -22,7 +22,7 @@ package org.apache.cassandra.test.microbench;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
-import java.util.concurrent.*;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
@@ -39,6 +39,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.profile.StackProfiler;
 import org.openjdk.jmh.results.Result;
 import org.openjdk.jmh.results.RunResult;
@@ -46,8 +47,8 @@ import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
-@BenchmarkMode(Mode.Throughput)
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 1
@@ -63,7 +64,7 @@ public class MutationBench
 {
     static
     {
-        DatabaseDescriptor.clientInitialization(false);
+        DatabaseDescriptor.toolInitialization();
         // Partitioner is not set in client mode.
         if (DatabaseDescriptor.getPartitioner() == null)
             DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
@@ -77,6 +78,13 @@ public class MutationBench
     private DataOutputBuffer outputBuffer;
     private DataInputBuffer inputBuffer;
 
+    @Param({"skiplist", "trie", "trie_stage1", "trie_stage2", "trie_stage3"})
+    String memtable = "trie";
+
+    @Param({"VERSION_DS_20", "VERSION_DS_10"})
+    String version = "VERSION_DS_20";
+
+    private int messagingVersion;
 
     @State(Scope.Thread)
     public static class ThreadState
@@ -88,6 +96,27 @@ public class MutationBench
     @Setup
     public void setup() throws IOException
     {
+        if (version.equalsIgnoreCase("VERSION_DS_20") || version.equals("110"))
+            messagingVersion = MessagingService.VERSION_DS_20;
+        else if (version.equalsIgnoreCase("VERSION_DS_10") || version.equals("100"))
+            messagingVersion = MessagingService.VERSION_DS_10;
+        else if (version.equalsIgnoreCase("VERSION_DS_12") || version.equals("102"))
+            messagingVersion = MessagingService.VERSION_DS_12;
+        else if (version.equalsIgnoreCase("VERSION_DS_11") || version.equals("101"))
+            messagingVersion = MessagingService.VERSION_DS_11;
+        else if (version.equalsIgnoreCase("VERSION_40") || version.equals("12"))
+            messagingVersion = MessagingService.VERSION_40;
+        else if (version.equalsIgnoreCase("VERSION_30") || version.equals("10"))
+            messagingVersion = MessagingService.VERSION_30;
+        else
+        {
+            try {
+                messagingVersion = Integer.parseInt(version);
+            } catch (NumberFormatException e) {
+                messagingVersion = MessagingService.current_version;
+            }
+        }
+
         SchemaTestUtil.addOrUpdateKeyspace(KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1)), false);
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace);
         TableMetadata metadata =
@@ -95,33 +124,36 @@ public class MutationBench
                                        "( userid bigint," +
                                        "picid bigint," +
                                        "commentid bigint, " +
-                                       "PRIMARY KEY(userid, picid))", keyspace)
+                                       "PRIMARY KEY(userid, picid)) WITH memtable = '" + memtable + "';", keyspace)
                                 .build();
 
         SchemaTestUtil.addOrUpdateKeyspace(ksm.withSwapped(ksm.tables.with(metadata)), false);
 
         mutation = (Mutation)UpdateBuilder.create(metadata, 1L).newRow(1L).add("commentid", 32L).makeMutation();
-        buffer = ByteBuffer.allocate(mutation.serializedSize(MessagingService.current_version));
+        buffer = ByteBuffer.allocate(mutation.serializedSize(messagingVersion));
         outputBuffer = new DataOutputBufferFixed(buffer);
+
+        Mutation.serializer.serialize(mutation, outputBuffer, messagingVersion);
+        buffer.flip();
         inputBuffer = new DataInputBuffer(buffer, false);
-
-        Mutation.serializer.serialize(mutation, outputBuffer, MessagingService.current_version);
     }
 
     @Benchmark
-    public void serialize(ThreadState state) throws IOException
+    public void serialize(ThreadState state, Blackhole bh) throws IOException
     {
         buffer.rewind();
-        Mutation.serializer.serialize(mutation, outputBuffer, MessagingService.current_version);
+        Mutation.serializer.serialize(mutation, outputBuffer, messagingVersion);
+        bh.consume(outputBuffer.buffer(true));
         state.counter++;
     }
 
     @Benchmark
-    public void deserialize(ThreadState state) throws IOException
+    public void deserialize(ThreadState state, Blackhole bh) throws IOException
     {
         buffer.rewind();
-        state.in = Mutation.serializer.deserialize(inputBuffer, MessagingService.current_version);
+        state.in = Mutation.serializer.deserialize(inputBuffer, messagingVersion);
         state.counter++;
+        bh.consume(state.in);
     }
 
     public static void main(String... args) throws Exception {

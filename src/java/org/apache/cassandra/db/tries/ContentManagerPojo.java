@@ -18,12 +18,15 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.io.IOException;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import org.agrona.collections.IntArrayList;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.db.tries.InMemoryBaseTrie.REFERENCE_ARRAY_ON_HEAP_SIZE;
@@ -61,6 +64,155 @@ public class ContentManagerPojo<T> implements ContentManager<T>
     ///
     /// @param shouldPreserveWithoutChildren Predicate used to check whether a given object should be preserved when
     /// its branch becomes empty. See [ContentManager#shouldPreserveWithoutChildren].
+    public interface PojoSerializer<T> {
+        void serialize(T content, DataOutputPlus out) throws IOException;
+        T deserialize(DataInputPlus in) throws IOException;
+        long serializedSize(T content);
+    }
+
+    public long serializedSize(PojoSerializer<T> serializer)
+    {
+        int count = reservedCount;
+        long size = 4L; // 32-bit count of total reserved slots
+        int bitsetLongs = (count + 63) >>> 6;
+        size += (long) bitsetLongs * 8L; // 64-bit packed bitset footprint
+        for (int w = 0; w < bitsetLongs; w++)
+        {
+            int base = w << 6;
+            int limit = Math.min(base + 64, count);
+            for (int i = base; i < limit; i++)
+            {
+                T content = getContent(i);
+                if (content != null)
+                    size += serializer.serializedSize(content);
+            }
+        }
+        return size;
+    }
+
+    /**
+     * Thread-local buffer to avoid heap allocations when serializing larger multi-word bitsets.
+     */
+    private static final ThreadLocal<long[]> BITSETS_THREAD_LOCAL = ThreadLocal.withInitial(() -> new long[64]);
+
+    /**
+     * Serializes the content manager using a sparse packed-bitset encoding.
+     * To keep wire footprint small and serialization fast:
+     * 1. We write total reserved slots count followed by 64-bit mask words indicating present items.
+     * 2. Non-null content items are serialized sequentially using trailing zero bit manipulation
+     *    to jump directly over empty slots without array scan overhead.
+     */
+    public void serialize(DataOutputPlus out, PojoSerializer<T> serializer) throws IOException
+    {
+        int count = reservedCount;
+        out.writeInt(count);
+        int bitsetLongs = (count + 63) >>> 6;
+
+        // Fast-path for single 64-bit word bitsets (fits up to 64 items without heap allocations)
+        if (bitsetLongs == 1)
+        {
+            long bits = 0;
+            for (int i = 0; i < count; i++)
+            {
+                if (getContent(i) != null)
+                    bits |= (1L << i);
+            }
+            out.writeLong(bits);
+
+            long b = bits;
+            while (b != 0)
+            {
+                int bitIdx = Long.numberOfTrailingZeros(b);
+                T content = getContent(bitIdx);
+                serializer.serialize(content, out);
+                b &= (b - 1);
+            }
+            return;
+        }
+
+        // Multi-word bitset encoding using thread-local buffer to prevent per-call array allocations
+        long[] bitsets = (bitsetLongs <= 64) ? BITSETS_THREAD_LOCAL.get() : new long[bitsetLongs];
+        for (int w = 0; w < bitsetLongs; w++)
+        {
+            long bits = 0;
+            int base = w << 6;
+            int limit = Math.min(base + 64, count);
+            for (int i = base; i < limit; i++)
+            {
+                if (getContent(i) != null)
+                    bits |= (1L << (i - base));
+            }
+            bitsets[w] = bits;
+            out.writeLong(bits);
+        }
+
+        // Write non-null content payloads using bit-scan jumps
+        for (int w = 0; w < bitsetLongs; w++)
+        {
+            long bits = bitsets[w];
+            int base = w << 6;
+            while (bits != 0)
+            {
+                int bitIdx = Long.numberOfTrailingZeros(bits);
+                int targetIndex = base + bitIdx;
+                T content = getContent(targetIndex);
+                serializer.serialize(content, out);
+                bits &= (bits - 1);
+            }
+        }
+    }
+
+    /**
+     * Deserializes a ContentManagerPojo from the input stream.
+     * Allocates all required backing AtomicReferenceArrays up front to eliminate reallocation checks,
+     * then decodes non-null content items via bitset trailing-zero scanning.
+     */
+    public static <T> ContentManagerPojo<T> deserialize(DataInputPlus in, Predicate<T> shouldPreserveWithoutChildren, InMemoryBaseTrie.ExpectedLifetime lifetime, OpOrder opOrder, PojoSerializer<T> serializer) throws IOException, TrieSpaceExhaustedException
+    {
+        ContentManagerPojo<T> cm = new ContentManagerPojo<>(shouldPreserveWithoutChildren, lifetime, opOrder);
+        int count = in.readInt();
+        if (count < 0 || count > 10_000_000)
+            throw new IOException("Corrupt ContentManagerPojo reservedCount: " + count);
+
+        cm.reservedCount = count;
+        if (count > 0)
+        {
+            // Pre-allocate backing reference arrays up front based on target size
+            int maxLeadBit = getBufferIdx(count - 1, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+            for (int b = 0; b <= maxLeadBit; b++)
+            {
+                cm.contentArrays[b] = new AtomicReferenceArray<>(CONTENTS_START_SIZE << b);
+            }
+        }
+
+        // Read packed bitset mask
+        int bitsetLongs = (count + 63) >>> 6;
+        long[] bitset = new long[bitsetLongs];
+        for (int w = 0; w < bitsetLongs; w++)
+            bitset[w] = in.readLong();
+
+        // Fast-path decode non-null elements using trailing zero bit counts
+        for (int w = 0; w < bitsetLongs; w++)
+        {
+            long bits = bitset[w];
+            int base = w << 6;
+            while (bits != 0)
+            {
+                int bitIdx = Long.numberOfTrailingZeros(bits);
+                int targetIndex = base + bitIdx;
+                T content = serializer.deserialize(in);
+                cm.valuesCount++;
+                int leadBit = getBufferIdx(targetIndex, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+                int ofs = inBufferOffset(targetIndex, leadBit, CONTENTS_START_SIZE);
+                cm.contentArrays[leadBit].setPlain(ofs, content);
+                bits &= (bits - 1);
+            }
+        }
+        return cm;
+    }
+
+    // Suppress warning required for generic array creation of contentArrays (AtomicReferenceArray<T>[])
+    @SuppressWarnings("unchecked")
     public ContentManagerPojo(Predicate<T> shouldPreserveWithoutChildren,
                               InMemoryBaseTrie.ExpectedLifetime lifetime,
                               OpOrder opOrder)

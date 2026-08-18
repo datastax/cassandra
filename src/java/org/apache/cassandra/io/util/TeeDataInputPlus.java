@@ -22,7 +22,6 @@ import java.io.EOFException;
 import java.io.IOException;
 
 import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.utils.Throwables;
 
 /**
  * DataInput that also stores the raw inputs into an output buffer
@@ -53,26 +52,37 @@ public class TeeDataInputPlus implements DataInputPlus
         this.limitReached = false;
     }
 
-    private void maybeWrite(int length, Throwables.DiscreteAction<IOException> writeAction) throws IOException
+    /**
+     * Checks if writing {@code length} bytes to the tee buffer will remain within the configured {@code limit}.
+     * Returns true if writing is permitted, or false if the byte limit would be exceeded.
+     * Sets {@code limitReached} to true upon the first boundary breach to fast-path subsequent reads.
+     */
+    private boolean canWrite(int length)
     {
-        if (limit <= 0 || (!limitReached && (teeBuffer.position() + length) < limit))
-            writeAction.perform();
-        else
-            limitReached = true;
+        if (limit <= 0)
+            return true;
+        if (limitReached)
+            return false;
+        if ((teeBuffer.position() + length) <= limit)
+            return true;
+        limitReached = true;
+        return false;
     }
 
     @Override
     public void readFully(byte[] bytes) throws IOException
     {
         source.readFully(bytes);
-        maybeWrite(bytes.length, () -> teeBuffer.write(bytes));
+        if (canWrite(bytes.length))
+            teeBuffer.write(bytes);
     }
 
     @Override
     public void readFully(byte[] bytes, int offset, int length) throws IOException
     {
         source.readFully(bytes, offset, length);
-        maybeWrite(length, () -> teeBuffer.write(bytes, offset, length));
+        if (canWrite(length))
+            teeBuffer.write(bytes, offset, length);
     }
 
     @Override
@@ -83,7 +93,8 @@ public class TeeDataInputPlus implements DataInputPlus
             try
             {
                 byte v = source.readByte();
-                maybeWrite(TypeSizes.BYTE_SIZE, () -> teeBuffer.writeByte(v));
+                if (canWrite(TypeSizes.BYTE_SIZE))
+                    teeBuffer.writeByte(v);
             }
             catch (EOFException eof)
             {
@@ -97,7 +108,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public boolean readBoolean() throws IOException
     {
         boolean v = source.readBoolean();
-        maybeWrite(TypeSizes.BOOL_SIZE, () -> teeBuffer.writeBoolean(v));
+        if (canWrite(TypeSizes.BOOL_SIZE))
+            teeBuffer.writeBoolean(v);
         return v;
     }
 
@@ -105,7 +117,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public byte readByte() throws IOException
     {
         byte v = source.readByte();
-        maybeWrite(TypeSizes.BYTE_SIZE, () -> teeBuffer.writeByte(v));
+        if (canWrite(TypeSizes.BYTE_SIZE))
+            teeBuffer.writeByte(v);
         return v;
     }
 
@@ -113,7 +126,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public int readUnsignedByte() throws IOException
     {
         int v = source.readUnsignedByte();
-        maybeWrite(TypeSizes.BYTE_SIZE, () -> teeBuffer.writeByte(v));
+        if (canWrite(TypeSizes.BYTE_SIZE))
+            teeBuffer.writeByte(v);
         return v;
     }
 
@@ -121,7 +135,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public short readShort() throws IOException
     {
         short v = source.readShort();
-        maybeWrite(TypeSizes.SHORT_SIZE, () -> teeBuffer.writeShort(v));
+        if (canWrite(TypeSizes.SHORT_SIZE))
+            teeBuffer.writeShort(v);
         return v;
     }
 
@@ -129,7 +144,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public int readUnsignedShort() throws IOException
     {
         int v = source.readUnsignedShort();
-        maybeWrite(TypeSizes.SHORT_SIZE, () -> teeBuffer.writeShort(v));
+        if (canWrite(TypeSizes.SHORT_SIZE))
+            teeBuffer.writeShort(v);
         return v;
     }
 
@@ -137,7 +153,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public char readChar() throws IOException
     {
         char v = source.readChar();
-        maybeWrite(TypeSizes.BYTE_SIZE, () -> teeBuffer.writeChar(v));
+        if (canWrite(TypeSizes.SHORT_SIZE))
+            teeBuffer.writeChar(v);
         return v;
     }
 
@@ -145,7 +162,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public int readInt() throws IOException
     {
         int v = source.readInt();
-        maybeWrite(TypeSizes.INT_SIZE, () -> teeBuffer.writeInt(v));
+        if (canWrite(TypeSizes.INT_SIZE))
+            teeBuffer.writeInt(v);
         return v;
     }
 
@@ -153,7 +171,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public long readLong() throws IOException
     {
         long v = source.readLong();
-        maybeWrite(TypeSizes.LONG_SIZE, () -> teeBuffer.writeLong(v));
+        if (canWrite(TypeSizes.LONG_SIZE))
+            teeBuffer.writeLong(v);
         return v;
     }
 
@@ -161,7 +180,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public float readFloat() throws IOException
     {
         float v = source.readFloat();
-        maybeWrite(TypeSizes.FLOAT_SIZE, () -> teeBuffer.writeFloat(v));
+        if (canWrite(TypeSizes.FLOAT_SIZE))
+            teeBuffer.writeFloat(v);
         return v;
     }
 
@@ -169,7 +189,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public double readDouble() throws IOException
     {
         double v = source.readDouble();
-        maybeWrite(TypeSizes.DOUBLE_SIZE, () -> teeBuffer.writeDouble(v));
+        if (canWrite(TypeSizes.DOUBLE_SIZE))
+            teeBuffer.writeDouble(v);
         return v;
     }
 
@@ -184,7 +205,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public String readUTF() throws IOException
     {
         String v = source.readUTF();
-        maybeWrite(TypeSizes.sizeof(v), () -> teeBuffer.writeUTF(v));
+        if (canWrite(TypeSizes.sizeof(v)))
+            teeBuffer.writeUTF(v);
         return v;
     }
 
@@ -192,7 +214,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public long readVInt() throws IOException
     {
         long v = source.readVInt();
-        maybeWrite(TypeSizes.sizeofVInt(v), () -> teeBuffer.writeVInt(v));
+        if (canWrite(TypeSizes.sizeofVInt(v)))
+            teeBuffer.writeVInt(v);
         return v;
     }
 
@@ -200,7 +223,8 @@ public class TeeDataInputPlus implements DataInputPlus
     public long readUnsignedVInt() throws IOException
     {
         long v = source.readUnsignedVInt();
-        maybeWrite(TypeSizes.sizeofUnsignedVInt(v), () -> teeBuffer.writeUnsignedVInt(v));
+        if (canWrite(TypeSizes.sizeofUnsignedVInt(v)))
+            teeBuffer.writeUnsignedVInt(v);
         return v;
     }
 
@@ -208,10 +232,11 @@ public class TeeDataInputPlus implements DataInputPlus
     public void skipBytesFully(int n) throws IOException
     {
         source.skipBytesFully(n);
-        maybeWrite(n, () -> {
+        if (canWrite(n))
+        {
             for (int i = 0; i < n; i++)
                 teeBuffer.writeByte(0);
-        });
+        }
     }
 
     /**

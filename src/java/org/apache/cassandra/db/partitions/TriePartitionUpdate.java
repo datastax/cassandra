@@ -81,14 +81,18 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
     final int dataSize;
 
-    private TriePartitionUpdate(TableMetadata metadata,
-                                DecoratedKey key,
-                                RegularAndStaticColumns columns,
-                                EncodingStats stats,
-                                int rowCountIncludingStatic,
-                                int tombstoneCount,
-                                int dataSize,
-                                InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    /**
+     * Package-private constructor used by {@link TriePartitionUpdateSerializer} and {@link TrieBuilder}
+     * to instantiate immutable trie partition update instances.
+     */
+    TriePartitionUpdate(TableMetadata metadata,
+                        DecoratedKey key,
+                        RegularAndStaticColumns columns,
+                        EncodingStats stats,
+                        int rowCountIncludingStatic,
+                        int tombstoneCount,
+                        int dataSize,
+                        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
         super(key, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata);
         this.dataSize = dataSize;
