@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -184,7 +185,7 @@ public class VectorKeyRestrictedOnPartitionTest extends VectorKeyRestrictedTeste
         // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
         // in a peer index for an sstable's search index but not its vector index.
         createTable("CREATE TABLE %s (partition int, i int, v vector<float, 2>, c int, PRIMARY KEY(partition, i))");
-        createIndex(vectorIndexDDL("%s", "v", "'similarity_function': 'euclidean'"));
+        createIndex(vectorIndexDDL("%s", "v", Map.of("similarity_function", "euclidean")));
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
 
         var partitionKeys = new ArrayList<Integer>();

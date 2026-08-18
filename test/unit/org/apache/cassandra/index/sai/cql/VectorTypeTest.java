@@ -372,7 +372,7 @@ public class VectorTypeTest extends VectorTester.Versioned
     public void changingOptionsTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex(vectorIndexDDL("%s", "val", "'maximum_node_connections' : 10, 'construction_beam_width' : 200, 'similarity_function' : 'euclidean'"));
+        createIndex(vectorIndexDDL("%s", "val", Map.of("maximum_node_connections", "10", "construction_beam_width", "200", "similarity_function", "euclidean")));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -426,7 +426,7 @@ public class VectorTypeTest extends VectorTester.Versioned
     public void obsoleteOptionsTest()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex(vectorIndexDDL("%s", "v", "'optimize_for' : 'recall'"));
+        createIndex(vectorIndexDDL("%s", "v", Map.of("optimize_for", "recall")));
         // as long as CREATE doesn't error out, we're good
     }
 
@@ -550,7 +550,7 @@ public class VectorTypeTest extends VectorTester.Versioned
     public void partitionKeySearchTest()
     {
         createTable("CREATE TABLE %s (partition int, row int, val vector<float, 2>, PRIMARY KEY(partition, row))");
-        createIndex(vectorIndexDDL("%s", "val", "'similarity_function' : 'euclidean'"));
+        createIndex(vectorIndexDDL("%s", "val", Map.of("similarity_function", "euclidean")));
 
         var nPartitions = 5;
         var rowsPerPartition = 10;
@@ -687,7 +687,7 @@ public class VectorTypeTest extends VectorTester.Versioned
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
         // Use euclidean distance to more easily verify correctness of caching
-        createIndex(vectorIndexDDL("%s", "vec", "'similarity_function' : 'euclidean'"));
+        createIndex(vectorIndexDDL("%s", "vec", Map.of("similarity_function", "euclidean")));
 
         // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
         execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vector(1f, 1f));
@@ -708,7 +708,7 @@ public class VectorTypeTest extends VectorTester.Versioned
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
         // Use euclidean distance to more easily verify correctness of caching
-        createIndex(vectorIndexDDL("%s", "vec", "'similarity_function' : 'euclidean'"));
+        createIndex(vectorIndexDDL("%s", "vec", Map.of("similarity_function", "euclidean")));
 
         // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
         execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vector(1f, 1f));
@@ -824,7 +824,7 @@ public class VectorTypeTest extends VectorTester.Versioned
         }
 
         // create indexes on existing sstable to produce multiple segments
-        createIndex(vectorIndexDDL("%s", "val", "'similarity_function' : 'euclidean'"));
+        createIndex(vectorIndexDDL("%s", "val", Map.of("similarity_function", "euclidean")));
         createIndex("CREATE CUSTOM INDEX ON %s(constant) USING 'StorageAttachedIndex'");
 
         // query multiple on-disk indexes
@@ -1030,7 +1030,7 @@ public class VectorTypeTest extends VectorTester.Versioned
     public void testMemtableInsertSearchInsertSearchHandling()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, embedding vector<float, 5>)");
-        createIndex(vectorIndexDDL("%s", "embedding", "'similarity_function': 'dot_product', 'source_model': 'OTHER'"));
+        createIndex(vectorIndexDDL("%s", "embedding", Map.of("similarity_function", "dot_product", "source_model", "OTHER")));
 
         // Insert initial data
         execute("INSERT INTO %s (id, embedding) VALUES ('row1', [0.1, 0.1, 0.1, 0.1, 0.1])");

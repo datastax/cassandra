@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
@@ -400,7 +401,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
     private void createIndex()
     {
         // we need a long timeout because we are adding many vectors
-        String index = createIndexAsync(vectorIndexDDL("%s", "val", "'similarity_function' : 'euclidean'"));
+        String index = createIndexAsync(vectorIndexDDL("%s", "val", Map.of("similarity_function", "euclidean")));
         waitForIndexQueryable(KEYSPACE, index, 5, TimeUnit.MINUTES);
     }
 
