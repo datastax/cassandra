@@ -538,7 +538,7 @@ interface VerificationCursor
         {
             super(source);
             this.deletionBranchDepth = -1;
-            verifyDeletionBranch(0);
+            verifyDeletionBranch(returnedPosition);
         }
 
         @Override
@@ -574,6 +574,8 @@ interface VerificationCursor
             int depth = Cursor.depth(position);
             if (depth <= deletionBranchDepth)
                 deletionBranchDepth = -1;
+            if (Cursor.isExhausted(position))
+                return position;
 
             var deletionBranch = source.deletionBranchCursor(direction);
             if (deletionBranch != null)
