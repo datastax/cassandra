@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.hints;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.BooleanSupplier;
 
@@ -25,6 +27,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.UnknownTableException;
+import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.util.File;
@@ -51,17 +56,19 @@ final class HintsDispatcher implements AutoCloseable
     private final HintsReader reader;
     final UUID hostId;
     final InetAddressAndPort address;
+    private final int messagingVersion;
     private final BooleanSupplier abortRequested;
 
     private InputPosition currentPagePosition;
 
-    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddressAndPort address, BooleanSupplier abortRequested)
+    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddressAndPort address, int messagingVersion, BooleanSupplier abortRequested)
     {
         currentPagePosition = null;
 
         this.reader = reader;
         this.hostId = hostId;
         this.address = address;
+        this.messagingVersion = messagingVersion;
         this.abortRequested = abortRequested;
     }
 
@@ -69,9 +76,10 @@ final class HintsDispatcher implements AutoCloseable
                                   RateLimiter rateLimiter,
                                   InetAddressAndPort address,
                                   UUID hostId,
+                                  int messagingVersion,
                                   BooleanSupplier abortRequested)
     {
-        HintsDispatcher dispatcher = new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, abortRequested);
+        HintsDispatcher dispatcher = new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, messagingVersion, abortRequested);
         HintDiagnostics.dispatcherCreated(dispatcher);
         return dispatcher;
     }
@@ -122,7 +130,7 @@ final class HintsDispatcher implements AutoCloseable
     {
         Collection<Callback> callbacks = new ArrayList<>();
 
-        Action action = sendHints(page.hintsIterator(), callbacks);
+        Action action = sendHints(page.buffersIterator(), callbacks);
 
         if (action == Action.ABORT)
             return action;
@@ -157,30 +165,57 @@ final class HintsDispatcher implements AutoCloseable
         HintsServiceMetrics.hintsTimedOut.mark(timeouts);
     }
 
-    private Action sendHints(Iterator<Hint> hints, Collection<Callback> callbacks)
+    private Action sendHints(Iterator<ByteBuffer> encodedHints, Collection<Callback> callbacks)
     {
+        List<ByteBuffer> buffersToSend = new ArrayList<>();
         List<Hint> hintsToSend = new ArrayList<>();
-        while (hints.hasNext())
+        int fileVersion = reader.descriptor().messagingVersion();
+
+        while (encodedHints.hasNext())
         {
             if (abortRequested.getAsBoolean())
             {
                 HintDiagnostics.abortRequested(this);
                 return Action.ABORT;
             }
-            Hint hint = hints.next();
-            if (!isWritable(hint))
+
+            ByteBuffer buffer = encodedHints.next();
+            Hint hint;
+            try (DataInputBuffer in = new DataInputBuffer(buffer, true))
+            {
+                hint = Hint.serializer.deserialize(in, fileVersion);
+            }
+            catch (UnknownTableException e)
+            {
+                // A dropped table has no keyspace affinity left to enforce. Preserve the encoded hint so the
+                // receiver can discard it without turning an expected schema race into a dispatch failure.
+                if (fileVersion != messagingVersion)
+                    continue;
+                hint = null;
+            }
+            catch (IOException e)
+            {
+                throw new FSReadError(e, reader.descriptor().fileName());
+            }
+
+            if (hint != null && !isWritable(hint))
                 return Action.ABORT;
+
+            buffersToSend.add(buffer);
             hintsToSend.add(hint);
         }
 
-        for (Hint hint : hintsToSend)
+        for (int i = 0; i < buffersToSend.size(); i++)
         {
             if (abortRequested.getAsBoolean())
             {
                 HintDiagnostics.abortRequested(this);
                 return Action.ABORT;
             }
-            callbacks.add(sendHint(hint));
+
+            callbacks.add(fileVersion == messagingVersion
+                          ? sendEncodedHint(buffersToSend.get(i))
+                          : sendHint(hintsToSend.get(i)));
         }
         return Action.CONTINUE;
     }
@@ -196,6 +231,14 @@ final class HintsDispatcher implements AutoCloseable
         Callback callback = new Callback(hint.creationTime);
         Message<?> message = Message.out(HINT_REQ, new HintMessage(hostId, hint));
         MessagingService.instance().sendWithCallback(message, address, callback);
+        return callback;
+    }
+
+    private Callback sendEncodedHint(ByteBuffer hint)
+    {
+        HintMessage.Encoded message = new HintMessage.Encoded(hostId, hint, messagingVersion);
+        Callback callback = new Callback(message.getHintCreationTime());
+        MessagingService.instance().sendWithCallback(Message.out(HINT_REQ, message), address, callback);
         return callback;
     }
 

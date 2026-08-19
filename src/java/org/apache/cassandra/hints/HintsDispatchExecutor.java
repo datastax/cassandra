@@ -281,7 +281,7 @@ final class HintsDispatchExecutor
                 return false;
             }
 
-            try (HintsDispatcher dispatcher = HintsDispatcher.create(file, rateLimiter, address, descriptor.hostId, shouldAbort))
+            try (HintsDispatcher dispatcher = HintsDispatcher.create(file, rateLimiter, address, descriptor.hostId, optVersion.get(), shouldAbort))
             {
                 if (offset != null)
                     dispatcher.seek(offset);
