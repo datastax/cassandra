@@ -199,6 +199,13 @@ public class KeyspaceMetrics
     public final Meter coordinatorReadSizeWarnings;
     public final Meter coordinatorReadSizeAborts;
     public final Histogram coordinatorReadSize;
+    public final Histogram coordinatorRangeReadSize;
+    public final Histogram coordinatorRangeReadSizeWithIndex;
+    public final Histogram coordinatorRangeReadSizeWithoutIndex;
+    public final Histogram coordinatorSingleReadSize;
+    public final Histogram coordinatorSingleReadSizeWithIndex;
+    public final Histogram coordinatorSingleReadSizeWithoutIndex;
+
 
     public final Meter localReadSizeWarnings;
     public final Meter localReadSizeAborts;
@@ -321,6 +328,13 @@ public class KeyspaceMetrics
         coordinatorReadSizeWarnings = createKeyspaceMeter("CoordinatorReadSizeWarnings");
         coordinatorReadSizeAborts = createKeyspaceMeter("CoordinatorReadSizeAborts");
         coordinatorReadSize = createKeyspaceHistogram("CoordinatorReadSize", false);
+        coordinatorRangeReadSize = createKeyspaceHistogram("CoordinatorRangeReadSize", false);
+        coordinatorRangeReadSizeWithIndex = createKeyspaceHistogram("CoordinatorRangeReadSizeWithIndex", false);
+        coordinatorRangeReadSizeWithoutIndex = createKeyspaceHistogram("CoordinatorRangeReadSizeWithoutIndex", false);
+        coordinatorSingleReadSize = createKeyspaceHistogram("CoordinatorSingleReadSize", false);
+        coordinatorSingleReadSizeWithIndex = createKeyspaceHistogram("CoordinatorSingleReadSizeWithIndex", false);
+        coordinatorSingleReadSizeWithoutIndex = createKeyspaceHistogram("CoordinatorSingleReadSizeWithoutIndex", false);
+
 
         localReadSizeWarnings = createKeyspaceMeter("LocalReadSizeWarnings");
         localReadSizeAborts = createKeyspaceMeter("LocalReadSizeAborts");
