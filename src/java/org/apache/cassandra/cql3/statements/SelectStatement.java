@@ -72,6 +72,7 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.guardrails.GuardrailsConfigProvider;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -1349,7 +1350,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             return;
         ColumnFamilyStore store = cfs();
         if (store != null)
-            store.metric.coordinatorReadSize.update(result.getSize());
+        {
+            updatedMetrics(store.metric, restrictions, result.readRowsSize());
+        }
         if (result.shouldWarn(options.getCoordinatorReadSizeWarnThresholdBytes()))
         {
             String msg = String.format("Read on table %s has exceeded the size warning threshold of %,d bytes", table, options.getCoordinatorReadSizeWarnThresholdBytes());
@@ -1358,6 +1361,31 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             logger.warn("{} with query {}", msg, asCQL(options, state));
             if (store != null)
                 store.metric.coordinatorReadSizeWarnings.mark();
+        }
+    }
+
+    private void updatedMetrics(TableMetrics metrics, StatementRestrictions restrictions, long rowsSize)
+    {
+        boolean isRangeQuery = restrictions.isKeyRange() || restrictions.isDisjunction();
+        boolean isIndexQuery = restrictions.usesSecondaryIndexing();
+
+        metrics.coordinatorReadSize.update(rowsSize);
+
+        if (isRangeQuery)
+        {
+            metrics.coordinatorRangeReadSize.update(rowsSize);
+            if (isIndexQuery)
+                metrics.coordinatorRangeReadSizeWithIndex.update(rowsSize);
+            else
+                metrics.coordinatorRangeReadSizeWithoutIndex.update(rowsSize);
+        }
+        else
+        {
+            metrics.coordinatorSingleReadSize.update(rowsSize);
+            if (isIndexQuery)
+                metrics.coordinatorSingleReadSizeWithIndex.update(rowsSize);
+            else
+                metrics.coordinatorSingleReadSizeWithoutIndex.update(rowsSize);
         }
     }
 
