@@ -81,8 +81,8 @@ public class MutationBench
     @Param({"skiplist", "trie", "trie_stage1", "trie_stage2", "trie_stage3"})
     String memtable = "trie";
 
-    @Param({"VERSION_DS_20", "VERSION_DS_10"})
-    String version = "VERSION_DS_20";
+    @Param({"VERSION_DS_21", "VERSION_DS_20", "VERSION_DS_10"})
+    String version = "VERSION_DS_21";
 
     private int messagingVersion;
 
@@ -96,7 +96,9 @@ public class MutationBench
     @Setup
     public void setup() throws IOException
     {
-        if (version.equalsIgnoreCase("VERSION_DS_20") || version.equals("110"))
+        if (version.equalsIgnoreCase("VERSION_DS_21") || version.equals("111"))
+            messagingVersion = MessagingService.VERSION_DS_21;
+        else if (version.equalsIgnoreCase("VERSION_DS_20") || version.equals("110"))
             messagingVersion = MessagingService.VERSION_DS_20;
         else if (version.equalsIgnoreCase("VERSION_DS_10") || version.equals("100"))
             messagingVersion = MessagingService.VERSION_DS_10;

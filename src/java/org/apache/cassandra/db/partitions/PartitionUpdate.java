@@ -492,7 +492,7 @@ public interface PartitionUpdate extends Partition
                                         "Can't serialize to version " + version);
             update.metadata().id.serialize(out);
 
-            if (version >= MessagingService.VERSION_DS_20)
+            if (version >= MessagingService.VERSION_DS_21)
             {
                 if (update instanceof TriePartitionUpdate)
                 {
@@ -512,7 +512,7 @@ public interface PartitionUpdate extends Partition
         public PartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
             TableMetadata metadata = tableMetadataResolver.apply(TableId.deserialize(in));
-            if (version >= MessagingService.VERSION_DS_20)
+            if (version >= MessagingService.VERSION_DS_21)
             {
                 int format = in.readByte();
                 if (format == 1)
@@ -558,7 +558,7 @@ public interface PartitionUpdate extends Partition
         {
             long size = update.metadata().id.serializedSize();
 
-            if (version >= MessagingService.VERSION_DS_20)
+            if (version >= MessagingService.VERSION_DS_21)
             {
                 if (update instanceof TriePartitionUpdate)
                     return size + 1L + TriePartitionUpdateSerializer.serializedSize(update, version);

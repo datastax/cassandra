@@ -73,8 +73,7 @@ public class PartitionUpdateTest extends CQLTester
             rowSum += row.dataSize();
 
         Assert.assertEquals(rowSum, size1);
-        // TriePartitionUpdate provides a compact 64-byte trie node dataSize footprint
-        Assert.assertEquals(64, trieUpdate1.dataSize());
+        Assert.assertEquals(size1, trieUpdate1.dataSize());
 
         builder = UpdateBuilder.create(cfm, "key0");
         builder.newRow(1).add("a", 2);

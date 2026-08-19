@@ -80,6 +80,7 @@ final class HintsDescriptor
     static final int VERSION_DS_11 = MessagingService.VERSION_DS_11;
     static final int VERSION_DS_12 = MessagingService.VERSION_DS_12;
     static final int VERSION_DS_20 = MessagingService.VERSION_DS_20;
+    static final int VERSION_DS_21 = MessagingService.VERSION_DS_21;
     static final int CURRENT_VERSION = MessagingService.current_version;
 
     static final String COMPRESSION = "compression";
@@ -183,6 +184,8 @@ final class HintsDescriptor
                 return VERSION_DS_12;
             case MessagingService.VERSION_DS_20:
                 return VERSION_DS_20;
+            case MessagingService.VERSION_DS_21:
+                return VERSION_DS_21;
             default:
                 throw new IllegalStateException("Unknown messaging version " + messagingVersion);
         }
@@ -357,6 +360,8 @@ final class HintsDescriptor
                 return MessagingService.VERSION_DS_12;
             case VERSION_DS_20:
                 return MessagingService.Version.VERSION_DS_20.value;
+            case VERSION_DS_21:
+                return MessagingService.Version.VERSION_DS_21.value;
             default:
                 throw new AssertionError();
         }

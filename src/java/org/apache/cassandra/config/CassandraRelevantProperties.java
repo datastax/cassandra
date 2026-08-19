@@ -421,7 +421,7 @@ public enum CassandraRelevantProperties
      * @deprecated remove when cndb no longer supports bdp/6.8-cndb
      */
     @Deprecated(since = "5.0")
-    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_20)),
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_21)),
     DTEST_API_LOG_TOPOLOGY("cassandra.dtest.api.log.topology"),
     /** This property indicates if the code is running under the in-jvm dtest framework */
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),

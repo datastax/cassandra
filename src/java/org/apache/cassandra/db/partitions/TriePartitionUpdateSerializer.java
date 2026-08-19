@@ -48,7 +48,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
- * Serializer for {@link TriePartitionUpdate} across messaging versions (VERSION_DS_20+).
+ * Serializer for {@link TriePartitionUpdate} across messaging versions (VERSION_DS_21+).
  * Encodes partition key, row and tombstone counts, data size footprint, {@link SerializationHeader},
  * and serializes the underlying {@link InMemoryDeletionAwareTrie} structure using a type-tagged {@link ContentManagerPojo.PojoSerializer}.
  */

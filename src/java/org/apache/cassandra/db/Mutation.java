@@ -64,6 +64,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_12;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_20;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_21;
 
 public class Mutation implements IMutation, Supplier<Mutation>
 {
@@ -343,6 +344,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
     private int serializedSizeDS11;
     private int serializedSizeDS12;
     private int serializedSizeDS20;
+    private int serializedSizeDS21;
     private int serializedSizeDSE68;
 
     public int serializedSize(int version)
@@ -373,6 +375,10 @@ public class Mutation implements IMutation, Supplier<Mutation>
                 if (serializedSizeDS20 == 0)
                     serializedSizeDS20 = (int) serializer.serializedSize(this, VERSION_DS_20);
                 return serializedSizeDS20;
+            case VERSION_DS_21:
+                if (serializedSizeDS21 == 0)
+                    serializedSizeDS21 = (int) serializer.serializedSize(this, VERSION_DS_21);
+                return serializedSizeDS21;
             case VERSION_DSE_68:
                 if (serializedSizeDSE68 == 0)
                     serializedSizeDSE68 = (int) serializer.serializedSize(this, VERSION_DSE_68);
