@@ -18,7 +18,6 @@
 package org.apache.cassandra.hints;
 
 import java.net.UnknownHostException;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -40,12 +39,10 @@ import org.junit.Test;
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.schema.TableMetadata;
@@ -70,15 +67,12 @@ import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class HintsServiceTest
 {
     private static final String KEYSPACE = "hints_service_test";
     private static final String TABLE = "table";
-    private static final String AFFINITY_KEYSPACE = "hints_service_affinity_test";
 
     private final AtomicBoolean isAlive = new AtomicBoolean(true);
 
@@ -91,9 +85,6 @@ public class HintsServiceTest
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE, TABLE));
-        SchemaLoader.createKeyspace(AFFINITY_KEYSPACE,
-                                    KeyspaceParams.simple(3),
-                                    SchemaLoader.standardCFMD(AFFINITY_KEYSPACE, TABLE));
     }
 
     @AfterClass
@@ -321,56 +312,31 @@ public class HintsServiceTest
     }
 
     @Test
-    public void testWriteForAllReplicasAppliesWriteAffinityFilter() throws UnknownHostException
+    public void testReplayWaitsForWriteAffinity() throws Exception
     {
-        TokenMetadata tokenMeta = StorageService.instance.getTokenMetadata();
-
-        InetAddressAndPort localEndpoint = FBUtilities.getBroadcastAddressAndPort();
-        UUID localHostId = StorageService.instance.getLocalHostUUID();
-        Collection<Token> localTokens = tokenMeta.getTokens(localEndpoint);
+        UUID hostId = StorageService.instance.getLocalHostUUID();
+        InetAddressAndPort endpoint = HintsEndpointProvider.instance.endpointForHost(hostId);
         IEndpointSnitch savedSnitch = DatabaseDescriptor.getEndpointSnitch();
-
-        InetAddressAndPort replicaA = InetAddressAndPort.getByName("127.0.0.11");
-        InetAddressAndPort replicaB = InetAddressAndPort.getByName("127.0.0.12");
-        InetAddressAndPort replicaC = InetAddressAndPort.getByName("127.0.0.13");
-        UUID hostIdA = UUID.randomUUID();
-        UUID hostIdB = UUID.randomUUID();
-        UUID hostIdC = UUID.randomUUID();
 
         try
         {
-            tokenMeta.clearUnsafe();
-            tokenMeta.updateHostId(hostIdA, replicaA);
-            tokenMeta.updateNormalToken(dk("a").getToken(), replicaA);
-            tokenMeta.updateHostId(hostIdB, replicaB);
-            tokenMeta.updateNormalToken(dk("b").getToken(), replicaB);
-            tokenMeta.updateHostId(hostIdC, replicaC);
-            tokenMeta.updateNormalToken(dk("c").getToken(), replicaC);
+            DatabaseDescriptor.setEndpointSnitch(new WriteAffinityExcludingSnitch(endpoint));
+            HintsStore store = writeAndFlushHints(hostId, 1);
+            MockMessagingSpy spy = MockMessagingService.when(verb(HINT_REQ))
+                                                       .respond(Message.internalResponse(HINT_RSP, NoPayload.noPayload));
 
-            // Snitch that excludes replicaB from write affinity.
-            DatabaseDescriptor.setEndpointSnitch(new WriteAffinityExcludingSnitch(replicaB));
+            HintsService.instance.dispatcherExecutor().dispatch(store).get();
+            spy.interceptNoMsg(500, TimeUnit.MILLISECONDS).get();
+            assertTrue(store.hasFiles());
 
-            long now = System.currentTimeMillis();
-            TableMetadata metadata = Schema.instance.getTableMetadata(AFFINITY_KEYSPACE, TABLE);
-            PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, dk("key0")).timestamp(now);
-            builder.row("column0").add("val", "value0");
-            Hint hint = Hint.create(builder.buildAsMutation(), now);
-
-            HintsService.instance.writeForAllReplicas(hint);
-
-            // replicaA and replicaC pass the affinity filter and get a hints store; replicaB is filtered out.
-            HintsCatalog catalog = HintsService.instance.getCatalog();
-            assertNotNull("expected a hints store for the non-filtered replicaA", catalog.getNullable(hostIdA));
-            assertNotNull("expected a hints store for the non-filtered replicaC", catalog.getNullable(hostIdC));
-            assertNull("replicaB should have been filtered out by write affinity", catalog.getNullable(hostIdB));
+            DatabaseDescriptor.setEndpointSnitch(savedSnitch);
+            HintsService.instance.dispatcherExecutor().dispatch(store).get();
+            spy.interceptMessageOut(1).get();
+            assertFalse(store.hasFiles());
         }
         finally
         {
             DatabaseDescriptor.setEndpointSnitch(savedSnitch);
-            tokenMeta.clearUnsafe();
-            tokenMeta.updateHostId(localHostId, localEndpoint);
-            if (localTokens != null && !localTokens.isEmpty())
-                tokenMeta.updateNormalTokens(localTokens, localEndpoint);
         }
     }
 
