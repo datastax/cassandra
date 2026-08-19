@@ -55,7 +55,7 @@ public class RepairOption
     public static final String OPTIMISE_STREAMS_KEY = "optimiseStreams";
     public static final String IGNORE_UNREPLICATED_KS = "ignoreUnreplicatedKeyspaces";
     public static final String OFFLINE_SERVICE = "offlineService";
-    public static final String TENANT_ID_KEY = "tenantId";
+    public static final String ENTITY_ID_KEY = "entityId";
     public static final String REPAIR_TYPE_KEY = "repairType";
 
     // we don't want to push nodes too much for repair
@@ -180,8 +180,8 @@ public class RepairOption
      *             <td>false</td>
      *         </tr>
      *         <tr>
-     *             <td>tenantId</td>
-     *             <td>Opaque tenant identifier set by CNDB orchestration. Not used by Cassandra internals.
+     *             <td>entityId</td>
+     *             <td>Opaque entity identifier set by CNDB orchestration. Not used by Cassandra internals.
      *             Included in repair log lines for observability. Ignored when absent.</td>
      *             <td>null</td>
      *         </tr>
@@ -211,7 +211,7 @@ public class RepairOption
         boolean pullRepair = Boolean.parseBoolean(options.get(PULL_REPAIR_KEY));
         boolean ignoreUnreplicatedKeyspaces = Boolean.parseBoolean(options.get(IGNORE_UNREPLICATED_KS));
         boolean offlineService = Boolean.parseBoolean(options.get(OFFLINE_SERVICE));
-        String tenantId   = options.get(TENANT_ID_KEY);   // null if absent - no default needed
+        String entityId   = options.get(ENTITY_ID_KEY);   // null if absent - no default needed
         String repairType = options.get(REPAIR_TYPE_KEY);  // null if absent
 
         Preconditions.checkArgument(!pullRepair || !pushRepair, "Cannot use pushRepair and pullRepair as the same time");
@@ -233,7 +233,7 @@ public class RepairOption
 
         RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges,
                                                !ranges.isEmpty(), pushRepair, pullRepair, force, previewKind, asymmetricSyncing,
-                                               ignoreUnreplicatedKeyspaces, offlineService, tenantId, repairType);
+                                               ignoreUnreplicatedKeyspaces, offlineService, entityId, repairType);
 
         // data centers
         String dataCentersStr = options.get(DATACENTERS_KEY);
@@ -315,7 +315,7 @@ public class RepairOption
     private final boolean optimiseStreams;
     private final boolean ignoreUnreplicatedKeyspaces;
     private final boolean offlineService;
-    private final String tenantId;   // nullable - absent when not set by CNDB
+    private final String entityId;   // nullable - absent when not set by CNDB
     private final String repairType; // nullable - e.g. "continuous", "decommission", "on_demand"
 
     private final Collection<String> columnFamilies = new HashSet<>();
@@ -327,7 +327,7 @@ public class RepairOption
                         int jobThreads, Collection<Range<Token>> ranges, boolean isSubrangeRepair, boolean pushRepair,
                         boolean pullRepair, boolean forceRepair, PreviewKind previewKind, boolean optimiseStreams,
                         boolean ignoreUnreplicatedKeyspaces, boolean offlineService,
-                        String tenantId, String repairType)
+                        String entityId, String repairType)
     {
         if (FBUtilities.isWindows &&
             (DatabaseDescriptor.getDiskAccessMode() != Config.DiskAccessMode.standard || DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard) &&
@@ -352,7 +352,7 @@ public class RepairOption
         this.optimiseStreams = optimiseStreams;
         this.ignoreUnreplicatedKeyspaces = ignoreUnreplicatedKeyspaces;
         this.offlineService = offlineService;
-        this.tenantId = tenantId;
+        this.entityId = entityId;
         this.repairType = repairType;
     }
 
@@ -472,11 +472,11 @@ public class RepairOption
     }
 
     /**
-     * @return tenant identifier supplied by CNDB at repair initiation, or null if not set
+     * @return entity identifier supplied by CNDB at repair initiation, or null if not set
      */
-    public String getTenantId()
+    public String getEntityId()
     {
-        return tenantId;
+        return entityId;
     }
 
     /**
@@ -506,7 +506,7 @@ public class RepairOption
                ", optimise streams: " + optimiseStreams() +
                ", ignore unreplicated keyspaces: " + ignoreUnreplicatedKeyspaces +
                ", offline service: " + offlineService +
-               (tenantId   != null ? ", tenantId: "   + tenantId   : "") +
+               (entityId   != null ? ", entityId: "   + entityId   : "") +
                (repairType != null ? ", repairType: " + repairType : "") +
                ')';
     }

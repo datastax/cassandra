@@ -185,9 +185,9 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         // exception should be ignored
         if (error instanceof SomeRepairFailedException)
             return;
-        if (options.getTenantId() != null)
-            logger.error("Repair {} failed [tenant: {}, type: {}, keyspace: {}]:",
-                         parentSession, options.getTenantId(), options.getRepairType(), keyspace, error);
+        if (options.getEntityId() != null)
+            logger.error("Repair {} failed [entity: {}, type: {}, keyspace: {}]:",
+                         parentSession, options.getEntityId(), options.getRepairType(), keyspace, error);
         else
             logger.error("Repair {} failed:", parentSession, error);
 
@@ -219,7 +219,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         complete(completionMessage);
     }
 
-    private void complete(String msg)
+    protected void complete(String msg)
     {
         long durationMillis = System.currentTimeMillis() - creationTimeMillis;
         if (msg == null)
@@ -229,7 +229,12 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         }
 
         fireProgressEvent(new ProgressEvent(ProgressEventType.COMPLETE, progressCounter.get(), totalProgress, msg));
-        logger.info(options.getPreviewKind().logPrefix(parentSession) + msg);
+        if (options.getEntityId() != null)
+            logger.info("{}{} [entity: {}, type: {}, keyspace: {}]",
+                        options.getPreviewKind().logPrefix(parentSession), msg,
+                        options.getEntityId(), options.getRepairType(), keyspace);
+        else
+            logger.info(options.getPreviewKind().logPrefix(parentSession) + msg);
 
         ActiveRepairService.instance.removeParentRepairSession(parentSession);
         TraceState localState = traceState;
@@ -272,7 +277,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         }
     }
 
-    private void runMayThrow() throws Exception
+    protected void runMayThrow() throws Exception
     {
         ActiveRepairService.instance.recordRepairStatus(cmd, ParentRepairStatus.IN_PROGRESS, ImmutableList.of());
 
@@ -705,16 +710,13 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
 
         for (CommonRange commonRange : commonRanges)
         {
-            logger.info("Starting RepairSession for {}", commonRange);
+            logger.info("Starting RepairSession for parent={} range={} endpoints={}",
+                        parentSession, commonRange, commonRange.endpoints);
             RepairSession session = ActiveRepairService.instance.submitRepairSession(parentSession,
                                                                                      commonRange,
                                                                                      keyspace,
-                                                                                     options.getParallelism(),
+                                                                                     options,
                                                                                      isIncremental,
-                                                                                     options.isPushRepair(),
-                                                                                     options.isPullRepair(),
-                                                                                     options.getPreviewKind(),
-                                                                                     options.optimiseStreams(),
                                                                                      executor,
                                                                                      validationScheduler,
                                                                                      cfnames);
@@ -747,8 +749,8 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
 
         public void onSuccess(RepairSessionResult result)
         {
-            String message = String.format("Repair session %s for range %s finished", session.getId(),
-                                           session.ranges().toString());
+            String message = String.format("Repair session %s (parent=%s) for range %s finished",
+                                           session.getId(), parentSession, session.ranges().toString());
             logger.info(message);
             fireProgressEvent(new ProgressEvent(ProgressEventType.PROGRESS,
                                                 progressCounter.incrementAndGet(),
@@ -758,8 +760,8 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
 
         public void onFailure(Throwable t)
         {
-            String message = String.format("Repair session %s for range %s failed with error %s",
-                                           session.getId(), session.ranges().toString(), t.getMessage());
+            String message = String.format("Repair session %s (parent=%s) for range %s failed with error %s",
+                                           session.getId(), parentSession, session.ranges().toString(), t.getMessage());
             notifyError(new RuntimeException(message, t));
         }
     }

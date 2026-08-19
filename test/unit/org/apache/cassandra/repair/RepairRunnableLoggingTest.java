@@ -37,21 +37,25 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.service.StorageService;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 
 /**
  * Tests that RepairRunnable emits the expected log messages for observability changes:
- * - notifyError() includes tenant, repairType, and keyspace when tenantId is set
- * - notifyError() output is unchanged when tenantId is absent
+ * - notifyError() includes entity, repairType, and keyspace when entityId is set
+ * - notifyError() output is unchanged when entityId is absent
  */
 public class RepairRunnableLoggingTest
 {
-    private static final String KEYSPACE = "ks1";
-    private static final String TENANT_ID = "tenant-abc-123";
-    private static final String REPAIR_TYPE = "continuous";
+    private static final String KEYSPACE     = "ks1";
+    private static final String ENTITY_ID    = "entity-abc-123";
+    private static final String REPAIR_TYPE  = "continuous";
 
     private ListAppender<ILoggingEvent> appender;
     private Logger runnableLogger;
@@ -79,16 +83,16 @@ public class RepairRunnableLoggingTest
         appender.stop();
     }
 
-    private RepairRunnable runnableWithTenant()
+    private RepairRunnable runnableWithEntity()
     {
         Map<String, String> options = new HashMap<>();
-        options.put(RepairOption.TENANT_ID_KEY, TENANT_ID);
+        options.put(RepairOption.ENTITY_ID_KEY, ENTITY_ID);
         options.put(RepairOption.REPAIR_TYPE_KEY, REPAIR_TYPE);
         RepairOption repairOption = RepairOption.parse(options, Murmur3Partitioner.instance);
         return new RepairRunnable(mock(StorageService.class), 1, repairOption, KEYSPACE);
     }
 
-    private RepairRunnable runnableWithoutTenant()
+    private RepairRunnable runnableWithoutEntity()
     {
         RepairOption repairOption = RepairOption.parse(Collections.emptyMap(), Murmur3Partitioner.instance);
         return new RepairRunnable(mock(StorageService.class), 1, repairOption, KEYSPACE);
@@ -102,40 +106,39 @@ public class RepairRunnableLoggingTest
                             .collect(Collectors.toList());
     }
 
-
     @Test
-    public void testNotifyErrorIncludesTenantContextWhenSet()
+    public void testNotifyErrorIncludesEntityContextWhenSet()
     {
-        RepairRunnable runnable = runnableWithTenant();
+        RepairRunnable runnable = runnableWithEntity();
 
         runnable.notifyError(new RuntimeException("disk failure"));
 
         List<String> errors = capturedErrorMessages();
         assertFalse("Expected at least one error log", errors.isEmpty());
         String msg = errors.get(0);
-        assertTrue("Should contain tenant id",   msg.contains("tenant: " + TENANT_ID));
+        assertTrue("Should contain entity id",   msg.contains("entity: " + ENTITY_ID));
         assertTrue("Should contain repair type", msg.contains("type: " + REPAIR_TYPE));
         assertTrue("Should contain keyspace",    msg.contains("keyspace: " + KEYSPACE));
     }
 
     @Test
-    public void testNotifyErrorOmitsTenantContextWhenAbsent()
+    public void testNotifyErrorOmitsEntityContextWhenAbsent()
     {
-        RepairRunnable runnable = runnableWithoutTenant();
+        RepairRunnable runnable = runnableWithoutEntity();
 
         runnable.notifyError(new RuntimeException("disk failure"));
 
         List<String> errors = capturedErrorMessages();
         assertFalse("Expected at least one error log", errors.isEmpty());
         String msg = errors.get(0);
-        assertFalse("Should not contain tenant bracket block", msg.contains("[tenant:"));
+        assertFalse("Should not contain entity bracket block", msg.contains("[entity:"));
         assertTrue("Should still contain 'failed'", msg.contains("failed"));
     }
 
     @Test
     public void testNotifyErrorSuppressedForSomeRepairFailedException()
     {
-        RepairRunnable runnable = runnableWithTenant();
+        RepairRunnable runnable = runnableWithEntity();
 
         // SomeRepairFailedException must be silently ignored per existing contract
         runnable.notifyError(SomeRepairFailedException.INSTANCE);

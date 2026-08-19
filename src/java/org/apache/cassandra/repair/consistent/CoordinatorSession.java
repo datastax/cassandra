@@ -298,7 +298,8 @@ public class CoordinatorSession extends ConsistentSession
      */
     public ListenableFuture execute(Supplier<ListenableFuture<List<RepairSessionResult>>> sessionSubmitter, AtomicBoolean hasFailure)
     {
-        logger.info("Beginning coordination of incremental repair session {}", sessionID);
+        logger.info("Beginning coordination of incremental repair session {} with {} participant(s): {}",
+                    sessionID, participants.size(), participants);
 
         sessionStart = System.currentTimeMillis();
         ListenableFuture<Boolean> prepareResult = prepare();
@@ -311,10 +312,7 @@ public class CoordinatorSession extends ConsistentSession
                 if (success)
                 {
                     repairStart = System.currentTimeMillis();
-                    if (logger.isDebugEnabled())
-                    {
-                        logger.debug("Incremental repair {} prepare phase completed in {}", sessionID, formatDuration(sessionStart, repairStart));
-                    }
+                    logger.info("Incremental repair {} prepare phase completed in {}", sessionID, formatDuration(sessionStart, repairStart));
                     setRepairing();
                     return sessionSubmitter.get();
                 }
@@ -334,15 +332,13 @@ public class CoordinatorSession extends ConsistentSession
                 if (results == null || results.isEmpty() || Iterables.any(results, r -> r == null))
                 {
                     finalizeStart = System.currentTimeMillis();
-                    if (logger.isDebugEnabled())
-                    {
-                        logger.debug("Incremental repair {} validation/stream phase completed in {}", sessionID, formatDuration(repairStart, finalizeStart));
-
-                    }
+                    logger.info("Incremental repair {} validation/stream phase failed in {}", sessionID, formatDuration(repairStart, finalizeStart));
                     return Futures.immediateFailedFuture(SomeRepairFailedException.INSTANCE);
                 }
                 else
                 {
+                    finalizeStart = System.currentTimeMillis();
+                    logger.info("Incremental repair {} validation/stream phase completed in {}", sessionID, formatDuration(repairStart, finalizeStart));
                     return finalizePropose();
                 }
             }
@@ -360,15 +356,9 @@ public class CoordinatorSession extends ConsistentSession
                 {
                     if (result != null && result)
                     {
-                        if (logger.isDebugEnabled())
-                        {
-                            logger.debug("Incremental repair {} finalization phase completed in {}", sessionID, formatDuration(finalizeStart, System.currentTimeMillis()));
-                        }
+                        logger.info("Incremental repair {} finalization phase completed in {}", sessionID, formatDuration(finalizeStart, System.currentTimeMillis()));
                         finalizeCommit();
-                        if (logger.isDebugEnabled())
-                        {
-                            logger.debug("Incremental repair {} phase completed in {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
-                        }
+                        logger.info("Incremental repair {} completed in total {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
                     }
                     else
                     {
@@ -387,10 +377,7 @@ public class CoordinatorSession extends ConsistentSession
             {
                 try
                 {
-                    if (logger.isDebugEnabled())
-                    {
-                        logger.debug("Incremental repair {} phase failed in {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
-                    }
+                    logger.info("Incremental repair {} failed after {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
                     hasFailure.set(true);
                     fail();
                 }
