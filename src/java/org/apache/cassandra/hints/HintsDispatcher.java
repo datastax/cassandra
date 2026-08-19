@@ -17,15 +17,14 @@
  */
 package org.apache.cassandra.hints;
 
-import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.BooleanSupplier;
-import java.util.function.Function;
 
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.util.File;
@@ -41,8 +40,7 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 /**
  * Dispatches a single hints file to a specified node in a batched manner.
  *
- * Uses either {@link HintMessage.Encoded} - when dispatching hints into a node with the same messaging version as the hints file,
- * or {@link HintMessage}, when conversion is required.
+ * Decodes hints before dispatch so endpoint writability can be checked against the hint's keyspace.
  */
 final class HintsDispatcher implements AutoCloseable
 {
@@ -53,19 +51,17 @@ final class HintsDispatcher implements AutoCloseable
     private final HintsReader reader;
     final UUID hostId;
     final InetAddressAndPort address;
-    private final int messagingVersion;
     private final BooleanSupplier abortRequested;
 
     private InputPosition currentPagePosition;
 
-    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddressAndPort address, int messagingVersion, BooleanSupplier abortRequested)
+    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddressAndPort address, BooleanSupplier abortRequested)
     {
         currentPagePosition = null;
 
         this.reader = reader;
         this.hostId = hostId;
         this.address = address;
-        this.messagingVersion = messagingVersion;
         this.abortRequested = abortRequested;
     }
 
@@ -73,10 +69,9 @@ final class HintsDispatcher implements AutoCloseable
                                   RateLimiter rateLimiter,
                                   InetAddressAndPort address,
                                   UUID hostId,
-                                  int peerMessagingVersion,
                                   BooleanSupplier abortRequested)
     {
-        HintsDispatcher dispatcher = new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, peerMessagingVersion, abortRequested);
+        HintsDispatcher dispatcher = new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, abortRequested);
         HintDiagnostics.dispatcherCreated(dispatcher);
         return dispatcher;
     }
@@ -127,16 +122,7 @@ final class HintsDispatcher implements AutoCloseable
     {
         Collection<Callback> callbacks = new ArrayList<>();
 
-        /*
-         * If hints file messaging version matches the version of the target host, we'll use the optimised path -
-         * skipping the redundant decoding/encoding cycle of the already encoded hint.
-         *
-         * If that is not the case, we'll need to perform conversion to a newer (or an older) format, and decoding the hint
-         * is an unavoidable intermediate step.
-         */
-        Action action = reader.descriptor().messagingVersion() == messagingVersion
-                      ? sendHints(page.buffersIterator(), callbacks, this::sendEncodedHint)
-                      : sendHints(page.hintsIterator(), callbacks, this::sendHint);
+        Action action = sendHints(page.hintsIterator(), callbacks);
 
         if (action == Action.ABORT)
             return action;
@@ -171,12 +157,9 @@ final class HintsDispatcher implements AutoCloseable
         HintsServiceMetrics.hintsTimedOut.mark(timeouts);
     }
 
-    /*
-     * Sending hints in compatibility mode.
-     */
-
-    private <T> Action sendHints(Iterator<T> hints, Collection<Callback> callbacks, Function<T, Callback> sendFunction)
+    private Action sendHints(Iterator<Hint> hints, Collection<Callback> callbacks)
     {
+        List<Hint> hintsToSend = new ArrayList<>();
         while (hints.hasNext())
         {
             if (abortRequested.getAsBoolean())
@@ -184,9 +167,28 @@ final class HintsDispatcher implements AutoCloseable
                 HintDiagnostics.abortRequested(this);
                 return Action.ABORT;
             }
-            callbacks.add(sendFunction.apply(hints.next()));
+            Hint hint = hints.next();
+            if (!isWritable(hint))
+                return Action.ABORT;
+            hintsToSend.add(hint);
+        }
+
+        for (Hint hint : hintsToSend)
+        {
+            if (abortRequested.getAsBoolean())
+            {
+                HintDiagnostics.abortRequested(this);
+                return Action.ABORT;
+            }
+            callbacks.add(sendHint(hint));
         }
         return Action.CONTINUE;
+    }
+
+    private boolean isWritable(Hint hint)
+    {
+        String keyspace = hint.mutation().getKeyspaceName();
+        return DatabaseDescriptor.getEndpointSnitch().filterByAffinityForWrites(keyspace).test(address);
     }
 
     private Callback sendHint(Hint hint)
@@ -194,18 +196,6 @@ final class HintsDispatcher implements AutoCloseable
         Callback callback = new Callback(hint.creationTime);
         Message<?> message = Message.out(HINT_REQ, new HintMessage(hostId, hint));
         MessagingService.instance().sendWithCallback(message, address, callback);
-        return callback;
-    }
-
-    /*
-     * Sending hints in raw mode.
-     */
-
-    private Callback sendEncodedHint(ByteBuffer hint)
-    {
-        HintMessage.Encoded message = new HintMessage.Encoded(hostId, hint, messagingVersion);
-        Callback callback = new Callback(message.getHintCreationTime());
-        MessagingService.instance().sendWithCallback(Message.out(HINT_REQ, message), address, callback);
         return callback;
     }
 
