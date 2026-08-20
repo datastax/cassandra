@@ -581,9 +581,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
         }
 
-        /// Testing only, use specified values.
-        @VisibleForTesting
-        ShardingStats(PartitionPosition min, PartitionPosition max, long totalOnDiskSize, double overheadToDataRatio, double uniqueKeyRatio, double density, int shardCountForDensity, int coveredShardCount)
+        /**
+         * Reconstructs sharding statistics using the specified density and shard counts.
+         * Used by CNDB to propagate pre-computed density from the leader to follower compactor nodes,
+         * and for testing.
+         */
+        public ShardingStats(PartitionPosition min, PartitionPosition max, long totalOnDiskSize, double overheadToDataRatio, double uniqueKeyRatio, double density, int shardCountForDensity, int coveredShardCount)
         {
 
             this.min = min;
@@ -594,6 +597,37 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.density = density;
             this.shardCountForDensity = shardCountForDensity;
             this.coveredShardCount = coveredShardCount;
+        }
+
+        /**
+         * Clones this {@link ShardingStats} with an adjusted density, recomputing
+         * the shard counts based on the new density.
+         *
+         * @param density the new sharding density to apply, must be non-negative
+         * @param shardManager the {@link ShardManager} to calculate shard set coverage
+         * @param controller the {@link Controller} to determine the number of shards
+         * @return a new {@link ShardingStats} instance with the adjusted density
+         * @throws IllegalArgumentException if {@code density} is negative
+         * @throws NullPointerException if {@code shardManager} or {@code controller} is null
+         */
+        public ShardingStats cloneWithAdjustedDensity(double density, ShardManager shardManager, Controller controller)
+        {
+            Preconditions.checkArgument(density >= 0.0, "Density must be non-negative, but was %s", density);
+            Preconditions.checkNotNull(shardManager, "shardManager must not be null");
+            Preconditions.checkNotNull(controller, "controller must not be null");
+
+            int shardCountForDensity = controller.getNumShards(density * shardManager.shardSetCoverage());
+            int coveredShardCount = shardManager.coveredShardCount(this.min, this.max, shardCountForDensity);
+            return new ShardingStats(
+                this.min,
+                this.max,
+                this.totalOnDiskSize,
+                this.overheadToDataRatio,
+                this.uniqueKeyRatio,
+                density,
+                shardCountForDensity,
+                coveredShardCount
+            );
         }
     }
 
