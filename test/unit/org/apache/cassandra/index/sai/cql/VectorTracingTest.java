@@ -40,7 +40,7 @@ public class VectorTracingTest extends VectorTester.VersionedWithChecksums
     public void tracingTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "val"));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");

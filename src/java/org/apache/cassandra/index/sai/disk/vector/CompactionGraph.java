@@ -116,7 +116,8 @@ public class CompactionGraph implements Closeable, Accountable
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
 
-    private static boolean PARALLEL_ENCODING_WRITING = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED.getBoolean();
+    @VisibleForTesting
+    public static boolean PARALLEL_ENCODING_WRITING = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED.getBoolean();
     private static int PARALLEL_ENCODING_WRITING_NUM_THREADS = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_NUM_THREADS.getInt();
     private static boolean PARALLEL_ENCODING_WRITING_USE_DIRECT_BUFFERS = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS.getBoolean();
 
