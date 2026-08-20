@@ -58,8 +58,7 @@ public class CompositePartitionKeyIndexStaticTest extends SAITester
 
         // pk0: 23:15:13.897962392 -> (static clustering (existing), -1296648-01-08, -1306427-11-21)
         // s0: true -> (static clustering, -1306427-11-21)
-        // TODO: C* uses s1='뾕⌒籖' + '鋿紞', which is not yet supported by CC, but will be supported in CC 5.0
-        execute("UPDATE %s SET s0=true, s1='뾕⌒籖鋿紞', v0=true WHERE  pk0 = '23:15:13.897962392' AND  pk1 = -2272 AND  ck0 = '-1306427-11-21'");
+        execute("UPDATE %s SET s0=true, s1='뾕⌒籖' + '鋿紞', v0=true WHERE  pk0 = '23:15:13.897962392' AND  pk1 = -2272 AND  ck0 = '-1306427-11-21'");
 
         // Since the value of "true" is never mapped to the clustering -1296648-01-08, the intersection must begin
         // at the STATIC key. Otherwise, we will miss the WIDE key for clustering -1296648-01-08.
