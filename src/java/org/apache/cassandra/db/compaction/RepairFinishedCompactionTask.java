@@ -61,26 +61,28 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
 
     protected void runMayThrow() throws Exception
     {
-        boolean completed = false;
+        int sstableCount = transaction.originals().size();
         boolean obsoleteSSTables = isTransient && repairedAt > 0;
         try
         {
             if (obsoleteSSTables)
             {
-                logger.info("Obsoleting transient repaired sstables for {}", sessionID);
+                logger.info("Obsoleting {} transient repaired sstable(s) for session {} on {}.{}",
+                            sstableCount, sessionID,
+                            realm.metadata().keyspace, realm.metadata().name);
                 Preconditions.checkState(Iterables.all(transaction.originals(), SSTableReader::isTransient));
                 transaction.obsoleteOriginals();
             }
             else
             {
-                logger.info("Moving {} from pending to repaired with repaired at = {} for session id = {}", transaction.originals(), repairedAt, sessionID);
+                logger.info("Moving {} sstable(s) from pending to repaired (repairedAt={}, session={}) on {}.{}",
+                            sstableCount, repairedAt, sessionID,
+                            realm.metadata().keyspace, realm.metadata().name);
                 realm.mutateRepairedWithLock(transaction.originals(),
                                              repairedAt,
                                              ActiveRepairService.NO_PENDING_REPAIR,
                                              false);
-                realm.repairSessionCompleted(sessionID);
             }
-            completed = true;
         }
         finally
         {
@@ -96,10 +98,10 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
                 // compactions from marking these sstables compacting, and unmarking them when we're done
                 transaction.abort();
             }
-            if (completed)
-            {
-                realm.repairSessionCompleted(sessionID);
-            }
+            // always notify that the session finished, regardless of success/failure
+            realm.repairSessionCompleted(sessionID);
+            logger.info("RepairFinishedCompactionTask for session {} on {}.{} complete ({} sstable(s), obsolete={})",
+                        sessionID, realm.metadata().keyspace, realm.metadata().name, sstableCount, obsoleteSSTables);
         }
     }
 

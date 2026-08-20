@@ -24,6 +24,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.*;
@@ -41,6 +43,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.consistent.ConsistentSession;
 import org.apache.cassandra.repair.consistent.LocalSession;
 import org.apache.cassandra.repair.consistent.LocalSessions;
+import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.streaming.SessionSummary;
@@ -104,6 +107,10 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
     public final boolean isIncremental;
     public final PreviewKind previewKind;
 
+    /** Entity identifier supplied by CNDB, null when not set */
+    @Nullable
+    public final String entityId;
+
     private final AtomicBoolean isFailed = new AtomicBoolean(false);
 
     // Each validation task waits response from replica in validating ConcurrentMap (keyed by CF name and endpoint address)
@@ -124,9 +131,8 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
      * @param id this sessions id
      * @param commonRange ranges to repair
      * @param keyspace name of keyspace
-     * @param parallelismDegree specifies the degree of parallelism when calculating the merkle trees
-     * @param pushRepair true if the repair should be one way pushing differences to remote host
-     * @param pullRepair true if the repair should be one way (from remote host to this host and only applicable between two hosts--see RepairOption)
+     * @param options repair options, used to extract parallelism, push/pull repair, preview kind,
+     *                optimise streams, and entity context for logging
      * @param cfnames names of columnfamilies
      */
     public RepairSession(UUID parentRepairSession,
@@ -134,12 +140,8 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
                          Scheduler validationScheduler,
                          CommonRange commonRange,
                          String keyspace,
-                         RepairParallelism parallelismDegree,
+                         RepairOption options,
                          boolean isIncremental,
-                         boolean pushRepair,
-                         boolean pullRepair,
-                         PreviewKind previewKind,
-                         boolean optimiseStreams,
                          String... cfnames)
     {
         assert cfnames.length > 0 : "Repairing no column families seems pointless, doesn't it";
@@ -147,15 +149,16 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         this.validationScheduler = validationScheduler;
         this.parentRepairSession = parentRepairSession;
         this.id = id;
-        this.parallelismDegree = parallelismDegree;
-        this.pushRepair = pushRepair;
+        this.parallelismDegree = options.getParallelism();
+        this.pushRepair = options.isPushRepair();
         this.keyspace = keyspace;
         this.cfnames = cfnames;
         this.commonRange = commonRange;
         this.isIncremental = isIncremental;
-        this.previewKind = previewKind;
-        this.pullRepair = pullRepair;
-        this.optimiseStreams = optimiseStreams;
+        this.previewKind = options.getPreviewKind();
+        this.pullRepair = options.isPullRepair();
+        this.optimiseStreams = options.optimiseStreams();
+        this.entityId = options.getEntityId();
         this.taskExecutor = MoreExecutors.listeningDecorator(createExecutor());
     }
 
@@ -206,7 +209,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         }
 
         String message = String.format("Received merkle tree for %s from %s", desc.columnFamily, endpoint);
-        logger.info("{} {}", previewKind.logPrefix(getId()), message);
+        logger.info("{} parentSession={} {}", previewKind.logPrefix(getId()), parentRepairSession, message);
         Tracing.traceRepair(message);
         task.treesReceived(trees);
     }
@@ -247,6 +250,12 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         return sb.toString();
     }
 
+    /** Returns " [entity: <id>]" when entityId is set, empty string otherwise. */
+    private String entityTag()
+    {
+        return entityId != null ? " [entity: " + entityId + ']' : "";
+    }
+
     /**
      * Start RepairJob on given ColumnFamilies.
      *
@@ -262,8 +271,8 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         if (terminated)
             return;
 
-        logger.info("{} parentSessionId = {}: new session: will sync {} on range {} for {}.{}",
-                    previewKind.logPrefix(getId()), parentRepairSession, repairedNodes(), commonRange, keyspace, Arrays.toString(cfnames));
+        logger.info("{} parentSessionId = {}: new session: will sync {} on range {} for {}.{}{}",
+                    previewKind.logPrefix(getId()), parentRepairSession, repairedNodes(), commonRange, keyspace, Arrays.toString(cfnames), entityTag());
         Tracing.traceRepair("Syncing range {}", commonRange);
         if (!previewKind.isPreview())
         {
@@ -314,7 +323,8 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
             public void onSuccess(List<RepairResult> results)
             {
                 // this repair session is completed
-                logger.info("{} {}", previewKind.logPrefix(getId()), "Session completed successfully");
+                logger.info("{} parentSession={} session completed successfully on range {} for {}.{}{}",
+                            previewKind.logPrefix(getId()), parentRepairSession, commonRange, keyspace, Arrays.toString(cfnames), entityTag());
                 Tracing.traceRepair("Completed sync of range {}", commonRange);
                 set(new RepairSessionResult(id, keyspace, commonRange.ranges, results, commonRange.hasSkippedReplicas));
                 taskExecutor.shutdown();
@@ -325,7 +335,8 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
 
             public void onFailure(Throwable t)
             {
-                logger.error("{} Session completed with the following error", previewKind.logPrefix(getId()), t);
+                logger.error("{} parentSession={} session failed on range {} for {}.{}{}",
+                             previewKind.logPrefix(getId()), parentRepairSession, commonRange, keyspace, Arrays.toString(cfnames), entityTag(), t);
                 Tracing.traceRepair("Session completed with the following error: {}", t);
                 forceShutdown(t);
             }
