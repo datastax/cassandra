@@ -143,6 +143,7 @@ public class SecondaryIndexTest extends CQLTester
         execute("INSERT INTO %s (a, b) values (?, ?);", 2, 2);
         execute("INSERT INTO %s (a, b) values (?, ?);", 3, 1);
 
+        waitForIndexQueryable(removeQuotes(indexName.toLowerCase(Locale.US)));
         assertRows(execute("SELECT * FROM %s where b = ?", 1), row(1, 1), row(3, 1));
 
         if (addKeyspaceOnDrop)
