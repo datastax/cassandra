@@ -133,16 +133,18 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     private long deleteCDCFiles(File cdcLink, File cdcIndexFile)
     {
         long total = 0;
+        // Use deleteIfExists to tolerate a race where a concurrent actor (e.g. the test teardown
+        // or a CDC consumer) deletes the file between our exists() check and delete() call.
         if (cdcLink != null && cdcLink.exists())
         {
             total += cdcLink.length();
-            cdcLink.delete();
+            cdcLink.deleteIfExists();
         }
 
         if (cdcIndexFile != null && cdcIndexFile.exists())
         {
             total += cdcIndexFile.length();
-            cdcIndexFile.delete();
+            cdcIndexFile.deleteIfExists();
         }
         return total;
     }
