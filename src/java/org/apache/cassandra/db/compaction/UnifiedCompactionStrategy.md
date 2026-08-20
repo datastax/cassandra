@@ -424,6 +424,96 @@ compaction thread count by default. Using a jobs of 0 will let the compaction us
 as quickly as possible, but this will prevent other compaction operations from running until it completes and thus
 should be used with caution, only while the database is known to not receive any writes.
 
+When [time-driven levels](#time-driven-levels) are configured, major compaction applies **within** each time bucket
+independently. SSTables from different time buckets are never compacted together, even during a
+user-triggered major compaction (e.g. via `nodetool compact`). Each bucket's SSTables are
+major-compacted separately, producing distinct output files per bucket.
+
+## Time-driven levels
+
+To support time-partitioned workloads (similar to DateTieredCompactionStrategy or
+TimeWindowCompactionStrategy), UCS allows partitioning SSTables into separate compaction arenas
+based on the age of the data (determined by the SSTable's minimum timestamp).
+
+Time-driven levels are defined within the `scaling_parameters` option using semicolon-separated
+segments:
+1. **`until <duration>` (Transient young period)**: SSTables whose age (now - minimum timestamp)
+   is less than the duration are matched by this segment. Multiple `until` segments can be
+   defined; they must be ordered by strictly increasing duration.
+2. **`every <duration>` (Repeating time-window)**: Older SSTables (whose age is greater than all
+   `until` segments) are partitioned into fixed-size repeating time windows of the specified
+   duration. The window boundaries align to multiples of the duration since the Unix epoch.
+3. **Plain/unqualified scaling parameters**: The final segment in the list can also be plain
+   scaling parameters, which act as the catch-all for all remaining (older) SSTables.
+
+### Configuration Examples
+
+- **`T4 until 1d; L1000000 every 1d`**:
+  - SSTables younger than 1 day fall into the transient `until 1d` bucket and use tiered compaction
+    with fanout 4 (`T4`).
+  - SSTables older than 1 day are partitioned into fixed 1-day windows starting from the Unix epoch,
+    and each window is compacted independently using aggressive leveling (`L1000000`) inside that
+    window to merge all data into a single run.
+- **`T4 until 1d; T2 until 1w; L10`**:
+  - SSTables younger than 1 day fall into the `until 1d` bucket and use `T4` tiered compaction.
+  - SSTables between 1 day and 1 week old fall into the `until 1w` bucket and use `T2` tiered
+    compaction.
+  - SSTables older than 1 week fall into the base bucket and use `L10` leveled compaction.
+- **`T4 every 1d`**:
+  - All SSTables are partitioned into fixed 1-day windows, and each window is compacted
+    independently using `T4` tiered compaction (similar to traditional TWCS).
+
+### Regular Major Compaction of Closed Windows
+
+For time-series or time-partitioned workloads, it is often desirable to regularly perform a major
+compaction on older, closed windows. This merges all SSTables within each closed window into a single
+sorted run, which maximizes tombstone clearance and minimizes read amplification for historical data.
+
+This can be achieved under UCS by defining an older bucket with aggressive leveling (e.g., using `L1000000`
+as the scaling parameter). Because leveling with such a high fanout effectively limits the level structure
+to a single level (Level 0) with a massive capacity, UCS will automatically compact all SSTables that fall
+into that window into a single SSTable once the window is closed and no new data is being written to it.
+
+For example, with the configuration `T4 until 1d; L1000000 every 1d`:
+- During the first day, incoming data is compacted using `T4` (tiered compaction), which keeps write
+  amplification low.
+- Once the data becomes older than 1 day, it graduates to the repeating `every 1d` windows.
+- Each 1-day window is managed as a separate arena with `L1000000`. Once a window stops receiving new
+  writes, UCS triggers a compaction that merges all of its SSTables into a single file, effectively
+  performing a major compaction for that day's window.
+
+### SSTable Size Adjustment (Stranded SSTable Prevention)
+
+In time-window systems, traffic fluctuations can cause some windows to contain much smaller
+SSTables than normal. For example, if a node is configured with `T4 until 1d; L4` (where older
+data uses leveled compaction $L4$), a typical day might produce $16\text{ GiB}$ SSTables that end
+up on Level 2 in the older arena. However, a lower-traffic day might result in a $5\text{ GiB}$
+SSTable that falls on Level 1. Because subsequent days return to normal, this smaller SSTable
+remains on Level 1 and is never compacted, preventing tombstone clearance.
+
+To prevent stranded SSTables and avoid sudden base size fluctuations as large SSTables graduate to
+older buckets, UCS dynamically adjusts the Level 0 boundary (base SSTable size) of each older
+bucket.
+
+During the compaction planning phase, for each bucket $B$, UCS determines:
+1. **`youngerMaxDensity`**: The maximum density (size) among active SSTables currently present in
+   buckets younger than $B$.
+2. **`olderMinDensity`**: The minimum density (size) of any SSTable currently present in bucket $B$
+   itself.
+
+The base SSTable size for bucket $B$ is then adjusted to be the maximum of the configured base
+size, the younger maximum density, and the older minimum density:
+
+$$\text{baseSSTableSize}_B = \max(\text{baseSSTableSize}, \text{youngerMaxDensity}, \text{olderMinDensity})$$
+
+This ensures that:
+- Any SSTable entering an older bucket that is smaller than or equal to the size of data produced
+  by younger buckets starts at Level 0, allowing it to compact properly.
+- As large SSTables graduate from the younger bucket to the older bucket, the base size of the older
+  bucket does not drop suddenly (which would otherwise strand the graduated SSTables on higher
+  levels), since `olderMinDensity` holds the base size steady at the size of the graduated
+  SSTables.
+
 ## Differences with STCS and LCS
 
 Note that there are some differences between the tiered flavors of UCS (UCS-tiered) and STCS, and between the leveled
@@ -494,7 +584,12 @@ UCS accepts these compaction strategy parameters:
   N is the middle ground that has the features of levelled (one sstable run per level) as well as tiered (one
   compaction to be promoted to the next level) and a fan factor of 2. This can also be specified as T2 or L2.  
   The default value is T4, matching the default STCS behaviour with threshold 4. The default value in vector mode (see
-  paragraph below) is L10, equivalent to LCS with its default fan factor 10.
+  paragraph below) is L10, equivalent to LCS with its default fan factor 10.  
+  Time-driven levels can also be configured by suffixing scaling parameter segments with
+  `until <duration>` or `every <duration>`, separated by semicolons. For example,
+  `T4 until 1d; L1000000 every 1d` configures tiered compaction ($T4$) for data younger than 1 day,
+  and repeating 1-day windows with aggressive leveling ($L1000000$) for older data. See the
+  [Time-driven levels](#time-driven-levels) section above for more details.
 * `target_sstable_size` The target sstable size $t$, specified as a human-friendly size in bytes (e.g. 100 MiB =
   $100\cdot 2^{20}$ B or (10 MB = 10,000,000 B)). The strategy will split data in shards that aim to produce sstables
   of size between $t / \sqrt 2$ and $t \cdot \sqrt 2$.  

@@ -56,6 +56,17 @@ public class UnifiedCompactionStrategyTransactionClosingTest extends BaseCompact
         super.setUp();
     }
 
+    private Controller mockController()
+    {
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getScalingParameter(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
+        when(controller.getFanout(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
+        when(controller.getThreshold(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
+        when(controller.getMaxLevelDensity(Mockito.anyInt(), Mockito.anyDouble(), Mockito.any())).thenCallRealMethod();
+        when(controller.getBaseSstableSize(Mockito.anyInt(), Mockito.anyDouble())).thenCallRealMethod();
+        return controller;
+    }
+
     @Test
     @BMRules(rules = {
     @BMRule(name = "Throw exception to force tx closure",
@@ -74,7 +85,7 @@ public class UnifiedCompactionStrategyTransactionClosingTest extends BaseCompact
         allSSTables.addAll(mockNonOverlappingSSTables(12, 0, 100 << 20));
         dataTracker.addInitialSSTables(allSSTables);
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getNumShards(anyDouble())).thenReturn(10);
         when(controller.parallelizeOutputShards()).thenReturn(true);
         when(controller.maxConcurrentCompactions()).thenReturn(1000);
@@ -107,7 +118,7 @@ public class UnifiedCompactionStrategyTransactionClosingTest extends BaseCompact
         Set<SSTableReader> allSSTables = new HashSet<>(mockNonOverlappingSSTables(12, 0, 100 << 20));
         dataTracker.addInitialSSTables(allSSTables);
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getNumShards(anyDouble())).thenReturn(10);
         when(controller.parallelizeOutputShards()).thenReturn(true);
         when(controller.maxConcurrentCompactions()).thenReturn(1000);
