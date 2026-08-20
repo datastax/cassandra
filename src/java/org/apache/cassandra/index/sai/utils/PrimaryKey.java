@@ -171,7 +171,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
     }
 
     /**
-     * Load the primary key from the {@link Supplier<PrimaryKey>} (if one
+     * Load the primary key from the {@link Supplier} (if one
      * is available) and fully populate the primary key.
      *
      * @return the fully populated {@link PrimaryKey}
