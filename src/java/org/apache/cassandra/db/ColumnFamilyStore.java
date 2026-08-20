@@ -103,6 +103,7 @@ import org.apache.cassandra.db.compaction.CompactionStrategyFactory;
 import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.Scrubber;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.Verifier;
 import org.apache.cassandra.db.compaction.unified.Environment;
@@ -1866,11 +1867,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, boolean reinsertOverflowedTTL, int jobs) throws ExecutionException, InterruptedException
     {
-        return scrub(disableSnapshot, skipCorrupted, reinsertOverflowedTTL, false, checkData, jobs);
+        return scrub(disableSnapshot, skipCorrupted,
+                     reinsertOverflowedTTL ? Scrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : Scrubber.OverwriteTTLMode.NONE,
+                     checkData, jobs);
+    }
+
+    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, Scrubber.OverwriteTTLMode overwriteTTLMode, boolean checkData, int jobs) throws ExecutionException, InterruptedException
+    {
+        return scrub(disableSnapshot, skipCorrupted, overwriteTTLMode, false, checkData, jobs);
     }
 
     @VisibleForTesting
-    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, boolean reinsertOverflowedTTL, boolean alwaysFail, boolean checkData, int jobs) throws ExecutionException, InterruptedException
+    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, Scrubber.OverwriteTTLMode overwriteTTLMode, boolean alwaysFail, boolean checkData, int jobs) throws ExecutionException, InterruptedException
     {
         // skip snapshot creation during scrub, SEE JIRA 5891
         if(!disableSnapshot)
@@ -1878,7 +1886,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         try
         {
-            return CompactionManager.instance.performScrub(ColumnFamilyStore.this, skipCorrupted, checkData, reinsertOverflowedTTL, jobs);
+            return CompactionManager.instance.performScrub(ColumnFamilyStore.this, skipCorrupted, checkData, overwriteTTLMode, jobs);
         }
         catch(Throwable t)
         {
