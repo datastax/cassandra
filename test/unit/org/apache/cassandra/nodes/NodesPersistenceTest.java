@@ -84,7 +84,12 @@ public class NodesPersistenceTest extends CQLTester
     {
         LocalInfo info = new LocalInfo();
         fillLocalInfoSampleData(info);
+        // Drain any pending Nodes.local() background writes (e.g. schema version updates
+        // from CQLTester keyspace setup) that would otherwise overwrite system.local with
+        // a stale empty LocalInfo and clobber the tokens we're about to write.
+        Nodes.getInstance().awaitInflightUpdateCompletion();
         np.saveLocal(info.duplicate());
+        Nodes.getInstance().awaitInflightUpdateCompletion();
         LocalInfo loaded = np.loadLocal();
         assertThat(loaded).isEqualTo(info);
     }
@@ -107,12 +112,19 @@ public class NodesPersistenceTest extends CQLTester
     {
         LocalInfo info = new LocalInfo();
         fillLocalInfoSampleData(info);
+        // Drain any pending Nodes.local() background writes (e.g. schema version updates
+        // from CQLTester keyspace setup) that would otherwise overwrite system.local with
+        // a stale empty LocalInfo and clobber the tokens we're about to write.
+        Nodes.getInstance().awaitInflightUpdateCompletion();
         np.saveLocal(info);
+        Nodes.getInstance().awaitInflightUpdateCompletion();
         LocalInfo loaded = np.loadLocal();
         assertThat(loaded.getTokens()).hasSize(3);
         ArrayList<Token> tokens = Lists.newArrayList(loaded.getTokens());
         tokens.remove(0);
+        Nodes.getInstance().awaitInflightUpdateCompletion();
         np.saveLocal(loaded.duplicate().setTokens(tokens));
+        Nodes.getInstance().awaitInflightUpdateCompletion();
         loaded = np.loadLocal();
         assertThat(loaded.getTokens()).hasSize(2);
     }
