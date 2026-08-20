@@ -103,7 +103,15 @@ public class ShardedMultiWriterTest extends CQLTester
         cfs.metric.flushSizeOnDisk().update(totSizeBytes); // flush size is only updated after the flush completes; set here so that flush uses correct size
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
-        assertEquals(numOutputSSTables, cfs.getLiveSSTables().size());
+        // When isReplicaAware=true, shard split points are snapped to ring token boundaries chosen by
+        // the token allocator, which starts from a single randomly-picked ring token.  If the last
+        // split point lands close to MAX_TOKEN there may be no data past it, producing numShards-1
+        // output files instead of numShards.  The coverage assertions below still fully verify the
+        // correctness of the resulting shard layout in that case.
+        if (isReplicaAware)
+            assertThat(cfs.getLiveSSTables().size()).isBetween(numOutputSSTables - 1, numOutputSSTables);
+        else
+            assertEquals(numOutputSSTables, cfs.getLiveSSTables().size());
 
         if (isReplicaAware)
         {
