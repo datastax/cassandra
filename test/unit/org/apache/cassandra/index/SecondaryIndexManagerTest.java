@@ -189,18 +189,26 @@ public class SecondaryIndexManagerTest extends CQLTester
         // unlink sstable and index context: expect no rows to be read by base and index
         cfs.clearUnsafe();
         IndexMetadata indexMetadata = cfs.metadata().indexes.iterator().next();
-        ((StorageAttachedIndex) cfs.getIndexManager().getIndex(indexMetadata)).getIndexContext().prepareSSTablesForRebuild(sstables);
+        // First confirm that if we pass an empty set, the index stays queryable. Not sure if this is a realistic
+        // code path, but it seems plausible that we could have an unrelated sstable passed to this method in the
+        // event of a data race, and in that case, we should stay queryable.
+        ((StorageAttachedIndex) cfs.getIndexManager().getIndex(indexMetadata)).getIndexContext().prepareSSTablesForRebuild(Collections.emptySet());
         assertEmpty(execute("SELECT * FROM %s WHERE a=1"));
         assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
 
-        // TODO why? This change reverts back to behavior from before https://github.com/datastax/cassandra/pull/1491,
-        // but it seems invalid.
-        // track sstable again: expect no rows to be read by index
+        // Now pass the actual sstables: expect no rows to be read by base and for the index to be non-queryable because
+        // preparing an sstable for rebuild removes the index from the view, which would otherwise result in
+        // partial results.
+        ((StorageAttachedIndex) cfs.getIndexManager().getIndex(indexMetadata)).getIndexContext().prepareSSTablesForRebuild(sstables);
+        assertEmpty(execute("SELECT * FROM %s WHERE a=1"));
+        assertInvalid("SELECT * FROM %s WHERE c=1");
+
+        // track sstable again: expect index to remain non-queryable because it is not rebuilt (the view hasn't been updated)
         cfs.getTracker().addInitialSSTables(sstables);
         assertRows(execute("SELECT * FROM %s WHERE a=1"), row(1, 1, 1));
-        assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
+        assertInvalid("SELECT * FROM %s WHERE c=1");
 
-        // remote reload should trigger index rebuild
+        // remote reload should trigger index rebuild, making the index queryable again
         cfs.getTracker().notifySSTablesChanged(Collections.emptySet(), sstables, OperationType.REMOTE_RELOAD, Optional.empty(), null);
         waitForIndexBuilds(KEYSPACE, indexName); // this is needed because index build on remote reload is async
         assertRows(execute("SELECT * FROM %s WHERE a=1"), row(1, 1, 1));

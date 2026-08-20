@@ -581,7 +581,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
     public static PqInfo getPqIfPresent(IndexContext indexContext, Function<VectorCompression, Boolean> matcher)
     {
         // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
-        // or the one with the most rows if none reach that size
+        // or the one with the most rows if none reach that size. Can safely ignore whether the view is queryable
+        // because we're just getting the PQ, and if one is loaded, we can assume it was validated (at least as much
+        // as we validate any other index component for reads).
         var view = indexContext.getReferencedView(TimeUnit.SECONDS.toNanos(5));
         if (view == null)
         {
