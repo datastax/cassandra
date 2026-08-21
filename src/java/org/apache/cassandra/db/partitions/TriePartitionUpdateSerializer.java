@@ -243,13 +243,13 @@ public class TriePartitionUpdateSerializer
         public void serialize(Object content, DataOutputPlus out) throws IOException
         {
             if (content == null)                                 { out.writeByte(TYPE_NULL); return; }
+            if (content instanceof Cell)                         { out.writeByte(TYPE_CELL); serializeCell((Cell<?>) content, out); return; }
+            if (content instanceof LivenessInfo)                 { out.writeByte(TYPE_LIVENESS); serializeLiveness((LivenessInfo) content, out); return; }
             if (content == TrieBackedRow.COMPLEX_COLUMN_MARKER)  { out.writeByte(TYPE_COMPLEX_MARKER); return; }
             if (content == TrieBackedPartition.PARTITION_MARKER) { out.writeByte(TYPE_PARTITION_MARKER); return; }
 
-            if (content instanceof Cell)                 { out.writeByte(TYPE_CELL); serializeCell((Cell<?>) content, out); return; }
             if (content instanceof Row)                  { out.writeByte(TYPE_ROW); UnfilteredSerializer.serializer.serialize((Row) content, helper, out, version); return; }
             if (content instanceof RangeTombstoneMarker) { out.writeByte(TYPE_MARKER); UnfilteredSerializer.serializer.serialize((RangeTombstoneMarker) content, helper, out, version); return; }
-            if (content instanceof LivenessInfo)         { out.writeByte(TYPE_LIVENESS); serializeLiveness((LivenessInfo) content, out); return; }
             if (content instanceof TrieTombstoneMarker)  { out.writeByte(TYPE_TRIE_TOMBSTONE_MARKER); serializeTrieTombstoneMarker((TrieTombstoneMarker) content, out); return; }
 
             throw new IllegalArgumentException("Unknown content type in trie: " + content.getClass().getName());
@@ -263,11 +263,11 @@ public class TriePartitionUpdateSerializer
             {
                 case TYPE_NULL:                  return null;
                 case TYPE_CELL:                  return deserializeCell(in);
+                case TYPE_LIVENESS:              return deserializeLiveness(in);
                 case TYPE_ROW:                   return UnfilteredSerializer.serializer.deserialize(in, header, desHelper, BTreeRow.sortedBuilder());
                 case TYPE_MARKER:                return UnfilteredSerializer.serializer.deserialize(in, header, desHelper, BTreeRow.sortedBuilder());
                 case TYPE_COMPLEX_MARKER:        return TrieBackedRow.COMPLEX_COLUMN_MARKER;
                 case TYPE_PARTITION_MARKER:      return TrieBackedPartition.PARTITION_MARKER;
-                case TYPE_LIVENESS:              return deserializeLiveness(in);
                 case TYPE_TRIE_TOMBSTONE_MARKER: return deserializeTrieTombstoneMarker(in);
                 default:                         throw new IOException("Unknown content type tag: " + type);
             }
@@ -280,9 +280,9 @@ public class TriePartitionUpdateSerializer
                 return 1L;
 
             if (content instanceof Cell)                 return 1L + serializedSizeCell((Cell<?>) content);
+            if (content instanceof LivenessInfo)         return 1L + serializedSizeLiveness((LivenessInfo) content);
             if (content instanceof Row)                  return 1L + UnfilteredSerializer.serializer.serializedSize((Row) content, helper, version);
             if (content instanceof RangeTombstoneMarker) return 1L + UnfilteredSerializer.serializer.serializedSize((RangeTombstoneMarker) content, helper, version);
-            if (content instanceof LivenessInfo)         return 1L + serializedSizeLiveness((LivenessInfo) content);
             if (content instanceof TrieTombstoneMarker)  return 1L + serializedSizeTrieTombstoneMarker((TrieTombstoneMarker) content);
 
             throw new IllegalArgumentException("Unknown content type in trie: " + content.getClass().getName());
