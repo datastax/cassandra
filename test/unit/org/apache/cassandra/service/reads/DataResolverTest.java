@@ -36,7 +36,6 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.EmptyIterators;
-import org.apache.cassandra.db.MutableDeletionInfo;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.ReadCommand;
@@ -45,7 +44,6 @@ import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
@@ -660,10 +658,9 @@ public class DataResolverTest extends AbstractReadResponseTest
 
         // 1st "stream": a partition deletion and a range tombstone
         RangeTombstone rt1 = tombstone("0", true , "9", true, 11, nowInSec);
-        PartitionUpdate upd1 = new RowUpdateBuilder(cfm, nowInSec, 1L, dk)
+        PartitionUpdate upd1 = new RowUpdateBuilder(cfm, DeletionTime.build(10, nowInSec), nowInSec, 1L, dk)
                                .addRangeTombstone(rt1)
                                .buildUpdate();
-        ((MutableDeletionInfo)upd1.deletionInfo()).add(DeletionTime.build(10, nowInSec));
         UnfilteredPartitionIterator iter1 = iter(upd1);
 
         // 2nd "stream": a range tombstone that is covered by the other stream rt
@@ -742,7 +739,7 @@ public class DataResolverTest extends AbstractReadResponseTest
 
         long[] ts = {100, 200};
 
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(cfm2, false, false);
         builder.newRow(Clustering.EMPTY);
         builder.addComplexDeletion(m, DeletionTime.build(ts[0] - 1, nowInSec));
         builder.addCell(mapCell(0, 0, ts[0]));
@@ -794,7 +791,7 @@ public class DataResolverTest extends AbstractReadResponseTest
 
         long[] ts = {100, 200};
 
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(cfm2, false, false);
         builder.newRow(Clustering.EMPTY);
         builder.addComplexDeletion(m, DeletionTime.build(ts[0] - 1, nowInSec));
         builder.addCell(mapCell(0, 0, ts[0]));
@@ -839,7 +836,7 @@ public class DataResolverTest extends AbstractReadResponseTest
         long[] ts = {100, 200};
 
         // map column
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(cfm2, false, false);
         builder.newRow(Clustering.EMPTY);
         DeletionTime expectedCmplxDelete = DeletionTime.build(ts[0] - 1, nowInSec);
         builder.addComplexDeletion(m, expectedCmplxDelete);
@@ -889,7 +886,7 @@ public class DataResolverTest extends AbstractReadResponseTest
         long[] ts = {100, 200};
 
         // cleared map column
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(cfm2, false, false);
         builder.newRow(Clustering.EMPTY);
         builder.addComplexDeletion(m, DeletionTime.build(ts[0] - 1, nowInSec));
 

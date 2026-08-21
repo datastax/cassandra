@@ -26,18 +26,19 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
 
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.compaction.writers.SSTableDataSink;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.compaction.SortedStringTableCursor;
 import org.apache.cassandra.io.sstable.compaction.IteratorFromCursor;
 import org.apache.cassandra.io.sstable.compaction.PurgeCursor;
 import org.apache.cassandra.io.sstable.compaction.SSTableCursor;
 import org.apache.cassandra.io.sstable.compaction.SSTableCursorMerger;
 import org.apache.cassandra.io.sstable.compaction.SkipEmptyDataCursor;
+import org.apache.cassandra.io.sstable.compaction.SortedStringTableCursor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Clock;
@@ -53,7 +54,8 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
     private final OperationType type;
     private final CompactionController controller;
     private final SSTableCursor cursor;
-    private final Row.Builder rowBuilder;
+    private final Row.Builder rowBuilderRegular;
+    private final Row.Builder rowBuilderStatic;
 
     private final long totalBytes;
     private volatile long currentBytes;
@@ -74,7 +76,9 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
         this.type = type;
         this.mergedPartitionsHistogram = new long[readers.size()];
         this.mergedRowsHistogram = new long[readers.size()];
-        this.rowBuilder = BTreeRow.sortedBuilder();
+        TableMetadata metadata = controller.realm.metadata();
+        this.rowBuilderRegular = BTreeRow.sortedBuilder();
+        this.rowBuilderStatic = metadata.hasStaticColumns() ? BTreeRow.sortedBuilder() : null;
         this.cursor = makeMergedAndPurgedCursor(readers, tokenRange, controller, limiter, nowInSec);
         this.totalBytes = cursor.bytesTotal();
         this.currentBytes = 0;
@@ -160,7 +164,7 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
 
     private Row collectRow()
     {
-        return IteratorFromCursor.collectRow(cursor, rowBuilder);
+        return IteratorFromCursor.collectRow(cursor, cursor.clusteringKey() == Clustering.STATIC_CLUSTERING ? rowBuilderStatic : rowBuilderRegular);
     }
 
     private Unfiltered collectRangeTombstoneMarker()

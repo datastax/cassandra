@@ -226,14 +226,14 @@ public class AtomicBTreePartitionMemtableAccountingTest
         {
             // Test regular row updates
             Pair<Row, Row> regularRows = makeInitialAndUpdate(r1md, c2md);
-            PartitionUpdate initial = PartitionUpdate.singleRowUpdate(metadata, partitionKey, regularRows.left);
-            PartitionUpdate update = PartitionUpdate.singleRowUpdate(metadata, partitionKey, regularRows.right);
+            PartitionUpdate initial = BTreePartitionUpdate.singleRowUpdate(metadata, partitionKey, regularRows.left);
+            PartitionUpdate update = BTreePartitionUpdate.singleRowUpdate(metadata, partitionKey, regularRows.right);
             validateUpdates(metadata, partitionKey, Arrays.asList(initial, update));
 
             // Test static row updates
             Pair<Row, Row> staticRows = makeInitialAndUpdate(s3md, c4md);
-            PartitionUpdate staticInitial = PartitionUpdate.singleRowUpdate(metadata, partitionKey, staticRows.left);
-            PartitionUpdate staticUpdate = PartitionUpdate.singleRowUpdate(metadata, partitionKey, staticRows.right);
+            PartitionUpdate staticInitial = BTreePartitionUpdate.singleRowUpdate(metadata, partitionKey, staticRows.left);
+            PartitionUpdate staticUpdate = BTreePartitionUpdate.singleRowUpdate(metadata, partitionKey, staticRows.right);
             validateUpdates(metadata, partitionKey, Arrays.asList(staticInitial, staticUpdate));
         }
 
@@ -376,7 +376,7 @@ public class AtomicBTreePartitionMemtableAccountingTest
             updDeletion = updRow.deletion().time();
 
         long size = 0;
-        for (ColumnData exsCd : exsRow.columnData())
+        for (ColumnData exsCd : exsRow)
         {
             ColumnData updCd = updRow.getColumnData(exsCd.column());
             if (exsCd instanceof Cell)

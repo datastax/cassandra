@@ -48,6 +48,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
@@ -320,9 +321,9 @@ public class SSTableFlushObserverTest
         }
     }
 
-    private static Row buildRow(Collection<Cell<?>> cells)
+    private Row buildRow(Collection<Cell<?>> cells)
     {
-        Row.Builder rowBuilder = BTreeRow.sortedBuilder();
+        Row.Builder rowBuilder = PartitionUpdate.rowBuilder(cfm, false, true);
         rowBuilder.newRow(Clustering.EMPTY);
         cells.forEach(rowBuilder::addCell);
         return rowBuilder.build();
