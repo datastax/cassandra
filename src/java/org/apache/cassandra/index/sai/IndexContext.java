@@ -64,6 +64,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
@@ -728,9 +729,49 @@ public class IndexContext
         return null;
     }
 
+    /**
+     * Returns whether this index supports prefix ({@code LIKE '<term>%'}) and the other {@code LIKE}
+     * restrictions.
+     * <p>
+     * These are supported for plain string types when the index is not tokenized: the terms dictionary then
+     * contains whole (though possibly normalized, e.g. lowercased) terms in sorted order, so prefixes map to
+     * contiguous scans of it and the other patterns to automaton intersections with it. Tokenizing (Lucene)
+     * analyzers break the 1:1 mapping between column values and indexed terms, making pattern semantics over
+     * the indexed terms undefined.
+     */
+    public boolean supportsPrefixQueries()
+    {
+        // Reversed (DESC clustering) validators are excluded: Expression#add swaps the bounds for reversed
+        // types, which matches the byte-inverted encoding of numeric (kd-tree) terms but not the raw,
+        // un-reversed bytes literal terms are stored with — serving trie scans would return the wrong rows.
+        // Reversed literal columns keep the pre-existing filtering path (ALLOW FILTERING).
+        return TypeUtil.isUTF8OrAscii(validator)
+               && !validator.isReversed()
+               && !isNonFrozenCollection()
+               && indexType != IndexTarget.Type.FULL
+               && !hasCustomAnalyzer();
+    }
+
+    /**
+     * @return whether this index uses a custom (Lucene) index or query analyzer, i.e. one that may tokenize
+     * a value into multiple terms. Indexes with only the non-tokenizing options (case_sensitive, normalize,
+     * ascii) are not considered custom-analyzed.
+     */
+    private boolean hasCustomAnalyzer()
+    {
+        return config != null && (config.options.containsKey(LuceneAnalyzer.INDEX_ANALYZER)
+                                  || config.options.containsKey(LuceneAnalyzer.QUERY_ANALYZER));
+    }
+
     public boolean supports(Operator op)
     {
-        if (op.isLike() || op == Operator.LIKE) return false;
+        // LIKE restrictions are parsed as the generic LIKE operator and are only refined to
+        // LIKE_PREFIX/LIKE_SUFFIX/LIKE_CONTAINS/LIKE_MATCHES once the queried value is bound and its wildcards
+        // are examined. Non-tokenizing indexes over string types serve prefix queries (LIKE '<term>%') as a
+        // bounded scan over the sorted terms dictionary, and the remaining variants (LIKE '%<term>',
+        // LIKE '%<term>%', LIKE '<a>%<b>') by automaton intersection with the terms dictionary.
+        if (op == Operator.LIKE || op.isLike())
+            return supportsPrefixQueries();
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operators are ANALYZER_MATCHES and BM25.
         if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;

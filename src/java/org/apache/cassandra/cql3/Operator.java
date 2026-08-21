@@ -27,6 +27,7 @@ import java.util.List;
 import org.apache.cassandra.serializers.ListSerializer;
 
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public enum Operator
@@ -233,7 +234,15 @@ public enum Operator
 
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            return ByteBufferUtil.contains(leftOperand, rightOperand);
+            // The value is the whole LIKE pattern (no leading/trailing '%', see LikeRestriction#makeSpecific) and
+            // every '%' in it is an any-string wildcard; there are no escapes and '_' is a literal character. The
+            // pattern is evaluated with the exact same automaton the SAI index side uses
+            // (AutomatonQueries#fromLikePattern), keeping index results and post-filtering (e.g. replica filtering
+            // protection) in exact agreement.
+            // Note: this used to be a plain 'contains' check, which treated the '%' wildcards as literal
+            // characters and could therefore never match a value for a pattern that actually contains a wildcard.
+            return AutomatonQueries.accepts(AutomatonQueries.forPatternOperator(this, rightOperand, "?"),
+                                            leftOperand);
         }
     },
     LIKE(14)
