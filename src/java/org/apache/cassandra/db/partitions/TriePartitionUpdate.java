@@ -80,6 +80,8 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         EnumSet.of(TrieTombstoneMarker.Kind.ROW, TrieTombstoneMarker.Kind.RANGE, TrieTombstoneMarker.Kind.PARTITION);
 
     final int dataSize;
+    int serializedSizeDS21 = -1;
+    int serializedSizeDS20 = -1;
 
     /**
      * Package-private constructor used by {@link TriePartitionUpdateSerializer} and {@link TrieBuilder}

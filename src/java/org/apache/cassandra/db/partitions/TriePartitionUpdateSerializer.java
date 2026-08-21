@@ -43,6 +43,8 @@ import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import com.google.common.primitives.Ints;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -141,14 +143,26 @@ public class TriePartitionUpdateSerializer
     public static long serializedSize(PartitionUpdate update, int version)
     {
         TriePartitionUpdate trieUpdate = TriePartitionUpdate.asTrieUpdate(update);
+        if (version == MessagingService.VERSION_DS_21 && trieUpdate.serializedSizeDS21 >= 0)
+            return trieUpdate.serializedSizeDS21;
+        if (version == MessagingService.VERSION_DS_20 && trieUpdate.serializedSizeDS20 >= 0)
+            return trieUpdate.serializedSizeDS20;
+
         SerializationHeader header = new SerializationHeader(false, trieUpdate.metadata(), trieUpdate.columns(), trieUpdate.stats());
         SerializationHelper helper = new SerializationHelper(header);
         ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null);
 
-        return ByteBufferUtil.serializedSizeWithVIntLength(trieUpdate.partitionKey().getKey())
+        long size = ByteBufferUtil.serializedSizeWithVIntLength(trieUpdate.partitionKey().getKey())
                + 3L * Integer.BYTES
                + SerializationHeader.serializer.serializedSizeForMessaging(header, null, true)
                + serializedTrieSize(trieUpdate, pojoSerializer);
+
+        if (version == MessagingService.VERSION_DS_21)
+            trieUpdate.serializedSizeDS21 = Ints.saturatedCast(size);
+        else if (version == MessagingService.VERSION_DS_20)
+            trieUpdate.serializedSizeDS20 = Ints.saturatedCast(size);
+
+        return size;
     }
 
     private static long serializedTrieSize(TriePartitionUpdate trieUpdate, ContentManagerPojo.PojoSerializer<Object> pojoSerializer)
@@ -169,29 +183,20 @@ public class TriePartitionUpdateSerializer
     /// @throws IllegalArgumentException if the column is missing from the header
     private static int indexOfColumn(ColumnMetadata[] targetCols, ColumnMetadata col)
     {
+        int pos = col.position();
+        if (pos >= 0 && pos < targetCols.length && (targetCols[pos] == col || targetCols[pos].equals(col)))
+            return pos;
+
         int len = targetCols.length;
-        if (len == 1)
+        for (int i = 0; i < len; i++)
         {
-            if (targetCols[0] == col || targetCols[0].equals(col))
-                return 0;
+            if (targetCols[i] == col)
+                return i;
         }
-        else if (len == 2)
+        for (int i = 0; i < len; i++)
         {
-            if (targetCols[0] == col || targetCols[0].equals(col)) return 0;
-            if (targetCols[1] == col || targetCols[1].equals(col)) return 1;
-        }
-        else
-        {
-            for (int i = 0; i < len; i++)
-            {
-                if (targetCols[i] == col)
-                    return i;
-            }
-            for (int i = 0; i < len; i++)
-            {
-                if (targetCols[i].equals(col))
-                    return i;
-            }
+            if (targetCols[i].equals(col))
+                return i;
         }
         throw new IllegalArgumentException("Column not found in serialization header: " + col.name);
     }
