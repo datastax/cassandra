@@ -32,6 +32,7 @@ import org.apache.cassandra.exceptions.CasWriteUnknownResultException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.IsBootstrappingException;
 import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestFailureException;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
@@ -182,6 +183,13 @@ public interface Mutator
      *       time. An agreed value is decided: it WILL be completed (by the dispatched commit, or
      *       by any later operation or repair touching the partition) even though this operation
      *       reported failure to the client;</li>
+     *   <li>throws because {@link #onCasCommit} itself threw a {@link RequestExecutionException}
+     *       (a "veto", see {@link #onCasCommit}) — either for this operation's own
+     *       {@link CasCommitOrigin#CLIENT_OPERATION} commit, or for a foreign round's repair/refresh
+     *       encountered while completing it: the vetoed value is decided (or already committed) and
+     *       WILL be completed, but the vetoed dispatch was skipped (earlier iterations of the same
+     *       operation may have dispatched and completed other rounds' commits) — completion of the
+     *       vetoed round relies on a later operation or repair touching the partition;</li>
      *   <li>throws otherwise: this coordinator dispatched no commit (but see the v2 caveat above
      *       for propose-phase timeouts).</li>
      * </ul>
@@ -229,9 +237,47 @@ public interface Mutator
      * they never produce this callback. Low-level re-transmissions inside the v2 prepare exchange
      * ({@code PaxosPrepareRefresh}) are transport details and are not reported.
      * <p>
-     * Implementations should not throw and must not block. Throwing is contained by the caller
-     * ({@link MutatorProvider#notifyCasCommit}): the exception is logged and ignored, never
-     * failing the operation, read or repair dispatching the commit.
+     * Throwing: an implementation may VETO the dispatch — for any origin — by throwing a
+     * {@link RequestExecutionException} (e.g. {@link OverloadedException} to apply backpressure):
+     * the commit (or refresh) is NOT sent and the exception propagates out of
+     * {@link MutatorProvider#notifyCasCommit} to whatever drives the dispatch. The exception
+     * surfaces as thrown, with one caveat: the v1 engine rewraps a timeout-typed veto
+     * ({@link WriteTimeoutException}) into its standard CAS/read timeout conversions rather than
+     * rethrowing the exact instance — prefer non-timeout types such as {@link OverloadedException}. A veto never loses
+     * the value — when this callback fires the value is already agreed by a quorum, i.e. decided
+     * (or, for {@link CasCommitOrigin#REFRESH_COMMITTED}, already committed), and the
+     * still-uncommitted round WILL be re-attempted, re-firing this callback each time: by the next
+     * operation touching the partition (either engine) and, under the v2 engine with paxos repairs
+     * enabled, by the periodic auto-repair machinery ({@code PaxosUncommittedTracker},
+     * {@code cassandra.auto_repair_frequency_seconds}, default 5 minutes). A veto is therefore a
+     * "defer, retry later" signal, not a rejection — implementations need not block the calling
+     * thread to await downstream capacity. Per-origin consequences:
+     * <ul>
+     *   <li>{@link CasCommitOrigin#CLIENT_OPERATION}: the client CAS fails with the thrown
+     *       exception (every {@link RequestExecutionException} maps to a native-protocol error
+     *       code); {@link #onCasCommitCompleted} fires with {@link CasCommitOutcome#UNCONFIRMED},
+     *       including at commit consistency {@code ANY};</li>
+     *   <li>{@link CasCommitOrigin#REPAIR_IN_PROGRESS} / {@link CasCommitOrigin#REFRESH_COMMITTED}
+     *       fired from an operation (v1 {@code beginAndRepairPaxos}, v2 {@code Paxos.begin}): the
+     *       DRIVING operation — possibly another client's CAS or SERIAL/LOCAL_SERIAL read — fails
+     *       with the thrown exception (the operation cannot safely proceed without completing the
+     *       round, so backpressure here affects readers of the partition too). The v2 sites and the
+     *       v1 in-progress site deliver an {@link CasCommitOutcome#UNCONFIRMED} terminal; the v1
+     *       fire-and-forget refresh site delivers none (as ever);</li>
+     *   <li>background {@code PaxosRepair}: only that repair attempt fails (on its arbitrary
+     *       thread, no client involved, no terminal); the auto-repair machinery re-attempts it
+     *       later. The same sites also run under operator-driven paxos cleanup (anti-entropy
+     *       repair, topology operations), where a veto fails that cleanup session — it must be
+     *       re-run. Note the v1 engine has no auto-repair: an idle partition's vetoed round is
+     *       only re-attempted when traffic next touches it.</li>
+     * </ul>
+     * Sustained vetoing has operational cost: uncommitted rounds accumulate, serial operations on
+     * those partitions keep failing, and (v2) paxos repairs — a prerequisite for topology changes —
+     * cannot complete. Treat it as a transient overload response, not a steady state.
+     * <p>
+     * Any throwable that is not a {@link RequestExecutionException} is contained by
+     * {@link MutatorProvider#notifyCasCommit}: logged and ignored, never failing the operation,
+     * read or repair dispatching the commit. Implementations must not block.
      */
     default void onCasCommit(Commit committed, ConsistencyLevel consistencyLevel, CasCommitOrigin origin)
     {
@@ -276,11 +322,16 @@ public interface Mutator
      * NO terminal is delivered (only the dispatched {@link #onCasCommit} is) for the v1
      * {@link CasCommitOrigin#REFRESH_COMMITTED} fire-and-forget {@code sendCommit} (no awaited ack),
      * nor for any commit performed at {@code consistencyForCommit == ANY} (which does not block for a
-     * replica ack). For those, rely on a deferred serial read.
+     * replica ack). A veto (see {@link #onCasCommit}) delivers an
+     * {@link CasCommitOutcome#UNCONFIRMED} terminal — ANY included — at every site except the v1
+     * fire-and-forget refresh and the background {@code PaxosRepair} sites, which deliver none on
+     * failure (as ever). For sites without a terminal, rely on a deferred serial read.
      * <p>
-     * Threading and containment mirror {@link #onCasCommit}: implementations should not throw and
-     * must not block; a thrown exception is logged and ignored by
-     * {@link MutatorProvider#notifyCasCommitCompleted} and never fails the operation, read or repair.
+     * Threading mirrors {@link #onCasCommit}. Containment is unconditional here — unlike
+     * {@link #onCasCommit} there is no propagating (veto) case, since the outcome is already
+     * decided when this fires: implementations should not throw and must not block; a thrown
+     * exception is logged and ignored by {@link MutatorProvider#notifyCasCommitCompleted} and
+     * never fails the operation, read or repair.
      */
     default void onCasCommitCompleted(Commit committed, ConsistencyLevel consistencyLevel,
                                       CasCommitOrigin origin, CasCommitOutcome outcome)

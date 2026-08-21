@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -49,8 +50,13 @@ public abstract class MutatorProvider
 
     /**
      * Notifies the installed Mutator of a commit dispatch (see {@link Mutator#onCasCommit}),
-     * containing any exception a misbehaving implementation throws: a notification failure must
-     * never abort the paxos operation, serial read or repair that is dispatching the commit.
+     * containing any exception a misbehaving implementation throws — with one deliberate
+     * exception: a {@link RequestExecutionException} is a VETO of this dispatch and propagates,
+     * for every origin (see {@link Mutator#onCasCommit} for the per-origin consequences). The
+     * commit is skipped, the caller fails, and the decided-but-uncommitted round is re-attempted
+     * later — re-firing the notification — so a veto defers the commit, it never loses it.
+     * Everything else is logged and ignored: a notification bug must never abort the operation,
+     * read or repair dispatching the commit.
      */
     public static void notifyCasCommit(Commit committed, ConsistencyLevel consistencyLevel, Mutator.CasCommitOrigin origin)
     {
@@ -62,6 +68,8 @@ public abstract class MutatorProvider
         {
             // Let fatal errors (OOM etc.) reach the JVM failure policy before we swallow.
             JVMStabilityInspector.inspectThrowable(t);
+            if (t instanceof RequestExecutionException)
+                throw (RequestExecutionException) t;
             noSpamLogger.warn("Custom mutator onCasCommit({}) failed; ignoring", origin, t);
         }
     }
@@ -70,6 +78,8 @@ public abstract class MutatorProvider
      * Notifies the installed Mutator of the terminal outcome of a previously-announced commit (see
      * {@link Mutator#onCasCommitCompleted}), containing any exception a misbehaving implementation
      * throws: a notification failure must never abort the paxos operation, serial read or repair.
+     * Unlike {@link #notifyCasCommit} there is no propagating case here — the outcome is already
+     * decided when this fires, so throwing could change nothing.
      */
     public static void notifyCasCommitCompleted(Commit committed, ConsistencyLevel consistencyLevel,
                                                 Mutator.CasCommitOrigin origin, Mutator.CasCommitOutcome outcome)
