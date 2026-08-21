@@ -448,6 +448,79 @@ public class SlowQueryLoggerTest extends TestBaseImpl
     }
 
     /**
+     * Test that the slow query logger outputs the correct metrics for number of returned cells in user-defined types.
+     */
+    @Test
+    public void testUDTs()
+    {
+        cluster.schemaChange(withKeyspace("CREATE TYPE %s.udt (x int, y int, z int)"));
+        cluster.schemaChange(format("CREATE TABLE %s.%s (k int, c int, v int, u udt, fu frozen<udt>, PRIMARY KEY(k, c))"));
+        int numPartitions = 10;
+        int numClusterings = 10;
+        int numRows = 0;
+        String insert = format("INSERT INTO %s.%s (k, c, v, u, fu) VALUES (?, ?, ?, {x:1, y:2, z:3}, {x:1, y:2, z:3})");
+        for (int k = 0; k < numPartitions; k++)
+            for (int c = 0; c < numClusterings; c++)
+                coordinator.execute(insert, ALL, k, c, numRows++);
+
+        // unrestricted query
+        long mark = node.logs().mark();
+        Object[][] rows = coordinator.execute(format("SELECT * FROM %s.%s"), ALL);
+        Assertions.assertThat(rows).hasNumberOfRows(numRows);
+        assertLogsContain(mark, node,
+                          quote(format("<SELECT * FROM %s.%s ALLOW FILTERING>")),
+                          "  Fetched/returned/tombstones:",
+                          "    partitions: 10/10/0",
+                          "    rows: 100/100/0",
+                          "    cells: 500/500/-");
+
+        // partition query
+        mark = node.logs().mark();
+        rows = coordinator.execute(format("SELECT * FROM %s.%s WHERE k = 1 ALLOW FILTERING"), ALL);
+        Assertions.assertThat(rows).hasNumberOfRows(10);
+        assertLogsContain(mark, node,
+                          quote(format("<SELECT * FROM %s.%s WHERE k = ? ALLOW FILTERING>")),
+                          "  Fetched/returned/tombstones:",
+                          "    partitions: 1/1/0",
+                          "    rows: 10/10/0",
+                          "    cells: 50/50/-");
+
+        // filtered partition query
+        mark = node.logs().mark();
+        rows = coordinator.execute(format("SELECT * FROM %s.%s WHERE k = 1 AND v >= 15 ALLOW FILTERING"), ALL);
+        Assertions.assertThat(rows).hasNumberOfRows(5);
+        assertLogsContain(mark, node,
+                          quote(format("<SELECT * FROM %s.%s WHERE k = ? AND v >= ? ALLOW FILTERING>")),
+                          "  Fetched/returned/tombstones:",
+                          "    partitions: 1/1/0",
+                          "    rows: 10/5/0",
+                          "    cells: 50/25/-");
+
+        // row query
+        mark = node.logs().mark();
+        rows = coordinator.execute(format("SELECT * FROM %s.%s WHERE k = 1 AND c = 1"), ALL);
+        Assertions.assertThat(rows).hasNumberOfRows(1);
+        assertLogsContain(mark, node,
+                          quote(format("<SELECT * FROM %s.%s WHERE k = ? AND c = ? ALLOW FILTERING>")),
+                          "  Fetched/returned/tombstones:",
+                          "    partitions: 1/1/0",
+                          "    rows: 1/1/0",
+                          "    cells: 5/5/-");
+
+        // remove a field from the non-frozen UDT
+        coordinator.execute(format("DELETE u.z FROM %s.%s WHERE k = 1 AND c = 1"), ALL);
+        mark = node.logs().mark();
+        rows = coordinator.execute(format("SELECT * FROM %s.%s WHERE k = 1 AND c = 1"), ALL);
+        Assertions.assertThat(rows).hasNumberOfRows(1);
+        assertLogsContain(mark, node,
+                          quote(format("<SELECT * FROM %s.%s WHERE k = ? AND c = ? ALLOW FILTERING>")),
+                          "  Fetched/returned/tombstones:",
+                          "    partitions: 1/1/0",
+                          "    rows: 1/1/0",
+                          "    cells: 5/5/-");
+    }
+
+    /**
      * Test that the slow query logger outputs the correct metrics for static rows.
      */
     @Test

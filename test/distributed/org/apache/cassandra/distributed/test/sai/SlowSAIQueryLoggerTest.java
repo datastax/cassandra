@@ -818,6 +818,64 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
     }
 
     /**
+     * Test that the slow query logger outputs the correct metrics for number of returned cells in user-defined types.
+     */
+    @Test
+    public void testUDTs()
+    {
+        cluster.schemaChange(withKeyspace("CREATE TYPE %s.udt (x int, y int, z int)"));
+        cluster.schemaChange(format("CREATE TABLE %s.%s (k int, c int, v int, u udt, fu frozen<udt>, PRIMARY KEY(k, c))"));
+        cluster.schemaChange(format("CREATE CUSTOM INDEX ON %s.%s (v) USING 'StorageAttachedIndex'"));
+        int numPartitions = 10;
+        int numClusterings = 10;
+        int numRows = 0;
+        String insert = format("INSERT INTO %s.%s (k, c, v, u, fu) VALUES (?, ?, ?, {x:1, y:2, z:3}, {x:1, y:2, z:3})");
+        for (int k = 0; k < numPartitions; k++)
+            for (int c = 0; c < numClusterings; c++)
+                coordinator.execute(insert, ALL, k, c, numRows++);
+
+        node.flush(KEYSPACE);
+
+        // filtered range query
+        long mark = node.logs().mark();
+        Object[][] rows = coordinator.execute(format("SELECT * FROM %s.%s WHERE v >= 20"), ALL);
+        Assertions.assertThat(rows).hasNumberOfRows(80);
+        assertLogsContain(mark, node,
+                          quote(format("<SELECT * FROM %s.%s WHERE v >= ? ALLOW FILTERING>")),
+                          "SAI slow query metrics:",
+                          "sstablesHit: 3",
+                          "segmentsHit: 3",
+                          "keysFetched: 80",
+                          "partitionsFetched: 8",
+                          "partitionsReturned: 8",
+                          "partitionTombstonesFetched: 0",
+                          "rowsFetched: 80",
+                          "rowsReturned: 80",
+                          "rowTombstonesFetched: 0",
+                          "cellsFetched: 400",
+                          "cellsReturned: 400");
+
+        // filtered partition query
+        mark = node.logs().mark();
+        rows = coordinator.execute(format("SELECT * FROM %s.%s WHERE k = 1 AND v >= 15"), ALL);
+        Assertions.assertThat(rows).hasNumberOfRows(5);
+        assertLogsContain(mark, node,
+                          quote(format("<SELECT * FROM %s.%s WHERE k = ? AND v >= ? ALLOW FILTERING>")),
+                          "SAI slow query metrics:",
+                          "sstablesHit: 1",
+                          "segmentsHit: 1",
+                          "keysFetched: 5",
+                          "partitionsFetched: 1",
+                          "partitionsReturned: 1",
+                          "partitionTombstonesFetched: 0",
+                          "rowsFetched: 5",
+                          "rowsReturned: 5",
+                          "rowTombstonesFetched: 0",
+                          "cellsFetched: 25",
+                          "cellsReturned: 25");
+    }
+
+    /**
      * Test that the slow query logger outputs the correct metrics for static rows.
      */
     @Test
