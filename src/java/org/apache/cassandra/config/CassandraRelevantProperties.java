@@ -831,8 +831,8 @@ public enum CassandraRelevantProperties
     /**
      * Maximum number of terms an automaton-driven SAI query (LIKE with non-prefix wildcards) may visit in the
      * terms dictionaries and memtable index shards it touches, in total per query, before the query is failed
-     * with an {@link org.apache.cassandra.exceptions.InvalidRequestException} suggesting a more selective
-     * pattern.
+     * with the {@link org.apache.cassandra.exceptions.RequestFailureReason#SAI_AUTOMATON_EXPANSIONS_EXCEEDED}
+     * failure reason and a message suggesting a more selective pattern.
      */
     SAI_MAX_AUTOMATON_EXPANSIONS("cassandra.sai.max_automaton_expansions", "8192"),
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "8"),

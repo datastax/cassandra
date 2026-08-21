@@ -241,6 +241,9 @@ public enum Operator
             // protection) in exact agreement.
             // Note: this used to be a plain 'contains' check, which treated the '%' wildcards as literal
             // characters and could therefore never match a value for a pattern that actually contains a wildcard.
+            // NOT_LIKE_MATCHES negates this method and flips accordingly, and post-filtering of LIKE results
+            // served by custom (non-SAI) index implementations also evaluates these corrected semantics (see
+            // NEWS.txt).
             return AutomatonQueries.accepts(AutomatonQueries.forPatternOperator(this, rightOperand, "?"),
                                             leftOperand);
         }

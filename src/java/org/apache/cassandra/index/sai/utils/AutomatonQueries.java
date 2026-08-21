@@ -91,6 +91,16 @@ public final class AutomatonQueries
     // hundreds of MB of untracked static heap. The weigher approximates retained bytes from the automaton
     // state count; typical patterns weigh a few KB, so the budget still caches thousands of them.
     private static final long COMPILE_CACHE_MAX_WEIGHT_BYTES = 32 << 20;
+
+    /**
+     * Failed compiles (syntactically invalid or too complex to determinize) are cached too, keyed like
+     * {@link #COMPILE_CACHE}: without this, a bad pattern that reaches the per-row post-filter path (e.g. LIKE
+     * served by a custom index implementation, which bypasses the eager SAI coordinator compile) would re-run
+     * determinization up to the work limit for every candidate row. Entries are small (the error message), so a
+     * plain size bound suffices.
+     */
+    private static final Cache<CacheKey, String> FAILED_COMPILE_CACHE =
+        Caffeine.newBuilder().maximumSize(1024).build();
     private static final Cache<CacheKey, CompiledAutomaton> COMPILE_CACHE =
         Caffeine.newBuilder()
                 .maximumWeight(COMPILE_CACHE_MAX_WEIGHT_BYTES)
@@ -349,9 +359,13 @@ public final class AutomatonQueries
         // Zero-copy, lock-free probe: this runs per candidate row from the Operator#isSatisfiedBy post-filters,
         // so it must neither copy the pattern buffer nor contend on a shared monitor. ByteBuffer#equals/hashCode
         // compare content, so the caller's buffer can key the lookup directly.
-        CompiledAutomaton cached = COMPILE_CACHE.getIfPresent(new CacheKey(operator, value));
+        CacheKey probe = new CacheKey(operator, value);
+        CompiledAutomaton cached = COMPILE_CACHE.getIfPresent(probe);
         if (cached != null)
             return cached;
+        String cachedFailure = FAILED_COMPILE_CACHE.getIfPresent(probe);
+        if (cachedFailure != null)
+            throw new InvalidRequestException(String.format(INVALID_PATTERN_MESSAGE, operator, column, cachedFailure));
 
         CompiledAutomaton automaton;
         try
@@ -360,6 +374,7 @@ public final class AutomatonQueries
         }
         catch (TooComplexToDeterminizeException | IllegalArgumentException e)
         {
+            FAILED_COMPILE_CACHE.put(new CacheKey(operator, ByteBufferUtil.clone(value)), String.valueOf(e.getMessage()));
             throw new InvalidRequestException(String.format(INVALID_PATTERN_MESSAGE, operator, column, e.getMessage()));
         }
 

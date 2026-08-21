@@ -22,6 +22,7 @@ import java.util.Arrays;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.lucene.util.automaton.Automata;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 
@@ -198,6 +199,27 @@ public class AutomatonQueriesTest
         assertSame(first, AutomatonQueries.forPatternOperator(Operator.LIKE_CONTAINS, ByteBuffer.wrap(utf8("cache%test")), "c"));
         // the operator is part of the key: same bytes under another operator compile independently
         assertNotSame(first, AutomatonQueries.forPatternOperator(Operator.LIKE_MATCHES, ByteBuffer.wrap(utf8("cache%test")), "c"));
+    }
+
+    @Test
+    public void likeMatchesOperatorPostFilterSemantics()
+    {
+        // The LIKE_MATCHES post-filter (used by filtering and replica filtering protection) evaluates the same
+        // automaton as the index side: every '%' is an any-string wildcard. It used to be a plain 'contains'
+        // check treating '%' as a literal character, so 'a%b' patterns could never match.
+        ByteBuffer pattern = ByteBuffer.wrap(utf8("qu%ck"));
+        assertTrue(Operator.LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("quick")), pattern));
+        assertTrue(Operator.LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("quck")), pattern));
+        assertFalse(Operator.LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("qu%ck!")), pattern));
+        // a pattern without wildcards is an exact match, not a substring match
+        ByteBuffer exact = ByteBuffer.wrap(utf8("quick"));
+        assertTrue(Operator.LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("quick")), exact));
+        assertFalse(Operator.LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("quicker")), exact));
+
+        // NOT_LIKE_MATCHES (not reachable from CQL) is defined as the negation and flips accordingly
+        assertFalse(Operator.NOT_LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("quick")), pattern));
+        assertTrue(Operator.NOT_LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("qu%ck!")), pattern));
+        assertTrue(Operator.NOT_LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("quicker")), exact));
     }
 
     private static void assertAccepts(CompiledAutomaton automaton, String... candidates)

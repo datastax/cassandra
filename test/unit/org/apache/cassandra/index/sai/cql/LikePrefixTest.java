@@ -224,6 +224,23 @@ public class LikePrefixTest extends SAITester
     }
 
     @Test
+    public void testReversedClusteringColumnRejectsLike()
+    {
+        // Reversed (DESC clustering) literal columns store their kd-tree bounds byte-inverted, which does not
+        // match the raw bytes literal terms are stored with, so LIKE stays unsupported on them (see
+        // IndexContext#supportsPrefixQueries) and keeps the pre-existing filtering path.
+        createTable("CREATE TABLE %s (pk int, ck text, v int, PRIMARY KEY (pk, ck)) " +
+                    "WITH CLUSTERING ORDER BY (ck DESC)");
+        createIndex("CREATE CUSTOM INDEX ON %s(ck) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s (pk, ck, v) VALUES (?, ?, ?)", 1, "abc", 1);
+
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "ck"),
+                             "SELECT pk FROM %s WHERE ck LIKE 'ab%%' ALLOW FILTERING");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "ck"),
+                             "SELECT pk FROM %s WHERE ck LIKE '%%bc' ALLOW FILTERING");
+    }
+
+    @Test
     public void testCollectionIndexRejectsLike()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, l list<text>)");
