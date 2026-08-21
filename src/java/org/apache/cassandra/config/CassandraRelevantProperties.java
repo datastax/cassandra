@@ -650,8 +650,8 @@ public enum CassandraRelevantProperties
      * This prevents unbounded memory growth when log messages contain dynamic content.
      * Note: This property is accessed manually in NoSpamLogger via Long.getLong() to avoid circular dependencies.
      * The circular dependency occurs because some classes referenced in CassandraRelevantProperties use NoSpamLogger.
-     * For example, {@link StorageCompatibilityMode} has a NoSpamLogger instance and is referenced in
-     * TEST_STORAGE_COMPATIBILITY_MODE, which would create a circular dependency if NoSpamLogger tried to
+     * For example, {@link org.apache.cassandra.net.Message} has a NoSpamLogger instance and is referenced in
+     * CassandraRelevantProperties, which would create a circular dependency if NoSpamLogger tried to
      * access CassandraRelevantProperties during initialization.
      *
      * @see org.apache.cassandra.utils.NoSpamLogger
