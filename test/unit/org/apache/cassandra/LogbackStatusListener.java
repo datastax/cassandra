@@ -70,7 +70,7 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
         if (idx > 0 && (idx + 1) < args.size())
             System.setProperty("suitename", args.get(idx + 1));
         else
-            System.setProperty("suitename", args.get(1));
+            System.setProperty("suitename", args.size() > 1 ? args.get(1) : args.get(0));
     }
 
     @Override

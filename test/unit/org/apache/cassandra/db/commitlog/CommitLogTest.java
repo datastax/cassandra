@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.commitlog;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.io.util.File;
 
@@ -516,7 +517,8 @@ public abstract class CommitLogTest
         max -= ENTRY_OVERHEAD_SIZE; // log entry overhead
 
         // Note that the size of the value if vint encoded. So we first compute the ovehead of the mutation without the value and it's size
-        int mutationOverhead = rm.serializedSize(MessagingService.current_version) - (VIntCoding.computeVIntSize(allocSize) + allocSize);
+        int storageVersion = StorageCompatibilityMode.current().storageMessagingVersion();
+        int mutationOverhead = rm.serializedSize(storageVersion) - (VIntCoding.computeVIntSize(allocSize) + allocSize);
         max -= mutationOverhead;
 
         // Now, max is the max for both the value and it's size. But we want to know how much we can allocate, i.e. the size of the value.
@@ -597,7 +599,8 @@ public abstract class CommitLogTest
         {
             String message = exception.getMessage();
 
-            long mutationSize = mutation.serializedSize(MessagingService.current_version) + ENTRY_OVERHEAD_SIZE;
+            int storageVersion = StorageCompatibilityMode.current().storageMessagingVersion();
+            long mutationSize = mutation.serializedSize(storageVersion) + ENTRY_OVERHEAD_SIZE;
             final String expectedMessagePrefix = format("Rejected an oversized mutation (%d/%d) for keyspace: %s.",
                                                         mutationSize,
                                                         DatabaseDescriptor.getMaxMutationSize(),

@@ -18,12 +18,15 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.io.IOException;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -62,6 +65,96 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     InMemoryDeletionAwareTrie(ByteComparable.Version byteComparableVersion, Predicate<T> shouldPreserveContentWithoutChildren, BufferType bufferType, ExpectedLifetime lifetime, OpOrder opOrder)
     {
         super(byteComparableVersion, true, shouldPreserveContentWithoutChildren, bufferType, lifetime, opOrder);
+    }
+
+    /**
+     * Computes the serialized size footprint of this deletion-aware trie instance.
+     */
+    @SuppressWarnings("unchecked")
+    public long serializedSize(ContentManagerPojo.PojoSerializer<T> serializer)
+    {
+        long size = 1L; // ByteComparable.Version ordinal
+        size += 4L; // root node pointer
+        size += 1L; // buffer manager type discriminator tag
+        if (bufferManager instanceof BufferManagerMultibuf)
+            size += ((BufferManagerMultibuf) bufferManager).serializedSize();
+        else
+            throw new UnsupportedOperationException("Unsupported buffer manager type: " + bufferManager.getClass().getName());
+
+        size += 1L; // content manager type discriminator tag
+        if (contentManager instanceof ContentManagerPojo)
+            size += ((ContentManagerPojo<T>) contentManager).serializedSize(serializer);
+        else
+            throw new UnsupportedOperationException("Unsupported content manager type: " + contentManager.getClass().getName());
+
+        return size;
+    }
+
+    /**
+     * Serializes this deletion-aware trie into the given output stream.
+     * Emits byte-comparable version, root offset, buffer manager bytes, and content manager payloads.
+     */
+    @SuppressWarnings("unchecked")
+    public void serialize(DataOutputPlus out, ContentManagerPojo.PojoSerializer<T> serializer) throws IOException
+    {
+        out.writeByte(byteComparableVersion.ordinal());
+        out.writeInt(root);
+        if (bufferManager instanceof BufferManagerMultibuf)
+        {
+            out.writeByte(0);
+            ((BufferManagerMultibuf) bufferManager).serialize(out);
+        }
+        else
+        {
+            throw new UnsupportedOperationException("Unsupported buffer manager type: " + bufferManager.getClass().getName());
+        }
+
+        if (contentManager instanceof ContentManagerPojo)
+        {
+            out.writeByte(0);
+            ((ContentManagerPojo<T>) contentManager).serialize(out, serializer);
+        }
+        else
+        {
+            throw new UnsupportedOperationException("Unsupported content manager type: " + contentManager.getClass().getName());
+        }
+    }
+
+    private static final ByteComparable.Version[] VERSIONS = ByteComparable.Version.values();
+
+    /**
+     * Deserializes an {@link InMemoryDeletionAwareTrie} from the given input stream.
+     * Reads version, root pointer, buffer manager, and content manager.
+     * Guarantees that allocated off-heap buffers are safely discarded via {@link BufferManagerMultibuf#discardBuffers}
+     * if an exception occurs during content deserialization.
+     */
+    public static <T, D extends RangeState<D>> InMemoryDeletionAwareTrie<T, D> deserialize(DataInputPlus in, Predicate<T> shouldPreserveContentWithoutChildren, BufferType bufferType, ExpectedLifetime lifetime, OpOrder opOrder, ContentManagerPojo.PojoSerializer<T> serializer) throws IOException, TrieSpaceExhaustedException
+    {
+        int versionOrdinal = in.readByte() & 0xFF;
+        if (versionOrdinal >= VERSIONS.length)
+            throw new IOException("Invalid ByteComparable.Version ordinal: " + versionOrdinal);
+        ByteComparable.Version version = VERSIONS[versionOrdinal];
+        int root = in.readInt();
+        int bmType = in.readByte();
+        if (bmType != 0)
+            throw new IOException("Unknown buffer manager type tag: " + bmType);
+        BufferManagerMultibuf bm = BufferManagerMultibuf.deserialize(in, bufferType, lifetime, opOrder);
+        try
+        {
+            int cmType = in.readByte();
+            if (cmType != 0)
+                throw new IOException("Unknown content manager type tag: " + cmType);
+            ContentManagerPojo<T> cm = ContentManagerPojo.deserialize(in, shouldPreserveContentWithoutChildren, lifetime, opOrder, serializer);
+
+            InMemoryDeletionAwareTrie<T, D> trie = new InMemoryDeletionAwareTrie<>(version, bm, cm);
+            trie.root = root;
+            return trie;
+        }
+        catch (Throwable t)
+        {
+            bm.discardBuffers();
+            throw t;
+        }
     }
 
     InMemoryDeletionAwareTrie(ByteComparable.Version version, BufferManager bufferManager, ContentManager<T> contentManager)

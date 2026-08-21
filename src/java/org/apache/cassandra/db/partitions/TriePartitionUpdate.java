@@ -80,18 +80,39 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         EnumSet.of(TrieTombstoneMarker.Kind.ROW, TrieTombstoneMarker.Kind.RANGE, TrieTombstoneMarker.Kind.PARTITION);
 
     final int dataSize;
+    final int cellCount;
+    int serializedSizeDS21 = -1;
+    int serializedSizeDS20 = -1;
 
-    private TriePartitionUpdate(TableMetadata metadata,
-                                DecoratedKey key,
-                                RegularAndStaticColumns columns,
-                                EncodingStats stats,
-                                int rowCountIncludingStatic,
-                                int tombstoneCount,
-                                int dataSize,
-                                InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    /**
+     * Package-private constructor used by {@link TriePartitionUpdateSerializer} and {@link TrieBuilder}
+     * to instantiate immutable trie partition update instances.
+     */
+    TriePartitionUpdate(TableMetadata metadata,
+                        DecoratedKey key,
+                        RegularAndStaticColumns columns,
+                        EncodingStats stats,
+                        int rowCountIncludingStatic,
+                        int tombstoneCount,
+                        int dataSize,
+                        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    {
+        this(metadata, key, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, -1, trie);
+    }
+
+    TriePartitionUpdate(TableMetadata metadata,
+                        DecoratedKey key,
+                        RegularAndStaticColumns columns,
+                        EncodingStats stats,
+                        int rowCountIncludingStatic,
+                        int tombstoneCount,
+                        int dataSize,
+                        int cellCount,
+                        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
         super(key, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata);
         this.dataSize = dataSize;
+        this.cellCount = cellCount;
     }
 
     /// This is extremely inefficient and is to be used by tests only.
@@ -160,7 +181,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
         putInTrie(makeNoConflictMutator(trie), metadata, metadata.comparator, row);
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.deletion().isLive() ? 0 : 1, row.dataSize(), trie);
+        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.deletion().isLive() ? 0 : 1, row.dataSize(), row.columnCount(), trie);
     }
 
     /** @see PartitionUpdate.Factory#fromIterator(UnfilteredRowIterator)  */
@@ -301,6 +322,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         // If there is a partition-level deletion, we intend to delete at least the columns of one row.
         if (!partitionLevelDeletion().isLive())
             return metadata().regularAndStaticColumns().size();
+
+        if (cellCount >= 0)
+            return cellCount + tombstoneCount * metadata().regularColumns().size();
 
         return TrieBackedRow.countColumns(trie) +
                // Each range delete should correspond to at least one intended row deletion, and with it, its regular columns.
@@ -474,6 +498,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         private int rowCountIncludingStatic;
         /// Counts tombstone ranges and row deletions
         private int tombstoneCount;
+        private int cellCount;
         private long dataSize;
 
         private boolean isBuilt;
@@ -488,6 +513,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             isBuilt = false;
             rowCountIncludingStatic = 0;
             tombstoneCount = 0;
+            cellCount = 0;
             dataSize = 0;
             mutator = trie.mutator(this::mergeIncomingData,
                                    this::mergeTombstones,
@@ -555,6 +581,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                            rowCountIncludingStatic,
                                            tombstoneCount,
                                            Ints.saturatedCast(dataSize),
+                                           cellCount,
                                            trie);
         }
 
@@ -569,6 +596,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 Cell<?> reconciled;
                 if (existingCell == null)
                 {
+                    ++cellCount;
                     reconciled = updateCell;
                     dataSize += reconciled.dataSizeWithoutPath();
                 }
@@ -640,7 +668,10 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 if (!deletion.deletes(cell))
                     return o;
                 if (updateDataSize)
+                {
                     dataSize -= cell.dataSizeWithoutPath();
+                    --cellCount;
+                }
                 return null;
             }
             else if (o == TrieBackedRow.COMPLEX_COLUMN_MARKER)
