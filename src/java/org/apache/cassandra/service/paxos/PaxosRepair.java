@@ -247,6 +247,11 @@ public class PaxosRepair extends AbstractPaxosRepair
                 // note: we could send to only those we know haven't witnessed it, but this is a rare operation so a small amount of redundant work is fine
                 if (oldestCommitted.equals(latestCommitted.ballot))
                     return DONE;
+                // Here and at the two notify sites below: a veto (RequestExecutionException from
+                // Mutator.onCasCommit, rethrown by notifyCasCommit) escapes into
+                // AbstractPaxosRepair.updateState's failure handling, failing only this repair attempt;
+                // the round stays uncommitted and the paxos auto-repair machinery re-attempts it later,
+                // re-firing the notification.
                 MutatorProvider.notifyCasCommit(latestCommitted, commitConsistency(), Mutator.CasCommitOrigin.REFRESH_COMMITTED);
                 return PaxosCommit.commit(latestCommitted, participants, paxosConsistency, commitConsistency(), true,
                                           new CommittingRepair(latestCommitted, Mutator.CasCommitOrigin.REFRESH_COMMITTED));

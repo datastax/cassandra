@@ -74,6 +74,7 @@ import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.IsBootstrappingException;
+import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -780,7 +781,19 @@ public class Paxos
                         if (!proposal.update.isEmpty())
                         {
                             Agreed agreed = proposal.agreed();
-                            MutatorProvider.notifyCasCommit(agreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
+                            try
+                            {
+                                MutatorProvider.notifyCasCommit(agreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
+                            }
+                            catch (RequestExecutionException e)
+                            {
+                                // The installed Mutator vetoed the commit of a DECIDED value (see
+                                // MutatorProvider.notifyCasCommit): skip the dispatch, report UNCONFIRMED (a later
+                                // operation or repair will complete it) and fail the operation with the veto.
+                                markCasVeto(e, true, consistencyForCommit, metrics);
+                                MutatorProvider.notifyCasCommitCompleted(agreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.UNCONFIRMED);
+                                throw e;
+                            }
                             commit = commit(agreed, participants, consistencyForConsensus, consistencyForCommit, true);
                             committedAgreed = agreed;
                         }
@@ -1053,7 +1066,19 @@ public class Paxos
                 {
                     FoundIncompleteCommitted incomplete = prepare.incompleteCommitted();
                     Tracing.trace("Repairing replicas that missed the most recent commit");
-                    MutatorProvider.notifyCasCommit(incomplete.committed, consistencyForConsensus, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
+                    try
+                    {
+                        MutatorProvider.notifyCasCommit(incomplete.committed, consistencyForConsensus, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
+                    }
+                    catch (RequestExecutionException e)
+                    {
+                        // The installed Mutator vetoed the refresh (see MutatorProvider.notifyCasCommit): skip the
+                        // dispatch, report UNCONFIRMED, and abort the driving operation; the lagging replicas are
+                        // refreshed by a later operation or repair instead.
+                        markCasVeto(e, isWrite, consistencyForConsensus, metrics);
+                        MutatorProvider.notifyCasCommitCompleted(incomplete.committed, consistencyForConsensus, Mutator.CasCommitOrigin.REFRESH_COMMITTED, Mutator.CasCommitOutcome.UNCONFIRMED);
+                        throw e;
+                    }
                     retry = commitAndPrepare(incomplete.committed, incomplete.participants, query, isWrite, acceptEarlyReadPermission);
                     pendingFused = incomplete.committed;           // terminal delivered when 'retry' resolves
                     pendingFusedOrigin = Mutator.CasCommitOrigin.REFRESH_COMMITTED;
@@ -1086,7 +1111,20 @@ public class Paxos
                         case SUCCESS:
                         {
                             Agreed reproposeAgreed = repropose.agreed();
-                            MutatorProvider.notifyCasCommit(reproposeAgreed, consistencyForConsensus, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+                            try
+                            {
+                                MutatorProvider.notifyCasCommit(reproposeAgreed, consistencyForConsensus, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+                            }
+                            catch (RequestExecutionException e)
+                            {
+                                // The installed Mutator vetoed the repair commit of a DECIDED round (see
+                                // MutatorProvider.notifyCasCommit): skip the dispatch, report UNCONFIRMED, and abort
+                                // the driving operation; the round stays uncommitted and is re-attempted by a later
+                                // operation or by the paxos auto-repair machinery, re-firing the notification.
+                                markCasVeto(e, isWrite, consistencyForConsensus, metrics);
+                                MutatorProvider.notifyCasCommitCompleted(reproposeAgreed, consistencyForConsensus, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, Mutator.CasCommitOutcome.UNCONFIRMED);
+                                throw e;
+                            }
                             retry = commitAndPrepare(reproposeAgreed, inProgress.participants, query, isWrite, acceptEarlyReadPermission);
                             pendingFused = reproposeAgreed;        // terminal delivered when 'retry' resolves
                             pendingFusedOrigin = Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS;
@@ -1216,6 +1254,25 @@ public class Paxos
             toMark.apply(metrics.casReadMetrics).mark();
             toMark.apply(metrics.readMetricsForLevel(consistency)).mark();
         }
+    }
+
+    /**
+     * Marks the client request metrics for a {@link Mutator#onCasCommit} veto (see
+     * {@link MutatorProvider#notifyCasCommit}) with the meter matching the exception family, mirroring
+     * what the v1 engine's catch chains record for the same client-visible outcomes. Exception types
+     * without a dedicated meter mark nothing; the callers' finally blocks still record latency.
+     * Known family divergence, accepted for such an exotic veto type: a {@code ReadAbortException}
+     * (a {@code ReadFailureException} subtype) counts as a failure here, where the v1 chains would
+     * route it to {@code markAbort}.
+     */
+    private static void markCasVeto(RequestExecutionException veto, boolean isWrite, ConsistencyLevel consistency, ClientRequestsMetrics metrics)
+    {
+        if (veto instanceof OverloadedException || veto instanceof UnavailableException)
+            mark(isWrite, m -> m.unavailables, consistency, metrics);
+        else if (veto instanceof RequestTimeoutException)
+            mark(isWrite, m -> m.timeouts, consistency, metrics);
+        else if (veto instanceof RequestFailureException)
+            mark(isWrite, m -> m.failures, consistency, metrics);
     }
 
     public static Ballot newBallot(@Nullable Ballot minimumBallot, ConsistencyLevel consistency)

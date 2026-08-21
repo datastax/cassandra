@@ -90,6 +90,7 @@ import org.apache.cassandra.exceptions.QueryCancelledException;
 import org.apache.cassandra.exceptions.ReadAbortException;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestFailureException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
@@ -665,6 +666,33 @@ public class StorageProxy implements StorageProxyMBean
             lwtTracker.onError(e);
             throw e;
         }
+        catch (OverloadedException e)
+        {
+            // Thrown by checkHintOverload during the commit phase, or by a Mutator.onCasCommit veto.
+            metrics.casWriteMetrics.unavailables.mark();
+            metrics.writeMetricsForLevel(consistencyForPaxos).unavailables.mark();
+            Tracing.trace("Overloaded");
+            lwtTracker.onError(e);
+            throw e;
+        }
+        catch (RequestExecutionException e)
+        {
+            // Fallback for types outside the concrete families above -- typically a base-typed or
+            // custom Mutator.onCasCommit veto: mark the closest family meter (none for unknown
+            // families) and keep the tracker informed.
+            if (e instanceof RequestTimeoutException)
+            {
+                metrics.casWriteMetrics.timeouts.mark();
+                metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+            }
+            else if (e instanceof RequestFailureException)
+            {
+                metrics.casWriteMetrics.failures.mark();
+                metrics.writeMetricsForLevel(consistencyForPaxos).failures.mark();
+            }
+            lwtTracker.onError(e);
+            throw e;
+        }
         finally
         {
             // We track latency based on request processing time, since the amount of time that request spends in the queue
@@ -775,18 +803,23 @@ public class StorageProxy implements StorageProxyMBean
                     // them), this is worth bothering.
                     if (!proposal.update.isEmpty())
                     {
-                        MutatorProvider.notifyCasCommit(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
                         try
                         {
+                            // The notification may veto the commit: a RequestExecutionException thrown by
+                            // Mutator.onCasCommit propagates (see MutatorProvider.notifyCasCommit), skipping the
+                            // commit dispatch, and is handled below like any other commit failure.
+                            MutatorProvider.notifyCasCommit(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
                             commitPaxos(proposal, consistencyForCommit, true, requestTime, casMetrics);
                         }
                         catch (RuntimeException e)
                         {
                             // proposePaxos already returned true, so the value is DECIDED; any failure to confirm
-                            // the commit here (timeout, replica failure, interruption surfaced as
-                            // UncheckedInterruptedException) leaves it decided-but-not-confirmed: report UNCONFIRMED
-                            // before the failure surfaces to the client. (At CL=ANY commitPaxos does not block, so it
-                            // does not throw here; that case delivers no terminal, only the dispatched onCasCommit.)
+                            // the commit here (a mutator veto skipping the dispatch, timeout, replica failure,
+                            // interruption surfaced as UncheckedInterruptedException) leaves it
+                            // decided-but-not-confirmed: report UNCONFIRMED before the failure surfaces to the
+                            // client. (At CL=ANY commitPaxos does not block, so it does not throw here; that case
+                            // delivers no terminal, only the dispatched onCasCommit — unless the notification
+                            // itself vetoed, which does deliver UNCONFIRMED.)
                             MutatorProvider.notifyCasCommitCompleted(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.UNCONFIRMED);
                             throw e;
                         }
@@ -904,15 +937,20 @@ public class StorageProxy implements StorageProxyMBean
                     Commit refreshedInProgress = Commit.newProposal(ballot, inProgress.update);
                     if (proposePaxos(refreshedInProgress, paxosPlan, false, requestTime, casMetrics))
                     {
-                        MutatorProvider.notifyCasCommit(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
                         try
                         {
+                            // The notification may veto the commit: a RequestExecutionException thrown by
+                            // Mutator.onCasCommit propagates (see MutatorProvider.notifyCasCommit), skipping the
+                            // dispatch and aborting the driving operation; the recovered round stays uncommitted
+                            // and is re-attempted by a later operation on the partition.
+                            MutatorProvider.notifyCasCommit(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
                             commitPaxos(refreshedInProgress, consistencyForCommit, false, requestTime, casMetrics);
                         }
-                        catch (WriteTimeoutException e)
+                        catch (RuntimeException e)
                         {
-                            // recovered value decided but the commit was not acknowledged in time: report UNCONFIRMED
-                            // before the failure propagates. (CL=ANY does not block/throw here; no terminal then.)
+                            // recovered value decided but the commit was vetoed or not acknowledged in time: report
+                            // UNCONFIRMED before the failure propagates. (CL=ANY does not block/throw in commitPaxos;
+                            // absent a veto no terminal is delivered then.)
                             MutatorProvider.notifyCasCommitCompleted(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, Mutator.CasCommitOutcome.UNCONFIRMED);
                             throw e;
                         }
@@ -941,6 +979,9 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     Tracing.trace("Repairing replicas that missed the most recent commit");
                     casMetrics.missingMostRecentCommit.inc(missingMRCSize);
+                    // A veto (RequestExecutionException from Mutator.onCasCommit) propagates here too, skipping
+                    // the refresh and aborting the driving operation; the lagging replicas are refreshed by a
+                    // later operation instead. No terminal is delivered either way (fire-and-forget site).
                     MutatorProvider.notifyCasCommit(mostRecent, consistencyForCommit, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
                     sendCommit(mostRecent, missingMRC);
                     // TODO: provided commits don't invalid the prepare we just did above (which they don't), we could just wait
@@ -2296,6 +2337,18 @@ public class StorageProxy implements StorageProxyMBean
             readTracker.onError(e);
             throw e;
         }
+        catch (OverloadedException e)
+        {
+            // Thrown by checkHintOverload while committing a repaired round, or by a Mutator.onCasCommit veto
+            // of that commit (the serial read must complete in-progress rounds before it can proceed).
+            metrics.readMetrics.unavailables.mark();
+            metrics.casReadMetrics.unavailables.mark();
+            metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+            Tracing.trace("Overloaded");
+            logRequestException(e, group.queries);
+            readTracker.onError(e);
+            throw e;
+        }
         catch (ReadTimeoutException e)
         {
             metrics.readMetrics.timeouts.mark();
@@ -2318,6 +2371,29 @@ public class StorageProxy implements StorageProxyMBean
             metrics.readMetrics.failures.mark();
             metrics.casReadMetrics.failures.mark();
             metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+            readTracker.onError(e);
+            throw e;
+        }
+        catch (RequestExecutionException e)
+        {
+            // Fallback for types outside the concrete families above -- typically a base-typed or
+            // custom Mutator.onCasCommit veto: mark the closest family meter (none for unknown
+            // families) and keep the tracker informed.
+            if (e instanceof RequestTimeoutException)
+            {
+                metrics.readMetrics.timeouts.mark();
+                metrics.casReadMetrics.timeouts.mark();
+                metrics.readMetricsForLevel(consistencyLevel).timeouts.mark();
+                // logged for timeouts only, matching the concrete catches above (the failure-family
+                // ones deliberately do not log)
+                logRequestException(e, group.queries);
+            }
+            else if (e instanceof RequestFailureException)
+            {
+                metrics.readMetrics.failures.mark();
+                metrics.casReadMetrics.failures.mark();
+                metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+            }
             readTracker.onError(e);
             throw e;
         }
