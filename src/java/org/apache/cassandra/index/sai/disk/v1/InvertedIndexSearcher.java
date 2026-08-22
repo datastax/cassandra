@@ -170,10 +170,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         try (var rowIterator = sstable.iterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
         {
             // The primary key might not belong to this sstable, or this sstable might only hold a partition-level
-            // tombstone (or a static row) for it. In both cases there is no row to read. Note that isEmpty() is not a
-            // sufficient guard here: it is false as soon as the partition carries a deletion, and calling next() on an
-            // iterator without rows throws NoSuchElementException, which fails the whole query (see CNDB-13696 for
-            // the original, incomplete guard).
+            // tombstone (or a static row) for it. In both cases there is no row to read.
             if (!rowIterator.hasNext())
                 return null;
             var unfiltered = rowIterator.next();
