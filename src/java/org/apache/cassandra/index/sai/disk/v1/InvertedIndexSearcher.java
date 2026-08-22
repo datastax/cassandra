@@ -169,11 +169,17 @@ public class InvertedIndexSearcher extends IndexSearcher
         var slices = Slices.with(indexContext.comparator(), Slice.make(primaryKey.clustering()));
         try (var rowIterator = sstable.iterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
         {
-            // primaryKey might not belong to this sstable, thus the iterator will be empty
-            if (rowIterator.isEmpty())
+            // The primary key might not belong to this sstable, or this sstable might only hold a partition-level
+            // tombstone (or a static row) for it. In both cases there is no row to read. Note that isEmpty() is not a
+            // sufficient guard here: it is false as soon as the partition carries a deletion, and calling next() on an
+            // iterator without rows throws NoSuchElementException, which fails the whole query (see CNDB-13696 for
+            // the original, incomplete guard).
+            if (!rowIterator.hasNext())
                 return null;
             var unfiltered = rowIterator.next();
-            assert unfiltered.isRow() : unfiltered;
+            // A range tombstone marker covering the clustering means there is no row either.
+            if (!unfiltered.isRow())
+                return null;
             Row row = (Row) unfiltered;
             return row.getCell(indexContext.getDefinition());
         }

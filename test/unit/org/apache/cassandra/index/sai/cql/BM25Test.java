@@ -164,6 +164,59 @@ public class BM25Test extends SAITester
     }
 
     @Test
+    public void testSearchThenSortWithPartitionTombstoneInSeparateSSTable() throws Throwable
+    {
+        // A search-then-sort BM25 query reads each candidate row straight from every sstable. A partition that is
+        // present in an sstable only as a partition-level tombstone (deleted after the sstable holding its row was
+        // flushed) must be skipped, not fail the query with NoSuchElementException.
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text, n int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v, n) VALUES (1, 'apple', 0)");
+        execute("INSERT INTO %s (k, v, n) VALUES (2, 'apple juice', 0)");
+        // Insert many unrelated rows so we do search-then-sort
+        for (int i = 3; i < 100; i++)
+            execute("INSERT INTO %s (k, v, n) VALUES (?, 'apple juice', 1)", i);
+        flush();
+
+        // The tombstone for k = 2 lands in a second sstable, whose v index still exists thanks to k = 100, while the
+        // first sstable's n index keeps emitting k = 2 as a candidate.
+        execute("DELETE FROM %s WHERE k = 2");
+        execute("INSERT INTO %s (k, v, n) VALUES (100, 'pear', 1)");
+        flush();
+        String select = "SELECT k FROM %s WHERE n = 0 ORDER BY v BM25 OF 'apple' LIMIT 3";
+        assertRows(execute(select), row(1));
+
+        // Re-inserting the deleted key in a third sstable must not fail either, and the row must come back exactly once
+        execute("INSERT INTO %s (k, v, n) VALUES (2, 'apple juice', 0)");
+        flush();
+        assertRows(execute(select), row(1), row(2));
+        compact();
+        assertRows(execute(select), row(1), row(2));
+    }
+
+    @Test
+    public void testSearchThenSortWithRowReinsertedWithoutOrderedColumn() throws Throwable
+    {
+        // The live row has no value for the BM25 column (deleted and re-inserted without it) while an older sstable
+        // still holds and scores the previous value: the stale score must be discarded, not NPE during validation.
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text, n int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v, n) VALUES (1, 'apple', 0)");
+        execute("INSERT INTO %s (k, v, n) VALUES (2, 'apple juice', 0)");
+        // Insert many unrelated rows so we do search-then-sort
+        for (int i = 3; i < 100; i++)
+            execute("INSERT INTO %s (k, v, n) VALUES (?, 'apple juice', 1)", i);
+        flush();
+
+        execute("DELETE FROM %s WHERE k = 2");
+        execute("INSERT INTO %s (k, n) VALUES (2, 0)");
+        String select = "SELECT k FROM %s WHERE n = 0 ORDER BY v BM25 OF 'apple' LIMIT 3";
+        beforeAndAfterFlush(() -> assertRows(execute(select), row(1)));
+    }
+
+    @Test
     public void testTwoIndexesAmbiguousPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
