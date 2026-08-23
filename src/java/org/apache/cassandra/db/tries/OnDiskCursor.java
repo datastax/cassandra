@@ -126,7 +126,8 @@ public class OnDiskCursor<T> implements Cursor<T>
     long descendInto(long encodedPosition, long postCodePos, int nodeCode)
     {
         this.content = null;
-        this.currentEncodedPosition = encodedPosition;
+        // Content is loaded by the node implementation below; until it is, this node is known to have none.
+        this.currentEncodedPosition = encodedPosition & ~MAY_HAVE_CONTENT_BIT;
         this.postCodePos = postCodePos;
         this.nodeCode = nodeCode;
         this.currentImpl = selectNodeImpl(nodeCode);
@@ -230,12 +231,16 @@ public class OnDiskCursor<T> implements Cursor<T>
         int len = (int) readVInt(currentPos, vintlen);
         currentPos -= vintlen + len;
         content = rdr.deserialize(rdr, currentPos, len);
+        if (content != null)
+            currentEncodedPosition |= MAY_HAVE_CONTENT_BIT;
         return currentPos;
     }
 
     void getContentAtPosWithLength(long currentPos, int len)
     {
         content = rdr.deserialize(rdr, currentPos - len, len);
+        if (content != null)
+            currentEncodedPosition |= MAY_HAVE_CONTENT_BIT;
     }
 
 

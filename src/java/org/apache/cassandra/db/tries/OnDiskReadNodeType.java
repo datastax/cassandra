@@ -599,7 +599,11 @@ public enum OnDiskReadNodeType
         {
             state.getContentAtPos(state.postCodePos);
             state.descendPostPrefixToEmpty(); // no further children
-            return state.currentEncodedPosition = state.nodeImplData;
+            // The return-path position was saved before the content above was read, so re-apply the content flag.
+            long position = state.nodeImplData;
+            if (state.content != null)
+                position |= Cursor.MAY_HAVE_CONTENT_BIT;
+            return state.currentEncodedPosition = position;
         }
 
         @Override
@@ -617,6 +621,7 @@ public enum OnDiskReadNodeType
             boolean hasDescent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0;
             boolean hasChild = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_CHILD) != 0;
             Object saved = state.content;
+            long savedPosition = state.currentEncodedPosition;
             String descentContent = "";
             long pos = state.postCodePos;
             if (hasDescent)
@@ -630,7 +635,9 @@ public enum OnDiskReadNodeType
                 pos = state.getContentAtPos(pos);
                 ascentContent = "A[" + state.content + "]";
             }
+            // getContentAtPos above also sets the content flag on the position; this method must not change state.
             state.content = saved;
+            state.currentEncodedPosition = savedPosition;
             String children = hasChild ? " --> " + pos : "";
             return "Prefix: " + descentContent + ascentContent + children;
         }
