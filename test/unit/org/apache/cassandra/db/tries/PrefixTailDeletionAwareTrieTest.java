@@ -33,6 +33,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.checkerframework.checker.nullness.qual.NonNull;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
+import static org.apache.cassandra.db.tries.TrieUtil.asString;
 import static org.apache.cassandra.db.tries.TrieUtil.directComparable;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
 import static org.junit.Assert.assertEquals;
@@ -140,11 +141,11 @@ extends PrefixTailTestBase<InMemoryDeletionAwareTrie<Object, TestRangeState>,
     {
         // Note: Because we don't ensure order when calling resolve, just use a hash of the key as payload
         // (so that all sources have the same value).
-        int payload = InMemoryTrieTestBase.asString(b).hashCode() & 0x7fffffff; // must be positive for TestRangeState
+        int payload = asString(b).hashCode() & 0x7fffffff; // must be positive for TestRangeState
         ByteBuffer v = ByteBufferUtil.bytes(payload);
         content.put(b, v);
         if (InMemoryTrieTestBase.VERBOSE)
-            System.out.println("Adding " + InMemoryTrieTestBase.asString(b) + ": " + ByteBufferUtil.bytesToHex(v));
+            System.out.println("Adding " + asString(b) + ": " + ByteBufferUtil.bytesToHex(v));
 
         try
         {
