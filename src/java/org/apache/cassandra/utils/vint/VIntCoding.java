@@ -237,7 +237,7 @@ public class VIntCoding
             return -1;
 
         int firstByte = input.get(readerIndex);
-        return 1 + ((firstByte >= 0) ? 0 : numberOfExtraBytesToRead(firstByte));
+        return 1 + Integer.numberOfLeadingZeros(~(firstByte << 24));
     }
 
     public static long readVInt(DataInput input) throws IOException
