@@ -173,6 +173,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             while (rowIterator.hasNext())
             {
                 Unfiltered unfiltered = rowIterator.next();
+                // A range tombstone marker can precede the requested row, so skip non-row unfiltereds.
                 if (unfiltered.isRow())
                 {
                     Row row = (Row) unfiltered;
