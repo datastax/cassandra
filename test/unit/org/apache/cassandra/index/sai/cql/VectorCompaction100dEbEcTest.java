@@ -1,5 +1,5 @@
 /*
- * Copyright DataStax, Inc.
+ * Copyright IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,20 +22,15 @@ import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.index.sai.disk.format.Version;
 
-public class VectorCompaction100dTest extends VectorCompactionTest
+/**
+ * Shard of {@link VectorCompaction100dTest} covering versions EB and EC: the full version matrix
+ * takes longer than the test fork timeout on slow CI hosts.
+ */
+public class VectorCompaction100dEbEcTest extends VectorCompaction100dTest
 {
-    // The full version matrix takes longer than the test fork timeout on slow CI hosts, so the
-    // 100d suite is sharded by version: this class covers ED and later, older versions are covered
-    // by VectorCompaction100dEbEcTest and VectorCompaction100dLegacyTest.
     @Parameterized.Parameters(name = "version={0} enableNVQ={1}")
     public static Collection<Object[]> data()
     {
-        return data(v -> v.onOrAfter(Version.ED));
-    }
-
-    @Override
-    public int dimension()
-    {
-        return 100;
+        return data(v -> v.onOrAfter(Version.EB) && !v.onOrAfter(Version.ED));
     }
 }
