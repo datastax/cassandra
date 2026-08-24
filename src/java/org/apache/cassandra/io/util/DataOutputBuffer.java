@@ -282,6 +282,18 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
         return ByteBuffer.wrap(toByteArray());
     }
 
+    /**
+     * An in-memory buffer has no pages, so nothing written to it needs to be laid out to fit one.
+     * Reporting no limit disables the page-aware splitting a paged destination asks for; the base
+     * implementation throws, which would otherwise make this unusable as a destination for writers
+     * that consult it (such as the on-disk trie FileWriter).
+     */
+    @Override
+    public int maxBytesInPage()
+    {
+        return Integer.MAX_VALUE;
+    }
+
     public byte[] toByteArray()
     {
         ByteBuffer buffer = buffer();
