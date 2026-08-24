@@ -39,6 +39,7 @@ import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
@@ -171,12 +172,12 @@ public class InvertedIndexSearcher extends IndexSearcher
         {
             while (rowIterator.hasNext())
             {
-                var unfiltered = rowIterator.next();
-                if (!unfiltered.isRow())
-                    continue;
-
-                Row row = (Row) unfiltered;
-                return row.getCell(indexContext.getDefinition());
+                Unfiltered unfiltered = rowIterator.next();
+                if (unfiltered.isRow())
+                {
+                    Row row = (Row) unfiltered;
+                    return row.getCell(indexContext.getDefinition());
+                }
             }
             return null;
         }
