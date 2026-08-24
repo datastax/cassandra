@@ -143,13 +143,13 @@ public class ColumnFamilyStoreTest
     public void testRWCDLocking() throws InterruptedException
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
-        CountDownLatch task1StaredtLatch = new CountDownLatch(1);
+        CountDownLatch task1StartedtLatch = new CountDownLatch(1);
         CountDownLatch task1FinishLatch = new CountDownLatch(1);
-        CountDownLatch task2StaredtLatch = new CountDownLatch(1);
+        CountDownLatch task2StartedtLatch = new CountDownLatch(1);
 
         Thread task1 = new Thread(() -> {
             cfs.runWithCompactionsDisabled(() -> {
-                                               task1StaredtLatch.countDown();
+                                               task1StartedtLatch.countDown();
                                                try
                                                {
                                                    task1FinishLatch.await();
@@ -169,11 +169,11 @@ public class ColumnFamilyStoreTest
 
         // Wait until task1 is inside the critical section before starting task2, otherwise task2
         // could acquire the lock first
-        assertTrue(task1StaredtLatch.await(30, TimeUnit.SECONDS));
+        assertTrue(task1StartedtLatch.await(30, TimeUnit.SECONDS));
 
         Thread task2 = new Thread(() -> {
             cfs.runWithCompactionsDisabled(() -> {
-                                               task2StaredtLatch.countDown();
+                                               task2StartedtLatch.countDown();
                                                return null;
                                            },
                                            OperationType.P0,
@@ -186,7 +186,7 @@ public class ColumnFamilyStoreTest
         try
         {
             // Check that task2 stays blocked while task1 holds the lock
-            assertFalse(task2StaredtLatch.await(1, TimeUnit.SECONDS));
+            assertFalse(task2StartedtLatch.await(1, TimeUnit.SECONDS));
         }
         finally
         {
@@ -196,7 +196,7 @@ public class ColumnFamilyStoreTest
         }
 
         // Allow task1 to complete and check task2 completed next
-        assertTrue(task2StaredtLatch.await(30, TimeUnit.SECONDS));
+        assertTrue(task2StartedtLatch.await(30, TimeUnit.SECONDS));
 
         task1.join(TimeUnit.SECONDS.toMillis(30));
         task2.join(TimeUnit.SECONDS.toMillis(30));
