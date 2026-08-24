@@ -19,8 +19,10 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -130,6 +132,23 @@ implements DeletionAwareTrie<T, D>, Closeable
                 }
             }
         }
+    }
+
+    /// Open a trie that is already fully in memory — a commit-log record or a message payload —
+    /// rather than a file. The buffer must outlive every cursor taken from the result, and is not
+    /// released by [#close].
+    ///
+    /// `root` is the position the trie's root node ends at; pass -1 when the trie occupies the
+    /// whole buffer, since the writer emits the root last.
+    public static <T, D extends RangeState<D>> OnDiskDeletionAwareTrie<T, D> open(ByteBuffer buffer,
+                                                                                  OnDiskCursor.DataDeserializer<T> contentDeserializer,
+                                                                                  OnDiskCursor.DataDeserializer<D> deletionDeserializer,
+                                                                                  ByteComparable.Version version,
+                                                                                  long root)
+    {
+        ByteBufferRebufferer rebufferer = new ByteBufferRebufferer(buffer);
+        return new OnDiskDeletionAwareTrie<>(rebufferer, contentDeserializer, deletionDeserializer, version,
+                                             root >= 0 ? root : rebufferer.fileLength(), null);
     }
 
     public static <T, D extends RangeState<D>> OnDiskDeletionAwareTrie<T, D> open(File file,
