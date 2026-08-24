@@ -265,8 +265,9 @@ public interface Mutator
      *       v1 in-progress site deliver an {@link CasCommitOutcome#UNCONFIRMED} terminal; the v1
      *       fire-and-forget refresh site delivers none (as ever);</li>
      *   <li>background {@code PaxosRepair}: only that repair attempt fails (on its arbitrary
-     *       thread, no client involved, no terminal); the auto-repair machinery re-attempts it
-     *       later. The same sites also run under operator-driven paxos cleanup (anti-entropy
+     *       thread, no client involved), closing the announce with an
+     *       {@link CasCommitOutcome#UNCONFIRMED} terminal; the auto-repair machinery re-attempts
+     *       it later. The same sites also run under operator-driven paxos cleanup (anti-entropy
      *       repair, topology operations), where a veto fails that cleanup session — it must be
      *       re-run. Note the v1 engine has no auto-repair: an idle partition's vetoed round is
      *       only re-attempted when traffic next touches it.</li>
@@ -315,17 +316,20 @@ public interface Mutator
      *       ({@code beginAndRepairPaxos}): {@link CasCommitOutcome#APPLIED} or
      *       {@link CasCommitOutcome#UNCONFIRMED};</li>
      *   <li>background {@code PaxosRepair} ({@link CasCommitOrigin#REPAIR_IN_PROGRESS} /
-     *       {@link CasCommitOrigin#REFRESH_COMMITTED}): {@link CasCommitOutcome#APPLIED} only — this
-     *       background state machine retries on failure rather than delivering a negative terminal,
-     *       so a non-success outcome is not reported (best-effort, on an arbitrary repair thread).</li>
+     *       {@link CasCommitOrigin#REFRESH_COMMITTED}): {@link CasCommitOutcome#APPLIED} when the
+     *       commit is acknowledged, else {@link CasCommitOutcome#UNCONFIRMED} — delivered when a
+     *       retry re-announces the commit, or when the repair ends (failure, cancellation, veto or
+     *       exhausted retry budget) with the announce still open, so an implementation tracking
+     *       in-flight state per announce never leaks it (best-effort ordering, on an arbitrary
+     *       repair thread).</li>
      * </ul>
      * NO terminal is delivered (only the dispatched {@link #onCasCommit} is) for the v1
      * {@link CasCommitOrigin#REFRESH_COMMITTED} fire-and-forget {@code sendCommit} (no awaited ack),
      * nor for any commit performed at {@code consistencyForCommit == ANY} (which does not block for a
      * replica ack). A veto (see {@link #onCasCommit}) delivers an
      * {@link CasCommitOutcome#UNCONFIRMED} terminal — ANY included — at every site except the v1
-     * fire-and-forget refresh and the background {@code PaxosRepair} sites, which deliver none on
-     * failure (as ever). For sites without a terminal, rely on a deferred serial read.
+     * fire-and-forget refresh, which delivers none (as ever). For sites without a terminal, rely on
+     * a deferred serial read.
      * <p>
      * Threading mirrors {@link #onCasCommit}. Containment is unconditional here — unlike
      * {@link #onCasCommit} there is no propagating (veto) case, since the outcome is already

@@ -54,12 +54,15 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.paxos.AbstractPaxosRepair;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.BallotGenerator;
 import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.paxos.PaxosRepair;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -327,6 +330,9 @@ public class MutatorCasTest
     public static void defineSchema()
     {
         SchemaLoader.prepareServer();
+        // PaxosRepair's query phase has no execute-on-self shortcut (unlike the prepare/propose/commit
+        // paths): it always goes through messaging, so loopback delivery needs a live listener.
+        MessagingService.instance().listen();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE, TABLE));
@@ -1072,6 +1078,69 @@ public class MutatorCasTest
     public void serialReadCustomVetoPropagatesV2()
     {
         serialReadCustomVetoPropagates(Config.PaxosVariant.v2, "cas_read_custom_veto_v2");
+    }
+
+    /**
+     * Background {@code PaxosRepair} pairs every announce with a terminal even on failure: a veto
+     * thrown from {@link Mutator#onCasCommit} fails the repair attempt AND closes the announce
+     * with an UNCONFIRMED terminal (previously the failure was swallowed with no terminal, leaking
+     * any in-flight state a tracking implementation opened on the announce). Once the
+     * implementation stops throwing, a re-run repair completes the round with an APPLIED terminal.
+     */
+    @Test
+    public void paxosRepairVetoDeliversUnconfirmed() throws Exception
+    {
+        setPaxosVariant(Config.PaxosVariant.v2);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk("cas_paxos_repair_veto");
+
+        Ballot foreignBallot = BallotGenerator.Global.nextBallot(Ballot.Flag.GLOBAL);
+        PartitionUpdate foreignUpdate = insertRow(metadata, key, "foreign", foreignBallot.unixMicros());
+        SystemKeyspace.savePaxosProposal(Commit.newProposal(foreignBallot, foreignUpdate));
+        PaxosState.unsafeReset();
+
+        OverloadedException veto = new OverloadedException("mutator veto during background repair");
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = null; // every origin
+
+        // null success criteria: passing the foreign ballot itself would clash with the witnessed
+        // ballot (reproposalMayBeRejected) and poison-loop to the retry timeout instead of
+        // completing the accepted proposal
+        AbstractPaxosRepair.Result result =
+            PaxosRepair.create(ConsistencyLevel.SERIAL, key, null, metadata).start().await();
+        assertThat(result).as("the vetoed repair attempt fails").isInstanceOf(AbstractPaxosRepair.Failure.class);
+        List<CommitRecord> announces = RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+        assertThat(announces).as("the vetoed repair commit is still announced").hasSize(1);
+        // the completion listener runs just after await() unblocks, on the repair's thread
+        List<CommitRecord> terminals = awaitCompleted(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, 1);
+        assertThat(terminals).as("the failed repair pairs the announce with a terminal").hasSize(1);
+        assertThat(terminals.get(0).outcome).isEqualTo(Mutator.CasCommitOutcome.UNCONFIRMED);
+        assertThat(terminals.get(0).commit.update.partitionKey()).isEqualTo(key);
+
+        // Deferred, not lost: with the veto disarmed a re-run repair completes the round.
+        RecordingMutator.reset();
+        result = PaxosRepair.create(ConsistencyLevel.SERIAL, key, null, metadata).start().await();
+        assertThat(result).as("the retried repair succeeds").isNotInstanceOf(AbstractPaxosRepair.Failure.class);
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS))
+            .as("the retried repair re-announces the commit").hasSize(1);
+        List<CommitRecord> applied = awaitCompleted(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, 1);
+        assertThat(applied).hasSize(1);
+        assertThat(applied.get(0).outcome)
+            .as("an acknowledged repair commit completes as APPLIED")
+            .isEqualTo(Mutator.CasCommitOutcome.APPLIED);
+    }
+
+    /** The repair state machine delivers terminals on its own threads, just after await() unblocks. */
+    private static List<CommitRecord> awaitCompleted(Mutator.CasCommitOrigin origin, int expected) throws InterruptedException
+    {
+        long deadlineMillis = System.currentTimeMillis() + 10_000;
+        List<CommitRecord> records = RecordingMutator.completedWithOrigin(origin);
+        while (records.size() < expected && System.currentTimeMillis() < deadlineMillis)
+        {
+            Thread.sleep(10);
+            records = RecordingMutator.completedWithOrigin(origin);
+        }
+        return records;
     }
 
     /**
