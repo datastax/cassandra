@@ -20,9 +20,12 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nullable;
 
+import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -1256,16 +1259,20 @@ public class MutatorCasTest
     }
 
     /** The repair state machine delivers terminals on its own threads, just after await() unblocks. */
-    private static List<CommitRecord> awaitCompleted(Mutator.CasCommitOrigin origin, int expected) throws InterruptedException
+    private static List<CommitRecord> awaitCompleted(Mutator.CasCommitOrigin origin, int expected)
     {
-        long deadlineMillis = System.currentTimeMillis() + 10_000;
-        List<CommitRecord> records = RecordingMutator.completedWithOrigin(origin);
-        while (records.size() < expected && System.currentTimeMillis() < deadlineMillis)
+        try
         {
-            Thread.sleep(10);
-            records = RecordingMutator.completedWithOrigin(origin);
+            Awaitility.await()
+                      .atMost(10, TimeUnit.SECONDS)
+                      .pollInterval(10, TimeUnit.MILLISECONDS)
+                      .until(() -> RecordingMutator.completedWithOrigin(origin).size() >= expected);
         }
-        return records;
+        catch (ConditionTimeoutException e)
+        {
+            // fall through: the caller's assertion reports the terminals actually delivered
+        }
+        return RecordingMutator.completedWithOrigin(origin);
     }
 
     /**

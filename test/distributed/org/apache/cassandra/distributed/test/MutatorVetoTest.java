@@ -19,9 +19,12 @@ package org.apache.cassandra.distributed.test;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nullable;
 
+import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -87,7 +90,7 @@ public class MutatorVetoTest extends CASTestBase
     private static final String REQUEST_TIMEOUT = "2000ms";
     private static final String CONTENTION_TIMEOUT = "2000ms";
 
-    private static Cluster FOUR_NODES;
+    private static Cluster cluster;
 
     @BeforeClass
     public static void beforeClass() throws Throwable
@@ -97,23 +100,23 @@ public class MutatorVetoTest extends CASTestBase
         // properties are JVM-global), exactly how a real deployment installs a custom Mutator.
         CassandraRelevantProperties.CUSTOM_MUTATOR_CLASS.setString(VetoMutator.class.getName());
         TestBaseImpl.beforeClass();
-        FOUR_NODES = init(Cluster.build(4)
-                                 .withConfig(config -> config.set("paxos_variant", "v2")
-                                                             .set("write_request_timeout", REQUEST_TIMEOUT)
-                                                             .set("cas_contention_timeout", CONTENTION_TIMEOUT)
-                                                             .set("request_timeout", REQUEST_TIMEOUT))
-                                 .withoutVNodes()
-                                 .start(), 3);
+        cluster = init(Cluster.build(4)
+                              .withConfig(config -> config.set("paxos_variant", "v2")
+                                                          .set("write_request_timeout", REQUEST_TIMEOUT)
+                                                          .set("cas_contention_timeout", CONTENTION_TIMEOUT)
+                                                          .set("request_timeout", REQUEST_TIMEOUT))
+                              .withoutVNodes()
+                              .start(), 3);
         // Warm the paxos paths on every coordinator: the first CAS of a cold cluster can burn its
         // whole operation deadline before reaching the commit phase, leaving the scenarios below
         // with nothing to repair.
-        FOUR_NODES.schemaChange("CREATE TABLE " + KEYSPACE + ".warmup (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
+        cluster.schemaChange("CREATE TABLE " + KEYSPACE + ".warmup (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
         for (int i = 1; i <= 3; i++)
-            FOUR_NODES.coordinator(i).execute("INSERT INTO " + KEYSPACE + ".warmup (pk, ck, v) VALUES (?, 1, 1) IF NOT EXISTS", QUORUM, i);
+            cluster.coordinator(i).execute("INSERT INTO " + KEYSPACE + ".warmup (pk, ck, v) VALUES (?, 1, 1) IF NOT EXISTS", QUORUM, i);
         // Schema changes need every instance reachable: create all scenario tables while the ring
         // is whole.
         for (String table : new String[]{ "veto_repair", "veto_poison", "veto_begin" })
-            FOUR_NODES.schemaChange("CREATE TABLE " + KEYSPACE + '.' + table + " (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
+            cluster.schemaChange("CREATE TABLE " + KEYSPACE + '.' + table + " (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
         // Class invariant: {4} stays out of the ring, so every scenario runs on the stable
         // {1, 2, 3} topology; only beginIncompleteCommittedVetoAbortsOperation promotes {4} to
         // bootstrapping and puts it back afterwards.
@@ -123,8 +126,8 @@ public class MutatorVetoTest extends CASTestBase
     @AfterClass
     public static void afterClass()
     {
-        if (FOUR_NODES != null)
-            FOUR_NODES.close();
+        if (cluster != null)
+            cluster.close();
     }
 
     /**
@@ -227,52 +230,59 @@ public class MutatorVetoTest extends CASTestBase
 
     private static void resetMutator(int node)
     {
-        FOUR_NODES.get(node).runOnInstance(VetoMutator::reset);
+        cluster.get(node).runOnInstance(VetoMutator::reset);
     }
 
     private static String announces(int node)
     {
-        return FOUR_NODES.get(node).callOnInstance(() -> String.join(",", VetoMutator.announces));
+        return cluster.get(node).callOnInstance(() -> String.join(",", VetoMutator.announces));
     }
 
     private static void armRefreshVeto(int node, boolean armed)
     {
-        FOUR_NODES.get(node).runOnInstance(() -> VetoMutator.vetoRefresh = armed);
+        cluster.get(node).runOnInstance(() -> VetoMutator.vetoRefresh = armed);
     }
 
     private static int refreshAnnounced(int node)
     {
         // NOTE: must be a lambda, not a bound method reference — the latter would capture this
         // classloader's static AtomicInteger instead of the instance's.
-        return FOUR_NODES.get(node).callOnInstance(() -> VetoMutator.refreshAnnounced.get());
+        return cluster.get(node).callOnInstance(() -> VetoMutator.refreshAnnounced.get());
     }
 
-    private static List<String> awaitTerminals(int node, int expected) throws InterruptedException
+    private static List<String> awaitTerminals(int node, int expected)
     {
-        long deadline = System.currentTimeMillis() + 20_000;
-        List<String> result;
-        while ((result = terminals(node)).size() < expected && System.currentTimeMillis() < deadline)
-            Thread.sleep(50);
-        return result;
+        try
+        {
+            Awaitility.await()
+                      .atMost(20, TimeUnit.SECONDS)
+                      .pollInterval(50, TimeUnit.MILLISECONDS)
+                      .until(() -> terminals(node).size() >= expected);
+        }
+        catch (ConditionTimeoutException e)
+        {
+            // fall through: the caller's assertion reports the terminals actually delivered
+        }
+        return terminals(node);
     }
 
     private static List<String> terminals(int node)
     {
-        String joined = FOUR_NODES.get(node).callOnInstance(() -> String.join(",", VetoMutator.terminals));
+        String joined = cluster.get(node).callOnInstance(() -> String.join(",", VetoMutator.terminals));
         return joined.isEmpty() ? List.of() : List.of(joined.split(","));
     }
 
     private static void takeNodeFourOutOfRing()
     {
         for (int i = 1; i <= 4; ++i)
-            FOUR_NODES.get(i).acceptsOnInstance(CASTestBase::removeFromRing).accept(FOUR_NODES.get(4));
+            cluster.get(i).acceptsOnInstance(CASTestBase::removeFromRing).accept(cluster.get(4));
     }
 
 
     /** Runs a PaxosRepair for {@code pk} on {@code node}; returns "OK", or the failure cause prefixed with "FAILURE: ". */
     private static String repairOnNode(int node, String tableName, int pk)
     {
-        return FOUR_NODES.get(node).callOnInstance(() -> {
+        return cluster.get(node).callOnInstance(() -> {
             TableMetadata schema = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName).metadata.get();
             DecoratedKey key = schema.partitioner.decorateKey(Int32Type.instance.decompose(pk));
             try
@@ -292,9 +302,9 @@ public class MutatorVetoTest extends CASTestBase
 
     private static boolean hasRowInternally(int node, String tableName, int pk)
     {
-        return FOUR_NODES.get(node)
-                         .executeInternal("SELECT ck FROM " + KEYSPACE + '.' + tableName + " WHERE pk = ? AND ck = 1", pk)
-                         .length > 0;
+        return cluster.get(node)
+                      .executeInternal("SELECT ck FROM " + KEYSPACE + '.' + tableName + " WHERE pk = ? AND ck = 1", pk)
+                      .length > 0;
     }
 
     /**
@@ -306,11 +316,11 @@ public class MutatorVetoTest extends CASTestBase
     private static void commitOnlyOn(int coordinator, int holder, String tableName, int pk, int[] dropTo, int[] mustLack)
     {
         IMessageFilters.Filter dropCommits =
-            FOUR_NODES.filters().verbs(PAXOS_COMMIT_REQ.id).from(coordinator).to(dropTo).drop();
+            cluster.filters().verbs(PAXOS_COMMIT_REQ.id).from(coordinator).to(dropTo).drop();
         try
         {
-            FOUR_NODES.coordinator(coordinator)
-                      .execute("INSERT INTO " + KEYSPACE + '.' + tableName + " (pk, ck, v) VALUES (?, 1, 1) IF NOT EXISTS", QUORUM, pk);
+            cluster.coordinator(coordinator)
+                   .execute("INSERT INTO " + KEYSPACE + '.' + tableName + " (pk, ck, v) VALUES (?, 1, 1) IF NOT EXISTS", QUORUM, pk);
             Assert.fail("the CAS commit cannot reach a quorum and must time out");
         }
         catch (RuntimeException expected)
@@ -338,7 +348,7 @@ public class MutatorVetoTest extends CASTestBase
     {
         // schema changes need the whole ring: create the table before taking {4} out
         String tableName = "veto_repair";
-        int pk = pk(FOUR_NODES, 1, 2);
+        int pk = pk(cluster, 1, 2);
 
         commitOnlyOn(1, 3, tableName, pk, to(1, 2), to(1, 2));
 
@@ -359,8 +369,8 @@ public class MutatorVetoTest extends CASTestBase
         resetMutator(2);
         AtomicInteger dropped = new AtomicInteger();
         IMessageFilters.Filter dropFirstAttempt =
-            FOUR_NODES.filters().verbs(PAXOS_COMMIT_REQ.id).from(2).to(1, 2, 3)
-                      .messagesMatching((from, to, message) -> dropped.incrementAndGet() <= 3).drop();
+            cluster.filters().verbs(PAXOS_COMMIT_REQ.id).from(2).to(1, 2, 3)
+                   .messagesMatching((from, to, message) -> dropped.incrementAndGet() <= 3).drop();
         try
         {
             Assert.assertEquals("the retried repair must complete", "OK", repairOnNode(2, tableName, pk));
@@ -374,8 +384,8 @@ public class MutatorVetoTest extends CASTestBase
                             List.of("REFRESH_COMMITTED:UNCONFIRMED", "REFRESH_COMMITTED:APPLIED"), terminals);
         Assert.assertEquals(2, refreshAnnounced(2));
 
-        assertRows(FOUR_NODES.coordinator(3).execute("SELECT pk, ck, v FROM " + KEYSPACE + '.' + tableName + " WHERE pk = ?",
-                                                     org.apache.cassandra.distributed.api.ConsistencyLevel.SERIAL, pk),
+        assertRows(cluster.coordinator(3).execute("SELECT pk, ck, v FROM " + KEYSPACE + '.' + tableName + " WHERE pk = ?",
+                                                  org.apache.cassandra.distributed.api.ConsistencyLevel.SERIAL, pk),
                    row(pk, 1, 1));
     }
 
@@ -389,7 +399,7 @@ public class MutatorVetoTest extends CASTestBase
     public void paxosRepairPoisonRefreshDeliversApplied() throws Throwable
     {
         String tableName = "veto_poison";
-        int pk = pk(FOUR_NODES, 1, 2);
+        int pk = pk(cluster, 1, 2);
 
         commitOnlyOn(1, 3, tableName, pk, to(1, 2), to(1, 2));
 
@@ -397,16 +407,17 @@ public class MutatorVetoTest extends CASTestBase
         // commit-and-prepare (which would refresh the lagging commit) and the prepare-refresh
         // never leave the coordinator.
         IMessageFilters.Filter dropProgress =
-            FOUR_NODES.filters().verbs(PAXOS2_PROPOSE_REQ.id, PAXOS_PROPOSE_REQ.id, PAXOS2_COMMIT_AND_PREPARE_REQ.id, PAXOS2_PREPARE_REFRESH_REQ.id)
-                      .from(1).to(1, 2, 3).drop();
+            cluster.filters().verbs(PAXOS2_PROPOSE_REQ.id, PAXOS_PROPOSE_REQ.id, PAXOS2_COMMIT_AND_PREPARE_REQ.id, PAXOS2_PREPARE_REFRESH_REQ.id)
+                   .from(1).to(1, 2, 3).drop();
         try
         {
-            FOUR_NODES.coordinator(1)
-                      .execute("INSERT INTO " + KEYSPACE + '.' + tableName + " (pk, ck, v) VALUES (?, 2, 2) IF NOT EXISTS", QUORUM, pk);
+            cluster.coordinator(1)
+                   .execute("INSERT INTO " + KEYSPACE + '.' + tableName + " (pk, ck, v) VALUES (?, 2, 2) IF NOT EXISTS", QUORUM, pk);
             Assert.fail("the promised-but-never-proposed CAS must time out");
         }
         catch (RuntimeException expected)
         {
+            // CasWriteTimeout: the prepare succeeded but nothing was proposed, leaving the bare promise
         }
         finally
         {
@@ -419,8 +430,8 @@ public class MutatorVetoTest extends CASTestBase
         Assert.assertTrue("the poison-path refresh must deliver an APPLIED terminal: " + terminals,
                           terminals.contains("REFRESH_COMMITTED:APPLIED"));
 
-        assertRows(FOUR_NODES.coordinator(1).execute("SELECT pk, ck, v FROM " + KEYSPACE + '.' + tableName + " WHERE pk = ?",
-                                                     org.apache.cassandra.distributed.api.ConsistencyLevel.SERIAL, pk),
+        assertRows(cluster.coordinator(1).execute("SELECT pk, ck, v FROM " + KEYSPACE + '.' + tableName + " WHERE pk = ?",
+                                                  org.apache.cassandra.distributed.api.ConsistencyLevel.SERIAL, pk),
                    row(pk, 1, 1));
     }
 
@@ -439,12 +450,12 @@ public class MutatorVetoTest extends CASTestBase
         takeNodeFourOutOfRing();
         for (int i = 1; i <= 4; ++i)
         {
-            FOUR_NODES.get(i).acceptsOnInstance(CASTestBase::addToRingBootstrapping).accept(FOUR_NODES.get(4));
-            FOUR_NODES.get(i).acceptsOnInstance(CASTestBase::assertVisibleInRing).accept(FOUR_NODES.get(4));
+            cluster.get(i).acceptsOnInstance(CASTestBase::addToRingBootstrapping).accept(cluster.get(4));
+            cluster.get(i).acceptsOnInstance(CASTestBase::assertVisibleInRing).accept(cluster.get(4));
         }
         try
         {
-            int pk = pk(FOUR_NODES, 3, 4);
+            int pk = pk(cluster, 3, 4);
 
             // commit lands only on the pending {4}: dropped towards the natural replicas
             commitOnlyOn(2, 4, tableName, pk, to(1, 2, 3), to(1, 2, 3));
@@ -455,11 +466,11 @@ public class MutatorVetoTest extends CASTestBase
             // pending {4}: without this, {1, 2, 3} can answer first and the round is completed as
             // an in-progress repair instead. Excluding {1} from the prepare forces {2, 3, 4}.
             IMessageFilters.Filter excludeNodeOne =
-                FOUR_NODES.filters().verbs(org.apache.cassandra.net.Verb.PAXOS2_PREPARE_REQ.id).from(3).to(1).drop();
+                cluster.filters().verbs(org.apache.cassandra.net.Verb.PAXOS2_PREPARE_REQ.id).from(3).to(1).drop();
             try
             {
-                FOUR_NODES.coordinator(3)
-                          .execute("INSERT INTO " + KEYSPACE + '.' + tableName + " (pk, ck, v) VALUES (?, 3, 3) IF NOT EXISTS", QUORUM, pk);
+                cluster.coordinator(3)
+                       .execute("INSERT INTO " + KEYSPACE + '.' + tableName + " (pk, ck, v) VALUES (?, 3, 3) IF NOT EXISTS", QUORUM, pk);
                 Assert.fail("the refresh veto must abort the driving operation; announces=" + announces(3) + " terminals=" + terminals(3));
             }
             catch (RuntimeException e)
@@ -476,8 +487,8 @@ public class MutatorVetoTest extends CASTestBase
             armRefreshVeto(3, false);
             try
             {
-                FOUR_NODES.coordinator(3)
-                          .execute("INSERT INTO " + KEYSPACE + '.' + tableName + " (pk, ck, v) VALUES (?, 3, 3) IF NOT EXISTS", QUORUM, pk);
+                cluster.coordinator(3)
+                       .execute("INSERT INTO " + KEYSPACE + '.' + tableName + " (pk, ck, v) VALUES (?, 3, 3) IF NOT EXISTS", QUORUM, pk);
             }
             finally
             {
