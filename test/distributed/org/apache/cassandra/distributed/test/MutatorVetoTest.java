@@ -269,7 +269,7 @@ public class MutatorVetoTest extends CASTestBase
     }
 
 
-    /** Runs a PaxosRepair for {@code pk} on {@code node}; returns "OK" or "FAILURE: <cause>". */
+    /** Runs a PaxosRepair for {@code pk} on {@code node}; returns "OK", or the failure cause prefixed with "FAILURE: ". */
     private static String repairOnNode(int node, String tableName, int pk)
     {
         return FOUR_NODES.get(node).callOnInstance(() -> {
