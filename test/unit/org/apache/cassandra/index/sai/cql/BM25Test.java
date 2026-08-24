@@ -217,6 +217,25 @@ public class BM25Test extends SAITester
     }
 
     @Test
+    public void testSearchThenSortWithRangeTombstoneBeforeLiveRow() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v text, n int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, c, v, n) VALUES (1, 1, 'apple', 0)");
+        execute("INSERT INTO %s (k, c, v, n) VALUES (2, 1, 'apple juice', 0)");
+        for (int i = 3; i < 100; i++)
+            execute("INSERT INTO %s (k, c, v, n) VALUES (?, 1, 'apple juice', 1)", i);
+
+        // The range tombstone is older than the live row, so both are preserved in the sstable.
+        execute("DELETE FROM %s USING TIMESTAMP 1 WHERE k = 2 AND c >= 0 AND c <= 2");
+        flush();
+
+        String select = "SELECT k, c FROM %s WHERE n = 0 ORDER BY v BM25 OF 'apple' LIMIT 3";
+        assertRows(execute(select), row(1, 1), row(2, 1));
+    }
+
+    @Test
     public void testTwoIndexesAmbiguousPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");

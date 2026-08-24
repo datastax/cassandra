@@ -169,16 +169,16 @@ public class InvertedIndexSearcher extends IndexSearcher
         var slices = Slices.with(indexContext.comparator(), Slice.make(primaryKey.clustering()));
         try (var rowIterator = sstable.iterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
         {
-            // The primary key might not belong to this sstable, or this sstable might only hold a partition-level
-            // tombstone (or a static row) for it. In both cases there is no row to read.
-            if (!rowIterator.hasNext())
-                return null;
-            var unfiltered = rowIterator.next();
-            // A range tombstone marker covering the clustering means there is no row either.
-            if (!unfiltered.isRow())
-                return null;
-            Row row = (Row) unfiltered;
-            return row.getCell(indexContext.getDefinition());
+            while (rowIterator.hasNext())
+            {
+                var unfiltered = rowIterator.next();
+                if (!unfiltered.isRow())
+                    continue;
+
+                Row row = (Row) unfiltered;
+                return row.getCell(indexContext.getDefinition());
+            }
+            return null;
         }
     }
 
