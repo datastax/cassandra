@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -28,6 +29,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -132,6 +134,24 @@ public class OnDiskDeletionAwareTrieTest
                  OnDiskDeletionAwareTrie.open(file, LIVE, MARKER, VERSION, -1))
         {
             assertTriesEqual(source, read);
+        }
+
+        assertRoundTripsInMemory(source);
+    }
+
+    /// The same round trip without a file, which is how the commit log and messaging will use this:
+    /// serialize into a buffer, then read the trie straight back out of that buffer.
+    private void assertRoundTripsInMemory(InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            DeletionAwareFileWriter.write(source, false, LIVE, MARKER, out);
+            ByteBuffer buffer = out.asNewBuffer();
+
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(buffer, LIVE, MARKER, VERSION, -1);
+            assertTriesEqual(source, read);
+            read.close();
         }
     }
 

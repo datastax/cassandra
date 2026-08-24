@@ -67,6 +67,10 @@ public abstract class SimpleTableWriter extends CQLTester
     @Param({ "false" })
     boolean useNet = false;
 
+    /// With this false no commit log is written at all, so nothing here measures commit-log cost.
+    @Param({ "true" })
+    boolean durableWrites = true;
+
     @Param({ "32" })
     int threadCount;
 
@@ -86,7 +90,7 @@ public abstract class SimpleTableWriter extends CQLTester
         String memtableSetup = "";
         if (!memtableClass.isEmpty())
             memtableSetup = String.format(" AND memtable = '%s'", memtableClass);
-        keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
+        keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = " + durableWrites);
         table = createTable(keyspace,
                             "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid)) with compression = {'enabled': false}" +
                             memtableSetup);
