@@ -43,9 +43,13 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 ///
 /// ```
 ///   unsigned vint : deletionBranchRoot + 1   (0 when the node has no deletion branch)
-///   unsigned vint : contentLength            (0 when the node has no live content)
-///   bytes         : content, as written by the caller's serializer
+///   bytes         : content, as written by the caller's serializer (may be empty)
 /// ```
+///
+/// The content carries no length of its own: the node encoding already length-prefixes the
+/// whole payload, so the reader derives the content length from the payload length it is
+/// given minus the bytes consumed by the vint. Overhead over a plain trie is therefore one
+/// byte per payload for any branch root below 128.
 ///
 /// ## Ordering
 ///
@@ -92,16 +96,18 @@ implements DeletionAwareCursor.DeletionAwareWalker<T, D, DataOutputPlus>
         public int serializedSize(Payload<T> value)
         {
             int contentSize = value.content != null ? contentSerializer.serializedSize(value.content) : 0;
-            return vintSize(value.deletionBranchRoot + 1) + vintSize(contentSize) + contentSize;
+            return vintSize(value.deletionBranchRoot + 1) + contentSize;
         }
 
         @Override
         public int serialize(DataOutputPlus out, Payload<T> value) throws IOException
         {
-            int contentSize = value.content != null ? contentSerializer.serializedSize(value.content) : 0;
+            // No length is written for the content: the node encoding already length-prefixes the
+            // whole payload (see OnDiskWriteNodeType.PREFIX, which writes serialize()'s return value
+            // as a reversed vint). The reader recovers the content length by subtracting the bytes
+            // consumed by the branch vint from the payload length it is handed.
             out.writeUnsignedVInt(value.deletionBranchRoot + 1);
-            out.writeUnsignedVInt(contentSize);
-            if (contentSize > 0)
+            if (value.content != null)
                 contentSerializer.serialize(out, value.content);
             return serializedSize(value);
         }
