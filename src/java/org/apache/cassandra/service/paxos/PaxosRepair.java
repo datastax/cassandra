@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -426,38 +427,47 @@ public class PaxosRepair extends AbstractPaxosRepair
     }
 
     /**
+     * An announced commit awaiting its terminal: the commit last passed to {@link Mutator#onCasCommit}
+     * whose terminal has not been delivered yet, with its origin.
+     */
+    private static final class AnnouncedCommit
+    {
+        final Commit commit;
+        final Mutator.CasCommitOrigin origin;
+
+        AnnouncedCommit(Commit commit, Mutator.CasCommitOrigin origin)
+        {
+            this.commit = commit;
+            this.origin = origin;
+        }
+    }
+
+    /**
      * The commit last announced via {@link Mutator#onCasCommit} whose terminal has not been
-     * delivered yet, with its origin. Set (before notifying, so a veto leaves it set) by
-     * {@link #announceCommit} and cleared by {@link #completeAnnounced}, so that every announce is
-     * paired with a terminal: {@link Mutator.CasCommitOutcome#APPLIED} on an acknowledged commit,
+     * delivered yet. Set (before notifying, so a veto leaves it set) by {@link #announceCommit}
+     * and consumed atomically by {@link #completeAnnounced}, so that every announce is paired with
+     * exactly one terminal: {@link Mutator.CasCommitOutcome#APPLIED} on an acknowledged commit,
      * else {@link Mutator.CasCommitOutcome#UNCONFIRMED} — delivered when a retry re-announces, or
      * by the completion listener installed in the constructor when the repair ends (failure,
-     * cancellation, veto or exhausted retry budget) with the announce still open. State
-     * transitions are serialized by {@link AbstractPaxosRepair#updateState}, and the listener only
-     * fires after the terminal state is reached, so plain volatile fields suffice.
+     * cancellation, veto or exhausted retry budget) with the announce still open.
      */
-    private volatile Commit announcedCommit;
-    private volatile Mutator.CasCommitOrigin announcedOrigin;
+    private final AtomicReference<AnnouncedCommit> announced = new AtomicReference<>();
 
     private void announceCommit(Commit commit, Mutator.CasCommitOrigin origin)
     {
         // a previous attempt's announce that was never confirmed (commit unacknowledged, retried):
         // close it out before opening the new one, keeping announces and terminals 1:1
         completeAnnounced(Mutator.CasCommitOutcome.UNCONFIRMED);
-        announcedCommit = commit;
-        announcedOrigin = origin;
+        announced.set(new AnnouncedCommit(commit, origin));
         MutatorProvider.notifyCasCommit(commit, commitConsistency(), origin);
     }
 
     private void completeAnnounced(Mutator.CasCommitOutcome outcome)
     {
-        Commit commit = announcedCommit;
-        Mutator.CasCommitOrigin origin = announcedOrigin;
-        if (commit == null)
+        AnnouncedCommit open = announced.getAndSet(null);
+        if (open == null)
             return;
-        announcedCommit = null;
-        announcedOrigin = null;
-        MutatorProvider.notifyCasCommitCompleted(commit, commitConsistency(), origin, outcome);
+        MutatorProvider.notifyCasCommitCompleted(open.commit, commitConsistency(), open.origin, outcome);
     }
 
     private PaxosRepair(DecoratedKey partitionKey, Ballot incompleteBallot, TableMetadata table, ConsistencyLevel paxosConsistency)
