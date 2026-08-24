@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.reflect.FieldUtils;
@@ -194,9 +195,15 @@ public class VectorTester extends SAITester
         @Parameterized.Parameters(name = "{0} {1}")
         public static Collection<Object[]> data()
         {
+            return data(v -> true);
+        }
+
+        protected static Collection<Object[]> data(Predicate<Version> versionFilter)
+        {
             // See Version file for explanation of changes associated with each version
             return Version.ALL.stream()
                               .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                              .filter(versionFilter)
                               .flatMap(v -> {
                                   var enableNVQ = JVectorVersionUtil.versionSupportsNVQ(v)
                                                   ? new Boolean[]{ true, false }
