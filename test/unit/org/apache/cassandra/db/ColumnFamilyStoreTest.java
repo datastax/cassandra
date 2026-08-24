@@ -167,6 +167,10 @@ public class ColumnFamilyStoreTest
         });
         task1.start();
 
+        // Wait until task1 is inside the critical section before starting task2, otherwise task2
+        // could acquire the lock first
+        assertTrue(task1StaredtLatch.await(30, TimeUnit.SECONDS));
+
         Thread task2 = new Thread(() -> {
             cfs.runWithCompactionsDisabled(() -> {
                                                task2StaredtLatch.countDown();
@@ -179,16 +183,25 @@ public class ColumnFamilyStoreTest
         });
         task2.start();
 
-        // Check that task1 started but task2 is waiting
-        assertTrue(task1StaredtLatch.await(30, TimeUnit.SECONDS));
-        assertEquals(1, task2StaredtLatch.getCount());
+        try
+        {
+            // Check that task2 stays blocked while task1 holds the lock
+            assertFalse(task2StaredtLatch.await(1, TimeUnit.SECONDS));
+        }
+        finally
+        {
+            // Release task1 even if an assertion fails: leaving it blocked would keep the lock held
+            // forever, hanging the truncation in the next test's setup until the fork times out
+            task1FinishLatch.countDown();
+        }
 
         // Allow task1 to complete and check task2 completed next
-        task1FinishLatch.countDown();
         assertTrue(task2StaredtLatch.await(30, TimeUnit.SECONDS));
 
-        task1.join();
-        task2.join();
+        task1.join(TimeUnit.SECONDS.toMillis(30));
+        task2.join(TimeUnit.SECONDS.toMillis(30));
+        assertFalse(task1.isAlive());
+        assertFalse(task2.isAlive());
     }
 
     @Test
