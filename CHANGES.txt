@@ -1,5 +1,4 @@
 Future version (tbd)
- * Fix search-then-sort BM25 failing on partitions that an sstable holds only as a tombstone (CNDB-18972)
  * Correct the default behavior of compareTo() when comparing WIDE and STATIC PrimaryKeys (CASSANDRA-20238)
  * Reduce size of per-SSTable index components for SAI (CASSANDRA-18673)
  * Support for add and replace in IntervalTree (CASSANDRA-20513)
