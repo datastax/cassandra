@@ -169,30 +169,31 @@ public class BM25Test extends SAITester
         // A search-then-sort BM25 query reads each candidate row straight from every sstable. A partition that is
         // present in an sstable only as a partition-level tombstone (deleted after the sstable holding its row was
         // flushed) must be skipped, not fail the query with NoSuchElementException.
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text, n int)");
+        createTable("CREATE TABLE %s (k int, c int, v text, n int, PRIMARY KEY (k, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
         createAnalyzedIndex();
-        execute("INSERT INTO %s (k, v, n) VALUES (1, 'apple', 0)");
-        execute("INSERT INTO %s (k, v, n) VALUES (2, 'apple juice', 0)");
+        execute("INSERT INTO %s (k, c, v, n) VALUES (1, 1, 'apple', 0)");
+        execute("INSERT INTO %s (k, c, v, n) VALUES (2, 1, 'apple juice', 0) USING TIMESTAMP 1");
         // Insert many unrelated rows so we do search-then-sort
         for (int i = 3; i < 100; i++)
-            execute("INSERT INTO %s (k, v, n) VALUES (?, 'apple juice', 1)", i);
+            execute("INSERT INTO %s (k, c, v, n) VALUES (?, 1, 'apple juice', 1)", i);
         flush();
 
-        // The tombstone for k = 2 lands in a second sstable, whose v index still exists thanks to k = 100, while the
-        // first sstable's n index keeps emitting k = 2 as a candidate.
-        execute("DELETE FROM %s WHERE k = 2");
-        execute("INSERT INTO %s (k, v, n) VALUES (100, 'pear', 1)");
+        // The tombstone for k = 2 lands in a second sstable. Live rows on either side of c = 1 keep its v index
+        // segment spanning the deleted candidate, while the first sstable's n index still emits (2, 1).
+        execute("DELETE FROM %s USING TIMESTAMP 2 WHERE k = 2");
+        execute("INSERT INTO %s (k, c, v, n) VALUES (2, 0, 'pear', 1) USING TIMESTAMP 3");
+        execute("INSERT INTO %s (k, c, v, n) VALUES (2, 2, 'pear', 1) USING TIMESTAMP 3");
         flush();
-        String select = "SELECT k FROM %s WHERE n = 0 ORDER BY v BM25 OF 'apple' LIMIT 3";
-        assertRows(execute(select), row(1));
+        String select = "SELECT k, c FROM %s WHERE n = 0 ORDER BY v BM25 OF 'apple' LIMIT 3";
+        assertRows(execute(select), row(1, 1));
 
         // Re-inserting the deleted key in a third sstable must not fail either, and the row must come back exactly once
-        execute("INSERT INTO %s (k, v, n) VALUES (2, 'apple juice', 0)");
+        execute("INSERT INTO %s (k, c, v, n) VALUES (2, 1, 'apple juice', 0) USING TIMESTAMP 4");
         flush();
-        assertRows(execute(select), row(1), row(2));
+        assertRows(execute(select), row(1, 1), row(2, 1));
         compact();
-        assertRows(execute(select), row(1), row(2));
+        assertRows(execute(select), row(1, 1), row(2, 1));
     }
 
     @Test
