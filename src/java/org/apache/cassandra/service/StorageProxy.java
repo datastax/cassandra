@@ -90,6 +90,7 @@ import org.apache.cassandra.exceptions.QueryCancelledException;
 import org.apache.cassandra.exceptions.ReadAbortException;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestFailureException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
@@ -191,6 +192,7 @@ public class StorageProxy implements StorageProxyMBean
     private static final Logger logger = LoggerFactory.getLogger(StorageProxy.class);
 
     public static final String UNREACHABLE = "UNREACHABLE";
+    private static final String OVERLOADED_TRACE_MESSAGE = "Overloaded";
 
     private static final int FAILURE_LOGGING_INTERVAL_SECONDS = CassandraRelevantProperties.FAILURE_LOGGING_INTERVAL_SECONDS.getInt();
 
@@ -665,6 +667,33 @@ public class StorageProxy implements StorageProxyMBean
             lwtTracker.onError(e);
             throw e;
         }
+        catch (OverloadedException e)
+        {
+            // Thrown by checkHintOverload during the commit phase, or by a Mutator.onCasCommit veto.
+            metrics.casWriteMetrics.unavailables.mark();
+            metrics.writeMetricsForLevel(consistencyForPaxos).unavailables.mark();
+            Tracing.trace(OVERLOADED_TRACE_MESSAGE);
+            lwtTracker.onError(e);
+            throw e;
+        }
+        catch (RequestExecutionException e)
+        {
+            // Fallback for types outside the concrete families above -- typically a base-typed or
+            // custom Mutator.onCasCommit veto: mark the closest family meter (none for unknown
+            // families) and keep the tracker informed.
+            if (e instanceof RequestTimeoutException)
+            {
+                metrics.casWriteMetrics.timeouts.mark();
+                metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+            }
+            else if (e instanceof RequestFailureException)
+            {
+                metrics.casWriteMetrics.failures.mark();
+                metrics.writeMetricsForLevel(consistencyForPaxos).failures.mark();
+            }
+            lwtTracker.onError(e);
+            throw e;
+        }
         finally
         {
             // We track latency based on request processing time, since the amount of time that request spends in the queue
@@ -774,27 +803,7 @@ public class StorageProxy implements StorageProxyMBean
                     // comment there). As empty update are somewhat common (serial reads and non-applying CAS propose
                     // them), this is worth bothering.
                     if (!proposal.update.isEmpty())
-                    {
-                        MutatorProvider.notifyCasCommit(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
-                        try
-                        {
-                            commitPaxos(proposal, consistencyForCommit, true, requestTime, casMetrics);
-                        }
-                        catch (RuntimeException e)
-                        {
-                            // proposePaxos already returned true, so the value is DECIDED; any failure to confirm
-                            // the commit here (timeout, replica failure, interruption surfaced as
-                            // UncheckedInterruptedException) leaves it decided-but-not-confirmed: report UNCONFIRMED
-                            // before the failure surfaces to the client. (At CL=ANY commitPaxos does not block, so it
-                            // does not throw here; that case delivers no terminal, only the dispatched onCasCommit.)
-                            MutatorProvider.notifyCasCommitCompleted(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.UNCONFIRMED);
-                            throw e;
-                        }
-                        // commitPaxos blocks until a consistencyForCommit quorum acknowledged the commit
-                        // (unless CL=ANY); reaching here means the value is now readable at that CL.
-                        if (consistencyForCommit != ConsistencyLevel.ANY)
-                            MutatorProvider.notifyCasCommitCompleted(proposal, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.APPLIED);
-                    }
+                        notifyAndCommitPaxos(proposal, consistencyForCommit, true, requestTime, casMetrics, Mutator.CasCommitOrigin.CLIENT_OPERATION);
                     RowIterator result = proposalPair.right;
                     if (result != null)
                         Tracing.trace("CAS did not apply");
@@ -831,6 +840,43 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     /**
+     * Announces a decided proposal to the installed {@link Mutator} and dispatches its commit, pairing the
+     * announcement with a terminal {@link Mutator.CasCommitOutcome}.
+     *
+     * <p>The notification may veto the commit: a RequestExecutionException thrown by
+     * {@link Mutator#onCasCommit} propagates (see {@link MutatorProvider#notifyCasCommit}), skipping the
+     * commit dispatch, and surfaces to the caller like any other commit failure.
+     *
+     * <p>The proposal is already DECIDED when this is called, so any failure to confirm the commit here
+     * (a mutator veto skipping the dispatch, timeout, replica failure, interruption surfaced as
+     * UncheckedInterruptedException) leaves it decided-but-not-confirmed: UNCONFIRMED is reported before
+     * the failure surfaces. At commit consistency ANY the commit dispatch does not block and thus cannot
+     * fail here, delivering no terminal beyond the announcement itself — unless the notification vetoed,
+     * which does deliver UNCONFIRMED. For any other commit consistency, returning normally means a quorum
+     * acknowledged the commit and the value is now readable at that consistency, reported as APPLIED.
+     */
+    private static void notifyAndCommitPaxos(Commit proposal,
+                                             ConsistencyLevel consistencyForCommit,
+                                             boolean allowHints,
+                                             Dispatcher.RequestTime requestTime,
+                                             CASClientRequestMetrics casMetrics,
+                                             Mutator.CasCommitOrigin origin)
+    {
+        try
+        {
+            MutatorProvider.notifyCasCommit(proposal, consistencyForCommit, origin);
+            commitPaxos(proposal, consistencyForCommit, allowHints, requestTime, casMetrics);
+        }
+        catch (RuntimeException e)
+        {
+            MutatorProvider.notifyCasCommitCompleted(proposal, consistencyForCommit, origin, Mutator.CasCommitOutcome.UNCONFIRMED);
+            throw e;
+        }
+        if (consistencyForCommit != ConsistencyLevel.ANY)
+            MutatorProvider.notifyCasCommitCompleted(proposal, consistencyForCommit, origin, Mutator.CasCommitOutcome.APPLIED);
+    }
+
+    /**
      * begin a Paxos session by sending a prepare request and completing any in-progress requests seen in the replies
      *
      * @return the Paxos ballot promised by the replicas if no in-progress requests were seen and a quorum of
@@ -852,14 +898,7 @@ public class StorageProxy implements StorageProxyMBean
         long deadline = requestTime.computeDeadline(timeoutNanos);
         while (nanoTime() < deadline)
         {
-            // We want a timestamp that is guaranteed to be unique for that node (so that the ballot is globally unique), but if we've got a prepare rejected
-            // already we also want to make sure we pick a timestamp that has a chance to be promised, i.e. one that is greater that the most recently known
-            // in progress (#5667). Lastly, we don't want to use a timestamp that is older than the last one assigned by ClientState or operations may appear
-            // out-of-order (#7801).
-            long minTimestampMicrosToUse = summary == null ? Long.MIN_VALUE : 1 + summary.mostRecentInProgressCommit.ballot.unixMicros();
-            // Note that ballotMicros is not guaranteed to be unique if two proposal are being handled concurrently by the same coordinator. But we still
-            // need ballots to be unique for each proposal so we have to use getRandomTimeUUIDFromMicros.
-            Ballot ballot = nextBallot(minTimestampMicrosToUse, consistencyForPaxos == SERIAL ? GLOBAL : LOCAL);
+            Ballot ballot = nextPrepareBallot(summary, consistencyForPaxos);
 
             // prepare
             try
@@ -901,27 +940,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     Tracing.trace("Finishing incomplete paxos round {}", inProgress);
                     casMetrics.unfinishedCommit.inc();
-                    Commit refreshedInProgress = Commit.newProposal(ballot, inProgress.update);
-                    if (proposePaxos(refreshedInProgress, paxosPlan, false, requestTime, casMetrics))
-                    {
-                        MutatorProvider.notifyCasCommit(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
-                        try
-                        {
-                            commitPaxos(refreshedInProgress, consistencyForCommit, false, requestTime, casMetrics);
-                        }
-                        catch (WriteTimeoutException e)
-                        {
-                            // recovered value decided but the commit was not acknowledged in time: report UNCONFIRMED
-                            // before the failure propagates. (CL=ANY does not block/throw here; no terminal then.)
-                            MutatorProvider.notifyCasCommitCompleted(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, Mutator.CasCommitOutcome.UNCONFIRMED);
-                            throw e;
-                        }
-                        // commitPaxos blocks until a consistencyForCommit quorum acknowledged the commit
-                        // (unless CL=ANY); reaching here means the recovered value is now readable at that CL.
-                        if (consistencyForCommit != ConsistencyLevel.ANY)
-                            MutatorProvider.notifyCasCommitCompleted(refreshedInProgress, consistencyForCommit, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, Mutator.CasCommitOutcome.APPLIED);
-                    }
-                    else
+                    if (!finishInProgressPaxosRound(inProgress, ballot, paxosPlan, consistencyForCommit, requestTime, casMetrics))
                     {
                         Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                         // sleep a random amount to give the other proposer a chance to finish
@@ -941,6 +960,9 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     Tracing.trace("Repairing replicas that missed the most recent commit");
                     casMetrics.missingMostRecentCommit.inc(missingMRCSize);
+                    // A veto (RequestExecutionException from Mutator.onCasCommit) propagates here too, skipping
+                    // the refresh and aborting the driving operation; the lagging replicas are refreshed by a
+                    // later operation instead. No terminal is delivered either way (fire-and-forget site).
                     MutatorProvider.notifyCasCommit(mostRecent, consistencyForCommit, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
                     sendCommit(mostRecent, missingMRC);
                     // TODO: provided commits don't invalid the prepare we just did above (which they don't), we could just wait
@@ -960,6 +982,46 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         throw new CasWriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(paxosPlan.replicationStrategy()), contentions);
+    }
+
+    /**
+     * Picks the ballot for the next prepare attempt of {@link #beginAndRepairPaxos}.
+     *
+     * <p>We want a timestamp that is guaranteed to be unique for that node (so that the ballot is globally unique), but if we've got a prepare rejected
+     * already we also want to make sure we pick a timestamp that has a chance to be promised, i.e. one that is greater that the most recently known
+     * in progress (#5667). Lastly, we don't want to use a timestamp that is older than the last one assigned by ClientState or operations may appear
+     * out-of-order (#7801).
+     *
+     * <p>Note that ballotMicros is not guaranteed to be unique if two proposal are being handled concurrently by the same coordinator. But we still
+     * need ballots to be unique for each proposal so we have to use getRandomTimeUUIDFromMicros.
+     */
+    private static Ballot nextPrepareBallot(PrepareCallback summary, ConsistencyLevel consistencyForPaxos)
+    {
+        long minTimestampMicrosToUse = summary == null ? Long.MIN_VALUE : 1 + summary.mostRecentInProgressCommit.ballot.unixMicros();
+        return nextBallot(minTimestampMicrosToUse, consistencyForPaxos == SERIAL ? GLOBAL : LOCAL);
+    }
+
+    /**
+     * Completes an in-progress paxos round witnessed by {@link #beginAndRepairPaxos}, re-proposing its update
+     * under our own ballot. If the proposal is accepted, the commit is announced to the installed
+     * {@link Mutator} (which may veto it, see {@link #notifyAndCommitPaxos}: the recovered round then stays
+     * uncommitted and is re-attempted by a later operation on the partition) and dispatched.
+     *
+     * @return true if the re-proposal was accepted (and its commit dispatched), false if it was pre-empted
+     * by a higher ballot and the caller must back off and retry.
+     */
+    private static boolean finishInProgressPaxosRound(Commit inProgress,
+                                                      Ballot ballot,
+                                                      ReplicaPlan.ForPaxosWrite paxosPlan,
+                                                      ConsistencyLevel consistencyForCommit,
+                                                      Dispatcher.RequestTime requestTime,
+                                                      CASClientRequestMetrics casMetrics)
+    {
+        Commit refreshedInProgress = Commit.newProposal(ballot, inProgress.update);
+        if (!proposePaxos(refreshedInProgress, paxosPlan, false, requestTime, casMetrics))
+            return false;
+        notifyAndCommitPaxos(refreshedInProgress, consistencyForCommit, false, requestTime, casMetrics, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+        return true;
     }
 
     /**
@@ -1282,7 +1344,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             metrics.writeMetrics.unavailables.mark();
             metrics.writeMetricsForLevel(consistencyLevel).unavailables.mark();
-            Tracing.trace("Overloaded");
+            Tracing.trace(OVERLOADED_TRACE_MESSAGE);
             writeTracker.onError(e);
             throw e;
         }
@@ -2296,6 +2358,18 @@ public class StorageProxy implements StorageProxyMBean
             readTracker.onError(e);
             throw e;
         }
+        catch (OverloadedException e)
+        {
+            // Thrown by checkHintOverload while committing a repaired round, or by a Mutator.onCasCommit veto
+            // of that commit (the serial read must complete in-progress rounds before it can proceed).
+            metrics.readMetrics.unavailables.mark();
+            metrics.casReadMetrics.unavailables.mark();
+            metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+            Tracing.trace(OVERLOADED_TRACE_MESSAGE);
+            logRequestException(e, group.queries);
+            readTracker.onError(e);
+            throw e;
+        }
         catch (ReadTimeoutException e)
         {
             metrics.readMetrics.timeouts.mark();
@@ -2318,6 +2392,29 @@ public class StorageProxy implements StorageProxyMBean
             metrics.readMetrics.failures.mark();
             metrics.casReadMetrics.failures.mark();
             metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+            readTracker.onError(e);
+            throw e;
+        }
+        catch (RequestExecutionException e)
+        {
+            // Fallback for types outside the concrete families above -- typically a base-typed or
+            // custom Mutator.onCasCommit veto: mark the closest family meter (none for unknown
+            // families) and keep the tracker informed.
+            if (e instanceof RequestTimeoutException)
+            {
+                metrics.readMetrics.timeouts.mark();
+                metrics.casReadMetrics.timeouts.mark();
+                metrics.readMetricsForLevel(consistencyLevel).timeouts.mark();
+                // logged for timeouts only, matching the concrete catches above (the failure-family
+                // ones deliberately do not log)
+                logRequestException(e, group.queries);
+            }
+            else if (e instanceof RequestFailureException)
+            {
+                metrics.readMetrics.failures.mark();
+                metrics.casReadMetrics.failures.mark();
+                metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+            }
             readTracker.onError(e);
             throw e;
         }

@@ -74,6 +74,7 @@ import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.IsBootstrappingException;
+import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -89,6 +90,7 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.metrics.CASClientRequestMetrics;
 import org.apache.cassandra.metrics.ClientRequestMetrics;
 import org.apache.cassandra.service.CASRequest;
 import org.apache.cassandra.service.ClientState;
@@ -667,14 +669,7 @@ public class Paxos
         SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
         TableMetadata metadata = readCommand.metadata();
 
-        // Register sensors for CAS operations so coordinator can aggregate replica sensor values
-        RequestSensors sensors = RequestTracker.instance.get();
-        if (sensors != null)
-        {
-            Context context = Context.from(metadata);
-            sensors.registerSensor(context, Type.READ_BYTES);
-            sensors.registerSensor(context, Type.WRITE_BYTES);
-        }
+        registerCasSensors(metadata);
 
         consistencyForConsensus.validateForCas(metadata.keyspace, clientState);
         consistencyForCommit.validateForCasCommit(Keyspace.open(metadata.keyspace).getReplicationStrategy(), metadata.keyspace, clientState);
@@ -684,8 +679,8 @@ public class Paxos
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(metadata.keyspace);
         try (PaxosOperationLock lock = PaxosState.lock(partitionKey, metadata, proposeDeadline, consistencyForConsensus, true))
         {
-            Paxos.Async<PaxosCommit.Status> commit = null;
-            Agreed committedAgreed = null; // the value behind 'commit', for the onCasCommitCompleted notification
+            Agreed committedAgreed = null;
+            Participants committedParticipants = null;
             done: while (true)
             {
                 // read the current values and check they validate the conditions
@@ -693,7 +688,6 @@ public class Paxos
 
                 BeginResult begin = begin(proposeDeadline, readCommand, consistencyForConsensus,
                         true, minimumBallot, failedAttemptsDueToContention);
-                Ballot ballot = begin.ballot;
                 Participants participants = begin.participants;
                 failedAttemptsDueToContention = begin.failedAttemptsDueToContention;
 
@@ -703,65 +697,13 @@ public class Paxos
                     current = FilteredPartition.create(iter);
                 }
 
-                Proposal proposal;
-                boolean conditionMet = request.appliesTo(current);
-                if (!conditionMet)
-                {
-                    if (getPaxosVariant() == v2_without_linearizable_reads_or_rejected_writes)
-                    {
-                        Tracing.trace("CAS precondition rejected", current);
-                        metrics.casWriteMetrics.conditionNotMet.inc();
-                        return current.rowIterator();
-                    }
+                CasProposalAttempt attempt = prepareCasProposal(request, current, begin, partitionKey, metadata, clientState, metrics);
+                if (attempt.earlyResult != null)
+                    return attempt.earlyResult;
+                if (attempt.proposal == null)
+                    continue; // ballot went stale, retry
 
-                    // If we failed to meet our condition, it does not mean we can do nothing: if we do not propose
-                    // anything that is accepted by a quorum, it is possible for our !conditionMet state
-                    // to not be serialized wrt other operations.
-                    // If a later read encounters an "in progress" write that did not reach a majority,
-                    // but that would have permitted conditionMet had it done so (and hence we evidently did not witness),
-                    // that operation will complete the in-progress proposal before continuing, so that this and future
-                    // reads will perceive conditionMet without any intervening modification from the time at which we
-                    // assured a conditional write that !conditionMet.
-                    // So our evaluation is only serialized if we invalidate any in progress operations by proposing an empty update
-                    // See also CASSANDRA-12126
-                    if (begin.isLinearizableRead)
-                    {
-                        Tracing.trace("CAS precondition does not match current values {}; read is already linearizable; aborting", current);
-                        return conditionNotMet(current);
-                    }
-
-                    Tracing.trace("CAS precondition does not match current values {}; proposing empty update", current);
-                    proposal = Proposal.empty(ballot, partitionKey, metadata);
-                }
-                else if (begin.isPromised)
-                {
-                    // finish the paxos round w/ the desired updates
-                    // TODO "turn null updates into delete?" - what does this TODO even mean?
-                    PartitionUpdate updates = request.makeUpdates(current, clientState, begin.ballot);
-
-                    // Update the metrics before triggers potentially add mutations.
-                    ClientRequestSizeMetrics.recordRowAndColumnCountMetrics(updates);
-
-                    // Apply triggers to cas updates. A consideration here is that
-                    // triggers emit Mutations, and so a given trigger implementation
-                    // may generate mutations for partitions other than the one this
-                    // paxos round is scoped for. In this case, TriggerExecutor will
-                    // validate that the generated mutations are targetted at the same
-                    // partition as the initial updates and reject (via an
-                    // InvalidRequestException) any which aren't.
-                    updates = TriggerExecutor.instance.execute(updates);
-
-                    proposal = Proposal.of(ballot, updates);
-                    Tracing.trace("CAS precondition is met; proposing client-requested updates for {}", ballot);
-                }
-                else
-                {
-                    // must retry, as only achieved read success in begin
-                    Tracing.trace("CAS precondition is met, but ballot stale for proposal; retrying", current);
-                    continue;
-                }
-
-                PaxosPropose.Status propose = propose(proposal, participants, conditionMet).awaitUntil(proposeDeadline);
+                PaxosPropose.Status propose = propose(attempt.proposal, participants, attempt.conditionMet).awaitUntil(proposeDeadline);
                 switch (propose.outcome)
                 {
                     default: throw new IllegalStateException();
@@ -771,18 +713,16 @@ public class Paxos
 
                     case SUCCESS:
                     {
-                        if (!conditionMet)
+                        if (!attempt.conditionMet)
                             return conditionNotMet(current);
 
                         // no need to commit a no-op; either it
                         //   1) reached a majority, in which case it was agreed, had no effect and we can do nothing; or
                         //   2) did not reach a majority, was not agreed, and was not user visible as a result so we can ignore it
-                        if (!proposal.update.isEmpty())
+                        if (!attempt.proposal.update.isEmpty())
                         {
-                            Agreed agreed = proposal.agreed();
-                            MutatorProvider.notifyCasCommit(agreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION);
-                            commit = commit(agreed, participants, consistencyForConsensus, consistencyForCommit, true);
-                            committedAgreed = agreed;
+                            committedAgreed = attempt.proposal.agreed();
+                            committedParticipants = participants;
                         }
 
                         break done;
@@ -790,66 +730,272 @@ public class Paxos
 
                     case SUPERSEDED:
                     {
-                        switch (propose.superseded().hadSideEffects)
-                        {
-                            default: throw new IllegalStateException();
-
-                            case MAYBE:
-                                // We don't know if our update has been applied, as the competing ballot may have completed
-                                // our proposal.  We yield our uncertainty to the caller via timeout exception.
-                                // TODO: should return more useful result to client, and should also avoid this situation where possible
-                                throw new MaybeFailure(false, participants.sizeOfPoll(), participants.sizeOfConsensusQuorum, 0, emptyMap())
-                                        .markAndThrowAsTimeoutOrFailure(true, consistencyForConsensus, failedAttemptsDueToContention, metrics);
-
-                            case NO:
-                                minimumBallot = propose.superseded().by;
-                                // We have been superseded without our proposal being accepted by anyone, so we can safely retry
-                                Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
-                                if (!waitForContention(proposeDeadline, ++failedAttemptsDueToContention, metadata, partitionKey, consistencyForConsensus, WRITE))
-                                    throw MaybeFailure.noResponses(participants).markAndThrowAsTimeoutOrFailure(true, consistencyForConsensus, failedAttemptsDueToContention, metrics);
-                        }
+                        throwIfMayHaveSideEffects(propose.superseded(), participants, consistencyForConsensus, failedAttemptsDueToContention, metrics);
+                        minimumBallot = propose.superseded().by;
+                        // We have been superseded without our proposal being accepted by anyone, so we can safely retry
+                        Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
+                        waitForContentionOrThrow(proposeDeadline, ++failedAttemptsDueToContention, metadata, partitionKey,
+                                                 consistencyForConsensus, WRITE, participants, metrics);
                     }
                 }
                 // continue to retry
             }
 
-            if (commit != null)
-            {
-                PaxosCommit.Status result = commit.awaitUntil(commitDeadline);
-                if (!result.isSuccess())
-                {
-                    // decided (agreed by a quorum) but the commit was not acknowledged in time: report the
-                    // terminal as UNCONFIRMED before surfacing the failure to the client. The value may still
-                    // be completed by a later operation or repair.
-                    MutatorProvider.notifyCasCommitCompleted(committedAgreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.UNCONFIRMED);
-                    throw result.maybeFailure().markAndThrowAsTimeoutOrFailure(true, consistencyForCommit, failedAttemptsDueToContention, metrics);
-                }
-                // the commit reached a consistencyForCommit quorum: the value is now readable at that CL.
-                // Note that, unlike the v1 path in StorageProxy, we do not need to special case CL=ANY here:
-                // v1 does not block at all for ANY (it fires the commits off and returns), so it must suppress
-                // this notification; here we always await PaxosCommit, which requires blockForWrite(ANY) == 1
-                // genuine replica acknowledgement (hints are not counted as accepts), so reaching this point
-                // means the commit really was applied on at least the replicas that consistencyForCommit requires.
-                MutatorProvider.notifyCasCommitCompleted(committedAgreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.APPLIED);
-            }
+            completeCasCommit(committedAgreed, committedParticipants, consistencyForConsensus, consistencyForCommit,
+                              commitDeadline, failedAttemptsDueToContention, metrics);
             Tracing.trace("CAS successful");
             return null;
 
         }
         finally
         {
-            final long latency = nanoTime() - start;
+            recordCasWriteLatency(metadata, partitionKey, consistencyForConsensus, metrics, start, failedAttemptsDueToContention);
+        }
+    }
 
-            if (failedAttemptsDueToContention > 0)
+    /**
+     * Registers sensors for CAS operations so the coordinator can aggregate replica sensor values.
+     */
+    private static void registerCasSensors(TableMetadata metadata)
+    {
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+        {
+            Context context = Context.from(metadata);
+            sensors.registerSensor(context, Type.READ_BYTES);
+            sensors.registerSensor(context, Type.WRITE_BYTES);
+        }
+    }
+
+    /**
+     * Outcome of evaluating the CAS condition against the current values and building the proposal for one
+     * round of {@link #cas}: either a client-visible result short-circuiting the whole operation
+     * ({@link #earlyResult} non-null), a proposal to submit ({@link #proposal} non-null, with
+     * {@link #conditionMet} telling whether it carries the requested updates or is an empty update
+     * linearizing the rejected condition), or neither, meaning the ballot went stale and the round must be
+     * retried.
+     */
+    private static final class CasProposalAttempt
+    {
+        @Nullable final Proposal proposal;
+        final boolean conditionMet;
+        @Nullable final RowIterator earlyResult;
+
+        private CasProposalAttempt(Proposal proposal, boolean conditionMet, RowIterator earlyResult)
+        {
+            this.proposal = proposal;
+            this.conditionMet = conditionMet;
+            this.earlyResult = earlyResult;
+        }
+
+        static CasProposalAttempt propose(Proposal proposal, boolean conditionMet)
+        {
+            return new CasProposalAttempt(proposal, conditionMet, null);
+        }
+
+        static CasProposalAttempt earlyResult(RowIterator result)
+        {
+            return new CasProposalAttempt(null, false, result);
+        }
+
+        static CasProposalAttempt retry()
+        {
+            return new CasProposalAttempt(null, false, null);
+        }
+    }
+
+    private static CasProposalAttempt prepareCasProposal(CASRequest request,
+                                                         FilteredPartition current,
+                                                         BeginResult begin,
+                                                         DecoratedKey partitionKey,
+                                                         TableMetadata metadata,
+                                                         ClientState clientState,
+                                                         ClientRequestsMetrics metrics)
+    {
+        boolean conditionMet = request.appliesTo(current);
+        if (!conditionMet)
+        {
+            if (getPaxosVariant() == v2_without_linearizable_reads_or_rejected_writes)
             {
-                metrics.casWriteMetrics.contention.update(failedAttemptsDueToContention);
-                openAndGetStore(metadata).metric.topCasPartitionContention.addSample(partitionKey.getKey(), failedAttemptsDueToContention);
+                Tracing.trace("CAS precondition rejected", current);
+                metrics.casWriteMetrics.conditionNotMet.inc();
+                return CasProposalAttempt.earlyResult(current.rowIterator());
             }
 
+            // If we failed to meet our condition, it does not mean we can do nothing: if we do not propose
+            // anything that is accepted by a quorum, it is possible for our !conditionMet state
+            // to not be serialized wrt other operations.
+            // If a later read encounters an "in progress" write that did not reach a majority,
+            // but that would have permitted conditionMet had it done so (and hence we evidently did not witness),
+            // that operation will complete the in-progress proposal before continuing, so that this and future
+            // reads will perceive conditionMet without any intervening modification from the time at which we
+            // assured a conditional write that !conditionMet.
+            // So our evaluation is only serialized if we invalidate any in progress operations by proposing an empty update
+            // See also CASSANDRA-12126
+            if (begin.isLinearizableRead)
+            {
+                Tracing.trace("CAS precondition does not match current values {}; read is already linearizable; aborting", current);
+                return CasProposalAttempt.earlyResult(conditionNotMet(current));
+            }
 
-            metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
-            metrics.writeMetricsForLevel(consistencyForConsensus).executionTimeMetrics.addNano(latency);
+            Tracing.trace("CAS precondition does not match current values {}; proposing empty update", current);
+            return CasProposalAttempt.propose(Proposal.empty(begin.ballot, partitionKey, metadata), false);
         }
+
+        if (begin.isPromised)
+        {
+            // finish the paxos round w/ the desired updates
+            // TODO "turn null updates into delete?" - what does this TODO even mean?
+            PartitionUpdate updates = request.makeUpdates(current, clientState, begin.ballot);
+
+            // Update the metrics before triggers potentially add mutations.
+            ClientRequestSizeMetrics.recordRowAndColumnCountMetrics(updates);
+
+            // Apply triggers to cas updates. A consideration here is that
+            // triggers emit Mutations, and so a given trigger implementation
+            // may generate mutations for partitions other than the one this
+            // paxos round is scoped for. In this case, TriggerExecutor will
+            // validate that the generated mutations are targetted at the same
+            // partition as the initial updates and reject (via an
+            // InvalidRequestException) any which aren't.
+            updates = TriggerExecutor.instance.execute(updates);
+
+            Proposal proposal = Proposal.of(begin.ballot, updates);
+            Tracing.trace("CAS precondition is met; proposing client-requested updates for {}", begin.ballot);
+            return CasProposalAttempt.propose(proposal, true);
+        }
+
+        // must retry, as only achieved read success in begin
+        Tracing.trace("CAS precondition is met, but ballot stale for proposal; retrying", current);
+        return CasProposalAttempt.retry();
+    }
+
+    /**
+     * Surfaces a superseded proposal that may have produced side effects: we don't know if our update has
+     * been applied, as the competing ballot may have completed our proposal, so we yield our uncertainty to
+     * the caller via timeout exception. Returns normally when the proposal is known to have had no side
+     * effects, in which case the caller can safely retry.
+     */
+    // TODO: should return more useful result to client, and should also avoid this situation where possible
+    private static void throwIfMayHaveSideEffects(PaxosPropose.Superseded superseded,
+                                                  Participants participants,
+                                                  ConsistencyLevel consistencyForConsensus,
+                                                  int failedAttemptsDueToContention,
+                                                  ClientRequestsMetrics metrics)
+    {
+        switch (superseded.hadSideEffects)
+        {
+            default: throw new IllegalStateException();
+
+            case MAYBE:
+                throw new MaybeFailure(false, participants.sizeOfPoll(), participants.sizeOfConsensusQuorum, 0, emptyMap())
+                        .markAndThrowAsTimeoutOrFailure(true, consistencyForConsensus, failedAttemptsDueToContention, metrics);
+
+            case NO:
+                return;
+        }
+    }
+
+    /**
+     * Backs off after a contention-induced retry, or, if the contention strategy decided to give up (for
+     * instance because the operation deadline expired), marks the timeout metrics and throws.
+     */
+    private static void waitForContentionOrThrow(long deadline,
+                                                 int failedAttemptsDueToContention,
+                                                 TableMetadata metadata,
+                                                 DecoratedKey partitionKey,
+                                                 ConsistencyLevel consistencyForConsensus,
+                                                 ContentionStrategy.Type type,
+                                                 Participants participants,
+                                                 ClientRequestsMetrics metrics)
+    {
+        if (!waitForContention(deadline, failedAttemptsDueToContention, metadata, partitionKey, consistencyForConsensus, type))
+            throw MaybeFailure.noResponses(participants).markAndThrowAsTimeoutOrFailure(true, consistencyForConsensus, failedAttemptsDueToContention, metrics);
+    }
+
+    /**
+     * Announces an agreed CAS update to the installed {@link Mutator}, then dispatches its commit and awaits
+     * it, pairing the announcement with a terminal outcome. A no-op when {@code agreed} is null (nothing to
+     * commit: the operation proposed an empty update).
+     *
+     * <p>The announcement may veto the commit of the DECIDED value (see
+     * {@link MutatorProvider#notifyCasCommit}): the dispatch is skipped, UNCONFIRMED is reported (a later
+     * operation or repair will complete it) and the operation fails with the veto. Likewise, when the commit
+     * is dispatched but not acknowledged in time, the terminal is reported as UNCONFIRMED before the failure
+     * surfaces to the client; the value may still be completed by a later operation or repair.
+     *
+     * <p>Returning normally means the commit reached a consistencyForCommit quorum and the value is now
+     * readable at that consistency, reported as APPLIED. Note that, unlike the v1 path in StorageProxy, we do
+     * not need to special case commits at consistency ANY here: v1 does not block at all for ANY (it fires
+     * the commits off and returns), so it must suppress this notification; here we always await PaxosCommit,
+     * which requires one genuine replica acknowledgement for ANY (hints are not counted as accepts), so
+     * reaching the end means the commit really was applied on at least the replicas that consistencyForCommit
+     * requires.
+     */
+    private static void completeCasCommit(@Nullable Agreed agreed,
+                                          Participants participants,
+                                          ConsistencyLevel consistencyForConsensus,
+                                          ConsistencyLevel consistencyForCommit,
+                                          long commitDeadline,
+                                          int failedAttemptsDueToContention,
+                                          ClientRequestsMetrics metrics)
+    {
+        if (agreed == null)
+            return;
+
+        announceCasCommit(agreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, true, metrics);
+        PaxosCommit.Status result = commit(agreed, participants, consistencyForConsensus, consistencyForCommit, true)
+                                    .awaitUntil(commitDeadline);
+        if (!result.isSuccess())
+        {
+            MutatorProvider.notifyCasCommitCompleted(agreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.UNCONFIRMED);
+            throw result.maybeFailure().markAndThrowAsTimeoutOrFailure(true, consistencyForCommit, failedAttemptsDueToContention, metrics);
+        }
+        MutatorProvider.notifyCasCommitCompleted(agreed, consistencyForCommit, Mutator.CasCommitOrigin.CLIENT_OPERATION, Mutator.CasCommitOutcome.APPLIED);
+    }
+
+    /**
+     * Announces a commit dispatch to the installed {@link Mutator}, handling a veto: a
+     * {@link RequestExecutionException} thrown by {@link Mutator#onCasCommit} (see
+     * {@link MutatorProvider#notifyCasCommit}) marks the client request metrics matching the exception
+     * family, pairs the announcement with an UNCONFIRMED terminal, and propagates, so that the caller skips
+     * the dispatch and the driving operation fails with the veto.
+     */
+    private static void announceCasCommit(Commit commit,
+                                          ConsistencyLevel consistency,
+                                          Mutator.CasCommitOrigin origin,
+                                          boolean isWrite,
+                                          ClientRequestsMetrics metrics)
+    {
+        try
+        {
+            MutatorProvider.notifyCasCommit(commit, consistency, origin);
+        }
+        catch (RequestExecutionException e)
+        {
+            markCasVeto(e, isWrite, consistency, metrics);
+            MutatorProvider.notifyCasCommitCompleted(commit, consistency, origin, Mutator.CasCommitOutcome.UNCONFIRMED);
+            throw e;
+        }
+    }
+
+    private static void recordCasWriteLatency(TableMetadata metadata,
+                                              DecoratedKey partitionKey,
+                                              ConsistencyLevel consistencyForConsensus,
+                                              ClientRequestsMetrics metrics,
+                                              long start,
+                                              int failedAttemptsDueToContention)
+    {
+        final long latency = nanoTime() - start;
+
+        if (failedAttemptsDueToContention > 0)
+        {
+            metrics.casWriteMetrics.contention.update(failedAttemptsDueToContention);
+            openAndGetStore(metadata).metric.topCasPartitionContention.addSample(partitionKey.getKey(), failedAttemptsDueToContention);
+        }
+
+        metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
+        metrics.writeMetricsForLevel(consistencyForConsensus).executionTimeMetrics.addNano(latency);
     }
 
     private static RowIterator conditionNotMet(FilteredPartition read)
@@ -1026,24 +1172,9 @@ public class Paxos
         {
             // prepare
             PaxosPrepare retry = null;
-            PaxosPrepare.Status prepare;
-            try
-            {
-                prepare = preparing.awaitUntil(deadline);
-            }
-            catch (Throwable t)
-            {
-                // the fused prepare (and its batched commit) did not resolve: report it as not confirmed
-                if (pendingFused != null)
-                    MutatorProvider.notifyCasCommitCompleted(pendingFused, consistencyForConsensus, pendingFusedOrigin, Mutator.CasCommitOutcome.UNCONFIRMED);
-                throw t;
-            }
-            if (pendingFused != null)
-            {
-                MutatorProvider.notifyCasCommitCompleted(pendingFused, consistencyForConsensus, pendingFusedOrigin, fusedCommitOutcome(prepare.outcome));
-                pendingFused = null;
-                pendingFusedOrigin = null;
-            }
+            PaxosPrepare.Status prepare = awaitPrepareWithFusedCommit(preparing, deadline, pendingFused, pendingFusedOrigin, consistencyForConsensus);
+            pendingFused = null;
+            pendingFusedOrigin = null;
             boolean isPromised = false;
             retry: switch (prepare.outcome)
             {
@@ -1052,9 +1183,7 @@ public class Paxos
                 case FOUND_INCOMPLETE_COMMITTED:
                 {
                     FoundIncompleteCommitted incomplete = prepare.incompleteCommitted();
-                    Tracing.trace("Repairing replicas that missed the most recent commit");
-                    MutatorProvider.notifyCasCommit(incomplete.committed, consistencyForConsensus, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
-                    retry = commitAndPrepare(incomplete.committed, incomplete.participants, query, isWrite, acceptEarlyReadPermission);
+                    retry = refreshIncompleteCommit(incomplete, query, isWrite, acceptEarlyReadPermission, consistencyForConsensus, metrics);
                     pendingFused = incomplete.committed;           // terminal delivered when 'retry' resolves
                     pendingFusedOrigin = Mutator.CasCommitOrigin.REFRESH_COMMITTED;
                     break;
@@ -1063,10 +1192,7 @@ public class Paxos
                 {
                     FoundIncompleteAccepted inProgress = prepare.incompleteAccepted();
                     Tracing.trace("Finishing incomplete paxos round {}", inProgress.accepted);
-                    if (isWrite)
-                        metrics.casWriteMetrics.unfinishedCommit.inc();
-                    else
-                        metrics.casReadMetrics.unfinishedCommit.inc();
+                    casRequestMetrics(isWrite, metrics).unfinishedCommit.inc();
 
                     // we DO NOT need to change the timestamp of this commit - either we or somebody else will finish it
                     // and the original timestamp is correctly linearised. By not updatinig the timestamp we leave enough
@@ -1086,7 +1212,10 @@ public class Paxos
                         case SUCCESS:
                         {
                             Agreed reproposeAgreed = repropose.agreed();
-                            MutatorProvider.notifyCasCommit(reproposeAgreed, consistencyForConsensus, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+                            // A veto aborts the driving operation; the round stays uncommitted and is
+                            // re-attempted by a later operation or by the paxos auto-repair machinery,
+                            // re-firing the notification.
+                            announceCasCommit(reproposeAgreed, consistencyForConsensus, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, isWrite, metrics);
                             retry = commitAndPrepare(reproposeAgreed, inProgress.participants, query, isWrite, acceptEarlyReadPermission);
                             pendingFused = reproposeAgreed;        // terminal delivered when 'retry' resolves
                             pendingFusedOrigin = Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS;
@@ -1106,27 +1235,16 @@ public class Paxos
                 {
                     Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                     // sleep a random amount to give the other proposer a chance to finish
-                    if (!waitForContention(deadline, ++failedAttemptsDueToContention, query.metadata(), query.partitionKey(), consistencyForConsensus, isWrite ? WRITE : READ))
-                        throw MaybeFailure.noResponses(prepare.participants).markAndThrowAsTimeoutOrFailure(true, consistencyForConsensus, failedAttemptsDueToContention, metrics);
+                    waitForContentionOrThrow(deadline, ++failedAttemptsDueToContention, query.metadata(), query.partitionKey(),
+                                             consistencyForConsensus, isWrite ? WRITE : READ, prepare.participants, metrics);
                     retry = prepare(prepare.retryWithAtLeast(), prepare.participants, query, isWrite, acceptEarlyReadPermission);
                     break;
                 }
                 case PROMISED: isPromised = true;
                 case READ_PERMITTED:
                 {
-                    // We have received a quorum of promises (or read permissions) that have all witnessed the commit of the prior paxos
-                    // round's proposal (if any).
-                    PaxosPrepare.Success success = prepare.success();
-
-                    DataResolver<?, ?> resolver = new DataResolver(query, success.participants, NoopReadRepair.instance, new Dispatcher.RequestTime(query.creationTimeNanos()), QueryInfoTracker.ReadTracker.NOOP);
-                    for (int i = 0 ; i < success.responses.size() ; ++i)
-                        resolver.preprocess(success.responses.get(i));
-
-                    class WasRun implements Runnable { boolean v; public void run() { v = true; } }
-                    WasRun hadShortRead = new WasRun();
-                    PartitionIterator result = resolver.resolve(hadShortRead);
-
-                    if (!isPromised && hadShortRead.v)
+                    BeginResult result = resolveBeginRead(prepare.success(), query, isPromised, failedAttemptsDueToContention);
+                    if (result == null)
                     {
                         // we need to propose an empty update to linearize our short read, but only had read success
                         // since we may continue to perform short reads, we ask our prepare not to accept an early
@@ -1135,8 +1253,7 @@ public class Paxos
                         acceptEarlyReadPermission = false;
                         break;
                     }
-
-                    return new BeginResult(success.ballot, success.participants, failedAttemptsDueToContention, result, !hadShortRead.v && success.isReadSafe, isPromised, success.supersededBy);
+                    return result;
                 }
 
                 case MAYBE_FAILURE:
@@ -1154,13 +1271,95 @@ public class Paxos
             {
                 Tracing.trace("Some replicas have already promised a higher ballot than ours; retrying");
                 // sleep a random amount to give the other proposer a chance to finish
-                if (!waitForContention(deadline, ++failedAttemptsDueToContention, query.metadata(), query.partitionKey(), consistencyForConsensus, isWrite ? WRITE : READ))
-                    throw MaybeFailure.noResponses(prepare.participants).markAndThrowAsTimeoutOrFailure(true, consistencyForConsensus, failedAttemptsDueToContention, metrics);
+                waitForContentionOrThrow(deadline, ++failedAttemptsDueToContention, query.metadata(), query.partitionKey(),
+                                         consistencyForConsensus, isWrite ? WRITE : READ, prepare.participants, metrics);
                 retry = prepare(prepare.retryWithAtLeast(), prepare.participants, query, isWrite, acceptEarlyReadPermission);
             }
 
             preparing = retry;
         }
+    }
+
+    /**
+     * Awaits the resolution of a prepare, delivering the terminal {@link Mutator.CasCommitOutcome} for the
+     * commit fused into it, if any. A commit batched into a commit-and-prepare (used to finish another
+     * proposer's round) has no separable acknowledgement, so its fate is only known when that prepare
+     * resolves: a promise-quorum outcome confirms it, anything else leaves it unconfirmed (including a
+     * failure to resolve at all, reported before the failure propagates).
+     */
+    private static PaxosPrepare.Status awaitPrepareWithFusedCommit(PaxosPrepare preparing,
+                                                                   long deadline,
+                                                                   @Nullable Commit pendingFused,
+                                                                   Mutator.CasCommitOrigin pendingFusedOrigin,
+                                                                   ConsistencyLevel consistencyForConsensus)
+    {
+        PaxosPrepare.Status prepare;
+        try
+        {
+            prepare = preparing.awaitUntil(deadline);
+        }
+        catch (Throwable t)
+        {
+            if (pendingFused != null)
+                MutatorProvider.notifyCasCommitCompleted(pendingFused, consistencyForConsensus, pendingFusedOrigin, Mutator.CasCommitOutcome.UNCONFIRMED);
+            throw t;
+        }
+        if (pendingFused != null)
+            MutatorProvider.notifyCasCommitCompleted(pendingFused, consistencyForConsensus, pendingFusedOrigin, fusedCommitOutcome(prepare.outcome));
+        return prepare;
+    }
+
+    /**
+     * Repairs the replicas that missed the most recent commit witnessed by a prepare, batching the commit
+     * refresh with the next prepare attempt. The refresh is announced to the installed {@link Mutator}
+     * first, which may veto it (see {@link #announceCasCommit}): the driving operation is then aborted and
+     * the lagging replicas are refreshed by a later operation or repair instead.
+     *
+     * @return the batched commit-and-prepare for the caller to await
+     */
+    private static PaxosPrepare refreshIncompleteCommit(FoundIncompleteCommitted incomplete,
+                                                        SinglePartitionReadCommand query,
+                                                        boolean isWrite,
+                                                        boolean acceptEarlyReadPermission,
+                                                        ConsistencyLevel consistencyForConsensus,
+                                                        ClientRequestsMetrics metrics)
+    {
+        Tracing.trace("Repairing replicas that missed the most recent commit");
+        announceCasCommit(incomplete.committed, consistencyForConsensus, Mutator.CasCommitOrigin.REFRESH_COMMITTED, isWrite, metrics);
+        return commitAndPrepare(incomplete.committed, incomplete.participants, query, isWrite, acceptEarlyReadPermission);
+    }
+
+    private static CASClientRequestMetrics casRequestMetrics(boolean isWrite, ClientRequestsMetrics metrics)
+    {
+        return isWrite ? metrics.casWriteMetrics : metrics.casReadMetrics;
+    }
+
+    /**
+     * Resolves the read responses attached to a successful prepare into the {@link BeginResult}, or returns
+     * null when the read came up short and only a read permission (not a promise) was obtained: the caller
+     * must then retry the prepare without accepting an early read permission, so that the empty update
+     * linearizing the short read can be proposed.
+     */
+    @Nullable
+    private static BeginResult resolveBeginRead(PaxosPrepare.Success success,
+                                                SinglePartitionReadCommand query,
+                                                boolean isPromised,
+                                                int failedAttemptsDueToContention)
+    {
+        // We have received a quorum of promises (or read permissions) that have all witnessed the commit of the prior paxos
+        // round's proposal (if any).
+        DataResolver<?, ?> resolver = new DataResolver(query, success.participants, NoopReadRepair.instance, new Dispatcher.RequestTime(query.creationTimeNanos()), QueryInfoTracker.ReadTracker.NOOP);
+        for (int i = 0 ; i < success.responses.size() ; ++i)
+            resolver.preprocess(success.responses.get(i));
+
+        class WasRun implements Runnable { boolean v; public void run() { v = true; } }
+        WasRun hadShortRead = new WasRun();
+        PartitionIterator result = resolver.resolve(hadShortRead);
+
+        if (!isPromised && hadShortRead.v)
+            return null;
+
+        return new BeginResult(success.ballot, success.participants, failedAttemptsDueToContention, result, !hadShortRead.v && success.isReadSafe, isPromised, success.supersededBy);
     }
 
     public static boolean isInRangeAndShouldProcess(InetAddressAndPort from, DecoratedKey key, TableMetadata table, boolean includesRead)
@@ -1216,6 +1415,25 @@ public class Paxos
             toMark.apply(metrics.casReadMetrics).mark();
             toMark.apply(metrics.readMetricsForLevel(consistency)).mark();
         }
+    }
+
+    /**
+     * Marks the client request metrics for a {@link Mutator#onCasCommit} veto (see
+     * {@link MutatorProvider#notifyCasCommit}) with the meter matching the exception family, mirroring
+     * what the v1 engine's catch chains record for the same client-visible outcomes. Exception types
+     * without a dedicated meter mark nothing; the callers' finally blocks still record latency.
+     * Known family divergence, accepted for such an exotic veto type: a {@code ReadAbortException}
+     * (a {@code ReadFailureException} subtype) counts as a failure here, where the v1 chains would
+     * route it to {@code markAbort}.
+     */
+    private static void markCasVeto(RequestExecutionException veto, boolean isWrite, ConsistencyLevel consistency, ClientRequestsMetrics metrics)
+    {
+        if (veto instanceof OverloadedException || veto instanceof UnavailableException)
+            mark(isWrite, m -> m.unavailables, consistency, metrics);
+        else if (veto instanceof RequestTimeoutException)
+            mark(isWrite, m -> m.timeouts, consistency, metrics);
+        else if (veto instanceof RequestFailureException)
+            mark(isWrite, m -> m.failures, consistency, metrics);
     }
 
     public static Ballot newBallot(@Nullable Ballot minimumBallot, ConsistencyLevel consistency)

@@ -20,9 +20,12 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nullable;
 
+import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -39,21 +42,33 @@ import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.CasWriteTimeoutException;
+import org.apache.cassandra.exceptions.ExceptionCode;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestFailureException;
+import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.paxos.AbstractPaxosRepair;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.BallotGenerator;
 import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.paxos.PaxosRepair;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -138,6 +153,14 @@ public class MutatorCasTest
          */
         static volatile RuntimeException commitFailure;
 
+        /**
+         * When non-null, {@link #onCasCommit} throws this (after recording) for callbacks whose origin
+         * matches {@link #onCasCommitFailureOrigin} (all origins when that is null) -- lets a test
+         * drive the veto and containment paths of {@link MutatorProvider#notifyCasCommit}.
+         */
+        static volatile RuntimeException onCasCommitFailure;
+        static volatile Mutator.CasCommitOrigin onCasCommitFailureOrigin;
+
         private final Mutator delegate = new StorageProxy.DefaultMutator();
 
         static void reset()
@@ -148,6 +171,8 @@ public class MutatorCasTest
             commits.clear();
             completed.clear();
             commitFailure = null;
+            onCasCommitFailure = null;
+            onCasCommitFailureOrigin = null;
             sequence.set(0);
         }
 
@@ -196,6 +221,9 @@ public class MutatorCasTest
         public void onCasCommit(Commit committed, ConsistencyLevel consistencyLevel, CasCommitOrigin origin)
         {
             commits.add(new CommitRecord(committed, consistencyLevel, origin));
+            RuntimeException failure = onCasCommitFailure;
+            if (failure != null && (onCasCommitFailureOrigin == null || onCasCommitFailureOrigin == origin))
+                throw failure;
         }
 
         @Override
@@ -308,6 +336,9 @@ public class MutatorCasTest
     public static void defineSchema()
     {
         SchemaLoader.prepareServer();
+        // PaxosRepair's query phase has no execute-on-self shortcut (unlike the prepare/propose/commit
+        // paths): it always goes through messaging, so loopback delivery needs a live listener.
+        MessagingService.instance().listen();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE, TABLE));
@@ -664,5 +695,615 @@ public class MutatorCasTest
     public void commitInterruptedCompletesUnconfirmedV1()
     {
         commitFailureCompletesUnconfirmed(new UncheckedInterruptedException(), "cas_commit_interrupt_v1");
+    }
+
+    /**
+     * The veto contract of {@link Mutator#onCasCommit}: a {@link OverloadedException} (any
+     * RequestExecutionException) thrown for a CLIENT_OPERATION commit propagates to the caller, the
+     * commit dispatch is skipped, and the announced commit is paired with an UNCONFIRMED terminal.
+     * The value is nonetheless DECIDED: the follow-up CAS on the same partition must find and
+     * complete it as a repair, and its condition must see the vetoed row.
+     */
+    private void vetoPropagatesAndValueCompletesLater(Config.PaxosVariant variant, String keyName)
+    {
+        setPaxosVariant(variant);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+
+        OverloadedException veto = new OverloadedException("mutator veto: downstream overloaded");
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = Mutator.CasCommitOrigin.CLIENT_OPERATION;
+
+        // The empty partition matches the condition, the proposal is accepted (DECIDED), then the
+        // commit announcement vetoes: the exact exception instance must surface to the caller.
+        assertThatThrownBy(() -> cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "v-" + keyName)))
+            .isSameAs(veto);
+
+        assertThat(RecordingMutator.casBegun.get()).isEqualTo(1);
+        assertThat(RecordingMutator.casCompleted.get()).as("completion also fires on a veto").isEqualTo(1);
+        List<CommitRecord> clientCommits = RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION);
+        assertThat(clientCommits).as("the veto still records the announced commit").hasSize(1);
+        assertThat(RecordingMutator.mutatePaxosCalls.get())
+            .as("a vetoed commit must never be dispatched (v1's commit transport is not invoked)")
+            .isZero();
+        List<CommitRecord> clientCompleted = RecordingMutator.completedWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION);
+        assertThat(clientCompleted).as("the vetoed commit is paired with exactly one terminal").hasSize(1);
+        CommitRecord terminal = clientCompleted.get(0);
+        assertThat(terminal.outcome)
+            .as("a vetoed commit is decided but not confirmed").isEqualTo(Mutator.CasCommitOutcome.UNCONFIRMED);
+        assertThat(terminal.commit.update.partitionKey()).isEqualTo(key);
+        assertThat(terminal.thread).isSameAs(Thread.currentThread());
+        assertThat(terminal.seq).isGreaterThan(clientCommits.get(0).seq);
+
+        // The vetoed value is decided: a later operation must complete it as a repair, and once the
+        // row is visible this second CAS must not apply.
+        RecordingMutator.reset();
+        try (RowIterator result = cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "unused")))
+        {
+            assertThat(result)
+                .as("the vetoed-but-decided row must be visible to the follow-up CAS (condition not met)")
+                .isNotNull();
+        }
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS))
+            .as("the vetoed round is completed by the follow-up operation as an in-progress repair")
+            .hasSize(1);
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION))
+            .as("the non-applying follow-up must not commit anything of its own").isEmpty();
+    }
+
+    @Test
+    public void vetoPropagatesAndValueCompletesLaterV1()
+    {
+        vetoPropagatesAndValueCompletesLater(Config.PaxosVariant.v1, "cas_veto_v1");
+    }
+
+    @Test
+    public void vetoPropagatesAndValueCompletesLaterV2()
+    {
+        vetoPropagatesAndValueCompletesLater(Config.PaxosVariant.v2, "cas_veto_v2");
+    }
+
+    /**
+     * Only the RequestExecutionException family may veto: any other throwable from
+     * {@link Mutator#onCasCommit} — including RequestValidationExceptions like
+     * {@link InvalidRequestException} — keeps the historic containment (logged and ignored), so the
+     * operation applies normally and completes with an APPLIED terminal.
+     */
+    private void containedOnCasCommitFailure(Config.PaxosVariant variant, RuntimeException failure, String keyName)
+    {
+        setPaxosVariant(variant);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+
+        RecordingMutator.onCasCommitFailure = failure;
+        RecordingMutator.onCasCommitFailureOrigin = Mutator.CasCommitOrigin.CLIENT_OPERATION;
+
+        try (RowIterator result = cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "v-" + keyName)))
+        {
+            assertThat(result).as("a contained onCasCommit failure must not affect the operation").isNull();
+        }
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION)).hasSize(1);
+        List<CommitRecord> clientCompleted = RecordingMutator.completedWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION);
+        assertThat(clientCompleted).hasSize(1);
+        assertThat(clientCompleted.get(0).outcome)
+            .as("the commit proceeds and is acknowledged despite the contained callback failure")
+            .isEqualTo(Mutator.CasCommitOutcome.APPLIED);
+        assertThat(RecordingMutator.mutatePaxosCalls.get())
+            .as("the commit is dispatched normally")
+            .isEqualTo(variant == Config.PaxosVariant.v1 ? 1 : 0);
+    }
+
+    @Test
+    public void runtimeExceptionFromOnCasCommitIsContainedV1()
+    {
+        containedOnCasCommitFailure(Config.PaxosVariant.v1, new RuntimeException("boom"), "cas_contained_rte_v1");
+    }
+
+    @Test
+    public void runtimeExceptionFromOnCasCommitIsContainedV2()
+    {
+        containedOnCasCommitFailure(Config.PaxosVariant.v2, new RuntimeException("boom"), "cas_contained_rte_v2");
+    }
+
+    @Test
+    public void invalidRequestFromOnCasCommitIsContainedV1()
+    {
+        containedOnCasCommitFailure(Config.PaxosVariant.v1, new InvalidRequestException("not a veto"),
+                                    "cas_contained_ire_v1");
+    }
+
+    @Test
+    public void invalidRequestFromOnCasCommitIsContainedV2()
+    {
+        containedOnCasCommitFailure(Config.PaxosVariant.v2, new InvalidRequestException("not a veto"),
+                                    "cas_contained_ire_v2");
+    }
+
+    /**
+     * The veto applies to repair origins too — as a "defer, retry later" signal: throwing a
+     * RequestExecutionException while completing a foreign in-progress round skips the repair
+     * commit and fails the driving operation, but the DECIDED round is not lost — the next
+     * operation on the partition re-attempts the repair (re-firing the callback) and, once the
+     * implementation stops throwing, completes it.
+     */
+    private void repairOriginVetoDefersAndRetries(Config.PaxosVariant variant, String keyName)
+    {
+        setPaxosVariant(variant);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+
+        Ballot foreignBallot = BallotGenerator.Global.nextBallot(Ballot.Flag.GLOBAL);
+        PartitionUpdate foreignUpdate = insertRow(metadata, key, "foreign", foreignBallot.unixMicros());
+        SystemKeyspace.savePaxosProposal(Commit.newProposal(foreignBallot, foreignUpdate));
+        PaxosState.unsafeReset();
+
+        OverloadedException veto = new OverloadedException("mutator veto during repair");
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = null; // every origin
+
+        // The operation must complete the foreign round before proceeding, so the veto of that
+        // repair commit aborts the whole (innocent) driving operation with the thrown exception.
+        assertThatThrownBy(() -> cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "unused")))
+            .isSameAs(veto);
+        assertThat(RecordingMutator.casCompleted.get()).as("completion also fires on a veto").isEqualTo(1);
+        List<CommitRecord> repairs = RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+        assertThat(repairs).as("the vetoed repair dispatch is still announced").isNotEmpty();
+        assertThat(RecordingMutator.completed)
+            .as("nothing may complete successfully: the vetoed repair commit was never dispatched")
+            .noneMatch(CommitRecord::isSuccess);
+        if (variant == Config.PaxosVariant.v1)
+        {
+            assertThat(RecordingMutator.mutatePaxosCalls.get())
+                .as("the vetoed repair commit must not reach the v1 commit transport").isZero();
+            List<CommitRecord> terminals = RecordingMutator.completedWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+            assertThat(terminals).as("the v1 in-progress site pairs the veto with a terminal").hasSize(1);
+            assertThat(terminals.get(0).outcome).isEqualTo(Mutator.CasCommitOutcome.UNCONFIRMED);
+        }
+        else
+        {
+            // v2's begin()-path repair pairs the veto with an UNCONFIRMED terminal; a completion
+            // driven by the PaxosRepair machinery instead delivers none on failure — either way no
+            // success terminal may appear (asserted above), and any delivered one is UNCONFIRMED.
+            assertThat(RecordingMutator.completedWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS))
+                .allMatch(r -> r.outcome == Mutator.CasCommitOutcome.UNCONFIRMED);
+        }
+
+        // "Retried later, not lost": once the implementation stops throwing, the next operation
+        // finds the still-uncommitted round, re-fires the repair callback and completes it — the
+        // foreign row becomes visible, so this CAS does not apply.
+        RecordingMutator.reset();
+        try (RowIterator result = cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "unused")))
+        {
+            assertThat(result)
+                .as("the retried repair must complete the vetoed round (foreign row visible)")
+                .isNotNull();
+        }
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS))
+            .as("the retry re-fires the repair-origin callback").isNotEmpty();
+    }
+
+    @Test
+    public void repairOriginVetoDefersAndRetriesV1()
+    {
+        repairOriginVetoDefersAndRetries(Config.PaxosVariant.v1, "cas_repair_veto_v1");
+    }
+
+    @Test
+    public void repairOriginVetoDefersAndRetriesV2()
+    {
+        repairOriginVetoDefersAndRetries(Config.PaxosVariant.v2, "cas_repair_veto_v2");
+    }
+
+    /**
+     * Containment at repair origins is unchanged for anything that is not a
+     * RequestExecutionException: completing a foreign in-progress round succeeds despite the
+     * throwing callback.
+     */
+    private void nonVetoAtRepairOriginIsContained(Config.PaxosVariant variant, String keyName)
+    {
+        setPaxosVariant(variant);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+
+        Ballot foreignBallot = BallotGenerator.Global.nextBallot(Ballot.Flag.GLOBAL);
+        PartitionUpdate foreignUpdate = insertRow(metadata, key, "foreign", foreignBallot.unixMicros());
+        SystemKeyspace.savePaxosProposal(Commit.newProposal(foreignBallot, foreignUpdate));
+        PaxosState.unsafeReset();
+
+        RecordingMutator.onCasCommitFailure = new RuntimeException("contained at repair origins");
+        RecordingMutator.onCasCommitFailureOrigin = null; // every origin
+
+        try (RowIterator result = cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "unused")))
+        {
+            assertThat(result).as("the repaired foreign round makes the CAS non-applying").isNotNull();
+        }
+        assertThat(RecordingMutator.casCompleted.get()).isEqualTo(1);
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS))
+            .as("the foreign round was still repaired despite the throwing callback").hasSize(1);
+    }
+
+    @Test
+    public void nonVetoAtRepairOriginIsContainedV1()
+    {
+        nonVetoAtRepairOriginIsContained(Config.PaxosVariant.v1, "cas_repair_contained_v1");
+    }
+
+    @Test
+    public void nonVetoAtRepairOriginIsContainedV2()
+    {
+        nonVetoAtRepairOriginIsContained(Config.PaxosVariant.v2, "cas_repair_contained_v2");
+    }
+
+    /**
+     * The veto reaches SERIAL readers too: a read that must complete a foreign in-progress round
+     * before proceeding fails with the exact vetoed exception, marks the CAS-read unavailables
+     * meter, and — once the implementation stops throwing — the retried read completes the round
+     * and observes the foreign row.
+     */
+    private void serialReadVetoDefersAndRetries(Config.PaxosVariant variant, String keyName)
+    {
+        setPaxosVariant(variant);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+
+        Ballot foreignBallot = BallotGenerator.Global.nextBallot(Ballot.Flag.GLOBAL);
+        PartitionUpdate foreignUpdate = insertRow(metadata, key, "foreign", foreignBallot.unixMicros());
+        SystemKeyspace.savePaxosProposal(Commit.newProposal(foreignBallot, foreignUpdate));
+        PaxosState.unsafeReset();
+
+        OverloadedException veto = new OverloadedException("mutator veto during serial read");
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = null; // every origin
+
+        long unavailablesBefore = casReadUnavailables();
+        assertThatThrownBy(() -> serialRead(metadata, key)).isSameAs(veto);
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS))
+            .as("the vetoed repair dispatch is still announced to the reader's mutator").isNotEmpty();
+        assertThat(casReadUnavailables())
+            .as("an Overloaded veto of a serial read marks the CAS-read unavailables meter (both engines)")
+            .isEqualTo(unavailablesBefore + 1);
+
+        // Deferred, not lost: the retried read completes the round and sees the foreign row.
+        RecordingMutator.reset();
+        try (PartitionIterator partitions = serialRead(metadata, key))
+        {
+            assertThat(partitions.hasNext()).as("the retried read returns the partition").isTrue();
+            try (RowIterator rows = partitions.next())
+            {
+                assertThat(rows.hasNext())
+                    .as("the retried read must observe the row of the previously vetoed round").isTrue();
+            }
+        }
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS))
+            .as("the retried read re-fires the repair-origin callback").isNotEmpty();
+    }
+
+    private static PartitionIterator serialRead(TableMetadata metadata, DecoratedKey key)
+    {
+        SinglePartitionReadCommand command = SinglePartitionReadCommand.fullPartitionRead(metadata, FBUtilities.nowInSeconds(), key);
+        return StorageProxy.read(SinglePartitionReadCommand.Group.one(command),
+                                 ConsistencyLevel.SERIAL,
+                                 ClientState.forInternalCalls(),
+                                 Dispatcher.RequestTime.forImmediateExecution());
+    }
+
+    private static long casReadUnavailables()
+    {
+        return ClientRequestsMetricsProvider.instance.metrics(KEYSPACE).casReadMetrics.unavailables.getCount();
+    }
+
+    @Test
+    public void serialReadVetoDefersAndRetriesV1()
+    {
+        serialReadVetoDefersAndRetries(Config.PaxosVariant.v1, "cas_read_veto_v1");
+    }
+
+    @Test
+    public void serialReadVetoDefersAndRetriesV2()
+    {
+        serialReadVetoDefersAndRetries(Config.PaxosVariant.v2, "cas_read_veto_v2");
+    }
+
+    /** A RequestExecutionException subtype outside the concrete write/read exception families. */
+    static final class CustomVetoException extends RequestExecutionException
+    {
+        CustomVetoException(String message)
+        {
+            super(ExceptionCode.SERVER_ERROR, message);
+        }
+    }
+
+    /** A timeout-family subtype outside the concrete write/read timeout classes. */
+    static final class CustomTimeoutVetoException extends RequestTimeoutException
+    {
+        CustomTimeoutVetoException(String message)
+        {
+            super(ExceptionCode.WRITE_TIMEOUT, ConsistencyLevel.QUORUM, 0, 1, message);
+        }
+    }
+
+    /** A failure-family subtype outside the concrete write/read failure classes. */
+    static final class CustomFailureVetoException extends RequestFailureException
+    {
+        CustomFailureVetoException(String message)
+        {
+            super(ExceptionCode.WRITE_FAILURE, message, ConsistencyLevel.QUORUM, 0, 1, Collections.emptyMap());
+        }
+    }
+
+    private static ClientRequestsMetrics requestMetrics()
+    {
+        return ClientRequestsMetricsProvider.instance.metrics(KEYSPACE);
+    }
+
+    /** Arms {@code veto} for CLIENT_OPERATION, runs an applying CAS and asserts the exact instance surfaces. */
+    private void clientVeto(RuntimeException veto, String keyName)
+    {
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+        RecordingMutator.reset();
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = Mutator.CasCommitOrigin.CLIENT_OPERATION;
+        assertThatThrownBy(() -> cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "v-" + keyName))).isSameAs(veto);
+    }
+
+    /**
+     * Arms {@code veto} for every origin, injects a foreign in-progress round for {@code keyName}
+     * and asserts a SERIAL read fails with the exact instance while completing it.
+     */
+    private void serialReadVeto(RuntimeException veto, String keyName)
+    {
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+        Ballot foreignBallot = BallotGenerator.Global.nextBallot(Ballot.Flag.GLOBAL);
+        SystemKeyspace.savePaxosProposal(Commit.newProposal(foreignBallot, insertRow(metadata, key, "foreign", foreignBallot.unixMicros())));
+        PaxosState.unsafeReset();
+        RecordingMutator.reset();
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = null;
+        assertThatThrownBy(() -> serialRead(metadata, key)).isSameAs(veto);
+    }
+
+    /**
+     * Every veto exception family marks its matching client-request meter on the v2 engine
+     * ({@code Paxos.markCasVeto}): Unavailable → unavailables, timeout family → timeouts, failure
+     * family → failures. (The Overloaded → unavailables branch is covered by the veto tests above.)
+     */
+    @Test
+    public void vetoFamilyMarksMatchingMeterV2()
+    {
+        setPaxosVariant(Config.PaxosVariant.v2);
+        ClientRequestsMetrics metrics = requestMetrics();
+
+        long unavailables = metrics.casWriteMetrics.unavailables.getCount();
+        clientVeto(UnavailableException.create(ConsistencyLevel.QUORUM, 1, 0), "cas_veto_meter_ua_v2");
+        assertThat(metrics.casWriteMetrics.unavailables.getCount()).isEqualTo(unavailables + 1);
+
+        long timeouts = metrics.casWriteMetrics.timeouts.getCount();
+        clientVeto(new CasWriteTimeoutException(WriteType.CAS, ConsistencyLevel.QUORUM, 0, 1, 0), "cas_veto_meter_to_v2");
+        assertThat(metrics.casWriteMetrics.timeouts.getCount()).isEqualTo(timeouts + 1);
+
+        long failures = metrics.casWriteMetrics.failures.getCount();
+        clientVeto(new WriteFailureException(ConsistencyLevel.QUORUM, 0, 1, WriteType.CAS, Collections.emptyMap()), "cas_veto_meter_fl_v2");
+        assertThat(metrics.casWriteMetrics.failures.getCount()).isEqualTo(failures + 1);
+    }
+
+    /**
+     * The v1 fallback catch in legacyCas routes veto types outside the concrete classes to the
+     * closest family meter, and the exact instance still surfaces.
+     */
+    @Test
+    public void customFamilyVetoMarksMatchingMeterV1()
+    {
+        setPaxosVariant(Config.PaxosVariant.v1);
+        ClientRequestsMetrics metrics = requestMetrics();
+
+        long timeouts = metrics.casWriteMetrics.timeouts.getCount();
+        clientVeto(new CustomTimeoutVetoException("custom timeout veto"), "cas_veto_meter_to_v1");
+        assertThat(metrics.casWriteMetrics.timeouts.getCount()).isEqualTo(timeouts + 1);
+
+        long failures = metrics.casWriteMetrics.failures.getCount();
+        clientVeto(new CustomFailureVetoException("custom failure veto"), "cas_veto_meter_fl_v1");
+        assertThat(metrics.casWriteMetrics.failures.getCount()).isEqualTo(failures + 1);
+    }
+
+    /** Same family routing through the v1 fallback catch in legacyReadWithPaxos (serial-read path). */
+    @Test
+    public void serialReadCustomFamilyVetoMarksMatchingMeterV1()
+    {
+        setPaxosVariant(Config.PaxosVariant.v1);
+        ClientRequestsMetrics metrics = requestMetrics();
+
+        long timeouts = metrics.casReadMetrics.timeouts.getCount();
+        serialReadVeto(new CustomTimeoutVetoException("custom timeout veto"), "cas_read_veto_meter_to_v1");
+        assertThat(metrics.casReadMetrics.timeouts.getCount()).isEqualTo(timeouts + 1);
+
+        long failures = metrics.casReadMetrics.failures.getCount();
+        serialReadVeto(new CustomFailureVetoException("custom failure veto"), "cas_read_veto_meter_fl_v1");
+        assertThat(metrics.casReadMetrics.failures.getCount()).isEqualTo(failures + 1);
+    }
+
+    /** The v2 read-side veto marks the CAS-read meters ({@code markCasVeto} with isWrite=false). */
+    @Test
+    public void serialReadTimeoutFamilyVetoMarksTimeoutsV2()
+    {
+        setPaxosVariant(Config.PaxosVariant.v2);
+        ClientRequestsMetrics metrics = requestMetrics();
+
+        long timeouts = metrics.casReadMetrics.timeouts.getCount();
+        serialReadVeto(new CustomTimeoutVetoException("custom timeout veto"), "cas_read_veto_meter_to_v2");
+        assertThat(metrics.casReadMetrics.timeouts.getCount()).isEqualTo(timeouts + 1);
+    }
+
+    /**
+     * A veto typed outside the concrete exception families still propagates on both engines — on
+     * v1 through the fallback catch in legacyCas that keeps the query tracker informed — skips the
+     * dispatch, and pairs the announcement with an UNCONFIRMED terminal.
+     */
+    private void customVetoTypePropagates(Config.PaxosVariant variant, String keyName)
+    {
+        setPaxosVariant(variant);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+
+        CustomVetoException veto = new CustomVetoException("custom veto type");
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = Mutator.CasCommitOrigin.CLIENT_OPERATION;
+
+        assertThatThrownBy(() -> cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "v-" + keyName)))
+            .isSameAs(veto);
+        assertThat(RecordingMutator.mutatePaxosCalls.get())
+            .as("the vetoed commit must never be dispatched").isZero();
+        List<CommitRecord> terminals = RecordingMutator.completedWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION);
+        assertThat(terminals).as("the vetoed commit is paired with exactly one terminal").hasSize(1);
+        assertThat(terminals.get(0).outcome).isEqualTo(Mutator.CasCommitOutcome.UNCONFIRMED);
+    }
+
+    @Test
+    public void customVetoTypePropagatesV1()
+    {
+        customVetoTypePropagates(Config.PaxosVariant.v1, "cas_custom_veto_v1");
+    }
+
+    @Test
+    public void customVetoTypePropagatesV2()
+    {
+        customVetoTypePropagates(Config.PaxosVariant.v2, "cas_custom_veto_v2");
+    }
+
+    /**
+     * Custom-typed veto on the serial-read path: exercises the fallback catch in
+     * legacyReadWithPaxos (v1) and the raw v2 propagation — the exact instance surfaces to the
+     * reader even for a type outside the concrete exception families.
+     */
+    private void serialReadCustomVetoPropagates(Config.PaxosVariant variant, String keyName)
+    {
+        setPaxosVariant(variant);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+
+        Ballot foreignBallot = BallotGenerator.Global.nextBallot(Ballot.Flag.GLOBAL);
+        PartitionUpdate foreignUpdate = insertRow(metadata, key, "foreign", foreignBallot.unixMicros());
+        SystemKeyspace.savePaxosProposal(Commit.newProposal(foreignBallot, foreignUpdate));
+        PaxosState.unsafeReset();
+
+        CustomVetoException veto = new CustomVetoException("custom veto during serial read");
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = null; // every origin
+
+        assertThatThrownBy(() -> serialRead(metadata, key)).isSameAs(veto);
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS))
+            .as("the vetoed repair dispatch is still announced").isNotEmpty();
+    }
+
+    @Test
+    public void serialReadCustomVetoPropagatesV1()
+    {
+        serialReadCustomVetoPropagates(Config.PaxosVariant.v1, "cas_read_custom_veto_v1");
+    }
+
+    @Test
+    public void serialReadCustomVetoPropagatesV2()
+    {
+        serialReadCustomVetoPropagates(Config.PaxosVariant.v2, "cas_read_custom_veto_v2");
+    }
+
+    /**
+     * Background {@code PaxosRepair} pairs every announce with a terminal even on failure: a veto
+     * thrown from {@link Mutator#onCasCommit} fails the repair attempt AND closes the announce
+     * with an UNCONFIRMED terminal (previously the failure was swallowed with no terminal, leaking
+     * any in-flight state a tracking implementation opened on the announce). Once the
+     * implementation stops throwing, a re-run repair completes the round with an APPLIED terminal.
+     */
+    @Test
+    public void paxosRepairVetoDeliversUnconfirmed() throws Exception
+    {
+        setPaxosVariant(Config.PaxosVariant.v2);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk("cas_paxos_repair_veto");
+
+        Ballot foreignBallot = BallotGenerator.Global.nextBallot(Ballot.Flag.GLOBAL);
+        PartitionUpdate foreignUpdate = insertRow(metadata, key, "foreign", foreignBallot.unixMicros());
+        SystemKeyspace.savePaxosProposal(Commit.newProposal(foreignBallot, foreignUpdate));
+        PaxosState.unsafeReset();
+
+        OverloadedException veto = new OverloadedException("mutator veto during background repair");
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = null; // every origin
+
+        // null success criteria: passing the foreign ballot itself would clash with the witnessed
+        // ballot (reproposalMayBeRejected) and poison-loop to the retry timeout instead of
+        // completing the accepted proposal
+        AbstractPaxosRepair.Result result =
+            PaxosRepair.create(ConsistencyLevel.SERIAL, key, null, metadata).start().await();
+        assertThat(result).as("the vetoed repair attempt fails").isInstanceOf(AbstractPaxosRepair.Failure.class);
+        List<CommitRecord> announces = RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+        assertThat(announces).as("the vetoed repair commit is still announced").hasSize(1);
+        // the completion listener runs just after await() unblocks, on the repair's thread
+        List<CommitRecord> terminals = awaitCompleted(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, 1);
+        assertThat(terminals).as("the failed repair pairs the announce with a terminal").hasSize(1);
+        assertThat(terminals.get(0).outcome).isEqualTo(Mutator.CasCommitOutcome.UNCONFIRMED);
+        assertThat(terminals.get(0).commit.update.partitionKey()).isEqualTo(key);
+
+        // Deferred, not lost: with the veto disarmed a re-run repair completes the round.
+        RecordingMutator.reset();
+        result = PaxosRepair.create(ConsistencyLevel.SERIAL, key, null, metadata).start().await();
+        assertThat(result).as("the retried repair succeeds").isNotInstanceOf(AbstractPaxosRepair.Failure.class);
+        assertThat(RecordingMutator.commitsWithOrigin(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS))
+            .as("the retried repair re-announces the commit").hasSize(1);
+        List<CommitRecord> applied = awaitCompleted(Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS, 1);
+        assertThat(applied).hasSize(1);
+        assertThat(applied.get(0).outcome)
+            .as("an acknowledged repair commit completes as APPLIED")
+            .isEqualTo(Mutator.CasCommitOutcome.APPLIED);
+    }
+
+    /** The repair state machine delivers terminals on its own threads, just after await() unblocks. */
+    private static List<CommitRecord> awaitCompleted(Mutator.CasCommitOrigin origin, int expected)
+    {
+        try
+        {
+            Awaitility.await()
+                      .atMost(10, TimeUnit.SECONDS)
+                      .pollInterval(10, TimeUnit.MILLISECONDS)
+                      .until(() -> RecordingMutator.completedWithOrigin(origin).size() >= expected);
+        }
+        catch (ConditionTimeoutException e)
+        {
+            // fall through: the caller's assertion reports the terminals actually delivered
+        }
+        return RecordingMutator.completedWithOrigin(origin);
+    }
+
+    /**
+     * v1, commit CL=ANY: normally ANY delivers no terminal (commitPaxos does not await an ack), but
+     * a veto always pairs the announcement with an UNCONFIRMED terminal — ANY included.
+     */
+    @Test
+    public void vetoAtConsistencyAnyDeliversUnconfirmedV1()
+    {
+        setPaxosVariant(Config.PaxosVariant.v1);
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk("cas_veto_any_v1");
+
+        OverloadedException veto = new OverloadedException("mutator veto at ANY");
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = Mutator.CasCommitOrigin.CLIENT_OPERATION;
+
+        assertThatThrownBy(() -> StorageProxy.cas(KEYSPACE,
+                                                  TABLE,
+                                                  key,
+                                                  ifEmptyInsert(metadata, key, "v-any"),
+                                                  ConsistencyLevel.SERIAL,
+                                                  ConsistencyLevel.ANY,
+                                                  ClientState.forInternalCalls(),
+                                                  FBUtilities.nowInSeconds(),
+                                                  Dispatcher.RequestTime.forImmediateExecution()))
+            .isSameAs(veto);
+
+        List<CommitRecord> clientCompleted = RecordingMutator.completedWithOrigin(Mutator.CasCommitOrigin.CLIENT_OPERATION);
+        assertThat(clientCompleted).as("a veto delivers the UNCONFIRMED terminal even at CL=ANY").hasSize(1);
+        assertThat(clientCompleted.get(0).outcome).isEqualTo(Mutator.CasCommitOutcome.UNCONFIRMED);
+        assertThat(RecordingMutator.mutatePaxosCalls.get()).isZero();
     }
 }
