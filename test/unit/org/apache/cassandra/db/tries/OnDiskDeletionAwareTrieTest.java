@@ -23,8 +23,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
@@ -40,6 +42,13 @@ import static org.apache.cassandra.db.tries.TrieUtil.assertTriesEqual;
 /// written into the payload is recovered and that the branch bytes land where the pointer says.
 public class OnDiskDeletionAwareTrieTest
 {
+    @BeforeClass
+    public static void setUp()
+    {
+        // The on-disk readers pull in BufferPools, whose static initializer needs configuration.
+        DatabaseDescriptor.toolInitialization();
+    }
+
     /// [LivePoint] and [DeletionMarker] both carry their own position, so the key bytes have to be
     /// serialized alongside the values for the round trip to compare equal.
     static class LiveSerDe implements FileWriter.DataSerializer<LivePoint>, OnDiskCursor.DataDeserializer<LivePoint>
