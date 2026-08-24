@@ -106,13 +106,29 @@ implements DeletionAwareTrie<T, D>, Closeable
         return byteComparableVersion;
     }
 
+    /// Mirrors [OnDiskBaseTrie.WithOwnChannel]: the reader must be released before the rebufferer
+    /// is closed, or `BufferManagingRebufferer.close` trips its outstanding-buffer assertion.
+    /// Cursors are not closeable; the caller must ensure none are still in use.
     @Override
     public void close()
     {
-        if (ownsChannel)
+        try
         {
-            rebufferer.close();
-            channel.close();
+            rebufferer.closeReader();
+        }
+        finally
+        {
+            if (ownsChannel)
+            {
+                try
+                {
+                    rebufferer.close();
+                }
+                finally
+                {
+                    channel.close();
+                }
+            }
         }
     }
 

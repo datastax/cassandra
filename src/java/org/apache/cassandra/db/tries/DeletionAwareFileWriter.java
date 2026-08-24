@@ -67,7 +67,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// `Walker<Payload<T>>` while this is a `Walker<T>`, and Java does not permit inheriting the
 /// same interface with two different type arguments.
 public class DeletionAwareFileWriter<T, D extends RangeState<D>>
-implements DeletionAwareCursor.DeletionAwareWalker<T, D, DataOutputPlus>
+implements Cursor.Walker<T, DataOutputPlus>
 {
     /// A node's live content together with the position of its deletion branch, if any.
     static class Payload<T>
@@ -133,11 +133,6 @@ implements DeletionAwareCursor.DeletionAwareWalker<T, D, DataOutputPlus>
     /// Depth of the node the current deletion branch hangs from, to rebase the nested walk.
     private int branchDepthAdjustment;
 
-    /// Content seen at the current position, held until we know whether this node also has
-    /// a deletion branch. [DeletionAwareCursor#process] reports content before the branch.
-    private T pendingContent;
-    private long pendingBranchRoot = -1;
-    private boolean hasPending;
 
     public DeletionAwareFileWriter(DataOutputPlus out,
                                    FileWriter.DataSerializer<T> contentSerializer,
@@ -154,7 +149,6 @@ implements DeletionAwareCursor.DeletionAwareWalker<T, D, DataOutputPlus>
     /// mirroring [FileWriter#ascendTo].
     public void ascendTo(long newEncodedPosition)
     {
-        flushPending();
         inner.ascendTo(newEncodedPosition);
     }
 
@@ -163,36 +157,39 @@ implements DeletionAwareCursor.DeletionAwareWalker<T, D, DataOutputPlus>
     @Override
     public void content(T content)
     {
-        flushPending();
-        pendingContent = content;
-        hasPending = true;
+        inner.content(new Payload<>(content, -1));
     }
 
-    @Override
+    /// Not [DeletionAwareCursor.DeletionAwareWalker]: that contract reports a branch's markers but
+    /// never its ascents, and [FileWriter] only emits nodes on ascent. The driver below walks both
+    /// levels explicitly instead, so these are plain methods rather than interface overrides.
     public boolean enterDeletionsBranch()
     {
         // Start a nested trie in the same stream. Its bytes land before the node that will
         // reference them, so the recorded root is a backward pointer like every other.
-        branchWriter = new FileWriter<>(out, deletionSerializer, swapAscentAndDescentSides);
+        //
+        // Always written ordered, independently of the data trie: a deletion branch is a range
+        // trie, it is read back through OnDiskCursor.Range, and that always reads with
+        // isOrdered = true. Writing it unordered loses the ascent-path stops and the read-back
+        // positions disagree on ON_RETURN_PATH_BIT.
+        branchWriter = new FileWriter<>(out, deletionSerializer, true);
         branchDepthAdjustment = inner.keyPos;
         return true;
     }
 
-    @Override
     public void deletionMarker(D marker)
     {
         branchWriter.content(marker);
     }
 
-    @Override
-    public void exitDeletionsBranch()
+    /// @return the position of the branch just written, to be recorded in the node's payload.
+    public long exitDeletionsBranch()
     {
-        branchWriter.ascendTo(Cursor.encode(0, 0, Direction.FORWARD));
         branchWriter.complete();
-        pendingBranchRoot = out.position();
-        hasPending = true;
+        long root = out.position();
         branchWriter = null;
         branchDepthAdjustment = 0;
+        return root;
     }
 
     // ---- path tracking ----------------------------------------------------------------
@@ -237,21 +234,121 @@ implements DeletionAwareCursor.DeletionAwareWalker<T, D, DataOutputPlus>
     @Override
     public DataOutputPlus complete()
     {
-        flushPending();
         return inner.complete();
     }
 
-    /// Hand the accumulated content and deletion-branch pointer to the underlying writer as
-    /// one payload. Called once the walk moves on from the position they belong to.
-    private void flushPending()
+    /// Serialize a deletion-aware trie.
+    ///
+    /// [DeletionAwareCursor#process] cannot drive this: it never calls `ascendTo`, and [FileWriter]
+    /// only emits nodes on ascent — which is why [FileWriter#write] has its own loop. The same
+    /// applies to a deletion branch, so both levels are walked explicitly here.
+    ///
+    /// Writes in [Direction#REVERSE] like [FileWriter#write], so the root ends up last and the trie
+    /// is read from the end of the stream.
+    public static <T, D extends RangeState<D>> void write(DeletionAwareTrie<T, D> trie,
+                                                          boolean isOrdered,
+                                                          FileWriter.DataSerializer<T> contentSerializer,
+                                                          FileWriter.DataSerializer<D> deletionSerializer,
+                                                          DataOutputPlus out)
     {
-        if (!hasPending)
-            return;
-        hasPending = false;
-        T content = pendingContent;
-        long branchRoot = pendingBranchRoot;
-        pendingContent = null;
-        pendingBranchRoot = -1;
-        inner.content(new Payload<>(content, branchRoot));
+        DeletionAwareFileWriter<T, D> fw =
+            new DeletionAwareFileWriter<>(out, contentSerializer, deletionSerializer, isOrdered);
+        DeletionAwareCursor<T, D> c = trie.cursor(Direction.REVERSE);
+
+        emitAt(fw, c);
+        long prevPosition = c.encodedPosition();
+        while (true)
+        {
+            long currPosition = c.advanceMultiple(fw);
+            if (Cursor.ascended(currPosition, prevPosition))
+            {
+                fw.ascendTo(currPosition);
+                if (Cursor.isExhausted(currPosition))
+                    break;
+
+                int depth = Cursor.depth(currPosition);
+                if (depth > 0)
+                {
+                    fw.resetPathLength(depth - 1);
+                    fw.addPathByte(Cursor.incomingTransition(currPosition));
+                }
+            }
+            else
+                fw.addPathByte(Cursor.incomingTransition(currPosition));
+
+            if (Cursor.isOnReturnPath(currPosition))
+                fw.onReturnPath();
+
+            emitAt(fw, c);
+            prevPosition = currPosition;
+        }
+        fw.complete();
     }
+
+    /// Report the content and, if present, the whole deletion branch at the cursor's position.
+    private static <T, D extends RangeState<D>> void emitAt(DeletionAwareFileWriter<T, D> fw,
+                                                            DeletionAwareCursor<T, D> c)
+    {
+        long position = c.encodedPosition();
+
+        T content = Cursor.content(c, position);
+
+        long branchRoot = -1;
+        if ((position & Cursor.MAY_HAVE_DELETION_BRANCH_BIT) != 0)
+        {
+            RangeCursor<D> branch = c.deletionBranchCursor(Direction.REVERSE);
+            if (branch != null)
+            {
+                fw.enterDeletionsBranch();
+                writeBranch(fw.branchWriter, branch);
+                branchRoot = fw.exitDeletionsBranch();
+            }
+        }
+
+        // Emit once both halves are known. This must happen while the walk is still at this
+        // position: FileWriter.content asserts on the path state, so it cannot be deferred past
+        // the next ascent. Writing the branch first is still correct — content() only attaches
+        // the payload to the in-progress node, whose bytes are emitted later on ascent, so the
+        // recorded root remains a backward pointer.
+        if (content != null || branchRoot >= 0)
+            fw.inner.content(new Payload<>(content, branchRoot));
+    }
+
+    /// The same ascent-driven loop as above, over one deletion branch, feeding the nested writer.
+    private static <D extends RangeState<D>> void writeBranch(FileWriter<D> bw, RangeCursor<D> c)
+    {
+        D content = c.content();
+        if (content != null)
+            bw.content(content);
+
+        long prevPosition = c.encodedPosition();
+        while (true)
+        {
+            long currPosition = c.advanceMultiple(bw);
+            if (Cursor.ascended(currPosition, prevPosition))
+            {
+                bw.ascendTo(currPosition);
+                if (Cursor.isExhausted(currPosition))
+                    return;
+
+                int depth = Cursor.depth(currPosition);
+                if (depth > 0)
+                {
+                    bw.resetPathLength(depth - 1);
+                    bw.addPathByte(Cursor.incomingTransition(currPosition));
+                }
+            }
+            else
+                bw.addPathByte(Cursor.incomingTransition(currPosition));
+
+            if (Cursor.isOnReturnPath(currPosition))
+                bw.onReturnPath();
+
+            content = c.content();
+            if (content != null)
+                bw.content(content);
+            prevPosition = currPosition;
+        }
+    }
+
 }
