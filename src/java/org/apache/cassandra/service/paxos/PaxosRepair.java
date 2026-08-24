@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -247,9 +248,15 @@ public class PaxosRepair extends AbstractPaxosRepair
                 // note: we could send to only those we know haven't witnessed it, but this is a rare operation so a small amount of redundant work is fine
                 if (oldestCommitted.equals(latestCommitted.ballot))
                     return DONE;
-                MutatorProvider.notifyCasCommit(latestCommitted, commitConsistency(), Mutator.CasCommitOrigin.REFRESH_COMMITTED);
+                // Here and at the two announce sites below: the announce is paired with a terminal even
+                // on failure. A veto (RequestExecutionException rethrown by notifyCasCommit) or any later
+                // failure ends this attempt via AbstractPaxosRepair.updateState's Failure handling, and
+                // the completion listener installed in the constructor closes the announce as
+                // UNCONFIRMED; the round stays uncommitted and the paxos auto-repair machinery
+                // re-attempts it later, re-firing the notification.
+                announceCommit(latestCommitted, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
                 return PaxosCommit.commit(latestCommitted, participants, paxosConsistency, commitConsistency(), true,
-                                          new CommittingRepair(latestCommitted, Mutator.CasCommitOrigin.REFRESH_COMMITTED));
+                                          new CommittingRepair());
             }
             else if (isAcceptedButNotCommitted && !isPromisedButNotAccepted && !reproposalMayBeRejected)
             {
@@ -332,9 +339,9 @@ public class PaxosRepair extends AbstractPaxosRepair
                     // finish the in-progress commit
                     FoundIncompleteCommitted incomplete = input.incompleteCommitted();
                     logger.trace("PaxosRepair of {} found in progress {}", partitionKey(), incomplete.committed);
-                    MutatorProvider.notifyCasCommit(incomplete.committed, commitConsistency(), Mutator.CasCommitOrigin.REFRESH_COMMITTED);
+                    announceCommit(incomplete.committed, Mutator.CasCommitOrigin.REFRESH_COMMITTED);
                     return PaxosCommit.commit(incomplete.committed, participants, paxosConsistency, commitConsistency(), true,
-                                              new CommitAndRestart(incomplete.committed, Mutator.CasCommitOrigin.REFRESH_COMMITTED)); // we don't know if we're done, so we must restart
+                                              new CommitAndRestart()); // we don't know if we're done, so we must restart
                 }
 
                 case PROMISED:
@@ -382,9 +389,9 @@ public class PaxosRepair extends AbstractPaxosRepair
 
                     logger.trace("PaxosRepair of {} committing successful proposal {}", partitionKey(), proposal);
                     Agreed agreed = proposal.agreed();
-                    MutatorProvider.notifyCasCommit(agreed, commitConsistency(), Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
+                    announceCommit(agreed, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS);
                     return PaxosCommit.commit(agreed, participants, paxosConsistency, commitConsistency(), true,
-                                              new CommittingRepair(agreed, Mutator.CasCommitOrigin.REPAIR_IN_PROGRESS));
+                                              new CommittingRepair());
 
                 default:
                     throw new IllegalStateException();
@@ -394,45 +401,73 @@ public class PaxosRepair extends AbstractPaxosRepair
 
     private class CommittingRepair extends ConsumerState<PaxosCommit.Status>
     {
-        private final Agreed committed;
-        private final Mutator.CasCommitOrigin origin;
-
-        private CommittingRepair(Agreed committed, Mutator.CasCommitOrigin origin)
-        {
-            this.committed = committed;
-            this.origin = origin;
-        }
-
         @Override
         public State execute(PaxosCommit.Status input)
         {
             logger.trace("PaxosRepair of {} {}", partitionKey(), input);
             if (!input.isSuccess())
+                // the announce stays open: a retry either re-announces (closing this one as
+                // UNCONFIRMED) or ends the repair with a Failure (same, via the completion listener)
                 return retry(this);
             // the commit reached a commitConsistency() quorum: the recovered value is now readable
-            MutatorProvider.notifyCasCommitCompleted(committed, commitConsistency(), origin, Mutator.CasCommitOutcome.APPLIED);
+            completeAnnounced(Mutator.CasCommitOutcome.APPLIED);
             return DONE;
         }
     }
 
     private class CommitAndRestart extends ConsumerState<PaxosCommit.Status>
     {
-        private final Agreed committed;
-        private final Mutator.CasCommitOrigin origin;
-
-        private CommitAndRestart(Agreed committed, Mutator.CasCommitOrigin origin)
-        {
-            this.committed = committed;
-            this.origin = origin;
-        }
-
         @Override
         public State execute(PaxosCommit.Status input)
         {
             if (input.isSuccess())
-                MutatorProvider.notifyCasCommitCompleted(committed, commitConsistency(), origin, Mutator.CasCommitOutcome.APPLIED);
+                completeAnnounced(Mutator.CasCommitOutcome.APPLIED);
             return restart(this);
         }
+    }
+
+    /**
+     * An announced commit awaiting its terminal: the commit last passed to {@link Mutator#onCasCommit}
+     * whose terminal has not been delivered yet, with its origin.
+     */
+    private static final class AnnouncedCommit
+    {
+        final Commit commit;
+        final Mutator.CasCommitOrigin origin;
+
+        AnnouncedCommit(Commit commit, Mutator.CasCommitOrigin origin)
+        {
+            this.commit = commit;
+            this.origin = origin;
+        }
+    }
+
+    /**
+     * The commit last announced via {@link Mutator#onCasCommit} whose terminal has not been
+     * delivered yet. Set (before notifying, so a veto leaves it set) by {@link #announceCommit}
+     * and consumed atomically by {@link #completeAnnounced}, so that every announce is paired with
+     * exactly one terminal: {@link Mutator.CasCommitOutcome#APPLIED} on an acknowledged commit,
+     * else {@link Mutator.CasCommitOutcome#UNCONFIRMED} — delivered when a retry re-announces, or
+     * by the completion listener installed in the constructor when the repair ends (failure,
+     * cancellation, veto or exhausted retry budget) with the announce still open.
+     */
+    private final AtomicReference<AnnouncedCommit> announced = new AtomicReference<>();
+
+    private void announceCommit(Commit commit, Mutator.CasCommitOrigin origin)
+    {
+        // a previous attempt's announce that was never confirmed (commit unacknowledged, retried):
+        // close it out before opening the new one, keeping announces and terminals 1:1
+        completeAnnounced(Mutator.CasCommitOutcome.UNCONFIRMED);
+        announced.set(new AnnouncedCommit(commit, origin));
+        MutatorProvider.notifyCasCommit(commit, commitConsistency(), origin);
+    }
+
+    private void completeAnnounced(Mutator.CasCommitOutcome outcome)
+    {
+        AnnouncedCommit open = announced.getAndSet(null);
+        if (open == null)
+            return;
+        MutatorProvider.notifyCasCommitCompleted(open.commit, commitConsistency(), open.origin, outcome);
     }
 
     private PaxosRepair(DecoratedKey partitionKey, Ballot incompleteBallot, TableMetadata table, ConsistencyLevel paxosConsistency)
@@ -443,6 +478,10 @@ public class PaxosRepair extends AbstractPaxosRepair
         this.table = table;
         this.paxosConsistency = paxosConsistency;
         this.successCriteria = incompleteBallot;
+        // Pair any announce still open when the repair completes: on success paths the APPLIED
+        // terminal has already closed it (no-op here); on failure, cancellation or a veto this
+        // closes it as UNCONFIRMED, so tracking Mutators never leak in-flight state.
+        addListener((repair, result) -> completeAnnounced(Mutator.CasCommitOutcome.UNCONFIRMED));
     }
 
     public static PaxosRepair create(ConsistencyLevel consistency, DecoratedKey partitionKey, Ballot incompleteBallot, TableMetadata table)
