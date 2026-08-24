@@ -44,10 +44,13 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.CasWriteTimeoutException;
 import org.apache.cassandra.exceptions.ExceptionCode;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestFailureException;
+import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.locator.ReplicaPlan;
@@ -1005,6 +1008,128 @@ public class MutatorCasTest
         {
             super(ExceptionCode.SERVER_ERROR, message);
         }
+    }
+
+    /** A timeout-family subtype outside the concrete write/read timeout classes. */
+    static final class CustomTimeoutVetoException extends RequestTimeoutException
+    {
+        CustomTimeoutVetoException(String message)
+        {
+            super(ExceptionCode.WRITE_TIMEOUT, ConsistencyLevel.QUORUM, 0, 1, message);
+        }
+    }
+
+    /** A failure-family subtype outside the concrete write/read failure classes. */
+    static final class CustomFailureVetoException extends RequestFailureException
+    {
+        CustomFailureVetoException(String message)
+        {
+            super(ExceptionCode.WRITE_FAILURE, message, ConsistencyLevel.QUORUM, 0, 1, Collections.emptyMap());
+        }
+    }
+
+    private static ClientRequestsMetrics requestMetrics()
+    {
+        return ClientRequestsMetricsProvider.instance.metrics(KEYSPACE);
+    }
+
+    /** Arms {@code veto} for CLIENT_OPERATION, runs an applying CAS and asserts the exact instance surfaces. */
+    private void clientVeto(RuntimeException veto, String keyName)
+    {
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+        RecordingMutator.reset();
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = Mutator.CasCommitOrigin.CLIENT_OPERATION;
+        assertThatThrownBy(() -> cas(KEYSPACE, key, ifEmptyInsert(metadata, key, "v-" + keyName))).isSameAs(veto);
+    }
+
+    /**
+     * Arms {@code veto} for every origin, injects a foreign in-progress round for {@code keyName}
+     * and asserts a SERIAL read fails with the exact instance while completing it.
+     */
+    private void serialReadVeto(RuntimeException veto, String keyName)
+    {
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        DecoratedKey key = dk(keyName);
+        Ballot foreignBallot = BallotGenerator.Global.nextBallot(Ballot.Flag.GLOBAL);
+        SystemKeyspace.savePaxosProposal(Commit.newProposal(foreignBallot, insertRow(metadata, key, "foreign", foreignBallot.unixMicros())));
+        PaxosState.unsafeReset();
+        RecordingMutator.reset();
+        RecordingMutator.onCasCommitFailure = veto;
+        RecordingMutator.onCasCommitFailureOrigin = null;
+        assertThatThrownBy(() -> serialRead(metadata, key)).isSameAs(veto);
+    }
+
+    /**
+     * Every veto exception family marks its matching client-request meter on the v2 engine
+     * ({@code Paxos.markCasVeto}): Unavailable → unavailables, timeout family → timeouts, failure
+     * family → failures. (The Overloaded → unavailables branch is covered by the veto tests above.)
+     */
+    @Test
+    public void vetoFamilyMarksMatchingMeterV2()
+    {
+        setPaxosVariant(Config.PaxosVariant.v2);
+        ClientRequestsMetrics metrics = requestMetrics();
+
+        long unavailables = metrics.casWriteMetrics.unavailables.getCount();
+        clientVeto(UnavailableException.create(ConsistencyLevel.QUORUM, 1, 0), "cas_veto_meter_ua_v2");
+        assertThat(metrics.casWriteMetrics.unavailables.getCount()).isEqualTo(unavailables + 1);
+
+        long timeouts = metrics.casWriteMetrics.timeouts.getCount();
+        clientVeto(new CasWriteTimeoutException(WriteType.CAS, ConsistencyLevel.QUORUM, 0, 1, 0), "cas_veto_meter_to_v2");
+        assertThat(metrics.casWriteMetrics.timeouts.getCount()).isEqualTo(timeouts + 1);
+
+        long failures = metrics.casWriteMetrics.failures.getCount();
+        clientVeto(new WriteFailureException(ConsistencyLevel.QUORUM, 0, 1, WriteType.CAS, Collections.emptyMap()), "cas_veto_meter_fl_v2");
+        assertThat(metrics.casWriteMetrics.failures.getCount()).isEqualTo(failures + 1);
+    }
+
+    /**
+     * The v1 fallback catch in legacyCas routes veto types outside the concrete classes to the
+     * closest family meter, and the exact instance still surfaces.
+     */
+    @Test
+    public void customFamilyVetoMarksMatchingMeterV1()
+    {
+        setPaxosVariant(Config.PaxosVariant.v1);
+        ClientRequestsMetrics metrics = requestMetrics();
+
+        long timeouts = metrics.casWriteMetrics.timeouts.getCount();
+        clientVeto(new CustomTimeoutVetoException("custom timeout veto"), "cas_veto_meter_to_v1");
+        assertThat(metrics.casWriteMetrics.timeouts.getCount()).isEqualTo(timeouts + 1);
+
+        long failures = metrics.casWriteMetrics.failures.getCount();
+        clientVeto(new CustomFailureVetoException("custom failure veto"), "cas_veto_meter_fl_v1");
+        assertThat(metrics.casWriteMetrics.failures.getCount()).isEqualTo(failures + 1);
+    }
+
+    /** Same family routing through the v1 fallback catch in legacyReadWithPaxos (serial-read path). */
+    @Test
+    public void serialReadCustomFamilyVetoMarksMatchingMeterV1()
+    {
+        setPaxosVariant(Config.PaxosVariant.v1);
+        ClientRequestsMetrics metrics = requestMetrics();
+
+        long timeouts = metrics.casReadMetrics.timeouts.getCount();
+        serialReadVeto(new CustomTimeoutVetoException("custom timeout veto"), "cas_read_veto_meter_to_v1");
+        assertThat(metrics.casReadMetrics.timeouts.getCount()).isEqualTo(timeouts + 1);
+
+        long failures = metrics.casReadMetrics.failures.getCount();
+        serialReadVeto(new CustomFailureVetoException("custom failure veto"), "cas_read_veto_meter_fl_v1");
+        assertThat(metrics.casReadMetrics.failures.getCount()).isEqualTo(failures + 1);
+    }
+
+    /** The v2 read-side veto marks the CAS-read meters ({@code markCasVeto} with isWrite=false). */
+    @Test
+    public void serialReadTimeoutFamilyVetoMarksTimeoutsV2()
+    {
+        setPaxosVariant(Config.PaxosVariant.v2);
+        ClientRequestsMetrics metrics = requestMetrics();
+
+        long timeouts = metrics.casReadMetrics.timeouts.getCount();
+        serialReadVeto(new CustomTimeoutVetoException("custom timeout veto"), "cas_read_veto_meter_to_v2");
+        assertThat(metrics.casReadMetrics.timeouts.getCount()).isEqualTo(timeouts + 1);
     }
 
     /**
