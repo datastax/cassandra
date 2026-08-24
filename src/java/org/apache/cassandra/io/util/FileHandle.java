@@ -227,7 +227,7 @@ public class FileHandle extends SharedCloseableImpl
                                 ? PrefetchingRebufferer.withPrefetching(rebuffererFactory)
                                 : rebuffererFactory.instantiateRebufferer(forScan);
 
-        if (limiter != null)
+        if (limiter != null && limiter.getRate() < Double.MAX_VALUE)
             rebufferer = new LimitingRebufferer(rebufferer, limiter, DiskOptimizationStrategy.MAX_BUFFER_SIZE);
         return rebufferer;
     }
