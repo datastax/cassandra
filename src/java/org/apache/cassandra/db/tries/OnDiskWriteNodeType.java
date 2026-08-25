@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.BitSet;
 
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -102,7 +103,10 @@ public enum OnDiskWriteNodeType
             BitSet bits = new BitSet(256);
             for (int i = 0; i < size; ++i)
                 bits.set(children[i].firstTransition);
-            long[] bitsAsLong = bits.toLongArray();
+            // toLongArray() trims to the highest set bit, so a node whose transitions all fall in the
+            // low half returns fewer than 4 longs. The format always reserves 32 bytes here (see
+            // sizeChildren), so pad back out to 4.
+            long[] bitsAsLong = Arrays.copyOf(bits.toLongArray(), 4);
             for (int i = 3; i >= 0; --i)
                 out.writeLong(bitsAsLong[i]);   // lowest-order bytes ends up last
             out.writeByte(this.bits | (bytesPerPointer - 1));
