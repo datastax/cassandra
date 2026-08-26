@@ -19,7 +19,6 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.NavigableSet;
 import java.util.TreeSet;
@@ -128,7 +127,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         onAscentPath = false;
     }
 
-    public void ascendTo(long newEncodedPosition)
+    public void ascendTo(long newEncodedPosition) throws IOException
     {
         // ascend until closest node on path (if there's content, it will be current depth)
         //   if ascend depth reached, exit
@@ -149,44 +148,33 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         if (Cursor.isOnReturnPath(newEncodedPosition) && (newLength == -1 || (keyBytes[newLength] & 0xFF) == Cursor.incomingTransition(newEncodedPosition)))
             ++newLength;
 
-        try
+        // repeat:
+        while (newLength < node.depth)
         {
-            // repeat:
-            while (newLength < node.depth)
+            --lastNodeOnPath;
+            InProgressNode<T> next = lastNodeOnPath >= 0 ? nodesOnPath[lastNodeOnPath] : null;
+            //   the path to reach this node includes the key bytes until there's node on path or we reach ascent depth - 1
+            int stopDepth = (next != null ? Math.max(next.depth, newLength) : newLength);
+            //   complete node, possibly write page
+            Node<T> completedNode = completeNode(node, stopDepth);
+
+            --keyPos;
+
+            //   if reached exhausted, child is root
+            if (keyPos < 0)
             {
-                --lastNodeOnPath;
-                InProgressNode<T> next = lastNodeOnPath >= 0 ? nodesOnPath[lastNodeOnPath] : null;
-                //   the path to reach this node includes the key bytes until there's node on path or we reach ascent depth - 1
-                int stopDepth = (next != null ? Math.max(next.depth, newLength) : newLength);
-                //   complete node, possibly write page
-                Node<T> completedNode = completeNode(node, stopDepth);
-
-                --keyPos;
-
-                //   if reached exhausted, child is root
-                if (keyPos < 0)
-                {
-                    writeNodeRecursively(completedNode);
-                    return; // the current file position is the root position
-                }
-
-                //   if reached ascend depth, add node on path, add child and exit
-                if (next == null || next.depth < keyPos)
-                    next = addNewNode(keyPos);
-
-                //   add child with last byte and pointer to child
-                next.addChild(completedNode);
-
-                node = next;
+                writeNodeRecursively(completedNode);
+                return; // the current file position is the root position
             }
-        }
-        catch (IOException e)
-        {
-            // The signature cannot carry a checked exception: neither `write` below nor
-            // DeletionAwareFileWriter's driving loops declare one, and their callers size a
-            // mutation without declaring `throws`. Use the same wrapper OnDiskCursor reports
-            // corruption with, so a failure on either side of the format is caught alike.
-            throw new UncheckedIOException(e);
+
+            //   if reached ascend depth, add node on path, add child and exit
+            if (next == null || next.depth < keyPos)
+                next = addNewNode(keyPos);
+
+            //   add child with last byte and pointer to child
+            next.addChild(completedNode);
+
+            node = next;
         }
     }
 
@@ -638,7 +626,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         }
     }
 
-    public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file)
+    public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file) throws IOException
     {
         try (SequentialWriter writer = new SequentialWriter(file))
         {
