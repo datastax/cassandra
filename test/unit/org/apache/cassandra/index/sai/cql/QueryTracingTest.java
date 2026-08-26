@@ -21,7 +21,6 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.service.ClientState;
@@ -111,16 +110,14 @@ public class QueryTracingTest extends SAITester
     @Test
     public void testAdaptiveBm25Fallback()
     {
-        long defaultProbeBudget = CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.getLong();
         int defaultOptimizationLevel = QueryController.QUERY_OPT_LEVEL;
         try
         {
             QueryController.QUERY_OPT_LEVEL = 0;
-            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(3);
 
             createTable("CREATE TABLE %s(id int PRIMARY KEY, site text, extension text, body text)");
-            createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
-            createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+            String siteIndex = createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+            String extensionIndex = createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
             createIndex("CREATE CUSTOM INDEX ON %s(body) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
 
             execute("INSERT INTO %s(id, site, extension, body) VALUES (1, 'pepsi', 'pdf', 'freight freight freight')");
@@ -129,31 +126,30 @@ public class QueryTracingTest extends SAITester
             execute("INSERT INTO %s(id, site, extension, body) VALUES (99, 'other', 'docx', 'freight freight freight freight')");
 
             String query = "SELECT id FROM %s WHERE site = 'pepsi' AND extension = 'pdf' ORDER BY body BM25 OF 'freight' LIMIT 2";
-            // Three candidates and one ordering source stay within the probe budget.
+            // Four BM25 postings are more work than scoring three candidates against one source.
             assertRows(execute(query), row(1), row(2));
             assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
 
             flush();
-            // The same candidate set in one SSTable also stays within the budget.
+            // The same work estimates in one SSTable retain filter-first execution.
             assertRows(execute(query), row(1), row(2));
             assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
 
             execute("INSERT INTO %s(id, site, extension, body) VALUES (4, 'pepsi', 'pdf', 'freight details')");
             assertRows(execute(query), row(1), row(2));
-            assertTraceContains("after materializing 3 candidates across 2 ordering index sources (probe budget 3, fallback soft limit ");
+            assertTraceContains("after materializing 4 candidates across 2 ordering index sources (estimated 5 BM25 posting visits, fallback soft limit ");
 
             flush();
-            // Two SSTables produce the same soft-limit-floored cap as one SSTable plus a memtable.
+            // Two SSTables produce the same derived cap as one SSTable plus a memtable.
             assertRows(execute(query), row(1), row(2));
-            assertTraceContains("after materializing 3 candidates across 2 ordering index sources (probe budget 3, fallback soft limit ");
+            assertTraceContains("after materializing 4 candidates across 2 ordering index sources (estimated 5 BM25 posting visits, fallback soft limit ");
 
-            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(0);
-            assertRows(execute(query), row(1), row(2));
+            String hintedQuery = query + String.format(" WITH included_indexes = {%s, %s}", siteIndex, extensionIndex);
+            assertRows(execute(hintedQuery), row(1), row(2));
             assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
         }
         finally
         {
-            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(defaultProbeBudget);
             QueryController.QUERY_OPT_LEVEL = defaultOptimizationLevel;
         }
     }

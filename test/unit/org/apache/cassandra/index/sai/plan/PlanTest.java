@@ -382,7 +382,7 @@ public class PlanTest
     }
 
     @Test
-    public void bm25SortFilterLimitAllowsFallbackWithExpandedLimit()
+    public void bm25SortFilterLimitUsesExpandedFallbackLimit()
     {
         int limit = 10;
         double selectivity = 0.2;
@@ -399,8 +399,7 @@ public class PlanTest
 
         Mockito.verify(executor).getTopKRows(Mockito.any(KeyRangeIterator.class),
                                              Mockito.eq(limit),
-                                             Mockito.eq((int) round(limit / selectivity)),
-                                             Mockito.eq(true));
+                                             Mockito.eq((int) round(limit / selectivity)));
     }
 
     @Test
@@ -420,10 +419,10 @@ public class PlanTest
         Mockito.doReturn(new LongIterator(new long[] { 1L })).when(executor).getKeysFromIndex(saiPred1);
         Objects.requireNonNull(plan.firstNodeOfType(Plan.KeysIteration.class)).execute(executor);
 
-        Mockito.verify(executor).getTopKRows(Mockito.any(KeyRangeIterator.class),
-                                             Mockito.eq(10),
-                                             Mockito.eq(50),
-                                             Mockito.eq(false));
+        Mockito.verify(executor).getTopKRows(Mockito.any(KeyRangeIterator.class), Mockito.eq(10));
+        Mockito.verify(executor, Mockito.never()).getTopKRows(Mockito.any(KeyRangeIterator.class),
+                                                               Mockito.eq(10),
+                                                               Mockito.anyInt());
     }
 
     @Test
@@ -453,10 +452,11 @@ public class PlanTest
     }
 
     @Test
-    public void bm25CandidateLimitCoversSoftLimitAcrossManySources()
+    public void bm25CandidateLimitUsesPostingWorkPerSource()
     {
         assertEquals(500, QueryController.calculateBm25CandidateLimit(400, 10_000, 20));
         assertEquals(400, QueryController.calculateBm25CandidateLimit(400, 10_000, 30));
+        assertEquals(4, QueryController.calculateBm25CandidateLimit(1, 7, 2));
     }
 
     @Test

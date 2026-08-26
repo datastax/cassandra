@@ -671,24 +671,26 @@ public class BM25Test extends SAITester
     @Test
     public void testAdaptiveFallbackMatchesForcedStrategies()
     {
-        long defaultProbeBudget = CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.getLong();
         int defaultOptimizationLevel = QueryController.QUERY_OPT_LEVEL;
         boolean defaultQueryPlanMetrics = CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean();
         try
         {
             CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(true);
             createTable("CREATE TABLE %s(id int PRIMARY KEY, site text, extension text, body text)");
-            createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'StorageAttachedIndex'");
-            createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'StorageAttachedIndex'");
+            String siteIndex = createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'StorageAttachedIndex'");
+            String extensionIndex = createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'StorageAttachedIndex'");
             createAnalyzedIndex("body");
 
             execute("INSERT INTO %s(id, site, extension, body) VALUES (1, 'pepsi', 'pdf', 'freight freight freight')");
             execute("INSERT INTO %s(id, site, extension, body) VALUES (2, 'pepsi', 'pdf', 'freight freight')");
             execute("INSERT INTO %s(id, site, extension, body) VALUES (3, 'pepsi', 'pdf', 'freight orders and notes')");
+            for (int id = 4; id <= 8; id++)
+                execute("INSERT INTO %s(id, site, extension, body) VALUES (?, 'pepsi', 'pdf', 'inventory notes')", id);
             execute("INSERT INTO %s(id, site, extension, body) VALUES (99, 'other', 'docx', 'freight freight freight freight')");
 
             String query = "SELECT id FROM %s WHERE site = 'pepsi' AND extension = 'pdf' " +
                            "ORDER BY body BM25 OF 'freight' LIMIT 2";
+            String hintedQuery = query + String.format(" WITH included_indexes = {%s, %s}", siteIndex, extensionIndex);
 
             var indexGroup = Objects.requireNonNull(StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore()));
             var tableMetrics = indexGroup.queryMetrics().perTableMetrics.get(TableQueryMetrics.QueryKind.ALL);
@@ -696,22 +698,19 @@ public class BM25Test extends SAITester
             long sortThenFilterCount = queryPlanMetrics.sortThenFilterQueriesCompleted.getCount();
             long filterThenSortCount = queryPlanMetrics.filterThenSortQueriesCompleted.getCount();
 
-            // Forced filter-first control.
-            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(0);
+            // Included-index hints force the semantically equivalent filter-first control.
             QueryController.QUERY_OPT_LEVEL = 0;
-            assertRows(execute(query), row(1), row(2));
+            assertRows(execute(hintedQuery), row(1), row(2));
             assertEquals(sortThenFilterCount, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
             assertEquals(filterThenSortCount + 1, queryPlanMetrics.filterThenSortQueriesCompleted.getCount());
 
-            // Adaptive filter-first planning crosses the two-candidate cap and must match both controls.
-            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(2);
+            // Eight filtered candidates exceed the four posting visits estimated for BM25-first execution.
             QueryController.QUERY_OPT_LEVEL = 0;
             assertRows(execute(query), row(1), row(2));
             assertEquals(sortThenFilterCount + 1, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
             assertEquals(filterThenSortCount + 1, queryPlanMetrics.filterThenSortQueriesCompleted.getCount());
 
-            // Disable adaptive fallback so the strategy counter proves the optimizer selected BM25-first directly.
-            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(0);
+            // The optimizer-selected BM25-first control must return the same rows in the same order.
             QueryController.QUERY_OPT_LEVEL = 1;
             assertRows(execute(query), row(1), row(2));
             assertEquals(sortThenFilterCount + 2, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
@@ -719,7 +718,6 @@ public class BM25Test extends SAITester
         }
         finally
         {
-            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(defaultProbeBudget);
             QueryController.QUERY_OPT_LEVEL = defaultOptimizationLevel;
             CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(defaultQueryPlanMetrics);
         }
