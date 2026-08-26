@@ -79,6 +79,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -92,6 +93,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MemtableParams;
 import org.apache.cassandra.schema.SchemaTestUtil;
@@ -877,6 +879,45 @@ public abstract class CommitLogTest
         assertEquals(cellCount, replayer.cells);
     }
 
+    /// A trie-backed update takes a different path into the log than a BTree one: from messaging
+    /// version VERSION_DS_21 on it is written by TriePartitionUpdateSerializer in the on-disk trie
+    /// format, and replay has to hand back what was written.
+    @Test
+    public void replayTriePartitionUpdate() throws IOException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(STANDARD1);
+
+        PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(cfs.metadata(), "trieKey");
+        builder.timestamp(1000).nowInSec(1500).delete();     // older than the rows, so it shadows nothing
+        builder.timestamp(2000).nowInSec(1500);
+        builder.row("aaa").add("val", bytes("first"));
+        builder.row("ccc").add("val", bytes("second"));
+        builder.addRangeTombstone().start("fff").end("mmm").inclStart().exclEnd();
+        TriePartitionUpdate expected = TriePartitionUpdate.asTrieUpdate(builder.build());
+
+        CommitLog.instance.add(new Mutation(expected));
+        CommitLog.instance.sync(true);
+
+        List<String> activeSegments = CommitLog.instance.getActiveSegmentNames();
+        assertFalse(activeSegments.isEmpty());
+        File[] files = CommitLog.instance.getSegmentManager().storageDirectory.tryList((file, name) -> activeSegments.contains(name));
+
+        CapturingReplayer replayer = new CapturingReplayer(CommitLog.instance, cfs.metadata());
+        replayer.replayFiles(files);
+
+        assertEquals(1, replayer.updates.size());
+        PartitionUpdate replayed = replayer.updates.get(0);
+
+        // The log is written at the storage compatibility mode's messaging version. Below
+        // VERSION_DS_21 there is no trie format and the update is replayed BTree-backed, so compare
+        // the trie representation of whatever came back, and assert the format separately.
+        int storageVersion = StorageCompatibilityMode.current().storageMessagingVersion();
+        assertEquals(expected, TriePartitionUpdate.asTrieUpdate(replayed));
+        assertEquals("Format the update was replayed in, at messaging version " + storageVersion,
+                     storageVersion >= MessagingService.VERSION_DS_21,
+                     replayed instanceof TriePartitionUpdate);
+    }
+
     @Test
     public void testReplayListProperty() throws Throwable
     {
@@ -1159,6 +1200,30 @@ public abstract class CommitLogTest
                     for (Row row : partitionUpdate.rows())
                         cells += Iterables.size(row.cells());
                 }
+            }
+        }
+    }
+
+    /// Collects the replayed updates for one table instead of applying them, so that a mutation can
+    /// be compared against what came back out of the log.
+    private static class CapturingReplayer extends CommitLogReplayer
+    {
+        private final TableMetadata metadata;
+        final List<PartitionUpdate> updates = new ArrayList<>();
+
+        CapturingReplayer(CommitLog commitLog, TableMetadata metadata)
+        {
+            super(commitLog, CommitLogPosition.NONE, Collections.emptyMap(), ReplayFilter.create());
+            this.metadata = metadata;
+        }
+
+        @Override
+        public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc)
+        {
+            for (PartitionUpdate update : m.getPartitionUpdates())
+            {
+                if (update.metadata().id.equals(metadata.id))
+                    updates.add(update);
             }
         }
     }
