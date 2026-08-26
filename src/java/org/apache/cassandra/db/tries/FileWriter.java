@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.NavigableSet;
 import java.util.TreeSet;
@@ -181,7 +182,11 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         }
         catch (IOException e)
         {
-            throw new RuntimeException(e);
+            // The signature cannot carry a checked exception: neither `write` below nor
+            // DeletionAwareFileWriter's driving loops declare one, and their callers size a
+            // mutation without declaring `throws`. Use the same wrapper OnDiskCursor reports
+            // corruption with, so a failure on either side of the format is caught alike.
+            throw new UncheckedIOException(e);
         }
     }
 
