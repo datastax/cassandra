@@ -38,7 +38,7 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 ///   p - has child
 ///   d - has descent content
 ///   a - has ascent content
-///   `[ascent data bytes] [varint-encoded ascent data length] [descent data bytes] [varint-encoded descent data length] 11100adp`
+///   `[ascent data bytes] [varint-encoded ascent data length] [descent data bytes] [varint-encoded descent data length] 11110dap`
 /// - chain up to 64 bytes; child immediately before
 ///   `[byte n-1] ... [byte 1] [byte 0] 01nnnnnn`
 /// - sparse up to 25 children; last child immediately before
@@ -46,9 +46,9 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 ///   nnnnn - child count - 2
 ///   `[child n-2] ... [child 1] [child 0] [byte n-1] ... [byte 1][byte 0]1nnnnnbb`
 /// - bitmap
-///   `[child n-2] ... [child 1] [child 0] [32-byte bitmap] 11101bbb`
+///   `[child n-2] ... [child 1] [child 0] [32-byte bitmap] 11100bbb`
 /// - dense full
-///   `[child 255] ... [child 1] [child 0] 11110bbb`
+///   `[child 255] ... [child 1] [child 0] 11101bbb`
 /// - relay (epsilon transition)
 ///   `[child] 11111bbb`
 
