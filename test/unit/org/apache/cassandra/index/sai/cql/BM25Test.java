@@ -36,8 +36,10 @@ import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import org.junit.runner.RunWith;
@@ -671,8 +673,10 @@ public class BM25Test extends SAITester
     {
         long defaultProbeBudget = CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.getLong();
         int defaultOptimizationLevel = QueryController.QUERY_OPT_LEVEL;
+        boolean defaultQueryPlanMetrics = CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean();
         try
         {
+            CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(true);
             createTable("CREATE TABLE %s(id int PRIMARY KEY, site text, extension text, body text)");
             createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'StorageAttachedIndex'");
             createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'StorageAttachedIndex'");
@@ -695,15 +699,24 @@ public class BM25Test extends SAITester
             QueryController.QUERY_OPT_LEVEL = 1;
             assertRows(execute(query), row(1), row(2));
 
+            var queryPlanMetrics = Objects.requireNonNull(StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore()))
+                                                 .queryMetrics()
+                                                 .perTableMetrics
+                                                 .get(TableQueryMetrics.QueryKind.ALL)
+                                                 .queryPlanMetrics;
+            long fallbackCount = Objects.requireNonNull(queryPlanMetrics).sortThenFilterQueriesCompleted.getCount();
+
             // Adaptive filter-first planning crosses the two-candidate cap and must match both controls.
             CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(2);
             QueryController.QUERY_OPT_LEVEL = 0;
             assertRows(execute(query), row(1), row(2));
+            assertEquals(fallbackCount + 1, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
         }
         finally
         {
             CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(defaultProbeBudget);
             QueryController.QUERY_OPT_LEVEL = defaultOptimizationLevel;
+            CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(defaultQueryPlanMetrics);
         }
     }
 

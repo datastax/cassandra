@@ -453,6 +453,13 @@ public class PlanTest
     }
 
     @Test
+    public void bm25CandidateLimitCoversSoftLimitAcrossManySources()
+    {
+        assertEquals(500, QueryController.calculateBm25CandidateLimit(400, 10_000, 20));
+        assertEquals(400, QueryController.calculateBm25CandidateLimit(400, 10_000, 30));
+    }
+
+    @Test
     public void annScan()
     {
         Plan.KeysIteration i = factory.sort(factory.everything, ordering);
