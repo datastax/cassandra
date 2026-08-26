@@ -561,10 +561,7 @@ public class OnDiskCursor<T> implements Cursor<T>
                 rootAscentContent = swap;
             }
 
-            if (rootAscentContent == null && rootDescentContent == null)
-                return new Range<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, currentFullNode);
-            else // skip over prefix
-                return new RangeBranch<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, currentFullNode, rootDescentContent, rootAscentContent);
+            return new RangeBranch<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, currentFullNode, rootDescentContent, rootAscentContent);
         }
     }
 
@@ -578,8 +575,9 @@ public class OnDiskCursor<T> implements Cursor<T>
             // LEAF or PREFIX may have put a backtrack entry, remove if so
             this.stackLength = 0;
             this.content = rootDescentContent;
-            if (rootDescentContent != null)
-                this.currentEncodedPosition |= MAY_HAVE_CONTENT_BIT;
+            this.currentEncodedPosition = rootDescentContent != null
+                                          ? currentEncodedPosition | MAY_HAVE_CONTENT_BIT
+                                          : currentEncodedPosition & ~MAY_HAVE_CONTENT_BIT;
             this.rootAscentContent = rootAscentContent;
             if (rootAscentContent != null)
                 addBacktrack(0, OnDiskReadNodeType.ASCENT_LEAF_CODE, currentEncodedPosition | ON_RETURN_PATH_BIT);

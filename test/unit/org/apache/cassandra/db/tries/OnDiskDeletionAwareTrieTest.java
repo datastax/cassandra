@@ -278,6 +278,63 @@ public class OnDiskDeletionAwareTrieTest
         }
     }
 
+    /// The range cursor over a deletion branch has a state machine that the walks above never drive:
+    /// the tail it gives at a position, and the deletion that is active when that tail's branch is
+    /// entered and left. Take the tail in both directions at every position of the branch and compare
+    /// it against the one the in-memory trie the file was written from gives at the same place.
+    @Test
+    public void testTailsOfADeletionBranch() throws IOException
+    {
+        // One byte of key below the branching one, so that no position inside the branch falls in the
+        // middle of a chain node; a tail taken there is a separate, open question.
+        List<DataPoint> points = wideBranchPoints(WIDE_TRANSITIONS, 4);
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            DeletionAwareFileWriter.write(source, false, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
+            for (Direction direction : Direction.values())
+                assertDeletionBranchTailsEqual(source.cursor(direction), read.cursor(direction));
+            read.close();
+        }
+    }
+
+    private static void assertDeletionBranchTailsEqual(DeletionAwareCursor<LivePoint, DeletionMarker> expected,
+                                                       DeletionAwareCursor<LivePoint, DeletionMarker> actual)
+    {
+        long position = expected.encodedPosition();
+        assertEquals(Cursor.toString(position), Cursor.toString(actual.encodedPosition()));
+        while (!Cursor.isExhausted(position))
+        {
+            Direction direction = Cursor.direction(position);
+            RangeCursor<DeletionMarker> expectedBranch = expected.deletionBranchCursor(direction);
+            RangeCursor<DeletionMarker> actualBranch = actual.deletionBranchCursor(direction);
+            assertEquals("Deletion branch present", expectedBranch != null, actualBranch != null);
+            if (expectedBranch != null)
+                assertTailsEqual(expectedBranch, actualBranch);
+            position = expected.advance();
+            assertEquals(Cursor.toString(position), Cursor.toString(actual.advance()));
+        }
+    }
+
+    /// Walks both branches in lockstep, taking the tail in both directions at every position.
+    private static void assertTailsEqual(RangeCursor<DeletionMarker> expected, RangeCursor<DeletionMarker> actual)
+    {
+        long position = expected.encodedPosition();
+        assertEquals(Cursor.toString(position), Cursor.toString(actual.encodedPosition()));
+        while (!Cursor.isExhausted(position))
+        {
+            // Taking a tail on the return path is not permitted.
+            if (!Cursor.isOnReturnPath(position))
+                for (Direction tailDirection : Direction.values())
+                    TrieUtil.assertCursorWalksEqual(expected.tailCursor(tailDirection),
+                                                    actual.tailCursor(tailDirection));
+            position = expected.advance();
+            assertEquals(Cursor.toString(position), Cursor.toString(actual.advance()));
+        }
+    }
+
     /// A deletion spanning every consecutive pair of the given transitions, over the keys [#wideKey]
     /// builds. All of them diverge at the same byte, so they end up in one branch.
     private static List<DataPoint> wideBranchPoints(int[] transitions, int keyLength)
