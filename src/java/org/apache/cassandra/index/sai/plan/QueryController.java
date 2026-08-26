@@ -664,6 +664,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return CloseableIterator.emptyIterator();
         }
 
+        // Filter-first reads every candidate from every ordering source; direct BM25 advances through term postings.
         int sourceCount = max(1, orderingView.memtableIndexes.size() + orderingView.sstableIndexes.size());
         long postingVisits = estimateBm25PostingVisits();
         long candidateLimit = calculateBm25CandidateLimit(softLimit, postingVisits, sourceCount);

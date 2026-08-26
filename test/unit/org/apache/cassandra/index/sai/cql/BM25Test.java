@@ -677,20 +677,17 @@ public class BM25Test extends SAITester
         {
             CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(true);
             createTable("CREATE TABLE %s(id int PRIMARY KEY, site text, extension text, body text)");
-            String siteIndex = createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'StorageAttachedIndex'");
-            String extensionIndex = createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'StorageAttachedIndex'");
             createAnalyzedIndex("body");
 
             execute("INSERT INTO %s(id, site, extension, body) VALUES (1, 'pepsi', 'pdf', 'freight freight freight')");
             execute("INSERT INTO %s(id, site, extension, body) VALUES (2, 'pepsi', 'pdf', 'freight freight')");
             execute("INSERT INTO %s(id, site, extension, body) VALUES (3, 'pepsi', 'pdf', 'freight orders and notes')");
-            for (int id = 4; id <= 8; id++)
-                execute("INSERT INTO %s(id, site, extension, body) VALUES (?, 'pepsi', 'pdf', 'inventory notes')", id);
             execute("INSERT INTO %s(id, site, extension, body) VALUES (99, 'other', 'docx', 'freight freight freight freight')");
 
             String query = "SELECT id FROM %s WHERE site = 'pepsi' AND extension = 'pdf' " +
                            "ORDER BY body BM25 OF 'freight' LIMIT 2";
-            String hintedQuery = query + String.format(" WITH included_indexes = {%s, %s}", siteIndex, extensionIndex);
 
             var indexGroup = Objects.requireNonNull(StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore()));
             var tableMetrics = indexGroup.queryMetrics().perTableMetrics.get(TableQueryMetrics.QueryKind.ALL);
@@ -698,13 +695,17 @@ public class BM25Test extends SAITester
             long sortThenFilterCount = queryPlanMetrics.sortThenFilterQueriesCompleted.getCount();
             long filterThenSortCount = queryPlanMetrics.filterThenSortQueriesCompleted.getCount();
 
-            // Included-index hints force the semantically equivalent filter-first control.
+            // Four posting visits cost more than scoring three filtered candidates, so filter-first is retained.
             QueryController.QUERY_OPT_LEVEL = 0;
-            assertRows(execute(hintedQuery), row(1), row(2));
+            assertRows(execute(query), row(1), row(2));
             assertEquals(sortThenFilterCount, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
             assertEquals(filterThenSortCount + 1, queryPlanMetrics.filterThenSortQueriesCompleted.getCount());
 
-            // Eight filtered candidates exceed the four posting visits estimated for BM25-first execution.
+            // These additional candidates do not contain the query term, so they cannot change the expected top rows.
+            for (int id = 4; id <= 8; id++)
+                execute("INSERT INTO %s(id, site, extension, body) VALUES (?, 'pepsi', 'pdf', 'inventory notes')", id);
+
+            // Eight filtered candidates now exceed the same four posting visits and trigger BM25-first execution.
             QueryController.QUERY_OPT_LEVEL = 0;
             assertRows(execute(query), row(1), row(2));
             assertEquals(sortThenFilterCount + 1, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());

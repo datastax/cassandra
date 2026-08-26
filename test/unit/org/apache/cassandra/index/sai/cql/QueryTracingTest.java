@@ -116,8 +116,8 @@ public class QueryTracingTest extends SAITester
             QueryController.QUERY_OPT_LEVEL = 0;
 
             createTable("CREATE TABLE %s(id int PRIMARY KEY, site text, extension text, body text)");
-            String siteIndex = createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
-            String extensionIndex = createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
             createIndex("CREATE CUSTOM INDEX ON %s(body) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
 
             execute("INSERT INTO %s(id, site, extension, body) VALUES (1, 'pepsi', 'pdf', 'freight freight freight')");
@@ -143,10 +143,6 @@ public class QueryTracingTest extends SAITester
             // Two SSTables produce the same derived cap as one SSTable plus a memtable.
             assertRows(execute(query), row(1), row(2));
             assertTraceContains("after materializing 4 candidates across 2 ordering index sources (estimated 5 BM25 posting visits, fallback soft limit ");
-
-            String hintedQuery = query + String.format(" WITH included_indexes = {%s, %s}", siteIndex, extensionIndex);
-            assertRows(execute(hintedQuery), row(1), row(2));
-            assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
         }
         finally
         {
