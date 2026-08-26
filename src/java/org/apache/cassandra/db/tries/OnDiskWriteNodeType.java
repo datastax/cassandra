@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.BitSet;
 
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -102,7 +103,10 @@ public enum OnDiskWriteNodeType
             BitSet bits = new BitSet(256);
             for (int i = 0; i < size; ++i)
                 bits.set(children[i].firstTransition);
-            long[] bitsAsLong = bits.toLongArray();
+            // toLongArray() trims to the highest set bit, so a node whose transitions all fall in the
+            // low half returns fewer than 4 longs. The format always reserves 32 bytes here (see
+            // sizeChildren), so pad back out to 4.
+            long[] bitsAsLong = Arrays.copyOf(bits.toLongArray(), 4);
             for (int i = 3; i >= 0; --i)
                 out.writeLong(bitsAsLong[i]);   // lowest-order bytes ends up last
             out.writeByte(this.bits | (bytesPerPointer - 1));
@@ -182,23 +186,27 @@ public enum OnDiskWriteNodeType
         if (descentData == null && ascentData == null)
             return;
 
+        // A node is read backwards from its code byte, and the reader takes the content block
+        // adjacent to the code as the descent side (see OnDiskReadNodeType.PREFIX and the layout in
+        // FileWriter's class comment), so the ascent block has to be emitted first.
+        int code = PREFIX.bits;
+        if (ascentData != null)
+        {
+            int ascentDataSize = serializer.serialize(out, ascentData);
+            FileWriter.writeReversedVint(out, ascentDataSize);
+            code |= PREFIX_HAS_ASCENT_CONTENT;
+        }
+
         int descentDataSize = -1;
         if (descentData != null)
             descentDataSize = serializer.serialize(out, descentData);
 
         if (hasChild || ascentData != null || descentDataSize > MAX_LEAF_LENGTH_INCLUSIVE)
         {
-            int code = PREFIX.bits;
             if (descentDataSize >= 0)
             {
                 FileWriter.writeReversedVint(out, descentDataSize);
                 code |= PREFIX_HAS_DESCENT_CONTENT;
-            }
-            if (ascentData != null)
-            {
-                int ascentDataSize = serializer.serialize(out, ascentData);
-                FileWriter.writeReversedVint(out, ascentDataSize);
-                code |= PREFIX_HAS_ASCENT_CONTENT;
             }
             if (hasChild)
                 code |= PREFIX_HAS_CHILD;
