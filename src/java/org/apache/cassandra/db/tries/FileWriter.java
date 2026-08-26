@@ -335,8 +335,11 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             }
             else if (size == 9)
             {
-                out.write((byte) 0xFF);
+                // The leading byte goes last, like the one writeReversedSized puts in the top byte
+                // of the shorter encodings: the reader takes the byte immediately before the value
+                // as the leading one.
                 out.writeLong(Long.reverseBytes(value));
+                out.write((byte) 0xFF);
             }
             else
             {
