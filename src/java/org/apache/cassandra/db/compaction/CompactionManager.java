@@ -1251,7 +1251,7 @@ public class CompactionManager implements CompactionManagerMBean
                  activeCompactions);
     }
 
-    void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData, Scrubber.OverwriteTTLMode overwriteTTLMode, TableOperationObserver activeCompactions)
+    private void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData, Scrubber.OverwriteTTLMode overwriteTTLMode, TableOperationObserver activeCompactions)
     {
         try (Scrubber scrubber = new Scrubber(cfs, modifier, skipCorrupted, checkData, overwriteTTLMode);
              NonThrowingCloseable c = activeCompactions.onOperationStart(scrubber.getScrubInfo()))

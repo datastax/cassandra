@@ -41,10 +41,12 @@ import org.apache.cassandra.tools.StandaloneScrubber;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.db.compaction.Scrubber;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -474,5 +476,96 @@ public class TTLTest extends CQLTester
             return clustering ? SIMPLE_CLUSTERING : SIMPLE_NOCLUSTERING;
         else
             return clustering ? COMPLEX_CLUSTERING : COMPLEX_NOCLUSTERING;
+    }
+
+    // ---- stripTTL tests -------------------------------------------------------
+
+    /**
+     * Rows written with a TTL have their expiry metadata removed by a NO_TTL scrub.
+     * Before scrub: ttl(v) returns a positive value.
+     * After scrub: ttl(v) returns null — the row is now permanent.
+     */
+    @Test
+    public void testScrubStripTTLSimpleColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        for (int i = 0; i < 5; i++)
+            execute("INSERT INTO %s (k, v) VALUES (?, ?) USING TTL 3600", i, "val" + i);
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        flush();
+
+        for (UntypedResultSet.Row row : execute("SELECT k, v, ttl(v) FROM %s"))
+            assertTrue("Expected ttl(v) > 0 before scrub", row.getInt("ttl(v)") > 0);
+
+        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+        ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
+
+        UntypedResultSet after = execute("SELECT k, v, ttl(v) FROM %s");
+        assertEquals("All 5 rows should still be present after stripTTL scrub", 5, after.size());
+        for (UntypedResultSet.Row row : after)
+            assertFalse("Expected ttl(v) to be null after stripTTL scrub", row.has("ttl(v)"));
+    }
+
+    /**
+     * Rows without a TTL should pass through a NO_TTL scrub unchanged.
+     */
+    @Test
+    public void testScrubStripTTLNoOpOnNonExpiringRows() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        for (int i = 0; i < 3; i++)
+            execute("INSERT INTO %s (k, v) VALUES (?, ?)", i, "permanent" + i);
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        flush();
+
+        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+        ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
+
+        assertEquals("Non-TTL rows should be unchanged after stripTTL scrub", 3, execute("SELECT k, v FROM %s").size());
+    }
+
+    /**
+     * TTL stripping on a static column: the static column's TTL is removed,
+     * data is preserved, and the row remains readable.
+     */
+    @Test
+    public void testScrubStripTTLStaticColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, s int static, PRIMARY KEY(k, c))");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 10)");
+        execute("INSERT INTO %s (k, s) VALUES (0, 7) USING TTL 3600");
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        flush();
+
+        assertTrue("Expected TTL > 0 on static column before scrub",
+                   execute("SELECT ttl(s) FROM %s").one().getInt("ttl(s)") > 0);
+
+        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+        ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
+
+        assertRows(execute("SELECT s, ttl(s) FROM %s"), row(7, null));
+    }
+
+    /**
+     * When OverwriteTTLMode is NONE (default), a scrub must not strip TTLs.
+     */
+    @Test
+    public void testScrubDefaultDoesNotStripTTL() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        for (int i = 0; i < 3; i++)
+            execute("INSERT INTO %s (k, v) VALUES (?, ?) USING TTL 3600", i, "val" + i);
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        flush();
+
+        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NONE, false, true, 1);
+        ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
+
+        for (UntypedResultSet.Row row : execute("SELECT k, v, ttl(v) FROM %s"))
+            assertTrue("TTL should still be present when scrub is run with NONE mode", row.getInt("ttl(v)") > 0);
     }
 }
