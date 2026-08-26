@@ -99,16 +99,23 @@ public enum ChecksumType
     };
 
     private static final Logger logger = LoggerFactory.getLogger(ChecksumType.class);
+    private static final boolean AWS_CRT_CHECKSUMS_ENABLED = Boolean.parseBoolean(System.getProperty("cassandra.checksums.aws_crt_detection_enabled", "true"));
     private static final boolean HAS_AWS_CRT_CRC64NVME;
 
     static {
         boolean available = false;
-        try {
-            Class.forName("software.amazon.awssdk.crt.checksums.CRC64NVME");
-            available = true;
-        } catch (ClassNotFoundException e) {
-            logger.debug("software.amazon.awssdk.crt.checksums.CRC64NVME not found, " +
-                        "falling back to PureJavaCRC64NVME for CRC64NVME checksum");
+        if (AWS_CRT_CHECKSUMS_ENABLED)
+        {
+            try
+            {
+                Class.forName("software.amazon.awssdk.crt.checksums.CRC64NVME");
+                available = true;
+            }
+            catch (ClassNotFoundException e)
+            {
+                logger.debug("software.amazon.awssdk.crt.checksums.CRC64NVME not found, " +
+                             "falling back to PureJavaCRC64NVME for CRC64NVME checksum");
+            }
         }
         HAS_AWS_CRT_CRC64NVME = available;
     }
