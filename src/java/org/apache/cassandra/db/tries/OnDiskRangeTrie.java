@@ -18,16 +18,11 @@
 
 package org.apache.cassandra.db.tries;
 
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.ChannelProxy;
-import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Rebufferer;
-import org.apache.cassandra.io.util.SimpleChunkReader;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-
-import static org.apache.cassandra.io.util.RandomAccessReader.DEFAULT_BUFFER_SIZE;
 
 public abstract class OnDiskRangeTrie<S extends RangeState<S>> extends OnDiskBaseTrie<S, RangeCursor<S>, RangeTrie<S>> implements RangeTrie<S>, Closeable
 {
@@ -67,9 +62,8 @@ public abstract class OnDiskRangeTrie<S extends RangeState<S>> extends OnDiskBas
         ChannelProxy channel = new ChannelProxy(file);
         try
         {
-            ChunkReader reader = new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);
-            Rebufferer rebufferer = reader.instantiateRebufferer(false);
-            return new WithOwnChannel(rebufferer, deserializer, version, root >= 0 ? root : reader.fileLength());
+            Rebufferer rebufferer = mapWholeFile(channel);
+            return new WithOwnChannel(rebufferer, deserializer, version, root >= 0 ? root : rebufferer.fileLength());
         }
         catch (Throwable t)
         {
