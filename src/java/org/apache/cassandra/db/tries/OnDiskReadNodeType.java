@@ -642,7 +642,7 @@ public enum OnDiskReadNodeType
             if (shouldAdvanceOverContent)
             {
                 int vintlen = state.readVIntLength(currentPos);
-                int len = (int) state.readVInt(currentPos, vintlen);
+                int len = state.readContentLength(currentPos, vintlen);
                 currentPos -= vintlen + len;
             }
             return currentPos;
