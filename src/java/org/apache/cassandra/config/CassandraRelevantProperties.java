@@ -764,12 +764,18 @@ public enum CassandraRelevantProperties
 
     // SAI specific properties
 
+    /**
+     * Whether to enable the SAI histogram for the latency of queries of any kind if {@link #SAI_HISTOGRAMS_ENABLED}
+     * is not true. Enabled by default.
+     */
+    SAI_ALL_QUERIES_LATENCY_HISTOGRAM_ENABLED("cassandra.sai.metrics.histograms.all_queries.enabled", "true"),
+
     /** Class used to discover/load the proper SAI index components file for a given sstable. */
     SAI_ANN_USE_SYNTHETIC_SCORE("cassandra.sai.ann_use_synthetic_score", "false"),
-    
+
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
-    
+
     SAI_CUSTOM_COMPONENTS_DISCOVERY_CLASS("cassandra.sai.custom_components_discovery_class"),
     SAI_ENABLE_EDGES_CACHE("cassandra.sai.enable_edges_cache", "false"),
     SAI_ENABLE_GENERAL_ORDER_BY("cassandra.sai.general_order_by", "true"),
@@ -794,6 +800,9 @@ public enum CassandraRelevantProperties
      * {@link org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics.BKDIndexMetrics#intersectionLatency}, and
      * {@link org.apache.cassandra.index.sai.metrics.TableQueryMetrics.PerQuery#queryLatency}.
      * Enabled by default.
+     *  </p>
+     * Even if this is false, {@link #SAI_ALL_QUERIES_LATENCY_HISTOGRAM_ENABLED} can still enable the generic histogram
+     * for the latency of queries of any kind.
      */
     SAI_HISTOGRAMS_ENABLED("cassandra.sai.metrics.histograms.enabled", "true"),
 
