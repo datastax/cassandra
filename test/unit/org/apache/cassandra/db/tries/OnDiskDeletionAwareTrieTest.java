@@ -38,6 +38,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.apache.cassandra.db.tries.TrieUtil.assertTriesEqual;
+import static org.junit.Assert.assertEquals;
 
 /// Round-trips deletion-aware tries through [DeletionAwareFileWriter] and
 /// [OnDiskDeletionAwareTrie], which is the only real check that the deletion-branch pointer
@@ -220,6 +221,65 @@ public class OnDiskDeletionAwareTrieTest
 
             assertRoundTrips(points);
         }
+    }
+
+    /// 30 transitions, a third of them at or above 0xE0, all diverging at the same byte so that the
+    /// deletion branch they form has a bitmap node at its root. The `%04d` keys the tests above use
+    /// only ever give a node ten children, i.e. always a sparse one.
+    private static final int[] WIDE_TRANSITIONS =
+    { 0x00, 0x01, 0x07, 0x0d, 0x1f, 0x32, 0x40, 0x4d, 0x64, 0x78, 0x7f, 0x96, 0xaa, 0xbe, 0xc8, 0xd2,
+      0xdc, 0xdf, 0xe0, 0xe1, 0xe6, 0xeb, 0xf0, 0xf5, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff };
+
+    private static final int KEY_LENGTH = 5;
+
+    /// A deletion branch over a wide alphabet: its root node is a bitmap one rather than the sparse
+    /// nodes the `%04d` keys above can produce, and the deletion state that applies to a key is asked
+    /// for, which the walks in [TrieUtil#assertTriesEqual] never do.
+    @Test
+    public void testWideDeletionBranch() throws IOException
+    {
+        List<DataPoint> points = new ArrayList<>();
+        for (int i = 0; i + 1 < WIDE_TRANSITIONS.length; i += 2)
+        {
+            int value = i / 2 + 1;
+            points.add(new DeletionMarker(wideKey(WIDE_TRANSITIONS[i], KEY_LENGTH), -1, value));
+            points.add(new DeletionMarker(wideKey(WIDE_TRANSITIONS[i + 1], KEY_LENGTH), value, -1));
+        }
+        DataPoint.verify(points);
+
+        assertRoundTrips(points);
+
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            DeletionAwareFileWriter.write(source, false, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
+            for (int transition = 0; transition <= 0xFF; ++transition)
+                for (int length = 3; length <= KEY_LENGTH + 1; ++length)
+                    assertApplicableDeletionEqual(source, read, wideKey(transition, length));
+            read.close();
+        }
+    }
+
+    private static void assertApplicableDeletionEqual(DeletionAwareTrie<LivePoint, DeletionMarker> expected,
+                                                      DeletionAwareTrie<LivePoint, DeletionMarker> actual,
+                                                      ByteComparable key)
+    {
+        assertEquals("Applicable deletion at " + key.byteComparableAsString(VERSION),
+                     expected.applicableDeletion(key),
+                     actual.applicableDeletion(key));
+    }
+
+    /// The first `length` bytes of a key made of two fixed bytes, so that the deletion branch is not
+    /// rooted at the trie's root, the given transition, then a fixed suffix. Shorter lengths give a
+    /// probe that stops above or inside the branch.
+    private static ByteComparable wideKey(int transition, int length)
+    {
+        byte[] bytes = new byte[length];
+        for (int i = 0; i < length; ++i)
+            bytes[i] = i < 2 ? 0x21 : i == 2 ? (byte) transition : 0x42;
+        return ByteComparable.preencoded(VERSION, bytes);
     }
 
     private static List<DataPoint> points(DataPoint... p)
