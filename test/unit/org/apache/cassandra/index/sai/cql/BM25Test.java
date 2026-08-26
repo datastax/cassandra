@@ -690,25 +690,32 @@ public class BM25Test extends SAITester
             String query = "SELECT id FROM %s WHERE site = 'pepsi' AND extension = 'pdf' " +
                            "ORDER BY body BM25 OF 'freight' LIMIT 2";
 
+            var indexGroup = Objects.requireNonNull(StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore()));
+            var tableMetrics = indexGroup.queryMetrics().perTableMetrics.get(TableQueryMetrics.QueryKind.ALL);
+            var queryPlanMetrics = Objects.requireNonNull(tableMetrics.queryPlanMetrics);
+            long sortThenFilterCount = queryPlanMetrics.sortThenFilterQueriesCompleted.getCount();
+            long filterThenSortCount = queryPlanMetrics.filterThenSortQueriesCompleted.getCount();
+
             // Forced filter-first control.
             CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(0);
             QueryController.QUERY_OPT_LEVEL = 0;
             assertRows(execute(query), row(1), row(2));
-
-            // Forced BM25-first control.
-            QueryController.QUERY_OPT_LEVEL = 1;
-            assertRows(execute(query), row(1), row(2));
-
-            var indexGroup = Objects.requireNonNull(StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore()));
-            var tableMetrics = indexGroup.queryMetrics().perTableMetrics.get(TableQueryMetrics.QueryKind.ALL);
-            var queryPlanMetrics = Objects.requireNonNull(tableMetrics.queryPlanMetrics);
-            long fallbackCount = queryPlanMetrics.sortThenFilterQueriesCompleted.getCount();
+            assertEquals(sortThenFilterCount, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
+            assertEquals(filterThenSortCount + 1, queryPlanMetrics.filterThenSortQueriesCompleted.getCount());
 
             // Adaptive filter-first planning crosses the two-candidate cap and must match both controls.
             CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(2);
             QueryController.QUERY_OPT_LEVEL = 0;
             assertRows(execute(query), row(1), row(2));
-            assertEquals(fallbackCount + 1, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
+            assertEquals(sortThenFilterCount + 1, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
+            assertEquals(filterThenSortCount + 1, queryPlanMetrics.filterThenSortQueriesCompleted.getCount());
+
+            // Disable adaptive fallback so the strategy counter proves the optimizer selected BM25-first directly.
+            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(0);
+            QueryController.QUERY_OPT_LEVEL = 1;
+            assertRows(execute(query), row(1), row(2));
+            assertEquals(sortThenFilterCount + 2, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
+            assertEquals(filterThenSortCount + 1, queryPlanMetrics.filterThenSortQueriesCompleted.getCount());
         }
         finally
         {

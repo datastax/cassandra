@@ -627,15 +627,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source, int softLimit)
     {
-        try
-        {
-            return getTopKRows(source, softLimit, Long.MAX_VALUE, softLimit, 0, 0);
-        }
-        catch (Throwable t)
-        {
-            FileUtils.closeQuietly(source);
-            throw t;
-        }
+        return getTopKRows(source, softLimit, Long.MAX_VALUE, softLimit, 0, 0);
     }
 
     @Override
@@ -644,27 +636,42 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                                 int fallbackSoftLimit,
                                                                 boolean fallbackAllowed)
     {
-        long probeBudget = CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.getLong();
-        if (!fallbackAllowed || probeBudget <= 0)
+        if (!fallbackAllowed)
             return getTopKRows(source, softLimit);
 
+        long probeBudget;
         try
         {
-            QueryView orderingView = getQueryView(orderer.context);
-            int sourceCount = max(1, orderingView.memtableIndexes.size() + orderingView.sstableIndexes.size());
-            long candidateLimit = calculateBm25CandidateLimit(softLimit, probeBudget, sourceCount);
-            return getTopKRows(source,
-                               softLimit,
-                               candidateLimit,
-                               fallbackSoftLimit,
-                               sourceCount,
-                               probeBudget);
+            probeBudget = CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.getLong();
         }
         catch (Throwable t)
         {
             FileUtils.closeQuietly(source);
             throw t;
         }
+
+        if (probeBudget <= 0)
+            return getTopKRows(source, softLimit);
+
+        QueryView orderingView;
+        try
+        {
+            orderingView = getQueryView(orderer.context);
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(source);
+            throw t;
+        }
+
+        int sourceCount = max(1, orderingView.memtableIndexes.size() + orderingView.sstableIndexes.size());
+        long candidateLimit = calculateBm25CandidateLimit(softLimit, probeBudget, sourceCount);
+        return getTopKRows(source,
+                           softLimit,
+                           candidateLimit,
+                           fallbackSoftLimit,
+                           sourceCount,
+                           probeBudget);
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source,
@@ -674,31 +681,44 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                                  int sourceCount,
                                                                  long probeBudget)
     {
-        MaterializedKeys materializedKeys = materializeKeys(source, candidateLimit);
-        if (materializedKeys.limitExceeded)
+        boolean sourceOpen = true;
+        try
         {
-            Tracing.logAndTrace(logger,
-                                "Switching filtered BM25 query to ordered index scan after materializing {} candidates across {} ordering index sources (probe budget {}, fallback soft limit {})",
-                                materializedKeys.primaryKeys.size(),
-                                sourceCount,
-                                probeBudget,
-                                fallbackSoftLimit);
-            queryContext.recordBm25SearchThenSortFallback();
-            CloseableIterator<PrimaryKeyWithSortKey> result = getTopKRows((Expression) null, fallbackSoftLimit);
-            FileUtils.closeQuietly(source);
-            return result;
-        }
+            MaterializedKeys materializedKeys = materializeKeys(source, candidateLimit);
+            if (materializedKeys.limitExceeded)
+            {
+                Tracing.logAndTrace(logger,
+                                    "Switching filtered BM25 query to ordered index scan after materializing {} candidates across {} ordering index sources (probe budget {}, fallback soft limit {})",
+                                    materializedKeys.primaryKeys.size(),
+                                    sourceCount,
+                                    probeBudget,
+                                    fallbackSoftLimit);
+                queryContext.recordBm25SearchThenSortFallback();
+                FileUtils.closeQuietly(source);
+                sourceOpen = false;
+                return getTopKRows((Expression) null, fallbackSoftLimit);
+            }
 
-        if (materializedKeys.primaryKeys.isEmpty())
-        {
-            FileUtils.closeQuietly(source);
-            return CloseableIterator.emptyIterator();
+            if (materializedKeys.primaryKeys.isEmpty())
+            {
+                FileUtils.closeQuietly(source);
+                sourceOpen = false;
+                return CloseableIterator.emptyIterator();
+            }
+            var result = getTopKRows(materializedKeys.primaryKeys, softLimit);
+            // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
+            // that might not be needed until a deeper search into the ordering index, which happens after
+            // we exit this block.
+            var wrappedResult = CloseableIterator.withOnClose(result, source);
+            sourceOpen = false;
+            return wrappedResult;
         }
-        var result = getTopKRows(materializedKeys.primaryKeys, softLimit);
-        // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
-        // that might not be needed until a deeper search into the ordering index, which happens after
-        // we exit this block.
-        return CloseableIterator.withOnClose(result, source);
+        catch (Throwable t)
+        {
+            if (sourceOpen)
+                FileUtils.closeQuietly(source);
+            throw t;
+        }
     }
 
     @VisibleForTesting
