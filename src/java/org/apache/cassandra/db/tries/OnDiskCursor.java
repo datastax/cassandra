@@ -594,6 +594,11 @@ public class OnDiskCursor<T> implements Cursor<T>
             // Deletion ranges active at entry and exit must be presented by the tail at its root. To do this, get
             // the closest content in both forward and reverse direction and adjust the content that the tail reports
             // for them.
+            // A RangeBranch is built unconditionally, even when both sides come out null and a plain Range over the
+            // same node would walk identically. Guarding on the root node carrying no content of its own on either
+            // side would save an object and a second updateActiveAndReturn per plain range tail, but the guard has
+            // to restate what getTailRootContent already worked out, and this path is not on any hot query today.
+            // Revisit the narrower guard when it becomes the SSTable read path.
             Direction ourDirection = direction();
             S rootDescentContent = getTailRootContent(ourDirection, content, activeIsSet, activeRange);
             S rootAscentContent = getTailRootContent(ourDirection.opposite(), getAscentPathContent(), false, null);
