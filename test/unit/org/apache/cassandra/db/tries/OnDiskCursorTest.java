@@ -47,15 +47,13 @@ public class OnDiskCursorTest
         DatabaseDescriptor.toolInitialization();
     }
 
-    /// One value per encoded length the writer can produce, on both sides of every length boundary.
-    ///
-    /// Nine-byte encodings are left out: [FileWriter#writeReversedVint] emits their leading byte first
-    /// rather than last, so they do not round-trip through [OnDiskCursor#readVIntLength], which reads
-    /// the byte immediately before the value as the leading one. Nothing can write a content that
-    /// large, but a corrupt leading byte still asks the reader to decode one; that case is below.
+    /// One value per encoded length the writer can produce, on both sides of every length boundary,
+    /// including the nine-byte encoding, which no content can be long enough to need but which a
+    /// corrupt leading byte still asks the reader to decode.
     private static final long[] VALUES =
     { 0, 1, 127, 128, (1L << 14) - 1, 1L << 14, (1L << 21) - 1, 1L << 21, (1L << 28) - 1, 1L << 28,
-      (1L << 35) - 1, 1L << 35, (1L << 42) - 1, 1L << 42, (1L << 49) - 1, 1L << 49, (1L << 56) - 1 };
+      (1L << 35) - 1, 1L << 35, (1L << 42) - 1, 1L << 42, (1L << 49) - 1, 1L << 49, (1L << 56) - 1,
+      1L << 56, Long.MAX_VALUE };
 
     @Test
     public void testVIntRoundTrip() throws IOException
