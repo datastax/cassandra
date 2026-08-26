@@ -2202,9 +2202,9 @@ abstract public class Plan
         Iterator<? extends PrimaryKey> getTopKRows(KeyRangeIterator keys, int softLimit);
 
         default Iterator<? extends PrimaryKey> getTopKRows(KeyRangeIterator keys,
-                                                            int softLimit,
-                                                            int fallbackSoftLimit,
-                                                            boolean fallbackAllowed)
+                                                           int softLimit,
+                                                           int fallbackSoftLimit,
+                                                           boolean fallbackAllowed)
         {
             return getTopKRows(keys, softLimit);
         }

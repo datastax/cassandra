@@ -140,12 +140,12 @@ public class QueryTracingTest extends SAITester
 
             execute("INSERT INTO %s(id, site, extension, body) VALUES (4, 'pepsi', 'pdf', 'freight details')");
             assertRows(execute(query), row(1), row(2));
-            assertTraceContains("after materializing 2 candidates across 2 ordering index sources (probe budget 3, fallback soft limit ");
+            assertTraceContains("after materializing 3 candidates across 2 ordering index sources (probe budget 3, fallback soft limit ");
 
             flush();
-            // Two SSTables halve the candidate cap just as one SSTable plus a memtable does.
+            // Two SSTables produce the same soft-limit-floored cap as one SSTable plus a memtable.
             assertRows(execute(query), row(1), row(2));
-            assertTraceContains("after materializing 2 candidates across 2 ordering index sources (probe budget 3, fallback soft limit ");
+            assertTraceContains("after materializing 3 candidates across 2 ordering index sources (probe budget 3, fallback soft limit ");
 
             CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(0);
             assertRows(execute(query), row(1), row(2));

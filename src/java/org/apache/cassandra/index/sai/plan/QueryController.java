@@ -627,7 +627,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source, int softLimit)
     {
-        return getTopKRows(source, softLimit, Long.MAX_VALUE, softLimit, 0, 0);
+        try
+        {
+            return getTopKRows(source, softLimit, Long.MAX_VALUE, softLimit, 0, 0);
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(source);
+            throw t;
+        }
     }
 
     @Override
@@ -644,7 +652,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             QueryView orderingView = getQueryView(orderer.context);
             int sourceCount = max(1, orderingView.memtableIndexes.size() + orderingView.sstableIndexes.size());
-            long candidateLimit = max(1L, probeBudget / sourceCount);
+            long candidateLimit = calculateBm25CandidateLimit(softLimit, probeBudget, sourceCount);
             return getTopKRows(source,
                                softLimit,
                                candidateLimit,
@@ -660,44 +668,43 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source,
-                                                                  int softLimit,
-                                                                  long candidateLimit,
-                                                                  int fallbackSoftLimit,
-                                                                  int sourceCount,
-                                                                  long probeBudget)
+                                                                 int softLimit,
+                                                                 long candidateLimit,
+                                                                 int fallbackSoftLimit,
+                                                                 int sourceCount,
+                                                                 long probeBudget)
     {
-        try
+        MaterializedKeys materializedKeys = materializeKeys(source, candidateLimit);
+        if (materializedKeys.limitExceeded)
         {
-            MaterializedKeys materializedKeys = materializeKeys(source, candidateLimit);
-            if (materializedKeys.limitExceeded)
-            {
-                FileUtils.closeQuietly(source);
-                Tracing.logAndTrace(logger,
-                                    "Switching filtered BM25 query to ordered index scan after materializing {} candidates across {} ordering index sources (probe budget {}, fallback soft limit {})",
-                                    materializedKeys.primaryKeys.size(),
-                                    sourceCount,
-                                    probeBudget,
-                                    fallbackSoftLimit);
-                queryContext.recordBm25SearchThenSortFallback();
-                return getTopKRows((Expression) null, fallbackSoftLimit);
-            }
-
-            if (materializedKeys.primaryKeys.isEmpty())
-            {
-                FileUtils.closeQuietly(source);
-                return CloseableIterator.emptyIterator();
-            }
-            var result = getTopKRows(materializedKeys.primaryKeys, softLimit);
-            // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
-            // that might not be needed until a deeper search into the ordering index, which happens after
-            // we exit this block.
-            return CloseableIterator.withOnClose(result, source);
+            Tracing.logAndTrace(logger,
+                                "Switching filtered BM25 query to ordered index scan after materializing {} candidates across {} ordering index sources (probe budget {}, fallback soft limit {})",
+                                materializedKeys.primaryKeys.size(),
+                                sourceCount,
+                                probeBudget,
+                                fallbackSoftLimit);
+            queryContext.recordBm25SearchThenSortFallback();
+            CloseableIterator<PrimaryKeyWithSortKey> result = getTopKRows((Expression) null, fallbackSoftLimit);
+            FileUtils.closeQuietly(source);
+            return result;
         }
-        catch (Throwable t)
+
+        if (materializedKeys.primaryKeys.isEmpty())
         {
             FileUtils.closeQuietly(source);
-            throw t;
+            return CloseableIterator.emptyIterator();
         }
+        var result = getTopKRows(materializedKeys.primaryKeys, softLimit);
+        // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
+        // that might not be needed until a deeper search into the ordering index, which happens after
+        // we exit this block.
+        return CloseableIterator.withOnClose(result, source);
+    }
+
+    @VisibleForTesting
+    static long calculateBm25CandidateLimit(int softLimit, long probeBudget, int sourceCount)
+    {
+        return max(softLimit, max(1L, probeBudget / sourceCount));
     }
 
     /**

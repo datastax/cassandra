@@ -699,12 +699,10 @@ public class BM25Test extends SAITester
             QueryController.QUERY_OPT_LEVEL = 1;
             assertRows(execute(query), row(1), row(2));
 
-            var queryPlanMetrics = Objects.requireNonNull(StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore()))
-                                                 .queryMetrics()
-                                                 .perTableMetrics
-                                                 .get(TableQueryMetrics.QueryKind.ALL)
-                                                 .queryPlanMetrics;
-            long fallbackCount = Objects.requireNonNull(queryPlanMetrics).sortThenFilterQueriesCompleted.getCount();
+            var indexGroup = Objects.requireNonNull(StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore()));
+            var tableMetrics = indexGroup.queryMetrics().perTableMetrics.get(TableQueryMetrics.QueryKind.ALL);
+            var queryPlanMetrics = Objects.requireNonNull(tableMetrics.queryPlanMetrics);
+            long fallbackCount = queryPlanMetrics.sortThenFilterQueriesCompleted.getCount();
 
             // Adaptive filter-first planning crosses the two-candidate cap and must match both controls.
             CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(2);
