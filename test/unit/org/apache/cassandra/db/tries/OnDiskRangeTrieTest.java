@@ -145,6 +145,28 @@ public class OnDiskRangeTrieTest
                      actual.applicableRange(key));
     }
 
+    /// A range that covers a whole branch puts a marker on both sides of the same node: one presented
+    /// on descent and one on the way back up. That is the only shape that fills both content slots of
+    /// a generic-content node, and it is what a partition-level deletion looks like in a trie-backed
+    /// partition update.
+    @Test
+    public void testContentOnBothSidesOfANode() throws IOException
+    {
+        assertBranchRoundTrips(ByteComparable.EMPTY);       // whole trie, i.e. content on the root
+        assertBranchRoundTrips(key(3, -1, 0));              // content on a node below the root
+    }
+
+    private void assertBranchRoundTrips(ByteComparable branchKey) throws IOException
+    {
+        TestRangeState covering = new TestRangeState(branchKey, false, 1, 1);
+        RangeTrie<TestRangeState> expected = RangeTrie.branch(branchKey, VERSION, covering);
+
+        try (OnDiskRangeTrie<TestRangeState> actual = TrieUtil.onDiskRoundtrip(expected))
+        {
+            TrieUtil.assertTriesEqual(expected, actual);
+        }
+    }
+
     /// A key of `prefixLength` bytes of 0x21, the given transition, and `suffixLength` bytes of 0x42.
     /// A negative transition gives the prefix alone, i.e. a key that stops above the wide node.
     private static ByteComparable.Preencoded key(int prefixLength, int transition, int suffixLength)

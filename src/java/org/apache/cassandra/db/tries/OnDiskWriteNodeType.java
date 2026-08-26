@@ -186,23 +186,27 @@ public enum OnDiskWriteNodeType
         if (descentData == null && ascentData == null)
             return;
 
+        // A node is read backwards from its code byte, and the reader takes the content block
+        // adjacent to the code as the descent side (see OnDiskReadNodeType.PREFIX and the layout in
+        // FileWriter's class comment), so the ascent block has to be emitted first.
+        int code = PREFIX.bits;
+        if (ascentData != null)
+        {
+            int ascentDataSize = serializer.serialize(out, ascentData);
+            FileWriter.writeReversedVint(out, ascentDataSize);
+            code |= PREFIX_HAS_ASCENT_CONTENT;
+        }
+
         int descentDataSize = -1;
         if (descentData != null)
             descentDataSize = serializer.serialize(out, descentData);
 
         if (hasChild || ascentData != null || descentDataSize > MAX_LEAF_LENGTH_INCLUSIVE)
         {
-            int code = PREFIX.bits;
             if (descentDataSize >= 0)
             {
                 FileWriter.writeReversedVint(out, descentDataSize);
                 code |= PREFIX_HAS_DESCENT_CONTENT;
-            }
-            if (ascentData != null)
-            {
-                int ascentDataSize = serializer.serialize(out, ascentData);
-                FileWriter.writeReversedVint(out, ascentDataSize);
-                code |= PREFIX_HAS_ASCENT_CONTENT;
             }
             if (hasChild)
                 code |= PREFIX_HAS_CHILD;
