@@ -283,7 +283,7 @@ public enum OnDiskReadNodeType
         public void load(OnDiskCursor<?> state)
         {
             Direction direction = Cursor.direction(state.currentEncodedPosition);
-            state.nodeImplData = findNext(state, direction, direction.select(0, 255));
+            state.nodeImplData = findNext(state, direction, state.nodeCode, state.postCodePos, direction.select(0, 255));
         }
 
         @Override
@@ -296,7 +296,7 @@ public enum OnDiskReadNodeType
 
         private long descendToChild(OnDiskCursor<?> state, Direction direction, int transition)
         {
-            int next = findNext(state, direction, transition + direction.increase);
+            int next = findNext(state, direction, state.nodeCode, state.postCodePos, transition + direction.increase);
             if (direction.inLoop(next, 0, 255))
                 state.addBacktrack(state.postCodePos, state.nodeCode, next);
             long nextPosition = Cursor.positionForDescentWithByte(state.currentEncodedPosition, transition);
@@ -313,16 +313,16 @@ public enum OnDiskReadNodeType
             int transition = Cursor.incomingTransition(encodedSkipPosition);
             if (direction.le(transition, (int) state.nodeImplData))
                 return advance(state);
-            int currTransition = findNext(state, direction, transition);
+            int currTransition = findNext(state, direction, state.nodeCode, state.postCodePos, transition);
             if (!direction.inLoop(currTransition, 0, 255))
                 return state.exhausted;
             return descendToChild(state, direction, currTransition);
         }
 
-        private int findNext(OnDiskCursor<?> state, Direction direction, int index)
+        private int findNext(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos, int index)
         {
-            int bytes = bytes(state.nodeCode);
-            long base = state.postCodePos - 256 * bytes;
+            int bytes = bytes(nodeCode);
+            long base = postCodePos - 256 * bytes;
             long notPresent = (1L << bytes * 8) - 1;
             do
             {
@@ -340,9 +340,9 @@ public enum OnDiskReadNodeType
         @Override
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
-            int index = findNext(state, direction, direction.select(0, 255));
+            int index = findNext(state, direction, nodeCode, postCodePos, direction.select(0, 255));
             int bytes = bytes(nodeCode);
-            long base = state.postCodePos - 256 * bytes;
+            long base = postCodePos - 256 * bytes;
             return base - state.readSizedInt(base, index, bytes);
         }
 
@@ -533,7 +533,7 @@ public enum OnDiskReadNodeType
         @Override
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
-            int length = cardinality(state, postCodePos, nodeCode);
+            int length = cardinality(state, postCodePos, 256);
             int index = direction.isForward() ? 0 : length - 1;
             int bytes = bytes(nodeCode);
             long base = base(postCodePos, length, bytes);
@@ -772,9 +772,9 @@ public enum OnDiskReadNodeType
         @Override
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
-            int bytes = bytes(state.nodeCode);
-            long base = state.postCodePos - bytes;
-            return base - state.readSizedInt(state.postCodePos, bytes);
+            int bytes = bytes(nodeCode);
+            long base = postCodePos - bytes;
+            return base - state.readSizedInt(postCodePos, bytes);
         }
 
         @Override
@@ -804,6 +804,11 @@ public enum OnDiskReadNodeType
     {
         return null; // overridden by leaf and prefix
     }
+
+    /// Return the position of the first child in the given direction of the node described by `nodeCode` and
+    /// `postCodePos`. This is used to descend to the nearest content of a branch and is called for nodes other than
+    /// the one the cursor is positioned on, thus it must only use the passed node and never `state`'s own
+    /// `nodeCode`/`postCodePos`.
     public abstract long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos);
 
     /**
