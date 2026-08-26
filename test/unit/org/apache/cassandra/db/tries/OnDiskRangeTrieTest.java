@@ -154,6 +154,15 @@ public class OnDiskRangeTrieTest
         assertTailsEqual(Direction.FORWARD);
     }
 
+    /// The same from a reverse walk. The ascent side of a tail's root is the side the walk has not yet
+    /// presented, which for a reverse walk is the one a node carries its content on, so the two
+    /// directions reach it by different routes.
+    @Test
+    public void testTailsAlongAReverseWalk() throws IOException
+    {
+        assertTailsEqual(Direction.REVERSE);
+    }
+
     /// Takes the tail in both directions at every position of a walk in the given one, and compares it
     /// against the tail the in-memory trie the file was written from gives at the same place.
     private void assertTailsEqual(Direction walkDirection) throws IOException
@@ -170,12 +179,23 @@ public class OnDiskRangeTrieTest
                 // Taking a tail on the return path is not permitted.
                 if (!Cursor.isOnReturnPath(position))
                     for (Direction tailDirection : Direction.values())
-                        TrieUtil.assertCursorWalksEqual(expectedCursor.tailCursor(tailDirection),
-                                                        actualCursor.tailCursor(tailDirection));
+                        assertTailsEqual(expectedCursor.tailCursor(tailDirection),
+                                         actualCursor.tailCursor(tailDirection));
                 position = expectedCursor.advance();
                 assertEquals(Cursor.toString(position), Cursor.toString(actualCursor.advance()));
             }
         }
+    }
+
+    /// Compares the two tails, and before walking them (which consumes them) the tails they in turn give
+    /// at their root: a branch tail holds its root's content in the cursor rather than in the file, and
+    /// a tail taken from it has to pick it up from there.
+    private void assertTailsEqual(RangeCursor<TestRangeState> expected, RangeCursor<TestRangeState> actual)
+    {
+        for (Direction nestedDirection : Direction.values())
+            TrieUtil.assertCursorWalksEqual(expected.tailCursor(nestedDirection),
+                                            actual.tailCursor(nestedDirection));
+        TrieUtil.assertCursorWalksEqual(expected, actual);
     }
 
     /// A range that covers a whole branch puts a marker on both sides of the same node: one presented

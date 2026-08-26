@@ -509,6 +509,25 @@ public class OnDiskCursor<T> implements Cursor<T>
             }
         }
 
+        /// The content that will be presented when the walk returns to the current position, which a tail
+        /// taken here has to reproduce on its root's ascent side.
+        ///
+        /// [OnDiskReadNodeType#PREFIX] records it as a backtrack entry when it loads the node, and then moves
+        /// the cursor on to the post-prefix node, so `currentImpl`, `nodeCode` and `postCodePos` no longer
+        /// describe the node that holds it -- often `currentImpl` is LEAF over bytes that are not a leaf.
+        /// The backtrack entry is the only remaining record of it, as it is in the in-memory cursor.
+        S getAscentPathContent()
+        {
+            if (stackLength <= 0)
+                return null;
+            int index = stackLength - 1;
+            if (getStackNodeCode(index) != OnDiskReadNodeType.ASCENT_LEAF_CODE)
+                return null;    // a child backtrack entry, not return-path content
+            if (getStackDepth(index) != Cursor.depth(currentEncodedPosition))
+                return null;    // recorded by an ancestor, not by this node
+            return readContentAtPos(getStackPostCodePos(index));
+        }
+
         S getTailRootContent(Direction direction, S contentAtRoot, boolean activeRangeKnown, S activeRange)
         {
             if (contentAtRoot != null)
@@ -531,9 +550,7 @@ public class OnDiskCursor<T> implements Cursor<T>
             // for them.
             Direction ourDirection = direction();
             S rootDescentContent = getTailRootContent(ourDirection, content, activeIsSet, activeRange);
-            S rootAscentContent = getTailRootContent(ourDirection.opposite(),
-                                                     currentImpl.getContent(this, ourDirection.opposite(), false, nodeCode, postCodePos),
-                                                     false, null);
+            S rootAscentContent = getTailRootContent(ourDirection.opposite(), getAscentPathContent(), false, null);
             if (ourDirection != direction)
             {
                 S swap = rootDescentContent;
@@ -577,6 +594,12 @@ public class OnDiskCursor<T> implements Cursor<T>
 
             content = rootAscentContent;
             return currentPos;
+        }
+
+        @Override
+        S readContentAtPos(long currentPos)
+        {
+            return currentPos > 0 ? super.readContentAtPos(currentPos) : rootAscentContent;
         }
     }
 
