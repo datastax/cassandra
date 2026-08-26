@@ -79,6 +79,18 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
             return;
         }
 
+        // Record where the write came from before anything else touches the payload: an inbound mutation is
+        // applied with the same WriteOptions as a locally coordinated one, so this is the only point at which
+        // the replica can still tell that the coordinator sits in another datacenter. See WriteOrigin.
+        //
+        // Stamped BEFORE forwarding on purpose. forwardToLocalNodes hands this very Mutation instance to the
+        // outbound connections, which serialize it on their own threads; writing to it after that would
+        // race with them and break the "never modify a mutation while it is being serialized" rule this
+        // class's payload lives under (see Mutation). Doing it here means the write happens-before the
+        // handoff. The origin itself is never serialized, so the forwarded copies carry nothing extra --
+        // each recipient stamps its own from its own message.
+        message.payload.withOrigin(WriteOrigin.fromMessage(message));
+
         // Check if there were any forwarding headers in this message
         ForwardingInfo forwardTo = message.forwardTo();
         if (forwardTo != null)
@@ -111,7 +123,9 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
             requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
         }
 
-        message.payload.applyFuture(WriteOptions.DEFAULT).addCallback(o -> respond(requestSensors, message, respondToAddress), wto -> failed());
+        // The origin was stamped in doVerb, before the payload could be handed to the forwarding path.
+        message.payload.applyFuture(WriteOptions.DEFAULT)
+                       .addCallback(o -> respond(requestSensors, message, respondToAddress), wto -> failed());
     }
 
     private static void forwardToLocalNodes(Message<Mutation> originalMessage, ForwardingInfo forwardTo)
