@@ -34,7 +34,7 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 /// value is written reversed. See [OnDiskTrie.md](./OnDiskTrie.md) for details.
 public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor.Walker<T, DataOutputPlus>
 {
-    interface DataSerializer<T>
+    public interface DataSerializer<T>
     {
         /// Writes `value` to `out` and returns the number of bytes written.
         int serialize(DataOutputPlus out, T value) throws IOException;

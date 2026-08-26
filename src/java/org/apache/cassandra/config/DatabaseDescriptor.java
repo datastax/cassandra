@@ -3991,10 +3991,10 @@ public class DatabaseDescriptor
 
     public static int getFileCacheSizeInMiB()
     {
-        if (conf.file_cache_size == null)
+        if (conf == null || conf.file_cache_size == null)
         {
-            // In client mode the value is not set.
-            assert DatabaseDescriptor.isClientInitialized();
+            // In client mode or uninitialized unit tests the value is not set.
+            assert conf == null || DatabaseDescriptor.isClientInitialized();
             return 0;
         }
 
@@ -4014,10 +4014,10 @@ public class DatabaseDescriptor
 
     public static int getNetworkingCacheSizeInMiB()
     {
-        if (conf.networking_cache_size == null)
+        if (conf == null || conf.networking_cache_size == null)
         {
-            // In client mode the value is not set.
-            assert DatabaseDescriptor.isClientInitialized();
+            // In client mode or uninitialized unit tests the value is not set.
+            assert conf == null || DatabaseDescriptor.isClientInitialized();
             return 0;
         }
         return conf.networking_cache_size.toMebibytes();
@@ -4025,10 +4025,10 @@ public class DatabaseDescriptor
 
     public static boolean getFileCacheRoundUp()
     {
-        if (conf.file_cache_round_up == null)
+        if (conf == null || conf.file_cache_round_up == null)
         {
-            // In client mode the value is not set.
-            assert DatabaseDescriptor.isClientInitialized();
+            // In client mode or uninitialized unit tests the value is not set.
+            assert conf == null || DatabaseDescriptor.isClientInitialized();
             return false;
         }
 
