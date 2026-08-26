@@ -255,7 +255,9 @@ public class TriePartitionUpdateSerializer
                                           contentSerializer(pojoSerializer),
                                           deletionSerializer(pojoSerializer),
                                           trieBytes);
-            return TypeSizes.sizeofWithVIntLength(trieBytes.asNewBuffer());
+            // Only the length is needed; asNewBuffer() would copy the whole trie out to report it.
+            int trieLength = trieBytes.getLength();
+            return TypeSizes.sizeofUnsignedVInt(trieLength) + trieLength;
         }
     }
 
