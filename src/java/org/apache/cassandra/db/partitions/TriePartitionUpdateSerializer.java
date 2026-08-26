@@ -46,7 +46,6 @@ import org.apache.cassandra.db.tries.OnDiskCursor;
 import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrie;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.db.tries.ContentManagerPojo;
-import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -58,7 +57,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 /**
  * Serializer for {@link TriePartitionUpdate} across messaging versions (VERSION_DS_21+).
  * Encodes partition key, row and tombstone counts, data size footprint, {@link SerializationHeader},
- * and serializes the underlying {@link InMemoryDeletionAwareTrie} structure using a type-tagged {@link ContentManagerPojo.PojoSerializer}.
+ * and writes the update's deletion-aware trie in the on-disk trie format with {@link DeletionAwareFileWriter},
+ * node payloads being encoded by a type-tagged {@link ContentManagerPojo.PojoSerializer}.
  */
 public class TriePartitionUpdateSerializer
 {
@@ -179,7 +179,8 @@ public class TriePartitionUpdateSerializer
 
     /**
      * Deserializes a {@link TriePartitionUpdate} from an input stream using messaging version, table metadata, and target buffer type.
-     * Reconstructs decorated key, header, and underlying {@link InMemoryDeletionAwareTrie} state.
+     * Reconstructs the decorated key and header, and opens the trie bytes as an
+     * {@link OnDiskDeletionAwareTrie} that is walked in place rather than rebuilt.
      */
     public static TriePartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag, TableMetadata metadata, BufferType bufferType) throws IOException
     {
