@@ -118,9 +118,9 @@ public interface QueryEventListener
 
     interface VectorIndexEventListener
     {
-        void onGraphLoaded(long quantizationBytes, long ordinalsMapCachedBytes, long vectorsLoaded);
+        void onGraphLoaded(long quantizationMemoryBytes, long quantizationDiskBytes, long ordinalsMapCachedBytes, long vectorsLoaded);
 
-        void onGraphClosed(long pqBytes, long ordinalsMapCachedBytes, long vectorsLoaded);
+        void onGraphClosed(long quantizationMemoryBytes, long quantizationDiskBytes, long ordinalsMapCachedBytes, long vectorsLoaded);
 
         void onSearchResult(SearchResult result, long latencyNs, boolean isResume);
 

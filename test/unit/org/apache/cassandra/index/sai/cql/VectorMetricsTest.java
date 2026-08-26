@@ -91,6 +91,7 @@ public class VectorMetricsTest extends VectorTester
         assertEquals(0, vectorMetrics.bruteForceNodesVisited.getCount());
         assertEquals(0, vectorMetrics.bruteForceNodesReranked.getCount());
         assertEquals(0, vectorMetrics.quantizationMemoryBytes.sum());
+        assertEquals(0, vectorMetrics.quantizationDiskBytes.sum());
         assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum());
         assertEquals(0, vectorMetrics.onDiskGraphsCount.sum());
         assertEquals(0, vectorMetrics.onDiskGraphVectorsCount.sum());
@@ -103,18 +104,23 @@ public class VectorMetricsTest extends VectorTester
         // FusedPQ is tied to version: enabled for FA+, disabled for pre-FA
         boolean fusedPQ = JVectorVersionUtil.versionSupportsFused(version);
         long pqMemoryAfterFlush = vectorMetrics.quantizationMemoryBytes.sum();
+        long pqDiskAfterFlush = vectorMetrics.quantizationDiskBytes.sum();
 
         if (fusedPQ)
         {
-            // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
-            assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ",
-                        0L, pqMemoryAfterFlush);
+            // FusedPQ keeps its codebook on heap and stores the encoded vectors inline with graph nodes.
+            assertTrue("Version " + version + " should have PQ codebook memory with FusedPQ",
+                       pqMemoryAfterFlush > 0);
+            assertTrue("Version " + version + " should have logical fused PQ bytes",
+                       pqDiskAfterFlush > 0);
         }
         else
         {
             // Without FusedPQ, PQ vectors are stored separately, so we expect some memory usage
             assertTrue("Version " + version + " should have PQ memory without FusedPQ",
                       pqMemoryAfterFlush > 0);
+            assertEquals("Version " + version + " should have no logical fused PQ bytes",
+                         0L, pqDiskAfterFlush);
         }
         
         assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum()); // unique vectors means no cache required
@@ -123,18 +129,22 @@ public class VectorMetricsTest extends VectorTester
 
         compact();
         long pqMemoryAfterCompaction = vectorMetrics.quantizationMemoryBytes.sum();
+        long pqDiskAfterCompaction = vectorMetrics.quantizationDiskBytes.sum();
 
         if (fusedPQ)
         {
-            // With FusedPQ, quantized vectors are stored inline with graph nodes, so no separate PQ memory
-            assertEquals("Version " + version + " should have no separate PQ memory with FusedPQ after compaction",
-                        0L, pqMemoryAfterCompaction);
+            assertTrue("Version " + version + " should have PQ codebook memory with FusedPQ after compaction",
+                       pqMemoryAfterCompaction > 0);
+            assertTrue("Version " + version + " should have logical fused PQ bytes after compaction",
+                       pqDiskAfterCompaction > 0);
         }
         else
         {
             // Without FusedPQ, PQ vectors are stored separately, so we expect some memory usage
             assertTrue("Version " + version + " should have PQ memory without FusedPQ after compaction",
                       pqMemoryAfterCompaction > 0);
+            assertEquals("Version " + version + " should have no logical fused PQ bytes after compaction",
+                         0L, pqDiskAfterCompaction);
         }
         
         assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum()); // unique vectors means no cache required
@@ -168,6 +178,7 @@ public class VectorMetricsTest extends VectorTester
         // Confirm that truncating the table which will remove the index also drops the gauges
         truncate(false);
         assertEquals(0, vectorMetrics.quantizationMemoryBytes.sum());
+        assertEquals(0, vectorMetrics.quantizationDiskBytes.sum());
         assertEquals(0, vectorMetrics.ordinalsMapMemoryBytes.sum());
         assertEquals(0, vectorMetrics.onDiskGraphsCount.sum());
         assertEquals(0, vectorMetrics.onDiskGraphVectorsCount.sum());

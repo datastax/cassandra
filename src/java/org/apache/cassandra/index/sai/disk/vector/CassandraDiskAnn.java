@@ -160,7 +160,8 @@ public class CassandraDiskAnn
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
 
         // Record metrics for this graph
-        columnQueryMetrics.onGraphLoaded(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
+        columnQueryMetrics.onGraphLoaded(compressedVectorBytes(),
+                                         fusedQuantizationBytes(),
                                          ordinalsMap.cachedBytesUsed(),
                                          graph.size(0));
     }
@@ -193,6 +194,16 @@ public class CassandraDiskAnn
         return compressedVectors == null
                ? pq == null ? 0 : pq.ramBytesUsed()
                : compressedVectors.ramBytesUsed();
+    }
+
+    /**
+     * Returns the logical size of fused PQ codes in this graph, excluding graph adjacency overhead.
+     */
+    private long fusedQuantizationBytes()
+    {
+        return compressedVectors == null && pq != null
+               ? (long) graph.size(0) * pq.compressedVectorSize()
+               : 0;
     }
 
     public int size()
@@ -305,7 +316,8 @@ public class CassandraDiskAnn
     public void close() throws IOException
     {
         FileUtils.close(ordinalsMap, searchers, graph, graphHandle);
-        columnQueryMetrics.onGraphClosed(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
+        columnQueryMetrics.onGraphClosed(compressedVectorBytes(),
+                                         fusedQuantizationBytes(),
                                          ordinalsMap.cachedBytesUsed(),
                                          graph.size(0));
     }

@@ -177,6 +177,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
 
         // While not query metrics, these are vector specific metrics for the column.
         public final LongAdder quantizationMemoryBytes;
+        public final LongAdder quantizationDiskBytes;
         public final LongAdder ordinalsMapMemoryBytes;
         public final LongAdder onDiskGraphsCount;
         public final LongAdder onDiskGraphVectorsCount;
@@ -200,24 +201,27 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
 
             // Initialize Gauge for PQ bytes. Ignoring codahale metrics for now.
             quantizationMemoryBytes = new LongAdder();
+            quantizationDiskBytes = new LongAdder();
             ordinalsMapMemoryBytes = new LongAdder();
             onDiskGraphVectorsCount = new LongAdder();
             onDiskGraphsCount = new LongAdder();
         }
 
         @Override
-        public void onGraphLoaded(long quantizationBytes, long ordinalsMapCachedBytes, long vectorsLoaded)
+        public void onGraphLoaded(long quantizationMemoryBytes, long quantizationDiskBytes, long ordinalsMapCachedBytes, long vectorsLoaded)
         {
-            this.quantizationMemoryBytes.add(quantizationBytes);
+            this.quantizationMemoryBytes.add(quantizationMemoryBytes);
+            this.quantizationDiskBytes.add(quantizationDiskBytes);
             this.ordinalsMapMemoryBytes.add(ordinalsMapCachedBytes);
             this.onDiskGraphVectorsCount.add(vectorsLoaded);
             this.onDiskGraphsCount.increment();
         }
 
         @Override
-        public void onGraphClosed(long quantizationBytes, long ordinalsMapCachedBytes, long vectorsLoaded)
+        public void onGraphClosed(long quantizationMemoryBytes, long quantizationDiskBytes, long ordinalsMapCachedBytes, long vectorsLoaded)
         {
-            this.quantizationMemoryBytes.add(-quantizationBytes);
+            this.quantizationMemoryBytes.add(-quantizationMemoryBytes);
+            this.quantizationDiskBytes.add(-quantizationDiskBytes);
             this.ordinalsMapMemoryBytes.add(-ordinalsMapCachedBytes);
             this.onDiskGraphVectorsCount.add(-vectorsLoaded);
             this.onDiskGraphsCount.decrement();
