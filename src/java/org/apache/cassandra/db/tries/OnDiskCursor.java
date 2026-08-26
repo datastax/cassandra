@@ -558,6 +558,8 @@ public class OnDiskCursor<T> implements Cursor<T>
             // LEAF or PREFIX may have put a backtrack entry, remove if so
             this.stackLength = 0;
             this.content = rootDescentContent;
+            if (rootDescentContent != null)
+                this.currentEncodedPosition |= MAY_HAVE_CONTENT_BIT;
             this.rootAscentContent = rootAscentContent;
             if (rootAscentContent != null)
                 addBacktrack(0, OnDiskReadNodeType.ASCENT_LEAF_CODE, currentEncodedPosition | ON_RETURN_PATH_BIT);
