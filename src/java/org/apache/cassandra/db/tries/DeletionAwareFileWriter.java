@@ -150,7 +150,7 @@ implements Cursor.Walker<T, DataOutputPlus>
 
     /// Write out every node the walk has finished with. Called by the driving loop on ascent,
     /// mirroring [FileWriter#ascendTo].
-    public void ascendTo(long newEncodedPosition)
+    public void ascendTo(long newEncodedPosition) throws IOException
     {
         inner.ascendTo(newEncodedPosition);
     }
@@ -259,7 +259,7 @@ implements Cursor.Walker<T, DataOutputPlus>
                                                           boolean isOrdered,
                                                           FileWriter.DataSerializer<T> contentSerializer,
                                                           FileWriter.DataSerializer<D> deletionSerializer,
-                                                          DataOutputPlus out)
+                                                          DataOutputPlus out) throws IOException
     {
         DeletionAwareFileWriter<T, D> fw =
             new DeletionAwareFileWriter<>(out, contentSerializer, deletionSerializer, isOrdered);
@@ -297,7 +297,7 @@ implements Cursor.Walker<T, DataOutputPlus>
 
     /// Report the content and, if present, the whole deletion branch at the cursor's position.
     private static <T, D extends RangeState<D>> void emitAt(DeletionAwareFileWriter<T, D> fw,
-                                                            DeletionAwareCursor<T, D> c)
+                                                            DeletionAwareCursor<T, D> c) throws IOException
     {
         long position = c.encodedPosition();
 
@@ -325,7 +325,7 @@ implements Cursor.Walker<T, DataOutputPlus>
     }
 
     /// The same ascent-driven loop as above, over one deletion branch, feeding the nested writer.
-    private static <D extends RangeState<D>> void writeBranch(FileWriter<D> bw, RangeCursor<D> c)
+    private static <D extends RangeState<D>> void writeBranch(FileWriter<D> bw, RangeCursor<D> c) throws IOException
     {
         D content = c.content();
         if (content != null)
