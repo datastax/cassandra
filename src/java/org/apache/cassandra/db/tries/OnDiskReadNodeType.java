@@ -326,12 +326,17 @@ public enum OnDiskReadNodeType
             return descendToChild(state, direction, currTransition);
         }
 
+        /// Find the first transition at or after `index` in the given direction that has a child, or the
+        /// out-of-range value the callers test for with [Direction#inLoop] if there is none. `index` can
+        /// already be out of range, in which case nothing is read: the pointer array holds exactly 256
+        /// entries, and the byte after it belongs to another node, or is past the end of the file if this
+        /// is the root.
         private int findNext(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos, int index)
         {
             int bytes = bytes(nodeCode);
             long base = postCodePos - 256 * bytes;
             long notPresent = notPresent(bytes);
-            do
+            while (direction.inLoop(index, 0, 255))
             {
                 long child = state.readSizedInt(base, index, bytes);
                 if (child != notPresent)
@@ -339,7 +344,6 @@ public enum OnDiskReadNodeType
 
                 index += direction.increase;
             }
-            while (direction.inLoop(index, 0, 255));
 
             return index;
         }
@@ -499,8 +503,15 @@ public enum OnDiskReadNodeType
             return bits;
         }
 
+        /// Find the first transition at or after `start` in the given direction that is set in the bitmap, or
+        /// the out-of-range value the callers test for with [Direction#inLoop] if there is none. `start` can
+        /// already be out of range, in which case nothing is read: the bitmap is exactly 32 bytes and the
+        /// byte below it is the top of the pointer array.
         private int findNextEntry(OnDiskCursor<?> state, long postCodePos, Direction direction, int start)
         {
+            if (!direction.inLoop(start, 0, 255))
+                return start;
+
             if (direction.isForward())
             {
                 int i = start / 8;
