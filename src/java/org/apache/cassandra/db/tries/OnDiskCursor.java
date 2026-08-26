@@ -38,6 +38,31 @@ public class OnDiskCursor<T> implements Cursor<T>
                         boolean isOrdered,
                         long root)
     {
+        this(deserializer, rebufferer, byteComparableVersion, direction, isOrdered);
+        descendInto(Cursor.rootPosition(direction), root);
+    }
+
+    /// Start at a node given as the pair that identifies it, as [#currentFullNodePostCodePos] and
+    /// [#currentFullNodeCode] hold it. Used for tails, whose root can be a position inside a chain node, which has
+    /// no code byte of its own in the file.
+    public OnDiskCursor(DataDeserializer<T> deserializer,
+                        Rebufferer rebufferer,
+                        ByteComparable.Version byteComparableVersion,
+                        Direction direction,
+                        boolean isOrdered,
+                        long rootPostCodePos,
+                        int rootNodeCode)
+    {
+        this(deserializer, rebufferer, byteComparableVersion, direction, isOrdered);
+        descendInto(Cursor.rootPosition(direction), rootPostCodePos, rootNodeCode);
+    }
+
+    private OnDiskCursor(DataDeserializer<T> deserializer,
+                         Rebufferer rebufferer,
+                         ByteComparable.Version byteComparableVersion,
+                         Direction direction,
+                         boolean isOrdered)
+    {
         this.rebufferer = rebufferer;
         this.currentBH = Rebufferer.EMPTY;
         this.currentBuffer = currentBH.buffer();
@@ -47,7 +72,6 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.isOrdered = isOrdered;
         this.swapContentSides = direction.select(false, isOrdered);
         this.exhausted = Cursor.exhaustedPosition(direction);
-        descendInto(Cursor.rootPosition(direction), root);
     }
 
     class SharedStream extends RebufferingInputStream
@@ -119,16 +143,23 @@ public class OnDiskCursor<T> implements Cursor<T>
     long nodeImplData;
     int nodeCode;
 
-    long currentFullNode;   // for tails
+    /// The node the cursor is positioned on, as the pair that identifies it: the position just after its code byte,
+    /// and that code. A chain node steps through its bytes without moving to a new node in the file, so the position
+    /// alone does not identify where a tail taken here must start -- the code carries how much of the chain is left.
+    /// Both are left alone by [#descendPostPrefixOrRelay], which moves the implementation on to the node a prefix or
+    /// relay points to while the cursor stays on the prefix.
+    long currentFullNodePostCodePos;   // for tails
+    int currentFullNodeCode;
 
     long descendInto(long encodedPosition, long nodePos)
     {
-        currentFullNode = nodePos;
         return descendInto(encodedPosition, nodePos - 1, readByteBefore(nodePos));
     }
 
     long descendInto(long encodedPosition, long postCodePos, int nodeCode)
     {
+        this.currentFullNodePostCodePos = postCodePos;
+        this.currentFullNodeCode = nodeCode;
         this.content = null;
         // Content is loaded by the node implementation below; until it is, this node is known to have none.
         this.currentEncodedPosition = encodedPosition & ~MAY_HAVE_CONTENT_BIT;
@@ -226,7 +257,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     @Override
     public Cursor<T> tailCursor(Direction direction)
     {
-        return new OnDiskCursor<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, isOrdered, currentFullNode);
+        return new OnDiskCursor<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, isOrdered, currentFullNodePostCodePos, currentFullNodeCode);
     }
 
     long getContentAtPos(long currentPos)
@@ -416,7 +447,17 @@ public class OnDiskCursor<T> implements Cursor<T>
         public Range(DataDeserializer<S> deserializer, Rebufferer rebufferer, ByteComparable.Version byteComparableVersion, Direction direction, long root)
         {
             super(deserializer, rebufferer, byteComparableVersion, direction, true, root);
+            initActiveState();
+        }
 
+        public Range(DataDeserializer<S> deserializer, Rebufferer rebufferer, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode)
+        {
+            super(deserializer, rebufferer, byteComparableVersion, direction, true, rootPostCodePos, rootNodeCode);
+            initActiveState();
+        }
+
+        private void initActiveState()
+        {
             activeIsSet = true;
             activeRange = null;
             prevContent = null;
@@ -499,16 +540,18 @@ public class OnDiskCursor<T> implements Cursor<T>
         {
 //            return tailCursor(direction).advanceToContent(null);
 
-            long node = currentFullNode;
+            long postCodePos = currentFullNodePostCodePos;
+            int code = currentFullNodeCode;
             while (true)
             {
-                int code = readByteBefore(node);
                 OnDiskReadNodeType type = OnDiskReadNodeType.selectNodeImpl(code);
-                S content = type.getContent(this, direction, true, code, node - 1);
+                S content = type.getContent(this, direction, true, code, postCodePos);
                 if (content != null)
                     return content;
-                node = type.getFirstChild(this, direction, code, node - 1);
+                long node = type.getFirstChild(this, direction, code, postCodePos);
                 assert node > 0;
+                postCodePos = node - 1;
+                code = readByteBefore(node);
             }
         }
 
@@ -561,7 +604,7 @@ public class OnDiskCursor<T> implements Cursor<T>
                 rootAscentContent = swap;
             }
 
-            return new RangeBranch<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, currentFullNode, rootDescentContent, rootAscentContent);
+            return new RangeBranch<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, currentFullNodePostCodePos, currentFullNodeCode, rootDescentContent, rootAscentContent);
         }
     }
 
@@ -569,9 +612,9 @@ public class OnDiskCursor<T> implements Cursor<T>
     {
         final S rootAscentContent;
 
-        public RangeBranch(DataDeserializer<S> deserializer, Rebufferer rebufferer, ByteComparable.Version byteComparableVersion, Direction direction, long root, S rootDescentContent, S rootAscentContent)
+        public RangeBranch(DataDeserializer<S> deserializer, Rebufferer rebufferer, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode, S rootDescentContent, S rootAscentContent)
         {
-            super(deserializer, rebufferer, byteComparableVersion, direction, root);
+            super(deserializer, rebufferer, byteComparableVersion, direction, rootPostCodePos, rootNodeCode);
             // LEAF or PREFIX may have put a backtrack entry, remove if so
             this.stackLength = 0;
             this.content = rootDescentContent;

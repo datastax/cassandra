@@ -185,6 +185,13 @@ implements DeletionAwareTrie<T, D>, Closeable
                                              trie.byteComparableVersion, direction, false, root);
         }
 
+        OnDiskDeletionAwareCursor(OnDiskDeletionAwareTrie<T, D> trie, Direction direction, long rootPostCodePos, int rootNodeCode)
+        {
+            this.trie = trie;
+            this.source = new OnDiskCursor<>(trie.payloadDeserializer, trie.rebufferer,
+                                             trie.byteComparableVersion, direction, false, rootPostCodePos, rootNodeCode);
+        }
+
         private DeletionAwareFileWriter.Payload<T> payload()
         {
             return (source.encodedPosition() & MAY_HAVE_CONTENT_BIT) != 0 ? source.content() : null;
@@ -259,7 +266,7 @@ implements DeletionAwareTrie<T, D>, Closeable
         @Override
         public DeletionAwareCursor<T, D> tailCursor(Direction direction)
         {
-            return new OnDiskDeletionAwareCursor<>(trie, direction, source.currentFullNode);
+            return new OnDiskDeletionAwareCursor<>(trie, direction, source.currentFullNodePostCodePos, source.currentFullNodeCode);
         }
     }
 }
