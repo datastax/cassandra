@@ -115,7 +115,9 @@ public class TriePartitionUpdateSerializer
                                           contentSerializer(pojoSerializer),
                                           deletionSerializer(pojoSerializer),
                                           trieBytes);
-            ByteBufferUtil.writeWithVIntLength(trieBytes.asNewBuffer(), out);
+            // out.write copies the buffer synchronously and leaves its position alone, and nothing
+            // touches trieBytes after this, so the trie does not have to be copied out first.
+            ByteBufferUtil.writeWithVIntLength(trieBytes.unsafeGetBufferAndFlip(), out);
         }
     }
 
