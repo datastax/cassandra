@@ -21,8 +21,8 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
@@ -129,19 +129,26 @@ public class QueryTracingTest extends SAITester
             execute("INSERT INTO %s(id, site, extension, body) VALUES (99, 'other', 'docx', 'freight freight freight freight')");
 
             String query = "SELECT id FROM %s WHERE site = 'pepsi' AND extension = 'pdf' ORDER BY body BM25 OF 'freight' LIMIT 2";
-            assertRowsIgnoringOrder(execute(query), row(1), row(2));
+            // Three candidates and one ordering source stay within the probe budget.
+            assertRows(execute(query), row(1), row(2));
             assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
 
             flush();
-            assertRowsIgnoringOrder(execute(query), row(1), row(2));
+            // The same candidate set in one SSTable also stays within the budget.
+            assertRows(execute(query), row(1), row(2));
             assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
 
             execute("INSERT INTO %s(id, site, extension, body) VALUES (4, 'pepsi', 'pdf', 'freight details')");
-            assertRowsIgnoringOrder(execute(query), row(1), row(2));
-            assertTraceContains("Switching filtered BM25 query to ordered index scan");
+            assertRows(execute(query), row(1), row(2));
+            assertTraceContains("after materializing 2 candidates across 2 ordering index sources (probe budget 3, fallback soft limit ");
+
+            flush();
+            // Two SSTables halve the candidate cap just as one SSTable plus a memtable does.
+            assertRows(execute(query), row(1), row(2));
+            assertTraceContains("after materializing 2 candidates across 2 ordering index sources (probe budget 3, fallback soft limit ");
 
             CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(0);
-            assertRowsIgnoringOrder(execute(query), row(1), row(2));
+            assertRows(execute(query), row(1), row(2));
             assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
         }
         finally

@@ -289,6 +289,13 @@ public class QueryContext
             this.queryPlanInfo = new PlanInfo(originalPlan, optimizedPlan);
     }
 
+    public void recordBm25SearchThenSortFallback()
+    {
+        checkThreadOwnership();
+        if (queryPlanInfo != null)
+            queryPlanInfo = queryPlanInfo.withActualStrategy(false, true);
+    }
+
     /**
      * @return a {@link Snapshot} representing an immutable version of this query context.
      */
@@ -406,6 +413,27 @@ public class QueryContext
             this.indexReferencesInPlan = optimizedPlan.referencedIndexCount();
             this.searchExecutedBeforeOrder = optimizedPlan.isSearchThenOrderHybrid();
             this.filterExecutedAfterOrderedScan = optimizedPlan.isOrderedScanThenFilterHybrid();
+        }
+
+        private PlanInfo(PlanInfo original,
+                         boolean searchExecutedBeforeOrder,
+                         boolean filterExecutedAfterOrderedScan)
+        {
+            this.costEstimated = original.costEstimated;
+            this.rowsToReturnEstimated = original.rowsToReturnEstimated;
+            this.rowsToFetchEstimated = original.rowsToFetchEstimated;
+            this.keysToIterateEstimated = original.keysToIterateEstimated;
+            this.logSelectivityEstimated = original.logSelectivityEstimated;
+            this.indexReferencesInQuery = original.indexReferencesInQuery;
+            this.indexReferencesInPlan = original.indexReferencesInPlan;
+            this.searchExecutedBeforeOrder = searchExecutedBeforeOrder;
+            this.filterExecutedAfterOrderedScan = filterExecutedAfterOrderedScan;
+        }
+
+        private PlanInfo withActualStrategy(boolean searchExecutedBeforeOrder,
+                                            boolean filterExecutedAfterOrderedScan)
+        {
+            return new PlanInfo(this, searchExecutedBeforeOrder, filterExecutedAfterOrderedScan);
         }
     }
 }

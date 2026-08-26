@@ -627,15 +627,67 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source, int softLimit)
     {
+        return getTopKRows(source, softLimit, Long.MAX_VALUE, softLimit, 0, 0);
+    }
+
+    @Override
+    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source,
+                                                                int softLimit,
+                                                                int fallbackSoftLimit,
+                                                                boolean fallbackAllowed)
+    {
+        long probeBudget = CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.getLong();
+        if (!fallbackAllowed || probeBudget <= 0)
+            return getTopKRows(source, softLimit);
+
         try
         {
-            var primaryKeys = materializeKeys(source);
-            if (primaryKeys.isEmpty())
+            QueryView orderingView = getQueryView(orderer.context);
+            int sourceCount = max(1, orderingView.memtableIndexes.size() + orderingView.sstableIndexes.size());
+            long candidateLimit = max(1L, probeBudget / sourceCount);
+            return getTopKRows(source,
+                               softLimit,
+                               candidateLimit,
+                               fallbackSoftLimit,
+                               sourceCount,
+                               probeBudget);
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(source);
+            throw t;
+        }
+    }
+
+    private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source,
+                                                                  int softLimit,
+                                                                  long candidateLimit,
+                                                                  int fallbackSoftLimit,
+                                                                  int sourceCount,
+                                                                  long probeBudget)
+    {
+        try
+        {
+            MaterializedKeys materializedKeys = materializeKeys(source, candidateLimit);
+            if (materializedKeys.limitExceeded)
+            {
+                FileUtils.closeQuietly(source);
+                Tracing.logAndTrace(logger,
+                                    "Switching filtered BM25 query to ordered index scan after materializing {} candidates across {} ordering index sources (probe budget {}, fallback soft limit {})",
+                                    materializedKeys.primaryKeys.size(),
+                                    sourceCount,
+                                    probeBudget,
+                                    fallbackSoftLimit);
+                queryContext.recordBm25SearchThenSortFallback();
+                return getTopKRows((Expression) null, fallbackSoftLimit);
+            }
+
+            if (materializedKeys.primaryKeys.isEmpty())
             {
                 FileUtils.closeQuietly(source);
                 return CloseableIterator.emptyIterator();
             }
-            var result = getTopKRows(primaryKeys, softLimit);
+            var result = getTopKRows(materializedKeys.primaryKeys, softLimit);
             // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
             // that might not be needed until a deeper search into the ordering index, which happens after
             // we exit this block.
@@ -652,16 +704,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Materialize the keys from the given source iterator. If there is a meaningful {@link #mergeRange}, the keys
      * are filtered to only include those within the range. Note: does not close the source iterator.
      * @param source The source iterator to materialize keys from.
-     * @return The list of materialized keys within the {@link #mergeRange}.
+     * @param candidateLimit Maximum number of keys to materialize without marking the result as over limit.
+     * @return The materialized keys within the {@link #mergeRange} and whether the limit was exceeded.
      */
-    private List<PrimaryKey> materializeKeys(KeyRangeIterator source)
+    private MaterializedKeys materializeKeys(KeyRangeIterator source, long candidateLimit)
     {
         // Skip to the first key (which is really just a token) in the range if it is not the minimum token
         if (!mergeRange.left.isMinimum())
             source.skipTo(firstPrimaryKey);
 
         if (!source.hasNext())
-            return List.of();
+            return new MaterializedKeys(List.of(), false);
 
         var maxToken = primaryKeyFactory().createTokenOnly(mergeRange.right.getToken());
         var hasLimitingMaxToken = !maxToken.token().isMinimum() && maxToken.compareTo(source.getMaximum()) < 0;
@@ -672,8 +725,22 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             if (hasLimitingMaxToken && next.compareTo(maxToken) > 0)
                 break;
             primaryKeys.add(next);
+            if (primaryKeys.size() > candidateLimit)
+                return new MaterializedKeys(primaryKeys, true);
         }
-        return primaryKeys;
+        return new MaterializedKeys(primaryKeys, false);
+    }
+
+    private static final class MaterializedKeys
+    {
+        private final List<PrimaryKey> primaryKeys;
+        private final boolean limitExceeded;
+
+        private MaterializedKeys(List<PrimaryKey> primaryKeys, boolean limitExceeded)
+        {
+            this.primaryKeys = primaryKeys;
+            this.limitExceeded = limitExceeded;
+        }
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
