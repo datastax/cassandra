@@ -578,11 +578,14 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     // reusable
     static class InProgressNode<T>
     {
+        private static final Node[] NO_CHILDREN = new Node[0];
+
         int depth;
 
         T descentPathContent;
         T ascentPathContent;
-        private Node[] children = new Node[256];
+        /// Grown on demand by [#addChild]; a node can have up to 256 children, but the vast majority have very few.
+        private Node[] children = NO_CHILDREN;
         private int childCount = 0;
 
         private Node<T> complete(int firstTransition, byte[] otherTransitions, boolean swapAscentAndDescentSides)
@@ -596,6 +599,9 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
 
         void reset()
         {
+            // clear the used part of the array to avoid retaining the completed branches; the entries above
+            // childCount are already null because every reset restores this state
+            Arrays.fill(children, 0, childCount, null);
             childCount = 0;
             descentPathContent = null;
             ascentPathContent = null;
@@ -603,6 +609,8 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
 
         void addChild(Node target)
         {
+            if (childCount == children.length)
+                children = Arrays.copyOf(children, Math.max(4, childCount * 2));
             children[childCount++] = target;
         }
 
