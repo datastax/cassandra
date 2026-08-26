@@ -83,16 +83,25 @@ public class TrieIndexFormat implements SSTableFormat
                                                                                Component.CRC,
                                                                                Component.TOC);
 
-    private final static Set<Component> STREAMING_COMPONENTS = ImmutableSet.of(Component.DATA,
-                                                                               Component.PARTITION_INDEX,
-                                                                               Component.ROW_INDEX,
-                                                                               Component.STATS,
-                                                                               Component.COMPRESSION_INFO,
-                                                                               Component.FILTER,
-                                                                               Component.DIGEST,
-                                                                               Component.DIGEST_CRC32C,
-                                                                               Component.DIGEST_CRC64NVME,
-                                                                               Component.CRC);
+    private final static Set<Component> STREAMING_COMPONENTS = SSTableFormat.shouldStreamNewChecksums()
+                                                               ? ImmutableSet.of(Component.DATA,
+                                                                                 Component.PARTITION_INDEX,
+                                                                                 Component.ROW_INDEX,
+                                                                                 Component.STATS,
+                                                                                 Component.COMPRESSION_INFO,
+                                                                                 Component.FILTER,
+                                                                                 Component.DIGEST,
+                                                                                 Component.DIGEST_CRC32C,
+                                                                                 Component.DIGEST_CRC64NVME,
+                                                                                 Component.CRC)
+                                                               : ImmutableSet.of(Component.DATA,
+                                                                                 Component.PARTITION_INDEX,
+                                                                                 Component.ROW_INDEX,
+                                                                                 Component.STATS,
+                                                                                 Component.COMPRESSION_INFO,
+                                                                                 Component.FILTER,
+                                                                                 Component.DIGEST,
+                                                                                 Component.CRC);
 
     private final static Set<Component> PRIMARY_INDEX_COMPONENTS = ImmutableSet.of(Component.PARTITION_INDEX,
                                                                                    Component.ROW_INDEX);
