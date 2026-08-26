@@ -21,19 +21,14 @@ package org.apache.cassandra.db.tries;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
-import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Rebufferer;
-import org.apache.cassandra.io.util.SimpleChunkReader;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.vint.VIntCoding;
-
-import static org.apache.cassandra.io.util.RandomAccessReader.DEFAULT_BUFFER_SIZE;
 
 /// Reads a [DeletionAwareTrie] written by [DeletionAwareFileWriter].
 ///
@@ -108,8 +103,8 @@ implements DeletionAwareTrie<T, D>, Closeable
         return byteComparableVersion;
     }
 
-    /// Mirrors [OnDiskBaseTrie.WithOwnChannel]: the reader must be released before the rebufferer
-    /// is closed, or `BufferManagingRebufferer.close` trips its outstanding-buffer assertion.
+    /// Mirrors [OnDiskBaseTrie.WithOwnChannel]: the reader is released before the rebufferer is
+    /// closed, and the channel last, since the rebufferer holds a shared copy of it.
     /// Cursors are not closeable; the caller must ensure none are still in use.
     @Override
     public void close()
@@ -160,10 +155,9 @@ implements DeletionAwareTrie<T, D>, Closeable
         ChannelProxy channel = new ChannelProxy(file);
         try
         {
-            ChunkReader reader = new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);
-            Rebufferer rebufferer = reader.instantiateRebufferer(false);
+            Rebufferer rebufferer = OnDiskBaseTrie.mapWholeFile(channel);
             return new OnDiskDeletionAwareTrie<>(rebufferer, contentDeserializer, deletionDeserializer, version,
-                                                 root >= 0 ? root : reader.fileLength(), channel);
+                                                 root >= 0 ? root : rebufferer.fileLength(), channel);
         }
         catch (Throwable t)
         {
