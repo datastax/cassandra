@@ -279,6 +279,13 @@ public enum OnDiskReadNodeType
             return (nodeCode & 0b111) + 1;
         }
 
+        /// The writer marks an absent child with all-ones. `1L << bytes * 8` is not that for the
+        /// widest pointer the three-bit size field permits, as the shift count is taken modulo 64.
+        private long notPresent(int bytes)
+        {
+            return bytes == 8 ? -1L : (1L << bytes * 8) - 1;
+        }
+
         @Override
         public void load(OnDiskCursor<?> state)
         {
@@ -323,7 +330,7 @@ public enum OnDiskReadNodeType
         {
             int bytes = bytes(nodeCode);
             long base = postCodePos - 256 * bytes;
-            long notPresent = (1L << bytes * 8) - 1;
+            long notPresent = notPresent(bytes);
             do
             {
                 long child = state.readSizedInt(base, index, bytes);
@@ -351,7 +358,7 @@ public enum OnDiskReadNodeType
         {
             int bytes = bytes(state.nodeCode);
             long base = state.postCodePos - 256 * bytes;
-            long notPresent = (1L << bytes * 8) - 1;
+            long notPresent = notPresent(bytes);
             StringBuilder s = new StringBuilder(String.format("Dense%d", bytes));
             for (int i = 0; i < 256; ++i)
             {
