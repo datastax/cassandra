@@ -132,6 +132,9 @@ implements Cursor.Walker<T, DataOutputPlus>
     private FileWriter<D> branchWriter;
     /// Depth of the node the current deletion branch hangs from, to rebase the nested walk.
     private int branchDepthAdjustment;
+    /// Stream position when the current deletion branch was entered, to tell a branch that wrote
+    /// nothing from one that did.
+    private long branchStartPosition;
 
 
     public DeletionAwareFileWriter(DataOutputPlus out,
@@ -173,6 +176,7 @@ implements Cursor.Walker<T, DataOutputPlus>
         // isOrdered = true. Writing it unordered loses the ascent-path stops and the read-back
         // positions disagree on ON_RETURN_PATH_BIT.
         branchWriter = new FileWriter<>(out, deletionSerializer, true);
+        branchStartPosition = out.position();
         branchDepthAdjustment = inner.keyPos;
         return true;
     }
@@ -182,11 +186,17 @@ implements Cursor.Walker<T, DataOutputPlus>
         branchWriter.content(marker);
     }
 
-    /// @return the position of the branch just written, to be recorded in the node's payload.
+    /// @return the position of the branch just written, to be recorded in the node's payload, or
+    ///         -1 if the branch turned out to have no content.
     public long exitDeletionsBranch()
     {
         branchWriter.complete();
-        long root = out.position();
+        // A trie with no content leaves the stream untouched (see FileWriter.ascendTo), so the
+        // position is that of whatever node was written last, or 0 if nothing has been written
+        // yet. Report "no branch" rather than a root that is not a node: a recorded root makes
+        // the reader set MAY_HAVE_DELETION_BRANCH_BIT and decode that byte as a node code.
+        long position = out.position();
+        long root = position > branchStartPosition ? position : -1;
         branchWriter = null;
         branchDepthAdjustment = 0;
         return root;
