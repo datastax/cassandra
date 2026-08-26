@@ -106,16 +106,7 @@ public class OnDiskRangeTrieTest
     /// and compares the on-disk read of it against the in-memory original.
     private void testWideNode(int prefixLength, int[] transitions, int suffixLength) throws IOException
     {
-        List<TestRangeState> markers = new ArrayList<>();
-        for (int i = 0; i + 1 < transitions.length; i += 2)
-        {
-            int value = i / 2 + 1;
-            markers.add(new TestRangeState(key(prefixLength, transitions[i], suffixLength), -1, value));
-            markers.add(new TestRangeState(key(prefixLength, transitions[i + 1], suffixLength), value, -1));
-        }
-        TestRangeState.verify(markers);
-
-        InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers);
+        InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, transitions, suffixLength));
         File file = FileWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
 
         try (OnDiskRangeTrie<TestRangeState> actual = OnDiskRangeTrie.open(file, RANGE_SERDE, VERSION, -1))
@@ -153,6 +144,60 @@ public class OnDiskRangeTrieTest
                      actual.applicableRange(key));
     }
 
+    /// A tail has to present the ranges that are active when its branch is entered and when it is left,
+    /// as content on its root. Neither the walks in [TrieUtil#assertTriesEqual] nor the applicable-range
+    /// probes above ask for that, and the flag on the root position that tells a consumer to look for it
+    /// is separate from the content itself.
+    @Test
+    public void testTailsAlongAForwardWalk() throws IOException
+    {
+        assertTailsEqual(Direction.FORWARD);
+    }
+
+    /// The same from a reverse walk. The ascent side of a tail's root is the side the walk has not yet
+    /// presented, which for a reverse walk is the one a node carries its content on, so the two
+    /// directions reach it by different routes.
+    @Test
+    public void testTailsAlongAReverseWalk() throws IOException
+    {
+        assertTailsEqual(Direction.REVERSE);
+    }
+
+    /// Takes the tail in both directions at every position of a walk in the given one, and compares it
+    /// against the tail the in-memory trie the file was written from gives at the same place.
+    private void assertTailsEqual(Direction walkDirection) throws IOException
+    {
+        InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(0, BITMAP_TRANSITIONS, 1));
+        try (OnDiskRangeTrie<TestRangeState> actual = TrieUtil.onDiskRoundtrip(expected))
+        {
+            RangeCursor<TestRangeState> expectedCursor = expected.cursor(walkDirection);
+            RangeCursor<TestRangeState> actualCursor = actual.cursor(walkDirection);
+            long position = expectedCursor.encodedPosition();
+            assertEquals(Cursor.toString(position), Cursor.toString(actualCursor.encodedPosition()));
+            while (!Cursor.isExhausted(position))
+            {
+                // Taking a tail on the return path is not permitted.
+                if (!Cursor.isOnReturnPath(position))
+                    for (Direction tailDirection : Direction.values())
+                        assertTailsEqual(expectedCursor.tailCursor(tailDirection),
+                                         actualCursor.tailCursor(tailDirection));
+                position = expectedCursor.advance();
+                assertEquals(Cursor.toString(position), Cursor.toString(actualCursor.advance()));
+            }
+        }
+    }
+
+    /// Compares the two tails, and before walking them (which consumes them) the tails they in turn give
+    /// at their root: a branch tail holds its root's content in the cursor rather than in the file, and
+    /// a tail taken from it has to pick it up from there.
+    private void assertTailsEqual(RangeCursor<TestRangeState> expected, RangeCursor<TestRangeState> actual)
+    {
+        for (Direction nestedDirection : Direction.values())
+            TrieUtil.assertCursorWalksEqual(expected.tailCursor(nestedDirection),
+                                            actual.tailCursor(nestedDirection));
+        TrieUtil.assertCursorWalksEqual(expected, actual);
+    }
+
     /// A range that covers a whole branch puts a marker on both sides of the same node: one presented
     /// on descent and one on the way back up. That is the only shape that fills both content slots of
     /// a generic-content node, and it is what a partition-level deletion looks like in a trie-backed
@@ -173,6 +218,20 @@ public class OnDiskRangeTrieTest
         {
             TrieUtil.assertTriesEqual(expected, actual);
         }
+    }
+
+    /// A range spanning every consecutive pair of the given transitions, over the keys [#key] builds.
+    private static List<TestRangeState> markers(int prefixLength, int[] transitions, int suffixLength)
+    {
+        List<TestRangeState> markers = new ArrayList<>();
+        for (int i = 0; i + 1 < transitions.length; i += 2)
+        {
+            int value = i / 2 + 1;
+            markers.add(new TestRangeState(key(prefixLength, transitions[i], suffixLength), -1, value));
+            markers.add(new TestRangeState(key(prefixLength, transitions[i + 1], suffixLength), value, -1));
+        }
+        TestRangeState.verify(markers);
+        return markers;
     }
 
     /// A key of `prefixLength` bytes of 0x21, the given transition, and `suffixLength` bytes of 0x42.

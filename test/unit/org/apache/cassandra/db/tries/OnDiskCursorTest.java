@@ -125,13 +125,38 @@ public class OnDiskCursorTest
         }
     }
 
+    /// The bytes handed to the payload deserializer can be corrupt, and the deserializer is often the
+    /// first thing that can tell -- a content type tag it does not know, for instance. Its rejection has
+    /// to reach the caller as the same kind of failure the length checks above produce: a commit-log
+    /// replay classifies the error it gets for a record, and an Error is not something it can classify.
+    @Test
+    public void testDeserializerFailureIsReportedAsIOException() throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            // The root leaf that cursorOver appends carries content, which the cursor reads as it is
+            // constructed. The deserializer below rejects it the way one that meets a tag it does not
+            // know does.
+            UncheckedIOException thrown = assertThrows(UncheckedIOException.class,
+                                                       () -> cursorOver(out, (rdr, length) -> {
+                                                           throw new IOException("Unknown content type tag: 18");
+                                                       }));
+            assertEquals("Unknown content type tag: 18", thrown.getCause().getMessage());
+        }
+    }
+
     /// A cursor over the given bytes. A leaf node with no content is appended as the root so that the
     /// cursor can be constructed; the tests read positions within the bytes before it directly.
     private static OnDiskCursor<Void> cursorOver(DataOutputBuffer out) throws IOException
     {
+        return cursorOver(out, (rdr, length) -> null);
+    }
+
+    private static OnDiskCursor<Void> cursorOver(DataOutputBuffer out, OnDiskCursor.DataDeserializer<Void> deserializer) throws IOException
+    {
         out.writeByte(OnDiskWriteNodeType.LEAF.bits);
         ByteBuffer buffer = out.asNewBuffer();
-        return new OnDiskCursor<>((rdr, length) -> null,
+        return new OnDiskCursor<>(deserializer,
                                   new ByteBufferRebufferer(buffer),
                                   VERSION,
                                   Direction.FORWARD,
