@@ -38,7 +38,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.apache.cassandra.db.tries.TrieUtil.assertTriesEqual;
+import static org.apache.cassandra.io.util.RandomAccessReader.DEFAULT_BUFFER_SIZE;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /// Round-trips deletion-aware tries through [DeletionAwareFileWriter] and
 /// [OnDiskDeletionAwareTrie], which is the only real check that the deletion-branch pointer
@@ -297,6 +299,91 @@ public class OnDiskDeletionAwareTrieTest
             for (Direction direction : Direction.values())
                 assertDeletionBranchTailsEqual(source.cursor(direction), read.cursor(direction));
             read.close();
+        }
+    }
+
+    /// Two cursors are live over one trie at the same time: the parent walking the data trie, and the deletion
+    /// branch cursor taken from it. Each holds on to the data it was given while the other reads elsewhere in the
+    /// file. The trie built here deliberately spans more than one buffer, which is the condition the tests above
+    /// miss -- theirs all fit in a single one, where any two cursors are handed the same bytes anyway.
+    @Test
+    public void testConcurrentCursorsOverALargeFile() throws IOException
+    {
+        List<DataPoint> points = largeMixedPoints(4000);
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
+
+        File file = new File(java.io.File.createTempFile("deletionawarelarge", ".trie"));
+        try (SequentialWriter writer = new SequentialWriter(file))
+        {
+            DeletionAwareFileWriter.write(source, false, LIVE, MARKER, writer);
+            writer.finish();
+        }
+        assertTrue("The trie must not fit in one buffer, was " + file.length() + " bytes",
+                   file.length() > DEFAULT_BUFFER_SIZE);
+
+        try (OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                 OnDiskDeletionAwareTrie.open(file, LIVE, MARKER, VERSION, -1))
+        {
+            assertTriesEqual(source, read);
+            for (Direction direction : Direction.values())
+                assertDeletionBranchesEqual(source.cursor(direction), read.cursor(direction));
+        }
+    }
+
+    /// The randomized shape of [#testRandomized], scaled up so that the written trie takes many buffers and the
+    /// deletion branches end up far from the data nodes that introduce them.
+    private static List<DataPoint> largeMixedPoints(int count)
+    {
+        Random rand = new Random(5);
+        java.util.TreeSet<String> keys = new java.util.TreeSet<>();
+        while (keys.size() < count)
+            keys.add(String.format("%06d", rand.nextInt(count * 4)));
+
+        List<DataPoint> points = new ArrayList<>();
+        int active = -1;
+        for (String key : keys)
+        {
+            if (active == -1 && rand.nextBoolean())
+            {
+                points.add(live(key, rand.nextInt(100)));
+            }
+            else
+            {
+                int next;
+                do
+                {
+                    next = active == -1 ? rand.nextInt(100)
+                                        : (rand.nextBoolean() ? -1 : rand.nextInt(100));
+                }
+                while (next == active);
+                points.add(marker(key, active, next));
+                active = next;
+            }
+        }
+        if (active != -1)
+            points.add(marker(String.format("%06d", count * 4 + 1), active, -1));
+        DataPoint.verify(points);
+        return points;
+    }
+
+    /// Walks the data trie, and at every position walks to exhaustion the deletion branch it introduces, while the
+    /// data cursor stays where it is. Deliberately does not take tails: those are covered by
+    /// [#testTailsOfADeletionBranch], and mid-chain tails are a separate open question.
+    private static void assertDeletionBranchesEqual(DeletionAwareCursor<LivePoint, DeletionMarker> expected,
+                                                    DeletionAwareCursor<LivePoint, DeletionMarker> actual)
+    {
+        long position = expected.encodedPosition();
+        assertEquals(Cursor.toString(position), Cursor.toString(actual.encodedPosition()));
+        while (!Cursor.isExhausted(position))
+        {
+            Direction direction = Cursor.direction(position);
+            RangeCursor<DeletionMarker> expectedBranch = expected.deletionBranchCursor(direction);
+            RangeCursor<DeletionMarker> actualBranch = actual.deletionBranchCursor(direction);
+            assertEquals("Deletion branch present", expectedBranch != null, actualBranch != null);
+            if (expectedBranch != null)
+                TrieUtil.assertCursorWalksEqual(expectedBranch, actualBranch);
+            position = expected.advance();
+            assertEquals(Cursor.toString(position), Cursor.toString(actual.advance()));
         }
     }
 
