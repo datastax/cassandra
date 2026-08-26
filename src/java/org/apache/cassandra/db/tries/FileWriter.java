@@ -38,7 +38,7 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 ///   p - has child
 ///   d - has descent content
 ///   a - has ascent content
-///   `[ascent data bytes] [varint-encoded ascent data length] [descent data bytes] [varint-encoded descent data length] 11100adp`
+///   `[ascent data bytes] [varint-encoded ascent data length] [descent data bytes] [varint-encoded descent data length] 11110dap`
 /// - chain up to 64 bytes; child immediately before
 ///   `[byte n-1] ... [byte 1] [byte 0] 01nnnnnn`
 /// - sparse up to 25 children; last child immediately before
@@ -46,9 +46,9 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 ///   nnnnn - child count - 2
 ///   `[child n-2] ... [child 1] [child 0] [byte n-1] ... [byte 1][byte 0]1nnnnnbb`
 /// - bitmap
-///   `[child n-2] ... [child 1] [child 0] [32-byte bitmap] 11101bbb`
+///   `[child n-2] ... [child 1] [child 0] [32-byte bitmap] 11100bbb`
 /// - dense full
-///   `[child 255] ... [child 1] [child 0] 11110bbb`
+///   `[child 255] ... [child 1] [child 0] 11101bbb`
 /// - relay (epsilon transition)
 ///   `[child] 11111bbb`
 
@@ -127,7 +127,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         onAscentPath = false;
     }
 
-    public void ascendTo(long newEncodedPosition)
+    public void ascendTo(long newEncodedPosition) throws IOException
     {
         // ascend until closest node on path (if there's content, it will be current depth)
         //   if ascend depth reached, exit
@@ -148,40 +148,33 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         if (Cursor.isOnReturnPath(newEncodedPosition) && (newLength == -1 || (keyBytes[newLength] & 0xFF) == Cursor.incomingTransition(newEncodedPosition)))
             ++newLength;
 
-        try
+        // repeat:
+        while (newLength < node.depth)
         {
-            // repeat:
-            while (newLength < node.depth)
+            --lastNodeOnPath;
+            InProgressNode<T> next = lastNodeOnPath >= 0 ? nodesOnPath[lastNodeOnPath] : null;
+            //   the path to reach this node includes the key bytes until there's node on path or we reach ascent depth - 1
+            int stopDepth = (next != null ? Math.max(next.depth, newLength) : newLength);
+            //   complete node, possibly write page
+            Node<T> completedNode = completeNode(node, stopDepth);
+
+            --keyPos;
+
+            //   if reached exhausted, child is root
+            if (keyPos < 0)
             {
-                --lastNodeOnPath;
-                InProgressNode<T> next = lastNodeOnPath >= 0 ? nodesOnPath[lastNodeOnPath] : null;
-                //   the path to reach this node includes the key bytes until there's node on path or we reach ascent depth - 1
-                int stopDepth = (next != null ? Math.max(next.depth, newLength) : newLength);
-                //   complete node, possibly write page
-                Node<T> completedNode = completeNode(node, stopDepth);
-
-                --keyPos;
-
-                //   if reached exhausted, child is root
-                if (keyPos < 0)
-                {
-                    writeNodeRecursively(completedNode);
-                    return; // the current file position is the root position
-                }
-
-                //   if reached ascend depth, add node on path, add child and exit
-                if (next == null || next.depth < keyPos)
-                    next = addNewNode(keyPos);
-
-                //   add child with last byte and pointer to child
-                next.addChild(completedNode);
-
-                node = next;
+                writeNodeRecursively(completedNode);
+                return; // the current file position is the root position
             }
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
+
+            //   if reached ascend depth, add node on path, add child and exit
+            if (next == null || next.depth < keyPos)
+                next = addNewNode(keyPos);
+
+            //   add child with last byte and pointer to child
+            next.addChild(completedNode);
+
+            node = next;
         }
     }
 
@@ -330,8 +323,11 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
             }
             else if (size == 9)
             {
-                out.write((byte) 0xFF);
+                // The leading byte goes last, like the one writeReversedSized puts in the top byte
+                // of the shorter encodings: the reader takes the byte immediately before the value
+                // as the leading one.
                 out.writeLong(Long.reverseBytes(value));
+                out.write((byte) 0xFF);
             }
             else
             {
@@ -578,11 +574,14 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     // reusable
     static class InProgressNode<T>
     {
+        private static final Node[] NO_CHILDREN = new Node[0];
+
         int depth;
 
         T descentPathContent;
         T ascentPathContent;
-        private Node[] children = new Node[256];
+        /// Grown on demand by [#addChild]; a node can have up to 256 children, but the vast majority have very few.
+        private Node[] children = NO_CHILDREN;
         private int childCount = 0;
 
         private Node<T> complete(int firstTransition, byte[] otherTransitions, boolean swapAscentAndDescentSides)
@@ -596,6 +595,9 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
 
         void reset()
         {
+            // clear the used part of the array to avoid retaining the completed branches; the entries above
+            // childCount are already null because every reset restores this state
+            Arrays.fill(children, 0, childCount, null);
             childCount = 0;
             descentPathContent = null;
             ascentPathContent = null;
@@ -603,6 +605,8 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
 
         void addChild(Node target)
         {
+            if (childCount == children.length)
+                children = Arrays.copyOf(children, Math.max(4, childCount * 2));
             children[childCount++] = target;
         }
 
@@ -622,7 +626,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
         }
     }
 
-    public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file)
+    public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file) throws IOException
     {
         try (SequentialWriter writer = new SequentialWriter(file))
         {

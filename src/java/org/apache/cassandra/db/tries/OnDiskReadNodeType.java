@@ -279,11 +279,18 @@ public enum OnDiskReadNodeType
             return (nodeCode & 0b111) + 1;
         }
 
+        /// The writer marks an absent child with all-ones. `1L << bytes * 8` is not that for the
+        /// widest pointer the three-bit size field permits, as the shift count is taken modulo 64.
+        private long notPresent(int bytes)
+        {
+            return bytes == 8 ? -1L : (1L << bytes * 8) - 1;
+        }
+
         @Override
         public void load(OnDiskCursor<?> state)
         {
             Direction direction = Cursor.direction(state.currentEncodedPosition);
-            state.nodeImplData = findNext(state, direction, direction.select(0, 255));
+            state.nodeImplData = findNext(state, direction, state.nodeCode, state.postCodePos, direction.select(0, 255));
         }
 
         @Override
@@ -296,7 +303,7 @@ public enum OnDiskReadNodeType
 
         private long descendToChild(OnDiskCursor<?> state, Direction direction, int transition)
         {
-            int next = findNext(state, direction, transition + direction.increase);
+            int next = findNext(state, direction, state.nodeCode, state.postCodePos, transition + direction.increase);
             if (direction.inLoop(next, 0, 255))
                 state.addBacktrack(state.postCodePos, state.nodeCode, next);
             long nextPosition = Cursor.positionForDescentWithByte(state.currentEncodedPosition, transition);
@@ -313,18 +320,23 @@ public enum OnDiskReadNodeType
             int transition = Cursor.incomingTransition(encodedSkipPosition);
             if (direction.le(transition, (int) state.nodeImplData))
                 return advance(state);
-            int currTransition = findNext(state, direction, transition);
+            int currTransition = findNext(state, direction, state.nodeCode, state.postCodePos, transition);
             if (!direction.inLoop(currTransition, 0, 255))
                 return state.exhausted;
             return descendToChild(state, direction, currTransition);
         }
 
-        private int findNext(OnDiskCursor<?> state, Direction direction, int index)
+        /// Find the first transition at or after `index` in the given direction that has a child, or the
+        /// out-of-range value the callers test for with [Direction#inLoop] if there is none. `index` can
+        /// already be out of range, in which case nothing is read: the pointer array holds exactly 256
+        /// entries, and the byte after it belongs to another node, or is past the end of the file if this
+        /// is the root.
+        private int findNext(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos, int index)
         {
-            int bytes = bytes(state.nodeCode);
-            long base = state.postCodePos - 256 * bytes;
-            long notPresent = (1L << bytes * 8) - 1;
-            do
+            int bytes = bytes(nodeCode);
+            long base = postCodePos - 256 * bytes;
+            long notPresent = notPresent(bytes);
+            while (direction.inLoop(index, 0, 255))
             {
                 long child = state.readSizedInt(base, index, bytes);
                 if (child != notPresent)
@@ -332,7 +344,6 @@ public enum OnDiskReadNodeType
 
                 index += direction.increase;
             }
-            while (direction.inLoop(index, 0, 255));
 
             return index;
         }
@@ -340,9 +351,9 @@ public enum OnDiskReadNodeType
         @Override
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
-            int index = findNext(state, direction, direction.select(0, 255));
+            int index = findNext(state, direction, nodeCode, postCodePos, direction.select(0, 255));
             int bytes = bytes(nodeCode);
-            long base = state.postCodePos - 256 * bytes;
+            long base = postCodePos - 256 * bytes;
             return base - state.readSizedInt(base, index, bytes);
         }
 
@@ -351,7 +362,7 @@ public enum OnDiskReadNodeType
         {
             int bytes = bytes(state.nodeCode);
             long base = state.postCodePos - 256 * bytes;
-            long notPresent = (1L << bytes * 8) - 1;
+            long notPresent = notPresent(bytes);
             StringBuilder s = new StringBuilder(String.format("Dense%d", bytes));
             for (int i = 0; i < 256; ++i)
             {
@@ -492,8 +503,15 @@ public enum OnDiskReadNodeType
             return bits;
         }
 
+        /// Find the first transition at or after `start` in the given direction that is set in the bitmap, or
+        /// the out-of-range value the callers test for with [Direction#inLoop] if there is none. `start` can
+        /// already be out of range, in which case nothing is read: the bitmap is exactly 32 bytes and the
+        /// byte below it is the top of the pointer array.
         private int findNextEntry(OnDiskCursor<?> state, long postCodePos, Direction direction, int start)
         {
+            if (!direction.inLoop(start, 0, 255))
+                return start;
+
             if (direction.isForward())
             {
                 int i = start / 8;
@@ -533,7 +551,7 @@ public enum OnDiskReadNodeType
         @Override
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
-            int length = cardinality(state, postCodePos, nodeCode);
+            int length = cardinality(state, postCodePos, 256);
             int index = direction.isForward() ? 0 : length - 1;
             int bytes = bytes(nodeCode);
             long base = base(postCodePos, length, bytes);
@@ -642,7 +660,7 @@ public enum OnDiskReadNodeType
             if (shouldAdvanceOverContent)
             {
                 int vintlen = state.readVIntLength(currentPos);
-                int len = (int) state.readVInt(currentPos, vintlen);
+                int len = state.readContentLength(currentPos, vintlen);
                 currentPos -= vintlen + len;
             }
             return currentPos;
@@ -772,9 +790,9 @@ public enum OnDiskReadNodeType
         @Override
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
-            int bytes = bytes(state.nodeCode);
-            long base = state.postCodePos - bytes;
-            return base - state.readSizedInt(state.postCodePos, bytes);
+            int bytes = bytes(nodeCode);
+            long base = postCodePos - bytes;
+            return base - state.readSizedInt(postCodePos, bytes);
         }
 
         @Override
@@ -804,6 +822,11 @@ public enum OnDiskReadNodeType
     {
         return null; // overridden by leaf and prefix
     }
+
+    /// Return the position of the first child in the given direction of the node described by `nodeCode` and
+    /// `postCodePos`. This is used to descend to the nearest content of a branch and is called for nodes other than
+    /// the one the cursor is positioned on, thus it must only use the passed node and never `state`'s own
+    /// `nodeCode`/`postCodePos`.
     public abstract long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos);
 
     /**

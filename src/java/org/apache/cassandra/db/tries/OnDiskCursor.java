@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
@@ -228,7 +229,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     long getContentAtPos(long currentPos)
     {
         int vintlen = readVIntLength(currentPos);
-        int len = (int) readVInt(currentPos, vintlen);
+        int len = readContentLength(currentPos, vintlen);
         currentPos -= vintlen + len;
         content = rdr.deserialize(rdr, currentPos, len);
         if (content != null)
@@ -239,7 +240,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     T readContentAtPos(long currentPos)
     {
         int vintlen = readVIntLength(currentPos);
-        int len = (int) readVInt(currentPos, vintlen);
+        int len = readContentLength(currentPos, vintlen);
         currentPos -= vintlen + len;
         return rdr.deserialize(rdr, currentPos, len);
     }
@@ -299,16 +300,41 @@ public class OnDiskCursor<T> implements Cursor<T>
     int readVIntLength(long pos)
     {
         seekTo(pos);
-        return VIntCoding.computeUnsignedVIntSize(currentBuffer, (int) (pos - 1 - currentBufferOffset));
+        int vintLength = VIntCoding.computeUnsignedVIntSize(currentBuffer, (int) (pos - 1 - currentBufferOffset));
+        if (vintLength < 0)
+            throw corrupt("no length byte before position " + pos);
+        return vintLength;
     }
 
     /// Read a variable-length-encoded unsigned integer with the given length (obtained using [#readVIntLength]),
     /// positioned immediately before position `pos` in the file.
     long readVInt(long pos, int vintLength)
     {
+        // The longest encoding spends its whole leading byte on the length, and the remaining eight bytes carry all
+        // 64 bits of the value; the shorter ones leave 8 - vintLength value bits in the leading byte.
+        if (vintLength == 9)
+            return readSizedInt(pos - 1, 8);
         long withMask = readSizedInt(pos, vintLength);
-        // vintLength * 7 + vintLength / 8 is 64 for vintLength == 8 and vintLength * 7 otherwise
-        return withMask & ((1 << vintLength * 7 + vintLength / 8) - 1);
+        return withMask & ((1L << vintLength * 7) - 1);
+    }
+
+    /// Read the length of a content item that ends immediately before `pos`, where `vintLength` is the size of the
+    /// length's own encoding as given by [#readVIntLength].
+    ///
+    /// The bytes being read are a commit-log record or a message payload, i.e. they can be corrupt. A length that does
+    /// not fit in the space before its encoding would place the item's start outside the data, so reject it here rather
+    /// than let it turn into an arbitrary position to seek to.
+    int readContentLength(long pos, int vintLength)
+    {
+        long length = readVInt(pos, vintLength);
+        if (length < 0 || length > pos - vintLength || length > Integer.MAX_VALUE)
+            throw corrupt("content length " + length + " before position " + pos);
+        return (int) length;
+    }
+
+    static UncheckedIOException corrupt(String message)
+    {
+        return new UncheckedIOException(new IOException("Corrupt serialized trie: " + message));
     }
 
     /// Reads a long int from an int array with the given number of bytes per item.
@@ -329,6 +355,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// Read `bytes` many bytes preceding position `pos` in the file into a long unsigned integer.
     long readSizedInt(long pos, int bytes)
     {
+        assert bytes <= 8 : "Cannot read " + bytes + " bytes into a long";
         seekTo(pos);
         if (pos - currentBufferOffset >= 8)
         {
