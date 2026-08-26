@@ -80,6 +80,14 @@ public class OnDiskRangeTrieTest
         testWideNode(2, BITMAP_TRANSITIONS, 1);
     }
 
+    /// A dense root is the only node that can have a child at transition 0xFF and be the last thing in
+    /// the file, because the writer emits the root last.
+    @Test
+    public void testDenseAtRoot() throws IOException
+    {
+        testWideNode(0, denseTransitions(), 1);
+    }
+
     @Test
     public void testDenseBelowRoot() throws IOException
     {
