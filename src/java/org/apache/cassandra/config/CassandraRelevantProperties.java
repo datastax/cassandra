@@ -445,15 +445,6 @@ public enum CassandraRelevantProperties
      */
     SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS("cassandra.sai.query_optimization.use_term_statistics", "false"),
 
-    /**
-     * Target maximum number of candidate-to-index-source probes before a filtered BM25 query switches from
-     * search-then-sort to ordered index scan with post-filtering. The candidate cap is never lower than the query
-     * soft limit, so the actual number of probes can exceed this target when many index sources are active. Crossing
-     * the cap discards the buffered candidates and starts a full BM25 posting scan, trading that extra scan work for
-     * bounded filter-first work. Set to a non-positive value to disable the adaptive fallback.
-     */
-    SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES("cassandra.sai.bm25.search_then_sort.max_candidate_source_probes", "10000"),
-
     /** Controls the number of rows read in a single batch when fetching rows for a partition key */
     SAI_PARTITION_ROW_BATCH_SIZE("cassandra.sai.partition_row_batch_size", "100"),
 
