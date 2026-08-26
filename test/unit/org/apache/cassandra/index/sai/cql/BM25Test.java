@@ -193,6 +193,7 @@ public class BM25Test extends SAITester
 
         // Re-inserting the deleted key in a third sstable must not fail either, and the row must come back exactly once
         execute("INSERT INTO %s (k, c, query_lexical_value, array_contains) VALUES (2, 1, 'apple juice', {'target'}) USING TIMESTAMP 4");
+        assertRows(execute(select, "target", "apple"), row(1, 1), row(2, 1));
         flush();
         assertRows(execute(select, "target", "apple"), row(1, 1), row(2, 1));
         compact();
