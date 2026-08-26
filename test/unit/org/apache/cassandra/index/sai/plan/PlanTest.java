@@ -35,9 +35,11 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.Redaction;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.LongIterator;
@@ -422,6 +424,32 @@ public class PlanTest
                                              Mockito.eq(10),
                                              Mockito.eq(50),
                                              Mockito.eq(false));
+    }
+
+    @Test
+    public void bm25FallbackUpdatesActualPlanStrategy()
+    {
+        boolean defaultPlanMetricsEnabled = CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean();
+        try
+        {
+            CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(true);
+            Plan.KeysIteration indexScan = factory.indexScan(saiPred1, (long) (0.2 * factory.tableMetrics.rows));
+            Plan.KeysIteration sort = factory.sort(indexScan, bm25Orderer());
+            Plan.RowsIteration plan = factory.limit(factory.recheckFilter(rowFilter1, factory.fetch(sort)), 10);
+
+            QueryContext context = new QueryContext();
+            context.recordQueryPlan(plan, plan);
+            assertTrue(context.snapshot().queryPlanInfo.searchExecutedBeforeOrder);
+            assertFalse(context.snapshot().queryPlanInfo.filterExecutedAfterOrderedScan);
+
+            context.recordBm25SearchThenSortFallback();
+            assertFalse(context.snapshot().queryPlanInfo.searchExecutedBeforeOrder);
+            assertTrue(context.snapshot().queryPlanInfo.filterExecutedAfterOrderedScan);
+        }
+        finally
+        {
+            CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(defaultPlanMetricsEnabled);
+        }
     }
 
     @Test
