@@ -82,8 +82,11 @@ public class OnDiskCursor<T> implements Cursor<T>
             }
             catch (IOException e)
             {
-                // Rebufferer wraps exception already, this cannot be raised.
-                throw new AssertionError(e);
+                // A rebuffering failure arrives already wrapped, so this is the deserializer rejecting the
+                // bytes it was given -- which, for a commit-log record or a message payload, can be corrupt.
+                // Present it the way the corruption checks in this class do, as an unchecked wrapper the
+                // callers can unwrap back into the IOException it is.
+                throw new UncheckedIOException(e);
             }
         }
     }
