@@ -230,6 +230,16 @@ public class OnDiskDeletionAwareTrieTest
     { 0x00, 0x01, 0x07, 0x0d, 0x1f, 0x32, 0x40, 0x4d, 0x64, 0x78, 0x7f, 0x96, 0xaa, 0xbe, 0xc8, 0xd2,
       0xdc, 0xdf, 0xe0, 0xe1, 0xe6, 0xeb, 0xf0, 0xf5, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff };
 
+    /// Every transition. [OnDiskWriteNodeType#selectChildrenType] picks a dense node once a bitmap one
+    /// would no longer save anything over it.
+    private static int[] allTransitions()
+    {
+        int[] transitions = new int[256];
+        for (int i = 0; i < transitions.length; ++i)
+            transitions[i] = i;
+        return transitions;
+    }
+
     private static final int KEY_LENGTH = 5;
 
     /// A deletion branch over a wide alphabet: its root node is a bitmap one rather than the sparse
@@ -238,14 +248,20 @@ public class OnDiskDeletionAwareTrieTest
     @Test
     public void testWideDeletionBranch() throws IOException
     {
-        List<DataPoint> points = new ArrayList<>();
-        for (int i = 0; i + 1 < WIDE_TRANSITIONS.length; i += 2)
-        {
-            int value = i / 2 + 1;
-            points.add(new DeletionMarker(wideKey(WIDE_TRANSITIONS[i], KEY_LENGTH), -1, value));
-            points.add(new DeletionMarker(wideKey(WIDE_TRANSITIONS[i + 1], KEY_LENGTH), value, -1));
-        }
-        DataPoint.verify(points);
+        testWideDeletionBranch(WIDE_TRANSITIONS);
+    }
+
+    /// The same with a dense branch root, which reads its children through a different node
+    /// implementation.
+    @Test
+    public void testDenseDeletionBranch() throws IOException
+    {
+        testWideDeletionBranch(allTransitions());
+    }
+
+    private void testWideDeletionBranch(int[] transitions) throws IOException
+    {
+        List<DataPoint> points = wideBranchPoints(transitions, KEY_LENGTH);
 
         assertRoundTrips(points);
 
@@ -260,6 +276,21 @@ public class OnDiskDeletionAwareTrieTest
                     assertApplicableDeletionEqual(source, read, wideKey(transition, length));
             read.close();
         }
+    }
+
+    /// A deletion spanning every consecutive pair of the given transitions, over the keys [#wideKey]
+    /// builds. All of them diverge at the same byte, so they end up in one branch.
+    private static List<DataPoint> wideBranchPoints(int[] transitions, int keyLength)
+    {
+        List<DataPoint> points = new ArrayList<>();
+        for (int i = 0; i + 1 < transitions.length; i += 2)
+        {
+            int value = i / 2 + 1;
+            points.add(new DeletionMarker(wideKey(transitions[i], keyLength), -1, value));
+            points.add(new DeletionMarker(wideKey(transitions[i + 1], keyLength), value, -1));
+        }
+        DataPoint.verify(points);
+        return points;
     }
 
     private static void assertApplicableDeletionEqual(DeletionAwareTrie<LivePoint, DeletionMarker> expected,
