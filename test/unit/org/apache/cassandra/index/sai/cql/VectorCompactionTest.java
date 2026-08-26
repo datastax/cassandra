@@ -49,6 +49,7 @@ import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
@@ -69,18 +70,30 @@ abstract public class VectorCompactionTest extends VectorTester
     @Parameterized.Parameter(1)
     public boolean enableNVQ;
 
-    @Parameterized.Parameters(name = "version={0} enableNVQ={1}")
+    @Parameterized.Parameter(2)
+    public boolean enableFused;
+
+    @Parameterized.Parameters(name = "version={0} enableNVQ={1} enableFused={2}")
     public static Collection<Object[]> data()
     {
         // See Version file for explanation of changes associated with each version
+        // FA is excluded: it always has FusedPQ on and is superseded by FB.
         return Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(v -> !v.equals(Version.FA))
                           .flatMap(vd -> {
                               // NVQ is only relevant some of the time
                               Boolean[] enableNVQ = JVectorVersionUtil.versionSupportsNVQ(vd)
                                                     ? new Boolean[]{ true, false }
                                                     : new Boolean[]{ false };
-                              return Arrays.stream(enableNVQ).map(b -> new Object[]{ vd, b });
+                              // FB+ allows toggling FusedPQ via the flag, so test both values.
+                              // Pre-FA versions don't support FusedPQ at all.
+                              Boolean[] enableFused = vd.onOrAfter(Version.FB)
+                                                      ? new Boolean[]{ true, false }
+                                                      : new Boolean[]{ false };
+                              return Arrays.stream(enableNVQ).flatMap(nvq ->
+                                  Arrays.stream(enableFused).map(fused -> new Object[]{ vd, nvq, fused })
+                              );
                           })
                           .collect(Collectors.toList());
     }
@@ -95,6 +108,19 @@ abstract public class VectorCompactionTest extends VectorTester
     public void setEnableNVQ()
     {
         SAIUtil.setEnableNVQ(enableNVQ);
+    }
+
+    @Before
+    public void setEnableFused()
+    {
+        SAIUtil.setEnableFused(enableFused);
+    }
+
+    @Before
+    public void setParallelGraphWriting()
+    {
+        // Enable parallel graph writing when running with FusedPQ (FB+ with enableFused=true)
+        SAIUtil.setParallelGraphWriting(enableFused);
     }
 
     @Test
@@ -277,7 +303,7 @@ abstract public class VectorCompactionTest extends VectorTester
             var duplicateExists = false;
             while (vectorsInserted.size() < vectorsPerSstable || !duplicateExists)
             {
-                if (!nullInserted && vectorsInserted.size() == vectorsPerSstable/2)
+                if (!nullInserted && vectorsInserted.size() == vectorsPerSstable / 2)
                 {
                     // Insert one null vector in the middle
                     execute("INSERT INTO %s (pk, v) VALUES (?, null)", j++);
@@ -405,14 +431,15 @@ abstract public class VectorCompactionTest extends VectorTester
                                 // reasonable for now.
                                 assertEquals(1.0f, quantizedSim, 0.01f);
                             }
-                            else if (numRows >= MIN_PQ_ROWS)
+                            else
                             {
-                                // With fused PQ (FA always; GA+ only when enabled), PQ metadata is stored inline
-                                // with the graph nodes — there is no standalone CompressedVectors to validate against.
-                                // Without fused PQ (GA+ default, pre-FA), we should never reach this branch.
-                                assertTrue("Found " + numRows + " rows without CompressedVectors; expected fused PQ for version " + version,
-                                           JVectorVersionUtil.shouldWriteFused(version));
-                                assertNotNull("Expected PQ metadata for fused PQ on version " + version, searcher.getPQ());
+                                // compressedVectors is null either because there weren't enough rows to build PQ,
+                                // or because FusedPQ is active (the PQ is embedded in the graph, not loaded
+                                // separately).  Both are valid; only flag an error if neither applies.
+                                boolean fusedPQ = searcher.graph.getCompression().type
+                                                  == VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
+                                assertTrue("Found " + numRows + " but no PQ",
+                                           MIN_PQ_ROWS > numRows || fusedPQ);
                             }
                         }
                     }
@@ -499,7 +526,7 @@ abstract public class VectorCompactionTest extends VectorTester
     private String createTableAndReturnIndexName()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, " + dimension() + ">, PRIMARY KEY(pk))");
-        return createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        return createIndex(vectorIndexDDL("%s", "v", null, enableFused));
     }
 
     private void validateQueries()
@@ -519,8 +546,9 @@ abstract public class VectorCompactionTest extends VectorTester
         }
     }
 
-    private static float[] create2DVector() {
+    private static float[] create2DVector()
+    {
         var R = getRandom();
-        return new float[] { R.nextFloatBetween(-100, 100), R.nextFloatBetween(-100, 100) };
+        return new float[]{ R.nextFloatBetween(-100, 100), R.nextFloatBetween(-100, 100) };
     }
 }

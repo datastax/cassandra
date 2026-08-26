@@ -44,7 +44,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testPartitionKeyComponentWithColumns() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, k2 vector<float, 2>, v int, PRIMARY KEY((k1, k2)))");
-        createIndex("CREATE CUSTOM INDEX ON %s(k2) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "k2"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         String insert = "INSERT INTO %s (k1, k2, v) VALUES (?, ?, ?)";
@@ -85,7 +85,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testPartitionKeyComponentWithoutColumns() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, k2 vector<float, 2>, v int, PRIMARY KEY((k1, k2)))");
-        createIndex("CREATE CUSTOM INDEX ON %s(k2) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "k2"));
 
         String insert = "INSERT INTO %s (k1, k2) VALUES (?, ?)";
         execute(insert, row(1, vector(0.1f, 0.1f)));
@@ -113,7 +113,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testPartitionKeyComponentWithClustering() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, k2 vector<float, 2>, c int, v int, PRIMARY KEY((k1, k2), c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(k2) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "k2"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         // insert static rows and non-static rows all at once
@@ -155,7 +155,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testClusteringKey() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c vector<float, 2>, v int, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "c"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         String insert = "INSERT INTO %s (k, c, v) VALUES (?, ?, ?)";
@@ -196,7 +196,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testClusteringKeyComponent() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c1 int, c2 vector<float, 2>, v int, PRIMARY KEY(k, c1, c2))");
-        createIndex("CREATE CUSTOM INDEX ON %s(c2) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "c2"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         String insert = "INSERT INTO %s (k, c1, c2, v) VALUES (?, ?, ?, ?)";
@@ -237,7 +237,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testRegularColumnWithoutClustering() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, r vector<float, 2>, v int)");
-        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "r"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         String insert = "INSERT INTO %s (k, r, v) VALUES (?, ?, ?)";
@@ -278,7 +278,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testRegularColumnWithClustering() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, r vector<float, 2>, v int, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "r"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         String insert = "INSERT INTO %s (k, c, r, v) VALUES (?, ?, ?, ?)";
@@ -345,7 +345,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testStaticColumnWithoutRows() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, s vector<float, 2> static, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "s"));
 
         // insert static rows alone, without non-static rows
         String insert = "INSERT INTO %s (k, s) VALUES (?, ?)";
@@ -390,7 +390,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testStaticColumnWithRowsTogether() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, s vector<float, 2> static, v int, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "s"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         // insert static rows and non-static rows all at once
@@ -460,7 +460,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testStaticColumnWithRowsSeparate() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, s vector<float, 2> static, v int, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "s"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         // insert static rows alone, without non-static rows
@@ -517,7 +517,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testStaticColumnWithDifferentSourcesWithRegulars() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, s vector<float, 2> static, v int, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "s"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         // insert static rows alone, with non-static rows
@@ -567,7 +567,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testStaticColumnWithDifferentSourcesWithoutRegulars() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, s vector<float, 2> static, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "s"));
 
         // insert static rows alone, without non-static rows
         String insert = "INSERT INTO %s (k, s) VALUES (?, ?)";
@@ -604,7 +604,7 @@ public class VectorColumnPositionsTest extends VectorTester.Versioned
     public void testStaticColumnWithDifferentSourcesWithAndWithoutRegulars() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, s vector<float, 2> static, v int, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex(vectorIndexDDL("%s", "s"));
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         // insert static rows alone, with non-static rows
