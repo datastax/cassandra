@@ -27,12 +27,24 @@ public class CassandraWriteContext implements WriteContext
 {
     private final OpOrder.Group opGroup;
     private final CommitLogPosition position;
+    private final WriteOptions writeOptions;
+    private final WriteOrigin origin;
 
     public CassandraWriteContext(OpOrder.Group opGroup, CommitLogPosition position)
+    {
+        this(opGroup, position, null, null);
+    }
+
+    public CassandraWriteContext(OpOrder.Group opGroup,
+                                 CommitLogPosition position,
+                                 WriteOptions writeOptions,
+                                 WriteOrigin origin)
     {
         Preconditions.checkArgument(opGroup != null);
         this.opGroup = opGroup;
         this.position = position;
+        this.writeOptions = writeOptions;
+        this.origin = origin;
     }
 
     public static CassandraWriteContext fromContext(WriteContext context)
@@ -49,6 +61,34 @@ public class CassandraWriteContext implements WriteContext
     public CommitLogPosition getPosition()
     {
         return position;
+    }
+
+    /**
+     * The options the enclosing mutation is being applied with, or null when this context was not opened for
+     * a mutation (index build, compaction, cleanup, and the read path — see
+     * {@link KeyspaceWriteHandler#createContextForIndexing()} and
+     * {@link KeyspaceWriteHandler#createContextForRead()}).
+     * <p>
+     * Secondary indexes receive this context in {@code Index.Group#indexerFor} and can use it to tell an
+     * ordinary write from a hint replay, a read repair, a batchlog replay or a commit log replay, which
+     * {@code IndexTransaction.Type} alone does not distinguish.
+     */
+    public WriteOptions getWriteOptions()
+    {
+        return writeOptions;
+    }
+
+    /**
+     * Where the enclosing mutation came from, or null when this context was not opened for a mutation.
+     * <p>
+     * Null and {@link WriteOrigin#LOCAL} are different answers. Null means "there is no mutation here at
+     * all" -- an index build, a compaction, a cleanup, or the read path. {@code LOCAL} means "there is a
+     * mutation and it did not arrive over the wire", which is a real, common origin: a write this node
+     * coordinated, a commit log replay, a paxos commit applied where it was proposed.
+     */
+    public WriteOrigin getOrigin()
+    {
+        return origin;
     }
 
     @Override

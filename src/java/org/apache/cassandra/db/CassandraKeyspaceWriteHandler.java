@@ -52,7 +52,7 @@ public class CassandraKeyspaceWriteHandler implements KeyspaceWriteHandler
             {
                 position = addToCommitLog(mutation);
             }
-            return new CassandraWriteContext(group, position);
+            return new CassandraWriteContext(group, position, writeOptions, mutation.origin());
         }
         catch (Throwable t)
         {
