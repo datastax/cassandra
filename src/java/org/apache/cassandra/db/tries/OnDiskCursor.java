@@ -200,7 +200,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         }
     }
 
-    interface DataDeserializer<T>
+    public interface DataDeserializer<T>
     {
         T deserialize(DataInputPlus rdr, int length) throws IOException;
     }

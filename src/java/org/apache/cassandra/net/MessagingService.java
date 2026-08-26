@@ -228,10 +228,12 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         VERSION_DS_11(MessagingService.VERSION_DS_11, false),
         VERSION_DS_12(MessagingService.VERSION_DS_12, false), // adds index hints (CNDB-13129)
         VERSION_DS_20(MessagingService.VERSION_DS_20, true), // DS Converged Cassandra 5.0
+        VERSION_DS_21(MessagingService.VERSION_DS_21, true), // adds trie commitlog/partition update serialization
         VERSION_DSE_68(MessagingService.VERSION_DSE_68, false), // DSE 6.8
         ;
 
-        public static final Version CURRENT = VERSION_DS_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
+        //public static final Version CURRENT = VERSION_DS_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
+        public static final Version CURRENT = VERSION_DS_21; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
 
         public final int value;
         public final boolean supportsExtendedDeletionTime;
@@ -275,8 +277,9 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     public static final int VERSION_DS_11 = 101; // adds ann_options (CNDB-12456)
     public static final int VERSION_DS_12 = 102; // adds index hints (CNDB-13129)
     public static final int VERSION_DS_20 = 110; // DS Converged Cassandra 5.0
+    public static final int VERSION_DS_21 = 111; // adds trie commitlog/partition update serialization
     public static final int minimum_version = VERSION_40;
-    public static final int maximum_version = VERSION_DS_20;
+    public static final int maximum_version = VERSION_DS_21;
     // we want to use a modified behavior for the tools and clients - that is, since they are not running a server, they
     // should not need to run in a compatibility mode. They should be able to connect to the server regardless whether
     // it uses messaving version 4 or 5
