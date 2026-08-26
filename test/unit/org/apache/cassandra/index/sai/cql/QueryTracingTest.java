@@ -22,6 +22,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.TracingTestImpl;
@@ -106,6 +108,49 @@ public class QueryTracingTest extends SAITester
                            "v ANN OF [1.2, 3.4] DESC");
     }
 
+    @Test
+    public void testAdaptiveBm25Fallback()
+    {
+        long defaultProbeBudget = CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.getLong();
+        int defaultOptimizationLevel = QueryController.QUERY_OPT_LEVEL;
+        try
+        {
+            QueryController.QUERY_OPT_LEVEL = 0;
+            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(3);
+
+            createTable("CREATE TABLE %s(id int PRIMARY KEY, site text, extension text, body text)");
+            createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(body) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (1, 'pepsi', 'pdf', 'freight freight freight')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (2, 'pepsi', 'pdf', 'freight freight')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (3, 'pepsi', 'pdf', 'freight orders and notes')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (99, 'other', 'docx', 'freight freight freight freight')");
+
+            String query = "SELECT id FROM %s WHERE site = 'pepsi' AND extension = 'pdf' ORDER BY body BM25 OF 'freight' LIMIT 2";
+            assertRowsIgnoringOrder(execute(query), row(1), row(2));
+            assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
+
+            flush();
+            assertRowsIgnoringOrder(execute(query), row(1), row(2));
+            assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
+
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (4, 'pepsi', 'pdf', 'freight details')");
+            assertRowsIgnoringOrder(execute(query), row(1), row(2));
+            assertTraceContains("Switching filtered BM25 query to ordered index scan");
+
+            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(0);
+            assertRowsIgnoringOrder(execute(query), row(1), row(2));
+            assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
+        }
+        finally
+        {
+            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(defaultProbeBudget);
+            QueryController.QUERY_OPT_LEVEL = defaultOptimizationLevel;
+        }
+    }
+
     private void assertTraceHasPlan(String query, String... expected)
     {
         TracingTestImpl tracing = (TracingTestImpl) Tracing.instance;
@@ -125,5 +170,17 @@ public class QueryTracingTest extends SAITester
             return;
         }
         Assert.fail("Query plan not found in traces");
+    }
+
+    private void assertTraceContains(String expected)
+    {
+        Assertions.assertThat(tracing.getTraces()).anyMatch(trace -> trace.contains(expected));
+        tracing.getTraces().clear();
+    }
+
+    private void assertTraceDoesNotContain(String unexpected)
+    {
+        Assertions.assertThat(tracing.getTraces()).noneMatch(trace -> trace.contains(unexpected));
+        tracing.getTraces().clear();
     }
 }

@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
@@ -42,6 +43,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.LongIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.mockito.Mockito;
 
 import static java.lang.Math.ceil;
@@ -70,6 +72,14 @@ public class PlanTest
         Mockito.when(orderer.isANN()).thenReturn(true);
         Mockito.when(orderer.toString(Redaction.REDACT)).thenReturn("ORDER BY v ANN OF ?");
         Mockito.when(orderer.toString(Redaction.NONE)).thenReturn("ORDER BY v ANN OF X");
+        return orderer;
+    }
+
+    private static Orderer bm25Orderer()
+    {
+        Orderer orderer = Mockito.mock(Orderer.class);
+        Mockito.when(orderer.isBM25()).thenReturn(true);
+        Mockito.when(orderer.getIndexName()).thenReturn("body_idx");
         return orderer;
     }
 
@@ -367,6 +377,51 @@ public class PlanTest
         Plan.Executor executor = Mockito.mock(Plan.Executor.class);
         Objects.requireNonNull(plan.firstNodeOfType(Plan.KeysIteration.class)).execute(executor);
         Mockito.verify(executor, Mockito.times(1)).getTopKRows((KeyRangeIterator) Mockito.any(), Mockito.eq(limit));
+    }
+
+    @Test
+    public void bm25SortFilterLimitAllowsFallbackWithExpandedLimit()
+    {
+        int limit = 10;
+        double selectivity = 0.2;
+
+        Plan.KeysIteration indexScan = factory.indexScan(saiPred1, (long) (selectivity * factory.tableMetrics.rows));
+        Plan.KeysIteration sort = factory.sort(indexScan, bm25Orderer());
+        Plan.RowsIteration fetch = factory.fetch(sort);
+        Plan.RowsIteration filter = factory.filter(rowFilter1, fetch, selectivity);
+        Plan.RowsIteration plan = factory.limit(filter, limit);
+
+        Plan.Executor executor = Mockito.mock(Plan.Executor.class);
+        Mockito.doReturn(new LongIterator(new long[] { 1L })).when(executor).getKeysFromIndex(saiPred1);
+        Objects.requireNonNull(plan.firstNodeOfType(Plan.KeysIteration.class)).execute(executor);
+
+        Mockito.verify(executor).getTopKRows(Mockito.any(KeyRangeIterator.class),
+                                             Mockito.eq(limit),
+                                             Mockito.eq((int) round(limit / selectivity)),
+                                             Mockito.eq(true));
+    }
+
+    @Test
+    public void bm25SortWithIncludedIndexDisallowsFallback()
+    {
+        double selectivity = 0.2;
+        IndexMetadata included = IndexMetadata.fromSchemaMetadata("pred1_idx",
+                                                                  IndexMetadata.Kind.CUSTOM,
+                                                                  Collections.emptyMap());
+        IndexHints hints = IndexHints.create(Set.of(included), Collections.emptySet());
+        Plan.Factory hintedFactory = new Plan.Factory(KEYSPACE, table1M, new CostEstimator(table1M), hints);
+        Plan.KeysIteration indexScan = hintedFactory.indexScan(saiPred1, (long) (selectivity * table1M.rows));
+        Plan.KeysIteration sort = hintedFactory.sort(indexScan, bm25Orderer());
+        Plan.RowsIteration plan = hintedFactory.limit(hintedFactory.fetch(sort), 10);
+
+        Plan.Executor executor = Mockito.mock(Plan.Executor.class);
+        Mockito.doReturn(new LongIterator(new long[] { 1L })).when(executor).getKeysFromIndex(saiPred1);
+        Objects.requireNonNull(plan.firstNodeOfType(Plan.KeysIteration.class)).execute(executor);
+
+        Mockito.verify(executor).getTopKRows(Mockito.any(KeyRangeIterator.class),
+                                             Mockito.eq(10),
+                                             Mockito.eq(50),
+                                             Mockito.eq(false));
     }
 
     @Test
