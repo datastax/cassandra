@@ -30,6 +30,7 @@ import org.assertj.core.api.Assertions;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -662,6 +663,47 @@ public class BM25Test extends SAITester
     {
         QueryController.QUERY_OPT_LEVEL = 0;
         testWithPredicate();
+    }
+
+    @Test
+    public void testAdaptiveFallbackMatchesForcedStrategies()
+    {
+        long defaultProbeBudget = CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.getLong();
+        int defaultOptimizationLevel = QueryController.QUERY_OPT_LEVEL;
+        try
+        {
+            createTable("CREATE TABLE %s(id int PRIMARY KEY, site text, extension text, body text)");
+            createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'StorageAttachedIndex'");
+            createAnalyzedIndex("body");
+
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (1, 'pepsi', 'pdf', 'freight freight freight')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (2, 'pepsi', 'pdf', 'freight freight')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (3, 'pepsi', 'pdf', 'freight orders and notes')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (99, 'other', 'docx', 'freight freight freight freight')");
+
+            String query = "SELECT id FROM %s WHERE site = 'pepsi' AND extension = 'pdf' " +
+                           "ORDER BY body BM25 OF 'freight' LIMIT 2";
+
+            // Forced filter-first control.
+            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(0);
+            QueryController.QUERY_OPT_LEVEL = 0;
+            assertRows(execute(query), row(1), row(2));
+
+            // Forced BM25-first control.
+            QueryController.QUERY_OPT_LEVEL = 1;
+            assertRows(execute(query), row(1), row(2));
+
+            // Adaptive filter-first planning crosses the two-candidate cap and must match both controls.
+            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(2);
+            QueryController.QUERY_OPT_LEVEL = 0;
+            assertRows(execute(query), row(1), row(2));
+        }
+        finally
+        {
+            CassandraRelevantProperties.SAI_BM25_SEARCH_THEN_SORT_MAX_CANDIDATE_SOURCE_PROBES.setLong(defaultProbeBudget);
+            QueryController.QUERY_OPT_LEVEL = defaultOptimizationLevel;
+        }
     }
 
     @Test
