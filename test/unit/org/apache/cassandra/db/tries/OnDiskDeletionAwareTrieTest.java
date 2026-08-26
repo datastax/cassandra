@@ -366,9 +366,10 @@ public class OnDiskDeletionAwareTrieTest
         return points;
     }
 
-    /// Walks the data trie, and at every position walks to exhaustion the deletion branch it introduces, while the
-    /// data cursor stays where it is. Deliberately does not take tails: those are covered by
-    /// [#testTailsOfADeletionBranch], and mid-chain tails are a separate open question.
+    /// Walks the data trie, and at every position walks to exhaustion the deletion branch it introduces and the tails
+    /// of both, while the data cursor stays where it is. The keys here are long enough for the walk to stop in the
+    /// middle of a chain node, where the tail's root has no code byte of its own in the file; the shorter keys used
+    /// by [#testTailsOfADeletionBranch] never land there.
     private static void assertDeletionBranchesEqual(DeletionAwareCursor<LivePoint, DeletionMarker> expected,
                                                     DeletionAwareCursor<LivePoint, DeletionMarker> actual)
     {
@@ -381,7 +382,11 @@ public class OnDiskDeletionAwareTrieTest
             RangeCursor<DeletionMarker> actualBranch = actual.deletionBranchCursor(direction);
             assertEquals("Deletion branch present", expectedBranch != null, actualBranch != null);
             if (expectedBranch != null)
-                TrieUtil.assertCursorWalksEqual(expectedBranch, actualBranch);
+                assertTailsEqual(expectedBranch, actualBranch);
+            if (!Cursor.isOnReturnPath(position))
+                for (Direction tailDirection : Direction.values())
+                    TrieUtil.assertCursorWalksEqual(expected.tailCursor(tailDirection),
+                                                    actual.tailCursor(tailDirection));
             position = expected.advance();
             assertEquals(Cursor.toString(position), Cursor.toString(actual.advance()));
         }
