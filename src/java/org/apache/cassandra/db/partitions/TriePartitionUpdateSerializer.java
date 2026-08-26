@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.partitions;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 
 import com.google.common.primitives.Ints;
@@ -259,6 +260,13 @@ public class TriePartitionUpdateSerializer
             // Only the length is needed; asNewBuffer() would copy the whole trie out to report it.
             int trieLength = trieBytes.getLength();
             return TypeSizes.sizeofUnsignedVInt(trieLength) + trieLength;
+        }
+        catch (IOException e)
+        {
+            // This is where a checked exception has to stop: serializedSize implements a contract
+            // that cannot report one. The destination is an in-memory buffer, so the only way here
+            // is a failure to encode a payload, which the write path reports as IOException.
+            throw new UncheckedIOException(e);
         }
     }
 
