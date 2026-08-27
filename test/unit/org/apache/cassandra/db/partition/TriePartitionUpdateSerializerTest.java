@@ -20,6 +20,7 @@ package org.apache.cassandra.db.partition;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Arrays;
+import java.util.function.Consumer;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -242,6 +243,89 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         assertFalse(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_21));
         assertFalse(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_20));
         assertFalse(PartitionUpdateSizeCache.hasRetainedTrie(update));
+    }
+
+    /**
+     * {@link org.apache.cassandra.db.Mutation#serializedSize} sizes a mutation and the result is used to reserve the
+     * commit log region that {@code serialize} then writes into, so the two must agree to the byte for every shape an
+     * update can take. Counts, liveness and deletion times are all encoded as deltas or vints, whose width depends on
+     * the values, which is exactly where the two can drift apart.
+     */
+    @Test
+    public void testSerializedSizeMatchesBytesWrittenForEveryShape() throws Throwable
+    {
+        createRichTable();
+        TableMetadata metadata = currentTableMetadata();
+
+        assertSizeAndRoundTrip("empty update",
+                               TriePartitionUpdate.asTrieUpdate(PartitionUpdate.emptyUpdate(metadata, metadata.partitioner.decorateKey(ByteBufferUtil.bytes("key0")))));
+
+        assertSizeAndRoundTrip("one row", build(builder -> {
+            builder.timestamp(2000).nowInSec(1500);
+            builder.row(1).add("v", 11);
+        }));
+
+        assertSizeAndRoundTrip("ten rows", build(builder -> {
+            builder.timestamp(2000).nowInSec(1500);
+            for (int i = 0; i < 10; ++i)
+                builder.row(i).add("v", i);
+        }));
+
+        assertSizeAndRoundTrip("row with a ttl", build(builder -> {
+            builder.timestamp(2000).nowInSec(1500).ttl(60);
+            builder.row(1).add("v", 11);
+        }));
+
+        assertSizeAndRoundTrip("range tombstone", build(builder -> {
+            builder.timestamp(2000).nowInSec(1500);
+            builder.row(1).add("v", 11);
+            builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
+        }));
+
+        assertSizeAndRoundTrip("complex columns", build(builder -> {
+            builder.timestamp(2000).nowInSec(1500);
+            builder.row().add("s", 7).add("ss", ImmutableSet.of("x", "y"));
+            builder.row(1).add("m", ImmutableMap.of("a", "1", "b", "2"));
+        }));
+
+        // An update that carries a deletion and no live row does not read back: walking the deserialized trie
+        // repeats the deletion branch and then trips the return-path assertion in RangesCursor.tailCopyOf. That is
+        // a defect in the read path rather than in sizing, so only the sizing invariant is checked for these two.
+        assertSizeMatchesBytesWritten("range tombstone without rows", build(builder -> {
+            builder.timestamp(2000).nowInSec(1500);
+            builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
+        }));
+
+        assertSizeMatchesBytesWritten("partition deletion", build(builder -> builder.timestamp(1000).nowInSec(1500).delete()));
+    }
+
+    private TriePartitionUpdate build(Consumer<PartitionUpdate.SimpleBuilder> content)
+    {
+        PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(currentTableMetadata(), "key0");
+        content.accept(builder);
+        return TriePartitionUpdate.asTrieUpdate(builder.build());
+    }
+
+    /** Size the update the way the mutation path does, then write it, and check the two agree and that it reads back. */
+    private void assertSizeAndRoundTrip(String shape, TriePartitionUpdate update) throws IOException
+    {
+        byte[] bytes = assertSizeMatchesBytesWritten(shape, update);
+        try (DataInputBuffer in = new DataInputBuffer(bytes))
+        {
+            assertEquals(shape, update, PartitionUpdate.serializer.deserialize(in, VERSION, DeserializationHelper.Flag.LOCAL));
+        }
+    }
+
+    /** Size the update the way the mutation path does, then write it, and check the two agree. */
+    private byte[] assertSizeMatchesBytesWritten(String shape, TriePartitionUpdate update) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            long size = PartitionUpdate.serializer.serializedSize(update, VERSION);
+            PartitionUpdate.serializer.serialize(update, out, VERSION);
+            assertEquals(shape, size, out.getLength());
+            return out.toByteArray();
+        }
     }
 
     /**
