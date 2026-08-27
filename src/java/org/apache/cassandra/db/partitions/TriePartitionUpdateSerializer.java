@@ -90,9 +90,9 @@ public class TriePartitionUpdateSerializer
         TriePartitionUpdate trieUpdate = TriePartitionUpdate.asTrieUpdate(update);
 
         ByteBufferUtil.writeWithVIntLength(trieUpdate.partitionKey().getKey(), out);
-        out.writeInt(trieUpdate.rowCountIncludingStatic);
-        out.writeInt(trieUpdate.tombstoneCount);
-        out.writeInt(trieUpdate.dataSize());
+        out.writeUnsignedVInt32(trieUpdate.rowCountIncludingStatic);
+        out.writeUnsignedVInt32(trieUpdate.tombstoneCount);
+        out.writeUnsignedVInt32(trieUpdate.dataSize());
 
         SerializationHeader header = new SerializationHeader(false, trieUpdate.metadata(), trieUpdate.columns(), trieUpdate.stats());
         SerializationHeader.serializer.serializeForMessaging(header, null, out, true);
@@ -226,9 +226,9 @@ public class TriePartitionUpdateSerializer
     public static TriePartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag, TableMetadata metadata, BufferType bufferType) throws IOException
     {
         DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.readWithVIntLength(in));
-        int rowCountIncludingStatic = in.readInt();
-        int tombstoneCount = in.readInt();
-        int dataSize = in.readInt();
+        int rowCountIncludingStatic = in.readUnsignedVInt32();
+        int tombstoneCount = in.readUnsignedVInt32();
+        int dataSize = in.readUnsignedVInt32();
 
         if (rowCountIncludingStatic < 0 || tombstoneCount < 0 || dataSize < 0)
             throw new IOException(String.format("Corrupt TriePartitionUpdate header counts: rows=%d, tombstones=%d, dataSize=%d",
@@ -269,7 +269,9 @@ public class TriePartitionUpdateSerializer
         ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null);
 
         long size = ByteBufferUtil.serializedSizeWithVIntLength(trieUpdate.partitionKey().getKey())
-               + 3L * Integer.BYTES
+               + TypeSizes.sizeofUnsignedVInt(trieUpdate.rowCountIncludingStatic)
+               + TypeSizes.sizeofUnsignedVInt(trieUpdate.tombstoneCount)
+               + TypeSizes.sizeofUnsignedVInt(trieUpdate.dataSize())
                + SerializationHeader.serializer.serializedSizeForMessaging(header, null, true)
                + serializedTrieSize(trieUpdate, pojoSerializer, version);
 
