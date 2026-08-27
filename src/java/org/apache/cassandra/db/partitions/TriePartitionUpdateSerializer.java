@@ -390,7 +390,7 @@ public class TriePartitionUpdateSerializer
 
             if (content instanceof Row)                  { out.writeByte(TYPE_ROW); UnfilteredSerializer.serializer.serialize((Row) content, helper, out, version); return; }
             if (content instanceof RangeTombstoneMarker) { out.writeByte(TYPE_MARKER); UnfilteredSerializer.serializer.serialize((RangeTombstoneMarker) content, helper, out, version); return; }
-            if (content instanceof TrieTombstoneMarker)  { out.writeByte(TYPE_TRIE_TOMBSTONE_MARKER); serializeTrieTombstoneMarker((TrieTombstoneMarker) content, out); return; }
+            if (content instanceof TrieTombstoneMarker)  { out.writeByte(TYPE_TRIE_TOMBSTONE_MARKER); serializeTrieTombstoneMarker((TrieTombstoneMarker) content, out, header); return; }
 
             throw new IllegalArgumentException("Unknown content type in trie: " + content.getClass().getName());
         }
@@ -408,7 +408,7 @@ public class TriePartitionUpdateSerializer
                 case TYPE_MARKER:                return UnfilteredSerializer.serializer.deserialize(in, header, desHelper, BTreeRow.sortedBuilder());
                 case TYPE_COMPLEX_MARKER:        return TrieBackedRow.COMPLEX_COLUMN_MARKER;
                 case TYPE_PARTITION_MARKER:      return TrieBackedPartition.PARTITION_MARKER;
-                case TYPE_TRIE_TOMBSTONE_MARKER: return deserializeTrieTombstoneMarker(in);
+                case TYPE_TRIE_TOMBSTONE_MARKER: return deserializeTrieTombstoneMarker(in, header);
                 default:                         throw new IOException("Unknown content type tag: " + type);
             }
         }
@@ -423,7 +423,7 @@ public class TriePartitionUpdateSerializer
             if (content instanceof LivenessInfo)         return 1L + serializedSizeLiveness((LivenessInfo) content);
             if (content instanceof Row)                  return 1L + UnfilteredSerializer.serializer.serializedSize((Row) content, helper, version);
             if (content instanceof RangeTombstoneMarker) return 1L + UnfilteredSerializer.serializer.serializedSize((RangeTombstoneMarker) content, helper, version);
-            if (content instanceof TrieTombstoneMarker)  return 1L + serializedSizeTrieTombstoneMarker((TrieTombstoneMarker) content);
+            if (content instanceof TrieTombstoneMarker)  return 1L + serializedSizeTrieTombstoneMarker((TrieTombstoneMarker) content, header);
 
             throw new IllegalArgumentException("Unknown content type in trie: " + content.getClass().getName());
         }
@@ -464,22 +464,22 @@ public class TriePartitionUpdateSerializer
         {
             boolean isExpiring = info.isExpiring();
             out.writeBoolean(isExpiring);
-            out.writeLong(info.timestamp());
+            header.writeTimestamp(info.timestamp(), out);
             if (isExpiring)
             {
-                out.writeInt(info.ttl());
-                out.writeLong(info.localExpirationTime());
+                header.writeTTL(info.ttl(), out);
+                header.writeLocalDeletionTime(info.localExpirationTime(), out);
             }
         }
 
         private LivenessInfo deserializeLiveness(DataInputPlus in) throws IOException
         {
             boolean isExpiring = in.readBoolean();
-            long ts = in.readLong();
+            long ts = header.readTimestamp(in);
             if (isExpiring)
             {
-                int ttl = in.readInt();
-                long localExp = in.readLong();
+                int ttl = header.readTTL(in);
+                long localExp = header.readLocalDeletionTime(in);
                 return LivenessInfo.withExpirationTime(ts, ttl, localExp);
             }
             return LivenessInfo.create(ts, 0);
@@ -487,14 +487,17 @@ public class TriePartitionUpdateSerializer
 
         private long serializedSizeLiveness(LivenessInfo info)
         {
-            return 1L + 8L + (info.isExpiring() ? (4L + 8L) : 0L);
+            long size = 1L + header.timestampSerializedSize(info.timestamp());
+            if (info.isExpiring())
+                size += header.ttlSerializedSize(info.ttl()) + header.localDeletionTimeSerializedSize(info.localExpirationTime());
+            return size;
         }
     }
 
     /**
      * Serializes a {@link TrieTombstoneMarker.Covering} instance (boolean presence tag, {@link DeletionTime}, and {@link TrieTombstoneMarker.Kind} ordinal).
      */
-    private static void serializeCovering(TrieTombstoneMarker.Covering covering, DataOutputPlus out) throws IOException
+    private static void serializeCovering(TrieTombstoneMarker.Covering covering, DataOutputPlus out, SerializationHeader header) throws IOException
     {
         if (covering == null)
         {
@@ -503,7 +506,7 @@ public class TriePartitionUpdateSerializer
         else
         {
             out.writeBoolean(true);
-            DeletionTime.serializer.serialize(covering, out);
+            header.writeDeletionTime(covering, out);
             out.writeByte(covering.deletionKind().ordinal());
         }
     }
@@ -513,11 +516,11 @@ public class TriePartitionUpdateSerializer
     /**
      * Deserializes a {@link TrieTombstoneMarker.Covering} instance from stream.
      */
-    private static TrieTombstoneMarker.Covering deserializeCovering(DataInputPlus in) throws IOException
+    private static TrieTombstoneMarker.Covering deserializeCovering(DataInputPlus in, SerializationHeader header) throws IOException
     {
         if (!in.readBoolean())
             return null;
-        DeletionTime dt = DeletionTime.serializer.deserialize(in);
+        DeletionTime dt = header.readDeletionTime(in);
         int ordinal = in.readByte() & 0xFF;
         if (ordinal >= KINDS.length)
             throw new IOException("Invalid TrieTombstoneMarker.Kind ordinal: " + ordinal);
@@ -528,32 +531,32 @@ public class TriePartitionUpdateSerializer
     /**
      * Computes serialized size of {@link TrieTombstoneMarker.Covering}.
      */
-    private static long serializedSizeCovering(TrieTombstoneMarker.Covering covering)
+    private static long serializedSizeCovering(TrieTombstoneMarker.Covering covering, SerializationHeader header)
     {
         if (covering == null)
             return 1L;
-        return 1L + DeletionTime.serializer.serializedSize(covering) + 1L;
+        return 1L + header.deletionTimeSerializedSize(covering) + 1L;
     }
 
     /**
      * Serializes a {@link TrieTombstoneMarker} across left, right, and point deletion bounds.
      */
-    private static void serializeTrieTombstoneMarker(TrieTombstoneMarker marker, DataOutputPlus out) throws IOException
+    private static void serializeTrieTombstoneMarker(TrieTombstoneMarker marker, DataOutputPlus out, SerializationHeader header) throws IOException
     {
-        serializeCovering(marker.leftDeletion(), out);
-        serializeCovering(marker.rightDeletion(), out);
-        serializeCovering(marker.pointDeletion(), out);
+        serializeCovering(marker.leftDeletion(), out, header);
+        serializeCovering(marker.rightDeletion(), out, header);
+        serializeCovering(marker.pointDeletion(), out, header);
         out.writeBoolean(marker.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW));
     }
 
     /**
      * Deserializes a {@link TrieTombstoneMarker} from stream.
      */
-    private static TrieTombstoneMarker deserializeTrieTombstoneMarker(DataInputPlus in) throws IOException
+    private static TrieTombstoneMarker deserializeTrieTombstoneMarker(DataInputPlus in, SerializationHeader header) throws IOException
     {
-        TrieTombstoneMarker.Covering left = deserializeCovering(in);
-        TrieTombstoneMarker.Covering right = deserializeCovering(in);
-        TrieTombstoneMarker.Covering point = deserializeCovering(in);
+        TrieTombstoneMarker.Covering left = deserializeCovering(in, header);
+        TrieTombstoneMarker.Covering right = deserializeCovering(in, header);
+        TrieTombstoneMarker.Covering point = deserializeCovering(in, header);
         boolean hasRowLevelMarker = in.readBoolean();
         TrieTombstoneMarker.LevelMarker levelMarker = hasRowLevelMarker ? TrieTombstoneMarker.LevelMarker.ROW : null;
 
@@ -566,11 +569,11 @@ public class TriePartitionUpdateSerializer
     /**
      * Computes serialized size of {@link TrieTombstoneMarker}.
      */
-    private static long serializedSizeTrieTombstoneMarker(TrieTombstoneMarker marker)
+    private static long serializedSizeTrieTombstoneMarker(TrieTombstoneMarker marker, SerializationHeader header)
     {
-        return serializedSizeCovering(marker.leftDeletion())
-               + serializedSizeCovering(marker.rightDeletion())
-               + serializedSizeCovering(marker.pointDeletion())
+        return serializedSizeCovering(marker.leftDeletion(), header)
+               + serializedSizeCovering(marker.rightDeletion(), header)
+               + serializedSizeCovering(marker.pointDeletion(), header)
                + 1L;
     }
 }
