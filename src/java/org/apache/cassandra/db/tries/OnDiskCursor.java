@@ -751,7 +751,10 @@ public class OnDiskCursor<T> implements Cursor<T>
             if (rootAscentContent != null)
                 addBacktrack(0, OnDiskReadNodeType.ASCENT_LEAF_CODE, currentEncodedPosition | ON_RETURN_PATH_BIT);
 
-            // Redo this as we now have different content() value
+            // Redo this as we now have different content() value. The superclass constructor ran
+            // updateActiveAndReturn over the root node's own, unrestricted content, so both the active
+            // range and prevContent it left describe content this cursor does not present.
+            activeRange = null;
             prevContent = null;
             updateActiveAndReturn(encodedPosition());
         }
