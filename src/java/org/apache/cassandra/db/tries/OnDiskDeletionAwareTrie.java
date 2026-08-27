@@ -20,12 +20,14 @@ package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Set;
 
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.vint.VIntCoding;
@@ -40,9 +42,10 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 /// See [DeletionAwareFileWriter] for why the branch position lives in the payload rather than
 /// in the node encoding.
 public class OnDiskDeletionAwareTrie<T, D extends RangeState<D>>
-implements DeletionAwareTrie<T, D>, Closeable
+implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
 {
-    final Rebufferer rebufferer;
+    final RebuffererFactory rebuffererFactory;
+    final Set<Rebufferer> outstandingRebufferers;
     final OnDiskCursor.DataDeserializer<DeletionAwareFileWriter.Payload<T>> payloadDeserializer;
     final OnDiskCursor.DataDeserializer<D> deletionDeserializer;
     final ByteComparable.Version byteComparableVersion;
@@ -50,14 +53,15 @@ implements DeletionAwareTrie<T, D>, Closeable
     private final boolean ownsChannel;
     private final ChannelProxy channel;
 
-    OnDiskDeletionAwareTrie(Rebufferer rebufferer,
+    OnDiskDeletionAwareTrie(RebuffererFactory rebuffererFactory,
                             OnDiskCursor.DataDeserializer<T> contentDeserializer,
                             OnDiskCursor.DataDeserializer<D> deletionDeserializer,
                             ByteComparable.Version byteComparableVersion,
                             long root,
                             ChannelProxy channel)
     {
-        this.rebufferer = rebufferer;
+        this.rebuffererFactory = rebuffererFactory;
+        this.outstandingRebufferers = OnDiskCursor.RebuffererSource.trackerFor(rebuffererFactory);
         this.payloadDeserializer = new PayloadDeserializer<>(contentDeserializer);
         this.deletionDeserializer = deletionDeserializer;
         this.byteComparableVersion = byteComparableVersion;
@@ -103,29 +107,34 @@ implements DeletionAwareTrie<T, D>, Closeable
         return byteComparableVersion;
     }
 
-    /// Mirrors [OnDiskBaseTrie.WithOwnChannel]: the reader is released before the rebufferer is
-    /// closed, and the channel last, since the rebufferer holds a shared copy of it.
-    /// Cursors are not closeable; the caller must ensure none are still in use.
+    @Override
+    public RebuffererFactory rebuffererFactory()
+    {
+        return rebuffererFactory;
+    }
+
+    @Override
+    public Set<Rebufferer> outstandingRebufferers()
+    {
+        return outstandingRebufferers;
+    }
+
+    /// Mirrors [OnDiskBaseTrie.WithOwnChannel]: whatever the cursors still hold is released first, then the factory,
+    /// then the channel, which the factory holds a shared copy of. The caller must have stopped reading by now.
     @Override
     public void close()
     {
+        releaseOutstandingRebufferers();
+        if (!ownsChannel)
+            return;
+
         try
         {
-            rebufferer.closeReader();
+            rebuffererFactory.close();
         }
         finally
         {
-            if (ownsChannel)
-            {
-                try
-                {
-                    rebufferer.close();
-                }
-                finally
-                {
-                    channel.close();
-                }
-            }
+            channel.close();
         }
     }
 
@@ -155,9 +164,9 @@ implements DeletionAwareTrie<T, D>, Closeable
         ChannelProxy channel = new ChannelProxy(file);
         try
         {
-            Rebufferer rebufferer = OnDiskBaseTrie.mapWholeFile(channel);
-            return new OnDiskDeletionAwareTrie<>(rebufferer, contentDeserializer, deletionDeserializer, version,
-                                                 root >= 0 ? root : rebufferer.fileLength(), channel);
+            RebuffererFactory rebuffererFactory = OnDiskBaseTrie.openChunkReader(channel);
+            return new OnDiskDeletionAwareTrie<>(rebuffererFactory, contentDeserializer, deletionDeserializer, version,
+                                                 root >= 0 ? root : rebuffererFactory.fileLength(), channel);
         }
         catch (Throwable t)
         {
@@ -181,14 +190,14 @@ implements DeletionAwareTrie<T, D>, Closeable
         OnDiskDeletionAwareCursor(OnDiskDeletionAwareTrie<T, D> trie, Direction direction, long root)
         {
             this.trie = trie;
-            this.source = new OnDiskCursor<>(trie.payloadDeserializer, trie.rebufferer,
+            this.source = new OnDiskCursor<>(trie.payloadDeserializer, trie,
                                              trie.byteComparableVersion, direction, false, root);
         }
 
         OnDiskDeletionAwareCursor(OnDiskDeletionAwareTrie<T, D> trie, Direction direction, long rootPostCodePos, int rootNodeCode)
         {
             this.trie = trie;
-            this.source = new OnDiskCursor<>(trie.payloadDeserializer, trie.rebufferer,
+            this.source = new OnDiskCursor<>(trie.payloadDeserializer, trie,
                                              trie.byteComparableVersion, direction, false, rootPostCodePos, rootNodeCode);
         }
 
@@ -222,7 +231,7 @@ implements DeletionAwareTrie<T, D>, Closeable
             DeletionAwareFileWriter.Payload<T> p = payload();
             if (p == null || p.deletionBranchRoot < 0)
                 return null;
-            return new OnDiskCursor.Range<>(trie.deletionDeserializer, trie.rebufferer,
+            return new OnDiskCursor.Range<>(trie.deletionDeserializer, trie,
                                             trie.byteComparableVersion, direction, p.deletionBranchRoot);
         }
 
@@ -267,6 +276,12 @@ implements DeletionAwareTrie<T, D>, Closeable
         public DeletionAwareCursor<T, D> tailCursor(Direction direction)
         {
             return new OnDiskDeletionAwareCursor<>(trie, direction, source.currentFullNodePostCodePos, source.currentFullNodeCode);
+        }
+
+        @Override
+        public void close()
+        {
+            source.close();
         }
     }
 }

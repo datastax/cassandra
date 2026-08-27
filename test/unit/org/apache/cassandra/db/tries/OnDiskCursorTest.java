@@ -22,12 +22,15 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Set;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
+import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
@@ -157,10 +160,31 @@ public class OnDiskCursorTest
         out.writeByte(OnDiskWriteNodeType.LEAF.bits);
         ByteBuffer buffer = out.asNewBuffer();
         return new OnDiskCursor<>(deserializer,
-                                  new ByteBufferRebufferer(buffer),
+                                  sourceOver(buffer),
                                   VERSION,
                                   Direction.FORWARD,
                                   true,
                                   buffer.limit());
+    }
+
+    /// The buffer source a trie would give its cursors, for a trie that is only these bytes. A
+    /// [ByteBufferRebufferer] hands itself to every cursor, so there is nothing per-cursor to track.
+    private static OnDiskCursor.RebuffererSource sourceOver(ByteBuffer buffer)
+    {
+        ByteBufferRebufferer rebufferer = new ByteBufferRebufferer(buffer);
+        return new OnDiskCursor.RebuffererSource()
+        {
+            @Override
+            public RebuffererFactory rebuffererFactory()
+            {
+                return rebufferer;
+            }
+
+            @Override
+            public Set<Rebufferer> outstandingRebufferers()
+            {
+                return null;
+            }
+        };
     }
 }

@@ -22,48 +22,129 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.io.util.RebufferingInputStream;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 public class OnDiskCursor<T> implements Cursor<T>
 {
+    /// The buffer source of a trie, shared by all its cursors.
+    ///
+    /// A cursor holds on to the data it was given until it has to move off it, and more than one cursor is live at a
+    /// time in normal use: a deletion branch cursor is taken while its parent is still walking, and merges and slices
+    /// hold several. The rebufferer a [org.apache.cassandra.io.util.ChunkReader] instantiates owns a single buffer and
+    /// hands out duplicates of it, so cursors sharing one overwrite each other's data as soon as the trie is longer
+    /// than a chunk. Each cursor therefore takes a rebufferer of its own and gives it back on [#close].
+    ///
+    /// A factory that hands itself out -- [org.apache.cassandra.io.util.ByteBufferRebufferer] over a commit-log record
+    /// or a message payload -- is shared between readers by design and owns no per-cursor buffer; it reports a null
+    /// [#outstandingRebufferers] and nothing is tracked or released for it.
+    ///
+    /// Not every cursor can be closed: [BaseTrie#tailTrie] and [BaseTrie#tailTries] hand back a trie that keeps a live
+    /// cursor of its own, and [BaseTrie] has no close for the caller to reach it with. The ones that are still out when
+    /// the trie itself is closed are released then, which is what the tracking is for.
+    interface RebuffererSource
+    {
+        RebuffererFactory rebuffererFactory();
+
+        /// The rebufferers handed out to cursors that have not given them back, or null if the factory hands itself
+        /// out and there is nothing per-cursor to track.
+        Set<Rebufferer> outstandingRebufferers();
+
+        /// Hand out a rebufferer for one cursor. Paired with [#releaseRebufferer].
+        default Rebufferer takeRebufferer()
+        {
+            Rebufferer rebufferer = rebuffererFactory().instantiateRebufferer(false);
+            Set<Rebufferer> outstanding = outstandingRebufferers();
+            if (outstanding != null)
+                outstanding.add(rebufferer);
+            return rebufferer;
+        }
+
+        /// Take back the rebufferer of a cursor that has been closed. The removal from the set is what claims it, so
+        /// that this cannot race [#releaseOutstandingRebufferers] into returning the same buffer to the pool twice.
+        default void releaseRebufferer(Rebufferer rebufferer)
+        {
+            Set<Rebufferer> outstanding = outstandingRebufferers();
+            if (outstanding != null && outstanding.remove(rebufferer))
+                rebufferer.closeReader();
+        }
+
+        /// Release whatever the cursors that could not be closed are still holding. Called when the trie is closed, by
+        /// which point the caller must have stopped reading through it.
+        default void releaseOutstandingRebufferers()
+        {
+            Set<Rebufferer> outstanding = outstandingRebufferers();
+            if (outstanding == null)
+                return;
+            for (Rebufferer rebufferer : outstanding)
+                if (outstanding.remove(rebufferer))
+                    rebufferer.closeReader();
+        }
+
+        /// The tracking set for a factory that makes a rebufferer per cursor, or null for one that hands itself out.
+        static Set<Rebufferer> trackerFor(RebuffererFactory factory)
+        {
+            return factory instanceof Rebufferer ? null : ConcurrentHashMap.newKeySet();
+        }
+    }
+
     public OnDiskCursor(DataDeserializer<T> deserializer,
-                        Rebufferer rebufferer,
+                        RebuffererSource source,
                         ByteComparable.Version byteComparableVersion,
                         Direction direction,
                         boolean isOrdered,
                         long root)
     {
-        this(deserializer, rebufferer, byteComparableVersion, direction, isOrdered);
-        descendInto(Cursor.rootPosition(direction), root);
+        this(deserializer, source, byteComparableVersion, direction, isOrdered);
+        try
+        {
+            descendInto(Cursor.rootPosition(direction), root);
+        }
+        catch (Throwable t)
+        {
+            close();
+            throw t;
+        }
     }
 
     /// Start at a node given as the pair that identifies it, as [#currentFullNodePostCodePos] and
     /// [#currentFullNodeCode] hold it. Used for tails, whose root can be a position inside a chain node, which has
     /// no code byte of its own in the file.
     public OnDiskCursor(DataDeserializer<T> deserializer,
-                        Rebufferer rebufferer,
+                        RebuffererSource source,
                         ByteComparable.Version byteComparableVersion,
                         Direction direction,
                         boolean isOrdered,
                         long rootPostCodePos,
                         int rootNodeCode)
     {
-        this(deserializer, rebufferer, byteComparableVersion, direction, isOrdered);
-        descendInto(Cursor.rootPosition(direction), rootPostCodePos, rootNodeCode);
+        this(deserializer, source, byteComparableVersion, direction, isOrdered);
+        try
+        {
+            descendInto(Cursor.rootPosition(direction), rootPostCodePos, rootNodeCode);
+        }
+        catch (Throwable t)
+        {
+            close();
+            throw t;
+        }
     }
 
     private OnDiskCursor(DataDeserializer<T> deserializer,
-                         Rebufferer rebufferer,
+                         RebuffererSource source,
                          ByteComparable.Version byteComparableVersion,
                          Direction direction,
                          boolean isOrdered)
     {
-        this.rebufferer = rebufferer;
+        this.source = source;
+        this.rebufferer = source.takeRebufferer();
         this.currentBH = Rebufferer.EMPTY;
         this.currentBuffer = currentBH.buffer();
         this.currentBufferOffset = 0;
@@ -121,7 +202,13 @@ public class OnDiskCursor<T> implements Cursor<T>
     }
 
     final SharedStream rdr;
-    final Rebufferer rebufferer;
+    /// The trie's shared buffer source, needed to make further cursors over the same trie and to give this cursor's
+    /// rebufferer back on [#close].
+    final RebuffererSource source;
+    /// This cursor's own rebufferer. A cursor holds on to the data it was given until it has to move off it, so it
+    /// cannot share one with the other cursors of the trie: the rebufferer a chunk reader makes owns a single buffer
+    /// and hands out duplicates of it. Released back to [#source] on [#close].
+    Rebufferer rebufferer;
     final ByteComparable.Version byteComparableVersion;
     final boolean swapContentSides;
     final boolean isOrdered; // determines swapContentSides above; needed if tailTrie switches direction
@@ -257,7 +344,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     @Override
     public Cursor<T> tailCursor(Direction direction)
     {
-        return new OnDiskCursor<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, isOrdered, currentFullNodePostCodePos, currentFullNodeCode);
+        return new OnDiskCursor<>(rdr.deserializer, source, byteComparableVersion, direction, isOrdered, currentFullNodePostCodePos, currentFullNodeCode);
     }
 
     long getContentAtPos(long currentPos)
@@ -425,6 +512,23 @@ public class OnDiskCursor<T> implements Cursor<T>
         currentBufferOffset = currentBH.offset();
     }
 
+    /// Give this cursor's buffer back to the trie it reads from. The cursor cannot be used afterwards.
+    ///
+    /// In-memory cursors hold nothing to release, so [Cursor#close] does nothing by default; a cursor over a file
+    /// holds a buffer for as long as it lives and must be closed, or the buffer is never returned to the pool.
+    @Override
+    public void close()
+    {
+        if (rebufferer == null)
+            return;     // already closed
+        currentBH.release();
+        currentBH = Rebufferer.EMPTY;
+        currentBuffer = currentBH.buffer();
+        Rebufferer toRelease = rebufferer;
+        rebufferer = null;
+        source.releaseRebufferer(toRelease);
+    }
+
     /// Used for debugging.
     String dumpNode()
     {
@@ -434,7 +538,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// Used for debugging.
     String dumpNode(long node)
     {
-        return new OnDiskCursor<>(rdr.deserializer, rebufferer, byteComparableVersion, direction(), swapContentSides, node).dumpNode();
+        return new OnDiskCursor<>(rdr.deserializer, source, byteComparableVersion, direction(), swapContentSides, node).dumpNode();
     }
 
     static class Range<S extends RangeState<S>> extends OnDiskCursor<S> implements RangeCursor<S>
@@ -444,15 +548,15 @@ public class OnDiskCursor<T> implements Cursor<T>
         S activeRange;  // only non-null if activeIsSet
         S prevContent;  // can only be non-null if activeIsSet
 
-        public Range(DataDeserializer<S> deserializer, Rebufferer rebufferer, ByteComparable.Version byteComparableVersion, Direction direction, long root)
+        public Range(DataDeserializer<S> deserializer, RebuffererSource source, ByteComparable.Version byteComparableVersion, Direction direction, long root)
         {
-            super(deserializer, rebufferer, byteComparableVersion, direction, true, root);
+            super(deserializer, source, byteComparableVersion, direction, true, root);
             initActiveState();
         }
 
-        public Range(DataDeserializer<S> deserializer, Rebufferer rebufferer, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode)
+        public Range(DataDeserializer<S> deserializer, RebuffererSource source, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode)
         {
-            super(deserializer, rebufferer, byteComparableVersion, direction, true, rootPostCodePos, rootNodeCode);
+            super(deserializer, source, byteComparableVersion, direction, true, rootPostCodePos, rootNodeCode);
             initActiveState();
         }
 
@@ -609,7 +713,7 @@ public class OnDiskCursor<T> implements Cursor<T>
                 rootAscentContent = swap;
             }
 
-            return new RangeBranch<>(rdr.deserializer, rebufferer, byteComparableVersion, direction, currentFullNodePostCodePos, currentFullNodeCode, rootDescentContent, rootAscentContent);
+            return new RangeBranch<>(rdr.deserializer, source, byteComparableVersion, direction, currentFullNodePostCodePos, currentFullNodeCode, rootDescentContent, rootAscentContent);
         }
     }
 
@@ -617,9 +721,9 @@ public class OnDiskCursor<T> implements Cursor<T>
     {
         final S rootAscentContent;
 
-        public RangeBranch(DataDeserializer<S> deserializer, Rebufferer rebufferer, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode, S rootDescentContent, S rootAscentContent)
+        public RangeBranch(DataDeserializer<S> deserializer, RebuffererSource source, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode, S rootDescentContent, S rootAscentContent)
         {
-            super(deserializer, rebufferer, byteComparableVersion, direction, rootPostCodePos, rootNodeCode);
+            super(deserializer, source, byteComparableVersion, direction, rootPostCodePos, rootNodeCode);
             // LEAF or PREFIX may have put a backtrack entry, remove if so
             this.stackLength = 0;
             this.content = rootDescentContent;

@@ -119,6 +119,12 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         collectAndCachePositionFlags();
     }
 
+    @Override
+    public void close()
+    {
+        applyToAllSources(Cursor::close);
+    }
+
     /// Interface for internal operations that can be applied to selected top elements of the heap.
     interface HeapOp<T, C extends Cursor<T>>
     {

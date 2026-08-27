@@ -340,11 +340,12 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
             {
                 case AT_C2:
                     // we need to exit the deletion branch at the next advance
+                    closeC2();
                     c2 = RangeCursor.empty(direction(), byteComparableVersion());
                     break;
                 default:
                     state = State.C1_ONLY;
-                    c2 = null;
+                    closeC2();
                     break;
             }
         }
@@ -481,6 +482,12 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
         public Wrapping(Cursor<T> source)
         {
             this.source = source;
+        }
+
+        @Override
+        public void close()
+        {
+            source.close();
         }
 
         @Override

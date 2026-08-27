@@ -18,87 +18,84 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.util.Set;
+
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.ChannelProxy;
-import org.apache.cassandra.io.util.MmapRebufferer;
-import org.apache.cassandra.io.util.MmappedRegions;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.RebuffererFactory;
+import org.apache.cassandra.io.util.SimpleChunkReader;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.io.util.RandomAccessReader.DEFAULT_BUFFER_SIZE;
 
-public abstract class OnDiskBaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> implements BaseTrie<T, C, Q>, Closeable
+public abstract class OnDiskBaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>>
+implements BaseTrie<T, C, Q>, OnDiskCursor.RebuffererSource, Closeable
 {
-    final Rebufferer rebufferer;
+    final RebuffererFactory rebuffererFactory;
+    final Set<Rebufferer> outstandingRebufferers;
     final OnDiskCursor.DataDeserializer<T> deserializer;
     final ByteComparable.Version byteComparableVersion;
     final long root;
 
-    public OnDiskBaseTrie(Rebufferer rebufferer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, long root)
+    public OnDiskBaseTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, long root)
     {
-        this.rebufferer = rebufferer;
+        this.rebuffererFactory = rebuffererFactory;
+        this.outstandingRebufferers = OnDiskCursor.RebuffererSource.trackerFor(rebuffererFactory);
         this.deserializer = deserializer;
         this.byteComparableVersion = byteComparableVersion;
         this.root = root;
     }
 
-    public Rebufferer rebufferer()
+    @Override
+    public RebuffererFactory rebuffererFactory()
     {
-        return rebufferer;
+        return rebuffererFactory;
     }
 
-    /// Open a rebufferer over the whole of the given channel, to be shared by all the cursors of a file-backed trie.
+    @Override
+    public Set<Rebufferer> outstandingRebufferers()
+    {
+        return outstandingRebufferers;
+    }
+
+    /// Open a factory over the given channel, which hands each cursor of a file-backed trie a rebufferer of its own.
     ///
-    /// A trie hands the same rebufferer to every cursor it makes, and a cursor keeps the data it was given until it
-    /// has to move off it. More than one cursor is live at a time in normal use: a deletion branch cursor is taken
-    /// while its parent is still walking, and merges and slices hold several. The rebufferer a
-    /// [org.apache.cassandra.io.util.ChunkReader] instantiates owns a single buffer and hands out duplicates of it,
-    /// so any trie longer than one chunk would have its cursors overwriting each other's data. Cursors are not
-    /// closeable, so they cannot be given a buffer each either. Memory mapping gives every cursor a view of the same
-    /// immutable mapping instead, and [MmapRebufferer] is documented to be shared between readers.
-    static Rebufferer mapWholeFile(ChannelProxy channel)
+    /// A cursor keeps the data it was given until it has to move off it, and more than one cursor is live at a time
+    /// in normal use: a deletion branch cursor is taken while its parent is still walking, and merges and slices hold
+    /// several. The rebufferer a [org.apache.cassandra.io.util.ChunkReader] instantiates owns a single buffer and
+    /// hands out duplicates of it, so cursors sharing one overwrite each other's data as soon as the trie is longer
+    /// than a chunk. The chunk reader itself is thread-safe and is what the cursors share instead; each takes a
+    /// buffer from it on construction and returns it on [Cursor#close].
+    static RebuffererFactory openChunkReader(ChannelProxy channel)
     {
-        long length = channel.size();
-        MmappedRegions regions = length > 0 ? MmappedRegions.map(channel, length, DEFAULT_BUFFER_SIZE, 0, false)
-                                            : MmappedRegions.empty(channel);
-        return new MmapRebufferer(channel, length, regions);
+        return new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);
     }
 
-    interface RebuffererAccess
-    {
-        Rebufferer rebufferer();
-    }
-
-    protected interface WithoutChannel extends RebuffererAccess, Closeable
+    protected interface WithoutChannel extends OnDiskCursor.RebuffererSource, Closeable
     {
         @Override
         default void close()
         {
-            // Cursors aren't closeable. User must control that they are no longer in use.
-            rebufferer().closeReader();
+            releaseOutstandingRebufferers();
         }
     }
 
-    protected interface WithOwnChannel extends RebuffererAccess, Closeable
+    protected interface WithOwnChannel extends OnDiskCursor.RebuffererSource, Closeable
     {
         @Override
         default void close()
         {
-            Rebufferer rebufferer = rebufferer();
+            releaseOutstandingRebufferers();
+            RebuffererFactory factory = rebuffererFactory();
             try
             {
-                rebufferer.closeReader();
+                factory.close();
             }
             finally
             {
-                try
-                {
-                    rebufferer.close();
-                }
-                finally
-                {
-                    rebufferer.channel().close();
-                }
+                factory.channel().close();
             }
         }
     }
