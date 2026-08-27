@@ -171,7 +171,8 @@ public class CoordinatorSession extends ConsistentSession
         }
         if (!success)
         {
-            logger.warn("{} failed the prepare phase for incremental repair session {}", participant, sessionID);
+            logger.warn("{} failed the prepare phase for incremental repair session {} (current state: {})",
+                        participant, sessionID, getParticipantState(participant));
             sendFailureMessageToParticipants();
             setParticipantState(participant, State.FAILED);
         }
@@ -222,7 +223,8 @@ public class CoordinatorSession extends ConsistentSession
         }
         else if (!success)
         {
-            logger.warn("Finalization proposal of session {} rejected by {}. Aborting session", sessionID, participant);
+            logger.warn("Finalization proposal of session {} rejected by {} (participant state: {}). Aborting session",
+                        sessionID, participant, getParticipantState(participant));
             fail();
             finalizeProposeFuture.set(false);
         }
@@ -274,7 +276,8 @@ public class CoordinatorSession extends ConsistentSession
             logger.error("Can't transition endpoints {} to FAILED", cantFail, new RuntimeException());
             return;
         }
-        logger.info("Incremental repair session {} failed", sessionID);
+        logger.warn("Incremental repair session {} failed with {} participant(s): {}",
+                    sessionID, participantStates.size(), participantStates.keySet());
         sendFailureMessageToParticipants();
         setAll(State.FAILED);
 
