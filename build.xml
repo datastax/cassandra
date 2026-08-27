@@ -754,7 +754,7 @@
             <exclusion groupId="junit" artifactId="junit"/>
           </dependency>
 
-          <dependency groupId="io.micrometer" artifactId="micrometer-core" version="1.5.5"/>
+          <dependency groupId="io.micrometer" artifactId="micrometer-core" version="1.17.1"/>
           <dependency groupId="org.latencyutils" artifactId="LatencyUtils" version="2.0.3"/>
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
