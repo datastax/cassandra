@@ -84,6 +84,30 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     int serializedSizeDS21 = -1;
     int serializedSizeDS20 = -1;
 
+    /// The trie as [TriePartitionUpdateSerializer#serializedSize] laid it out, kept so that the write that follows
+    /// does not have to lay it out again. Sizing the trie means writing it -- the on-disk writer accounts a branch's
+    /// size as it emits it -- and [org.apache.cassandra.db.Mutation] sizes a mutation and then immediately
+    /// serializes it, so without this every update is laid out twice.
+    ///
+    /// Cleared by the write that consumes it. Volatile because the same update can be serialized from more than one
+    /// thread: the volatile write is what publishes the buffer, whose position and limit are not final and could
+    /// otherwise be read as they were before the flip.
+    volatile SerializedTrie serializedTrie;
+
+    /// A laid-out trie and the messaging version it was laid out for, held together so that the two are read as a
+    /// pair -- writing one version's bytes under another would put a message on the wire that the peer cannot read.
+    static final class SerializedTrie
+    {
+        final int version;
+        final ByteBuffer bytes;
+
+        SerializedTrie(int version, ByteBuffer bytes)
+        {
+            this.version = version;
+            this.bytes = bytes;
+        }
+    }
+
     /**
      * Package-private constructor used by {@link TriePartitionUpdateSerializer} and {@link TrieBuilder}
      * to instantiate immutable trie partition update instances.

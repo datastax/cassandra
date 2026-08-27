@@ -189,8 +189,8 @@ public class PartitionUpdateSerializationBench
 
     /**
      * The sequence the commit log actually performs per mutation: size it, allocate nothing, write
-     * it. On the on-disk format this walks the trie twice unless {@code Mutation} has cached the
-     * bytes, which it only does below {@code CACHEABLE_MUTATION_SIZE_LIMIT}.
+     * it. Sizing lays the trie out and memoizes the bytes on the update, so serialization reuses
+     * the layout directly instead of walking the trie a second time.
      */
     @Benchmark
     public int sizeThenSerialize() throws IOException

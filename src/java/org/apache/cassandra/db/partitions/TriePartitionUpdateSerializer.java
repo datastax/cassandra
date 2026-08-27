@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 
 import com.google.common.primitives.Ints;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -72,6 +73,9 @@ public class TriePartitionUpdateSerializer
     private static final int TYPE_PARTITION_MARKER = 6;
     private static final int TYPE_TRIE_TOMBSTONE_MARKER = 7;
 
+    /// The largest trie layout [#serializedSize] will keep on the update for the write that follows it.
+    private static final long RETAINED_TRIE_SIZE_LIMIT = CassandraRelevantProperties.CACHEABLE_MUTATION_SIZE_LIMIT.getLong();
+
     private TriePartitionUpdateSerializer()
     {
     }
@@ -96,7 +100,7 @@ public class TriePartitionUpdateSerializer
 
         ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null);
 
-        writeTrie(trieUpdate.trie(), pojoSerializer, out);
+        writeTrie(trieUpdate, pojoSerializer, out, version);
     }
 
     /// Writes the trie in the on-disk trie format, length-prefixed.
@@ -105,13 +109,26 @@ public class TriePartitionUpdateSerializer
     /// consuming it from the stream, so it has to be handed the trie's bytes as a block. The
     /// writer emits the root last and pointers run backwards, so the trie is only readable once
     /// its extent is known.
-    private static void writeTrie(DeletionAwareTrie<Object, TrieTombstoneMarker> trie,
+    ///
+    /// If [#serializedSize] has already laid this trie out for this version, its bytes are written
+    /// instead of laying it out again, and the update stops holding them. Duplicated because the
+    /// retained buffer can be written from more than one thread at a time and not every
+    /// [DataOutputPlus] leaves the source's position alone.
+    private static void writeTrie(TriePartitionUpdate trieUpdate,
                                   ContentManagerPojo.PojoSerializer<Object> pojoSerializer,
-                                  DataOutputPlus out) throws IOException
+                                  DataOutputPlus out,
+                                  int version) throws IOException
     {
+        ByteBuffer laidOut = takeRetainedTrie(trieUpdate, version);
+        if (laidOut != null)
+        {
+            ByteBufferUtil.writeWithVIntLength(laidOut.duplicate(), out);
+            return;
+        }
+
         try (DataOutputBuffer trieBytes = new DataOutputBuffer())
         {
-            DeletionAwareFileWriter.write(trie,
+            DeletionAwareFileWriter.write(trieUpdate.trie(),
                                           contentSerializer(pojoSerializer),
                                           deletionSerializer(pojoSerializer),
                                           trieBytes);
@@ -119,6 +136,27 @@ public class TriePartitionUpdateSerializer
             // touches trieBytes after this, so the trie does not have to be copied out first.
             ByteBufferUtil.writeWithVIntLength(trieBytes.unsafeGetBufferAndFlip(), out);
         }
+    }
+
+    /// The trie [#serializedSize] laid out for this version, if it did, taken off the update so that it is not held
+    /// any longer than the write that uses it.
+    private static ByteBuffer takeRetainedTrie(TriePartitionUpdate trieUpdate, int version)
+    {
+        TriePartitionUpdate.SerializedTrie laidOut = trieUpdate.serializedTrie;
+        if (laidOut == null || laidOut.version != version)
+            return null;
+        trieUpdate.serializedTrie = null;
+        return laidOut.bytes;
+    }
+
+    /// Keep the laid-out trie on the update for the write that follows, unless it is large enough that holding it
+    /// is the problem [org.apache.cassandra.config.CassandraRelevantProperties#CACHEABLE_MUTATION_SIZE_LIMIT]
+    /// exists to avoid. Above that limit the mutation does not keep its own serialized bytes either, and the two
+    /// decisions should not diverge.
+    private static void retainTrie(TriePartitionUpdate trieUpdate, int version, ByteBuffer laidOut)
+    {
+        if (laidOut.remaining() < RETAINED_TRIE_SIZE_LIMIT)
+            trieUpdate.serializedTrie = new TriePartitionUpdate.SerializedTrie(version, laidOut);
     }
 
     /// The trie format keeps live content and deletion markers in separate branches, each with its
@@ -233,7 +271,7 @@ public class TriePartitionUpdateSerializer
         long size = ByteBufferUtil.serializedSizeWithVIntLength(trieUpdate.partitionKey().getKey())
                + 3L * Integer.BYTES
                + SerializationHeader.serializer.serializedSizeForMessaging(header, null, true)
-               + serializedTrieSize(trieUpdate, pojoSerializer);
+               + serializedTrieSize(trieUpdate, pojoSerializer, version);
 
         if (version == MessagingService.VERSION_DS_21)
             trieUpdate.serializedSizeDS21 = Ints.saturatedCast(size);
@@ -245,13 +283,11 @@ public class TriePartitionUpdateSerializer
 
     /// Sizing the trie means writing it: [FileWriter] lays branches out and accounts their sizes as
     /// it emits them, so unlike the previous format there is no cheap size to read off the
-    /// structure. A caller that then serializes therefore walks twice.
-    ///
-    /// This is not the hot path it looks like. [org.apache.cassandra.db.Mutation] already sizes a
-    /// mutation once and, below CACHEABLE_MUTATION_SIZE_LIMIT, caches the serialized bytes and
-    /// serves the write from them — so on the commit-log and messaging paths the second walk only
-    /// happens for mutations too large to cache.
-    private static long serializedTrieSize(TriePartitionUpdate trieUpdate, ContentManagerPojo.PojoSerializer<Object> pojoSerializer)
+    /// structure. The layout is therefore kept on the update, and [#writeTrie] writes it out
+    /// instead of building the same bytes a second time -- [org.apache.cassandra.db.Mutation]
+    /// sizes a mutation and then immediately serializes it, so the second build was the common
+    /// case rather than a rare one.
+    private static long serializedTrieSize(TriePartitionUpdate trieUpdate, ContentManagerPojo.PojoSerializer<Object> pojoSerializer, int version)
     {
         try (DataOutputBuffer trieBytes = new DataOutputBuffer())
         {
@@ -261,6 +297,9 @@ public class TriePartitionUpdateSerializer
                                           trieBytes);
             // Only the length is needed; asNewBuffer() would copy the whole trie out to report it.
             int trieLength = trieBytes.getLength();
+            // The buffer is this method's own and a plain DataOutputBuffer recycles nothing on close, so the layout
+            // can be kept as it stands rather than copied out.
+            retainTrie(trieUpdate, version, trieBytes.unsafeGetBufferAndFlip());
             return TypeSizes.sizeofUnsignedVInt(trieLength) + trieLength;
         }
         catch (IOException e)

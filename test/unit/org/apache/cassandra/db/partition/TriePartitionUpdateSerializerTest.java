@@ -28,6 +28,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.PartitionUpdateSizeCache;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdateSerializer;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -38,6 +39,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -82,18 +84,28 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
 
     private static byte[] serialize(PartitionUpdate update) throws IOException
     {
+        return serialize(update, VERSION);
+    }
+
+    private static byte[] serialize(PartitionUpdate update, int version) throws IOException
+    {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            TriePartitionUpdateSerializer.serialize(update, out, VERSION);
+            TriePartitionUpdateSerializer.serialize(update, out, version);
             return out.toByteArray();
         }
     }
 
     private TriePartitionUpdate deserialize(byte[] bytes) throws IOException
     {
+        return deserialize(bytes, VERSION);
+    }
+
+    private TriePartitionUpdate deserialize(byte[] bytes, int version) throws IOException
+    {
         try (DataInputBuffer in = new DataInputBuffer(bytes))
         {
-            return TriePartitionUpdateSerializer.deserialize(in, VERSION, DeserializationHelper.Flag.LOCAL, currentTableMetadata());
+            return TriePartitionUpdateSerializer.deserialize(in, version, DeserializationHelper.Flag.LOCAL, currentTableMetadata());
         }
     }
 
@@ -171,6 +183,65 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
             // Second call is served from the cache; it must still describe the same bytes.
             assertEquals(size, PartitionUpdate.serializer.serializedSize(update, VERSION));
         }
+    }
+
+    /**
+     * Sizing an update lays its trie out and the write that follows reuses that layout instead of building it a
+     * second time. What is written must be exactly what the writer would have produced, so sizing first cannot
+     * change the bytes, and the layout must be handed over only once.
+     */
+    @Test
+    public void testSizingFirstDoesNotChangeTheBytesWritten() throws Throwable
+    {
+        createRichTable();
+
+        byte[] withoutSizing = serialize(richUpdate());
+
+        TriePartitionUpdate sizedFirst = richUpdate();
+        TriePartitionUpdateSerializer.serializedSize(sizedFirst, VERSION);
+        assertArrayEquals(withoutSizing, serialize(sizedFirst));
+
+        // The retained layout is consumed by that write; a second one has to build the trie again and must still
+        // produce the same bytes.
+        assertArrayEquals(withoutSizing, serialize(sizedFirst));
+    }
+
+    /**
+     * Sizing an update under one messaging version must not cause a subsequent write under a
+     * different version to reuse the wrong layout.
+     */
+    @Test
+    public void testRetainedLayoutDiscardedOnVersionMismatch() throws Throwable
+    {
+        createRichTable();
+
+        TriePartitionUpdate update = richUpdate();
+        TriePartitionUpdateSerializer.serializedSize(update, MessagingService.VERSION_DS_20);
+        byte[] writtenDS21 = serialize(update, MessagingService.VERSION_DS_21);
+        byte[] expectedDS21 = serialize(richUpdate(), MessagingService.VERSION_DS_21);
+        assertArrayEquals(expectedDS21, writtenDS21);
+    }
+
+    /**
+     * {@link PartitionUpdateSizeCache#invalidate} clears cached serialized sizes and any retained trie layout.
+     */
+    @Test
+    public void testPartitionUpdateSizeCacheInvalidate() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = richUpdate();
+        TriePartitionUpdateSerializer.serializedSize(update, MessagingService.VERSION_DS_21);
+        TriePartitionUpdateSerializer.serializedSize(update, MessagingService.VERSION_DS_20);
+
+        assertTrue(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_21));
+        assertTrue(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_20));
+        assertTrue(PartitionUpdateSizeCache.hasRetainedTrie(update));
+
+        PartitionUpdateSizeCache.invalidate(update);
+
+        assertFalse(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_21));
+        assertFalse(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_20));
+        assertFalse(PartitionUpdateSizeCache.hasRetainedTrie(update));
     }
 
     /**
