@@ -20,7 +20,7 @@ package org.apache.cassandra.db.tries;
 
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -28,9 +28,9 @@ public abstract class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>
 {
     final boolean isOrdered;
 
-    public OnDiskTrie(Rebufferer rebufferer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
+    public OnDiskTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
     {
-        super(rebufferer, deserializer, byteComparableVersion, root);
+        super(rebuffererFactory, deserializer, byteComparableVersion, root);
         this.isOrdered = isOrdered;
     }
 
@@ -38,24 +38,24 @@ public abstract class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>
     public Cursor<T> makeCursor(Direction direction)
     {
         if (root != 0)
-            return new OnDiskCursor<>(deserializer, rebufferer, byteComparableVersion, direction, isOrdered, root);
+            return new OnDiskCursor<>(deserializer, this, byteComparableVersion, direction, isOrdered, root);
         else
             return new Cursor.Empty<>(direction, byteComparableVersion);
     }
 
     static class WithoutChannel<T> extends OnDiskTrie<T> implements OnDiskBaseTrie.WithoutChannel
     {
-        public WithoutChannel(Rebufferer rebufferer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
+        public WithoutChannel(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
         {
-            super(rebufferer, deserializer, byteComparableVersion, isOrdered, root);
+            super(rebuffererFactory, deserializer, byteComparableVersion, isOrdered, root);
         }
     }
 
     static class WithOwnChannel<T> extends OnDiskTrie<T> implements OnDiskBaseTrie.WithOwnChannel
     {
-        public WithOwnChannel(Rebufferer rebufferer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
+        public WithOwnChannel(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
         {
-            super(rebufferer, deserializer, byteComparableVersion, isOrdered, root);
+            super(rebuffererFactory, deserializer, byteComparableVersion, isOrdered, root);
         }
     }
 
@@ -64,8 +64,8 @@ public abstract class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>
         ChannelProxy channel = new ChannelProxy(file);
         try
         {
-            Rebufferer rebufferer = mapWholeFile(channel);
-            return new WithOwnChannel(rebufferer, deserializer, version, isOrdered, root >= 0 ? root : rebufferer.fileLength());
+            RebuffererFactory rebuffererFactory = openChunkReader(channel);
+            return new WithOwnChannel(rebuffererFactory, deserializer, version, isOrdered, root >= 0 ? root : rebuffererFactory.fileLength());
         }
         catch (Throwable t)
         {

@@ -68,6 +68,12 @@ interface VerificationCursor
         Cursor.TransitionsReceiver chainedReceiver = null;
         boolean advanceMultipleCalledReceiver;
 
+        @Override
+        public void close()
+        {
+            source.close();
+        }
+
         Plain(C cursor)
         {
             this.direction = cursor.direction();

@@ -101,12 +101,14 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
     /// the range that covers it (i.e. the `precedingState` of the next marker).
     default S applicableRange(ByteComparable key)
     {
-        RangeCursor<S> cursor = cursor(Direction.FORWARD);
-        final ByteSource bytes = key.asComparableBytes(cursor.byteComparableVersion());
-        if (cursor.descendAlong(bytes))
-            return cursor.state();
-        else
-            return cursor.precedingState();
+        try (RangeCursor<S> cursor = cursor(Direction.FORWARD))
+        {
+            final ByteSource bytes = key.asComparableBytes(cursor.byteComparableVersion());
+            if (cursor.descendAlong(bytes))
+                return cursor.state();
+            else
+                return cursor.precedingState();
+        }
     }
 
     @Override
