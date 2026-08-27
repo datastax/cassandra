@@ -21,7 +21,6 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.io.IOException;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
@@ -203,7 +202,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     previousBytesRead = bytesRead;
                 }
 
-                completeSSTable(txn, indexWriter, sstable, indexes, perSSTableFileLock, replacedComponents);
+                completeSSTable(txn, indexWriter, indexDescriptor, sstable, indexes, perSSTableFileLock, replacedComponents);
             }
             long timeTaken = Clock.Global.nanoTime() - startTimeNanos;
             group.table().metric.updateStorageAttachedIndexBuildTime(timeTaken);
@@ -307,12 +306,23 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             components.forWrite().forceDeleteAllComponents();
     }
 
+    /**
+     * Completes the index build for an SSTable and registers the built components in its TOC.
+     *
+     * <p>The supplied {@code indexDescriptor} must be the descriptor used to create {@code indexWriter}. Looking up the
+     * descriptor through the group at this point is unsafe because concurrent unloading can evict the cached descriptor;
+     * rebuilding it from the SSTable TOC would skip the components produced by this build.</p>
+     *
+     * <p>If {@code latch} is non-null, this builder owns the per-SSTable component build and releases waiting builders.
+     * Otherwise, this builder waits for an owner, if any, before publishing its per-index components.</p>
+     */
     private void completeSSTable(LifecycleTransaction txn,
                                  StorageAttachedIndexWriter indexWriter,
+                                 IndexDescriptor indexDescriptor,
                                  SSTableReader sstable,
                                  Set<StorageAttachedIndex> indexes,
                                  CountDownLatch latch,
-                                 Set<Component> replacedComponents) throws InterruptedException, IOException
+                                 Set<Component> replacedComponents) throws InterruptedException
     {
         indexWriter.complete(sstable);
 
@@ -339,8 +349,9 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             return;
         }
 
-        // register custom index components into existing sstables
-        sstable.registerComponents(group.activeComponents(sstable), tracker);
+        // Register components from the descriptor that owns the writers. The context cache may have been
+        // evicted before this point, and a reader lookup would reconstruct a descriptor from the pre-build TOC.
+        sstable.registerComponents(group.activeComponents(indexDescriptor), tracker);
         if (!replacedComponents.isEmpty())
             sstable.unregisterComponents(replacedComponents, tracker);
 
