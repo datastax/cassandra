@@ -568,7 +568,7 @@
         <scm connection="${scm.connection}" developerConnection="${scm.developerConnection}" url="${scm.url}"/>
         <dependencyManagement>
           <dependency groupId="org.xerial.snappy" artifactId="snappy-java" version="1.1.10.7"/>
-          <dependency groupId="at.yawk.lz4" artifactId="lz4-java" version="1.10.2"/>
+          <dependency groupId="at.yawk.lz4" artifactId="lz4-java" version="1.11.2"/>
           <dependency groupId="com.ning" artifactId="compress-lzf" version="0.8.4" scope="provided"/>
           <dependency groupId="com.github.luben" artifactId="zstd-jni" version="1.5.5-1"/>
           <dependency groupId="com.google.guava" artifactId="guava" version="33.4.0-jre">
