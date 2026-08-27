@@ -21,9 +21,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.EnumMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -77,20 +75,9 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         lifecycleNewTracker.trackNew(this);
         this.componentWriters = new EnumMap<>(Component.Type.class);
 
-        Set<Component> unsupportedComponents = new HashSet<>();
-        for (Component c : components)
-        {
-            if (!descriptor.getFormat().streamingComponents().contains(c))
-            {
-                if (c.type == Component.Type.CUSTOM)
-                    logger.warn("Unknown custom streaming component {} will be ignored.", c);
-                else
-                    unsupportedComponents.add(c);
-            }
-        }
-
-        if (!unsupportedComponents.isEmpty())
-            throw new AssertionError(format("Unsupported streaming component detected %s", unsupportedComponents));
+        if (!descriptor.getFormat().streamingComponents().containsAll(components))
+            throw new AssertionError(format("Unsupported streaming component detected %s",
+                                            Sets.difference(ImmutableSet.copyOf(components), descriptor.getFormat().streamingComponents())));
 
         for (Component c : components)
             componentWriters.put(c.type, makeWriter(descriptor, c));
