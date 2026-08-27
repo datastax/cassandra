@@ -26,6 +26,8 @@ import java.util.Base64;
 import org.junit.Before;
 import org.junit.Test;
 
+import software.amazon.awssdk.crt.checksums.CRC64NVME;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 // We use the same values to test as in AWS S3 SDK tests.
@@ -48,6 +50,9 @@ public class PureJavaCRC64NVMETest
         byte[] bytes = TEST_STRING.getBytes(StandardCharsets.UTF_8);
         crc64NVME.update(bytes, 0, bytes.length);
         assertThat(getAsString(getAsBytes(crc64NVME.getValue()))).isEqualTo("0000000000000000000000008b8f30cfc6f16409");
+        CRC64NVME awsCrc64 = new CRC64NVME();
+        awsCrc64.update(bytes, 0, bytes.length);
+        assertThat(awsCrc64.getValue()).isEqualTo(crc64NVME.getValue());
     }
 
     @Test
