@@ -112,8 +112,8 @@ public class RepairRunnableLoggingTest
         List<String> errors = capturedErrorMessages();
         assertFalse("Expected at least one error log", errors.isEmpty());
         String msg = errors.get(0);
-        assertTrue("Should contain entity id",   msg.contains("entity: " + ENTITY_ID));
-        assertTrue("Should contain repair type", msg.contains("type: " + REPAIR_TYPE));
+        assertTrue("Should contain entity id",   msg.contains("entityId: " + ENTITY_ID));
+        assertTrue("Should contain repair type", msg.contains("repairType: " + REPAIR_TYPE));
         assertTrue("Should contain keyspace",    msg.contains("keyspace: " + KEYSPACE));
     }
 
@@ -127,7 +127,7 @@ public class RepairRunnableLoggingTest
         List<String> errors = capturedErrorMessages();
         assertFalse("Expected at least one error log", errors.isEmpty());
         String msg = errors.get(0);
-        assertFalse("Should not contain entity bracket block", msg.contains("[entity:"));
+        assertFalse("Should not contain entity bracket block", msg.contains("[entityId:"));
         assertTrue("Should still contain 'failed'", msg.contains("failed"));
     }
 

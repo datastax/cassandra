@@ -61,10 +61,10 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
 
     private final List<SyncTask> syncTasks = new CopyOnWriteArrayList<>();
 
-    /** Returns " [entity: <id>]" when entityId is set on the session, empty string otherwise. */
+    /** Returns " [entityId: <id>]" when entityId is set on the session, empty string otherwise. */
     private String entityTag()
     {
-        return session.entityId != null ? " [entity: " + session.entityId + "]" : "";
+        return session.entityId != null ? " [entityId: " + session.entityId + "]" : "";
     }
 
     /**
@@ -150,7 +150,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
             {
                 if (!session.previewKind.isPreview())
                 {
-                    logger.info("{} parent={} {}.{} is fully synced with endpoints {}{}",
+                    logger.info("{} parentSession={} {}.{} is fully synced with endpoints {}{}",
                                 session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
                                 desc.keyspace, desc.columnFamily, session.commonRange.endpoints, entityTag());
                     RepairProgressReporter.instance.onRepairSucceeded(session.getId(), desc.keyspace, desc.columnFamily);
@@ -169,7 +169,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
 
                 if (!session.previewKind.isPreview())
                 {
-                    logger.warn("{} parent={} {}.{} sync failed with endpoints {}{}: {}",
+                    logger.warn("{} parentSession={} {}.{} sync failed with endpoints {}{}: {}",
                                 session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
                                 desc.keyspace, desc.columnFamily, session.commonRange.endpoints, entityTag(), t.getMessage());
                     RepairProgressReporter.instance.onRepairFailed(session.getId(), desc.keyspace, desc.columnFamily, t);

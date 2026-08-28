@@ -57,7 +57,7 @@ public class ValidationTask extends AbstractFuture<TreeResponse> implements Runn
      */
     public void run()
     {
-        logger.info("{} parent={} Sending validation request to {}",
+        logger.info("{} parentSession={} Sending validation request to {}",
                     previewKind.logPrefix(desc.sessionId), desc.parentSessionId, endpoint);
         RepairMessage.sendMessageWithFailureCB(new ValidationRequest(desc, nowInSec),
                                                VALIDATION_REQ,
@@ -74,7 +74,7 @@ public class ValidationTask extends AbstractFuture<TreeResponse> implements Runn
     {
         if (trees == null)
         {
-            logger.warn("{} parent={} Validation failed on {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, endpoint);
+            logger.warn("{} parentSession={} Validation failed on {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, endpoint);
             setException(new RepairException(desc, previewKind, "Validation failed in " + endpoint));
         }
         else

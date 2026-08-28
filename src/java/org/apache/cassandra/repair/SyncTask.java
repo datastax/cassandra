@@ -81,8 +81,8 @@ public abstract class SyncTask extends AbstractFuture<SyncStat> implements Runna
 
 
         // choose a repair method based on the significance of the difference
-        String format = String.format("%s parentSession=%s Endpoints %s and %s %%s for %s",
-                                     previewKind.logPrefix(desc.sessionId), desc.parentSessionId,
+        String format = String.format("%s parentSession=%s sessionId=%s Endpoints %s and %s %%s for %s",
+                                     previewKind.logPrefix(desc.sessionId), desc.parentSessionId, desc.sessionId,
                                      nodePair.coordinator, nodePair.peer, desc.columnFamily);
         if (rangesToSync.isEmpty())
         {

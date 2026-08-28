@@ -186,7 +186,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         if (error instanceof SomeRepairFailedException)
             return;
         if (options.getEntityId() != null)
-            logger.error("Repair {} failed [entity: {}, type: {}, keyspace: {}]:",
+            logger.error("Repair {} failed [entityId: {}, repairType: {}, keyspace: {}]:",
                          parentSession, options.getEntityId(), options.getRepairType(), keyspace, error);
         else
             logger.error("Repair {} failed:", parentSession, error);
@@ -230,7 +230,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
 
         fireProgressEvent(new ProgressEvent(ProgressEventType.COMPLETE, progressCounter.get(), totalProgress, msg));
         if (options.getEntityId() != null)
-            logger.info("{}{} [entity: {}, type: {}, keyspace: {}]",
+            logger.info("{}{} [entityId: {}, repairType: {}, keyspace: {}]",
                         options.getPreviewKind().logPrefix(parentSession), msg,
                         options.getEntityId(), options.getRepairType(), keyspace);
         else
@@ -331,8 +331,11 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
 
     private void notifyStarting()
     {
-        String message = String.format("Starting repair command #%d (%s), repairing keyspace %s with %s", cmd, parentSession, keyspace,
-                                       options);
+        String entityContext = options.getEntityId() != null
+            ? String.format("[entityId: %s] [repairType: %s] ", options.getEntityId(), options.getRepairType())
+            : "";
+        String message = String.format("%sStarting repair command #%d (%s), repairing keyspace %s with %s",
+                                       entityContext, cmd, parentSession, keyspace, options);
         logger.info(message);
         Tracing.traceRepair(message);
         fireProgressEvent(new ProgressEvent(ProgressEventType.START, 0, 100, message));
@@ -710,7 +713,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
 
         for (CommonRange commonRange : commonRanges)
         {
-            logger.info("Starting RepairSession for parent={} range={} endpoints={}",
+            logger.info("Starting RepairSession for parentSession={} range={} endpoints={}",
                         parentSession, commonRange, commonRange.endpoints);
             RepairSession session = ActiveRepairService.instance.submitRepairSession(parentSession,
                                                                                      commonRange,

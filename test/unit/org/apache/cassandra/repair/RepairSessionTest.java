@@ -31,7 +31,6 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
@@ -54,7 +53,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.messages.RepairOption;
-import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
 import org.slf4j.LoggerFactory;
@@ -268,7 +266,7 @@ public class RepairSessionTest
 
     /**
      * start() INFO banner must contain both the parent session UUID and
-     * the entity tag "[entity: <value>]" when entityId is set.
+     * the entity tag "[entityId: <value>]" when entityId is set.
      */
     @Test
     public void testStartInfoBannerIncludesEntityAndParentSession() throws Exception
@@ -293,12 +291,12 @@ public class RepairSessionTest
         String banner = infos.get(0);
         assertTrue("Banner must contain parentSessionId=" + parentSessionId,
                    banner.contains(parentSessionId.toString()));
-        assertTrue("Banner must contain [entity: " + ENTITY_ID + "]",
-                   banner.contains("[entity: " + ENTITY_ID + "]"));
+        assertTrue("Banner must contain [entityId: " + ENTITY_ID + "]",
+                   banner.contains("[entityId: " + ENTITY_ID + "]"));
     }
 
     /**
-     * When entityId is absent, start() INFO banner must NOT contain a "[entity:" block.
+     * When entityId is absent, start() INFO banner must NOT contain a "[entityId:" block.
      */
     @Test
     public void testStartInfoBannerOmitsEntityTagWhenAbsent() throws Exception
@@ -320,9 +318,9 @@ public class RepairSessionTest
         String banner = infos.get(0);
         assertTrue("Banner must still contain parentSessionId",
                    banner.contains(parentSessionId.toString()));
-        // No [entity: ...] block at all when entityId is absent
-        assertFalse("Banner must not contain [entity:] when entityId is absent",
-                    banner.contains("[entity:"));
+        // No [entityId: ...] block at all when entityId is absent
+        assertFalse("Banner must not contain [entityId:] when entityId is absent",
+                    banner.contains("[entityId:"));
     }
 
     private static class NoopExecutorService implements ListeningExecutorService

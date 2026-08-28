@@ -152,7 +152,8 @@ public class CoordinatorSession extends ConsistentSession
     {
         Preconditions.checkArgument(allStates(State.PREPARING));
 
-        logger.info("Beginning prepare phase of incremental repair session {}", sessionID);
+        logger.info("Beginning prepare phase of incremental repair session {} coordinated by {} with {} participant(s): {}",
+                    sessionID, coordinator, participants.size(), participants);
         Message<RepairMessage> message =
             Message.out(Verb.PREPARE_CONSISTENT_REQ, new PrepareConsistentRequest(sessionID, coordinator, participants));
         for (final InetAddressAndPort participant : participants)
@@ -380,7 +381,7 @@ public class CoordinatorSession extends ConsistentSession
             {
                 try
                 {
-                    logger.info("Incremental repair {} failed after {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
+                    logger.warn("Incremental repair {} failed after {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
                     hasFailure.set(true);
                     fail();
                 }

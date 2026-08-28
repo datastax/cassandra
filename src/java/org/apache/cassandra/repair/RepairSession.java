@@ -230,8 +230,14 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
             return;
         }
 
-        if (logger.isDebugEnabled())
-            logger.debug("{} Repair completed between {} and {} on {}", previewKind.logPrefix(getId()), nodes.coordinator, nodes.peer, desc.columnFamily);
+        if (!success)
+            logger.info("{} parentSession={} sync FAILED between {} and {} on {}",
+                        previewKind.logPrefix(getId()), parentRepairSession,
+                        nodes.coordinator, nodes.peer, desc.columnFamily);
+        else if (logger.isDebugEnabled())
+            logger.debug("{} parentSession={} sync completed between {} and {} on {}",
+                         previewKind.logPrefix(getId()), parentRepairSession,
+                         nodes.coordinator, nodes.peer, desc.columnFamily);
         task.syncComplete(success, summaries);
     }
 
@@ -250,10 +256,10 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         return sb.toString();
     }
 
-    /** Returns " [entity: <id>]" when entityId is set, empty string otherwise. */
+    /** Returns " [entityId: <id>]" when entityId is set, empty string otherwise. */
     private String entityTag()
     {
-        return entityId != null ? " [entity: " + entityId + ']' : "";
+        return entityId != null ? " [entityId: " + entityId + ']' : "";
     }
 
     /**
@@ -271,7 +277,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         if (terminated)
             return;
 
-        logger.info("{} parentSessionId = {}: new session: will sync {} on range {} for {}.{}{}",
+        logger.info("{} parentSession={}: new session: will sync {} on range {} for {}.{}{}",
                     previewKind.logPrefix(getId()), parentRepairSession, repairedNodes(), commonRange, keyspace, Arrays.toString(cfnames), entityTag());
         Tracing.traceRepair("Syncing range {}", commonRange);
         if (!previewKind.isPreview())
