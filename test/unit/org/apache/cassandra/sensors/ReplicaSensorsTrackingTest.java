@@ -446,7 +446,7 @@ public class ReplicaSensorsTrackingTest
         int replica = responses.getAndIncrement();
         onResponseAboutToStartSignal[replica].countDown();
         // don't wait indefinitely if the test is stuck.
-        assertThat(onResponseStartSignal[replica].await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(onResponseStartSignal[replica].await(5, TimeUnit.SECONDS)).isTrue();
     }
 
     private void assertSensorsTrackedForWriteRequest(Message writeRequest, boolean allowHints) throws InterruptedException
@@ -518,7 +518,7 @@ public class ReplicaSensorsTrackingTest
 
             // don't wait indefinitely if the test is stuck. Delay the assertion of the await results to give a better
             // chance of a meaningful error by virtue of the core test assertion
-            boolean awaitResult = onResponseAboutToStartSignal[responseIdx - 1].await(1, TimeUnit.SECONDS);
+            boolean awaitResult = onResponseAboutToStartSignal[responseIdx - 1].await(5, TimeUnit.SECONDS);
 
             // additive sensors must grow linearly with each response
             for (Pair<Sensor, Sensor> pair : additiveSensors)

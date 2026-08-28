@@ -248,10 +248,10 @@ public class SensorsInternodeTest
 
         // Get the request size, response size and total size per table:
         int tableCount = contexts.size();
-        int requestSizePerTable = request.payloadSize(MessagingService.current_version) / tableCount;
+        double requestSizePerTable = (double) request.payloadSize(MessagingService.current_version) / tableCount;
         Message response = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
-        int responseSizePerTable = response.payloadSize(MessagingService.current_version) / tableCount;
-        int total = requestSizePerTable + responseSizePerTable;
+        double responseSizePerTable = (double) response.payloadSize(MessagingService.current_version) / tableCount;
+        double total = requestSizePerTable + responseSizePerTable;
 
         // For each context/table, get the internode bytes and verify their value is between the request and total size:
         // it can't be equal to the total size because we don't record the custom headers in the internode sensor.
