@@ -112,6 +112,7 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.serializers.MarshalException;
@@ -489,17 +490,21 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         ResultMessage.Rows msg;
+        long totalStartNanos = System.nanoTime();
         try (PartitionIterator data = query.execute(options.getConsistency(), queryState, queryStartNanoTime))
         {
-            // Please note result processing time will be recorded and added to READ_EXECUTION_TIME, on top
-            // of the recorded replica processing time.
-            long coordinatorStartNanos = System.nanoTime();
             msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset);
             RequestSensors sensors = RequestTracker.instance.get();
             if (sensors != null)
             {
                 Context context = Context.from(this.table);
-                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, System.nanoTime() - coordinatorStartNanos);
+                // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
+                // (replica I/O + result processing + any short-read protection fetches) minus the replica max
+                // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
+                // clock skew or replica over-reporting producing a negative value.
+                double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
+                double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
+                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
                 sensors.syncAllSensors();
 
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
@@ -635,19 +640,23 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         // in memory all the rows that will be discarded by the offset. Key-based paging is also disabled if the offset
         // is explicitly set to zero.
         ResultMessage.Rows msg;
+        long totalStartNanos = System.nanoTime();
         try (PartitionIterator partitions = userOffset == NO_OFFSET
                                           ? pager.fetchPage(pageSize, queryStartNanoTime)
                                           : pager.readAll(pageSize, queryStartNanoTime))
         {
-            // Please note result processing time will be recorded and added to READ_EXECUTION_TIME, on top
-            // of the recorded replica processing time.
-            long coordinatorStartNanos = System.nanoTime();
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset);
             RequestSensors sensors = RequestTracker.instance.get();
             if (sensors != null)
             {
                 Context context = Context.from(this.table);
-                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, System.nanoTime() - coordinatorStartNanos);
+                // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
+                // (replica I/O + result processing + any short-read protection fetches) minus the replica max
+                // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
+                // clock skew or replica over-reporting producing a negative value.
+                double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
+                double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
+                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
                 sensors.syncAllSensors();
 
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
