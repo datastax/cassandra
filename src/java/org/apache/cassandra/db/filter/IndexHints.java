@@ -394,8 +394,8 @@ public class IndexHints
             throw new InvalidRequestException(TOO_MANY_INDEXES_ERROR + excluded.size());
 
         // The '*' wildcard is only supported for excluded_indexes: it's expanded here to the full set of indexes
-        // currently registered for the table, so it doesn't require a messaging version bump and replicas keep
-        // receiving an already-resolved, concrete set of excluded indexes exactly as before.
+        // currently registered for the table. This doesn't require explicit protocol support because replicas
+        // receive an already-resolved, concrete set of excluded indexes.
         Set<IndexMetadata> includedIndexes = fetchIndexes(included, table, indexRegistry, false);
         Set<IndexMetadata> excludedIndexes = fetchIndexes(excluded, table, indexRegistry, true);
 
@@ -439,26 +439,36 @@ public class IndexHints
      * do not exist in the specified index registry
      */
     private static Set<IndexMetadata> fetchIndexes(Set<QualifiedName> indexNames,
-                                                    TableMetadata table,
-                                                    IndexRegistry indexRegistry,
-                                                    boolean allowWildcard)
+                                                   TableMetadata table,
+                                                   IndexRegistry indexRegistry,
+                                                   boolean allowWildcard)
     {
         if (indexNames == null || indexNames.isEmpty())
             return Collections.emptySet();
 
-        boolean wildcard = indexNames.stream().anyMatch(QualifiedName::isWildcard);
-        if (wildcard && !allowWildcard)
-            throw new InvalidRequestException(WILDCARD_INCLUDED_INDEXES_ERROR);
-
-        Set<IndexMetadata> indexes = wildcard ? metadata(indexRegistry.listIndexes()) : new HashSet<>(indexNames.size());
+        boolean wildcardFound = false;
+        Set<IndexMetadata> indexes = new HashSet<>(indexNames.size());
 
         for (QualifiedName indexName : indexNames)
         {
             if (indexName.isWildcard())
-                continue;
+            {
+                if (wildcardFound)
+                    continue;
 
-            IndexMetadata index = fetchIndex(indexName, table, indexRegistry);
-            indexes.add(index);
+                if (!allowWildcard)
+                    throw new InvalidRequestException(WILDCARD_INCLUDED_INDEXES_ERROR);
+
+                wildcardFound = true;
+                indexes = metadata(indexRegistry.listIndexes());
+            }
+            else
+            {
+                IndexMetadata index = fetchIndex(indexName, table, indexRegistry);
+
+                if (!wildcardFound)
+                    indexes.add(index);
+            }
         }
 
         return indexes;
