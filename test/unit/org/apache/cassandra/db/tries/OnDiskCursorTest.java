@@ -39,8 +39,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 
 /// Covers the back-to-front integer decoding of [OnDiskCursor], which the round-trip tests only reach
-/// for the small content sizes they produce, and its behaviour on lengths that a corrupt commit-log
-/// record or message payload can present.
+/// for the small content sizes they produce, its behaviour on lengths that a corrupt commit-log
+/// record or message payload can present, and the parts of the cursor contract that a walk comparison
+/// against the in-memory trie does not check.
 public class OnDiskCursorTest
 {
     @BeforeClass
@@ -146,6 +147,56 @@ public class OnDiskCursorTest
                                                        }));
             assertEquals("Unknown content type tag: 18", thrown.getCause().getMessage());
         }
+    }
+
+    /// A cursor that has run out of positions must keep reporting the exhausted position from
+    /// [Cursor#encodedPosition], not the last live one it was on.
+    ///
+    /// The round-trip tests all drive a cursor by the position `advance` returns and stop as soon as that is
+    /// exhausted, so none of them asks an exhausted cursor where it is. The merge cursors do: they hold two or more
+    /// sources, advance the one that is behind, and then read the position of each to decide which to take next. A
+    /// source that answers with a live position after it has ended is advanced again and again, and the merge
+    /// republishes the content it ended on -- so a trie read back off disk silently gains rows when it is merged with
+    /// anything, and the merge only terminates because the other source does.
+    @Test
+    public void testExhaustedCursorReportsTheExhaustedPosition() throws IOException, TrieSpaceExhaustedException
+    {
+        InMemoryTrie<String> plain = InMemoryTrie.shortLived(VERSION);
+        plain.putRecursive(TrieUtil.directComparable("abc"), "one", (x, y) -> y);
+        plain.putRecursive(TrieUtil.directComparable("abd"), "two", (x, y) -> y);
+
+        try (OnDiskTrie<String> read = TrieUtil.onDiskRoundtripStrings(plain, false))
+        {
+            for (Direction direction : Direction.values())
+            {
+                assertExhaustedPositionReported("advanced to the end", read.cursor(direction), Cursor::advance);
+                assertExhaustedPositionReported("advanceMultiple to the end",
+                                                read.cursor(direction),
+                                                c -> c.advanceMultiple(null));
+                // Skipping past everything at the top level leaves the cursor exhausted through the ascent path
+                // rather than through a node running out of children.
+                assertExhaustedPositionReported("skipped past the end",
+                                                read.cursor(direction),
+                                                c -> c.skipTo(Cursor.encode(1, direction.select(0xFF, 0x00), direction)));
+                // A tail cursor ends the same way and is what tailTrie hands to a merge.
+                assertExhaustedPositionReported("tail advanced to the end",
+                                                read.cursor(direction).tailCursor(direction),
+                                                Cursor::advance);
+            }
+        }
+    }
+
+    private static void assertExhaustedPositionReported(String message,
+                                                       Cursor<String> cursor,
+                                                       java.util.function.ToLongFunction<Cursor<String>> step)
+    {
+        long position = cursor.encodedPosition();
+        while (!Cursor.isExhausted(position))
+            position = step.applyAsLong(cursor);
+
+        assertEquals(message,
+                     Cursor.toString(position),
+                     Cursor.toString(cursor.encodedPosition()));
     }
 
     /// A cursor over the given bytes. A leaf node with no content is appended as the root so that the

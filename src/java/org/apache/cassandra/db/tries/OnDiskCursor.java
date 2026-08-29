@@ -314,7 +314,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     private long ascend()
     {
         if (stackLength <= 0)
-            return exhausted;
+            return currentEncodedPosition = exhausted;
 
         --stackLength;
         currentImpl = loadStackImpl(stackLength);
