@@ -29,7 +29,6 @@ import java.util.stream.IntStream;
 import com.google.common.collect.Streams;
 import org.junit.After;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -250,15 +249,15 @@ public class MergedTrieSwitchableTest extends DeletionAwareTestBase
 
     /// The way `TrieBackedPartitionStage3` reaches the control: a cast of the cursor the trie hands out.
     ///
-    /// Ignored because it does not hold when `cassandra.debug_tries` is set, which this suite sets and which the
-    /// partition-level tests do not. [Trie#cursor] then wraps the cursor in a `VerificationCursor.Plain`, which does
-    /// not implement [DeletionAwareTrie.DeletionsStopControl], so the cast throws. The tests above reach the same
-    /// cursor through [Trie#makeCursor], which is what production gets with verification off. Enabling verification
-    /// for a read that hits a tombstone limit would fail with a ClassCastException as things stand.
-    @Ignore("VerificationCursor.Plain does not forward DeletionsStopControl; fails with cassandra.debug_tries set")
+    /// The tests above take the cursor through [Trie#makeCursor], which is what production gets with verification
+    /// off. With verification on -- which this suite sets and the partition-level tests do not -- [Trie#cursor]
+    /// wraps it, and the wrapper has to keep the control reachable or every read that hits a tombstone limit fails
+    /// with a ClassCastException. The `DEBUG` assertion is what stops this from passing vacuously: with
+    /// verification off the trie hands out the merge cursor itself and the check below is trivially true.
     @Test
     public void testControlIsReachableFromTheCursorTheTrieHandsOut()
     {
+        assertTrue("this test is only meaningful with trie verification enabled", Trie.DEBUG);
         Trie<DataPoint> switchable = inMemory(dataSet()).mergedTrieSwitchable(DataPoint::resolve);
         Cursor<DataPoint> cursor = switchable.cursor(Direction.FORWARD);
         assertTrue(cursor instanceof DeletionAwareTrie.DeletionsStopControl);

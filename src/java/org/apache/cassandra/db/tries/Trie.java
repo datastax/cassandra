@@ -349,7 +349,12 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
     @Override
     default Cursor<T> cursor(Direction direction)
     {
-        return DEBUG ? new VerificationCursor.Plain<>(makeCursor(direction))
-                     : makeCursor(direction);
+        if (!DEBUG)
+            return makeCursor(direction);
+        Cursor<T> cursor = makeCursor(direction);
+        // Callers reach the deletions switch by a cast of the cursor they are given; the wrapper must keep it.
+        return cursor instanceof DeletionAwareTrie.DeletionsStopControl
+               ? new VerificationCursor.PlainSwitchable<>(cursor)
+               : new VerificationCursor.Plain<>(cursor);
     }
 }
