@@ -320,10 +320,16 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
             this.stopIssuingDeletions = false;
         }
 
+        /// Constructs a tail of a cursor whose deletions may already have been switched off. The switch has to be
+        /// re-applied after the superclass constructor has run, because the latter calls the overridable
+        /// [#postAdvance] before this class's fields are assigned, i.e. with the flag still `false`, which opens the
+        /// deletion branch at the root of the tail.
         SwitchableLiveAndDeletionsMergeCursor(BiFunction<T, D, Z> resolver, DeletionAwareCursor<T, D> c1, boolean stopIssuingDeletions)
         {
             super(resolver, c1);
             this.stopIssuingDeletions = stopIssuingDeletions;
+            if (stopIssuingDeletions)
+                stopIssuingDeletions(null);
         }
 
         SwitchableLiveAndDeletionsMergeCursor(BiFunction<T, D, Z> resolver, DeletionAwareCursor<T, D> c1, RangeCursor<D> c2)

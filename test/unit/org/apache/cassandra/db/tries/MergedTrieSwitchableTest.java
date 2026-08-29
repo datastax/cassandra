@@ -222,20 +222,17 @@ public class MergedTrieSwitchableTest extends DeletionAwareTestBase
     }
 
     /// A tail taken at a position that has a deletion branch, after deletions have been switched off, must carry
-    /// live content only. It does not, and this test records that.
+    /// live content only.
     ///
     /// `SwitchableLiveAndDeletionsMergeCursor` passes the flag to the constructor of the tail it builds, but the
-    /// base `LiveAndDeletionsMergeCursor` constructor runs `postAdvance` before the subclass field is assigned. The
-    /// override of `postAdvance` therefore reads `false` and opens the deletion branch at the root of the tail; the
-    /// assignment that follows cannot close it again. The tails the suite takes elsewhere do not show it because
-    /// they are rooted below every deletion branch, so there is nothing for the constructor to re-open -- it takes a
-    /// branch at the trie root, which is how a partition-level deletion is stored, for the flag to be lost.
+    /// base `LiveAndDeletionsMergeCursor` constructor runs `postAdvance` before the subclass field is assigned, so
+    /// the tail's constructor has to re-apply the switch afterwards to close the deletion branch the superclass
+    /// opens at its root. The tails the suite takes elsewhere do not exercise that: they are rooted below every
+    /// deletion branch, so there is nothing for the superclass constructor to re-open -- it takes a branch at the
+    /// trie root, which is how a partition-level deletion is stored, for the flag to matter.
     ///
-    /// Consequence: a reader that has stopped issuing tombstones and then takes a tail of the switched view starts
-    /// issuing them again. `TrieBackedPartition` and `TrieBackedPartitionStage3` reach the switch through the tails
-    /// iterator and through a cursor walk respectively, neither of which takes a tail of the switched cursor, so
-    /// this looks latent today rather than live.
-    @Ignore("Tail of a switched cursor re-opens the deletion branch; see the comment above")
+    /// Without the re-application a reader that has stopped issuing tombstones and then takes a tail of the switched
+    /// view starts issuing them again.
     @Test
     public void testTailAtTheRootAfterSwitchingDeletionsOff()
     {
