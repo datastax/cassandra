@@ -145,6 +145,12 @@ public class OnDiskDeletionAwareTrieTest
         }
 
         assertRoundTripsInMemory(source);
+
+        // The same data with the deletion branch hoisted to the root. That is the only shape that fills both the
+        // descent and the ascent content slot of a node, which is where the on-disk payload order can be observed at
+        // all -- a swap of the two makes partition-level deletions vanish and leaves rows and range tombstones
+        // looking healthy. DataPoint.fromList(points) builds it below the root, so no other case here reaches it.
+        assertRoundTripsInMemory(DataPoint.fromList(points, false, true));
     }
 
     /// The same round trip without a file, which is how the commit log and messaging will use this:
