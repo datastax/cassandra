@@ -237,18 +237,16 @@ public class RootDeletionAccessorTest extends DeletionAwareTestBase
         }
     }
 
-    /// Documents a divergence between the two implementations that the shape tests above cannot see because they
-    /// build the trie before they read it.
+    /// The differential above, extended over a mutation -- which the shape tests cannot see because they build the
+    /// trie before they read it.
     ///
-    /// Trie views are documented as live -- a write to the source is reflected in the view -- and the cursor-based
-    /// default is, because it opens its cursor when it is walked. The [InMemoryDeletionAwareTrie] override is not:
-    /// it reads the root's alternate branch when `deletionBranchAtRoot()` is called and closes over the result, so a
-    /// view taken before a root deletion is written keeps reporting no deletion afterwards. This test asserts the
-    /// behaviour as it stands today, not as it should be; every current caller reads the view immediately, so the
-    /// difference is unobservable in production, but it is a real disagreement between an override and the default
-    /// it stands in for.
+    /// Trie views are documented as live: a write to the source is reflected in a view taken before it. The
+    /// cursor-based default is, because it reads the root when it opens its cursor, and the
+    /// [InMemoryDeletionAwareTrie] override has to read it in the same place to agree. Reading it when
+    /// `deletionBranchAtRoot()` is called and closing over the result instead leaves a view taken before a
+    /// partition deletion is written reporting no deletion for as long as it is held.
     @Test
-    public void testRootBranchViewIsCapturedEagerlyByTheOverride()
+    public void testRootBranchViewIsLiveAcrossAWrite()
     {
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> trie = InMemoryDeletionAwareTrie.shortLived(VERSION);
         var mutator = trie.mutator(DataPoint::combineLive,
@@ -260,6 +258,10 @@ public class RootDeletionAccessorTest extends DeletionAwareTestBase
         DeletionAwareTrie<LivePoint, DeletionMarker> viaDefault = trie::makeCursor;
         RangeTrie<DeletionMarker> fromOverride = trie.deletionBranchAtRoot();
         RangeTrie<DeletionMarker> fromDefault = viaDefault.deletionBranchAtRoot();
+        assertTrue("the override reports nothing before the write",
+                   markerEntries(fromOverride, Direction.FORWARD).isEmpty());
+        assertTrue("the default reports nothing before the write",
+                   markerEntries(fromDefault, Direction.FORWARD).isEmpty());
         try
         {
             mutator.apply(DeletionAwareTrie.deletedRange(ByteComparable.EMPTY, null, true, null, true, VERSION, PARTITION_DELETION));
@@ -272,8 +274,7 @@ public class RootDeletionAccessorTest extends DeletionAwareTestBase
         List<String> written = markerEntries(trie.deletionBranchAtRoot(), Direction.FORWARD);
         assertEquals("a view taken after the write reports it", 2, written.size());
         assertEquals("the default is live", written, markerEntries(fromDefault, Direction.FORWARD));
-        assertTrue("current behaviour: the override captured the absent branch when it was called",
-                   markerEntries(fromOverride, Direction.FORWARD).isEmpty());
+        assertEquals("the override is live", written, markerEntries(fromOverride, Direction.FORWARD));
     }
 
     /// Asserts the two implementations of both accessors agree, in both directions and down to the range states a
