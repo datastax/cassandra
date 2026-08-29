@@ -84,12 +84,19 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     int serializedSizeDS21 = -1;
     int serializedSizeDS20 = -1;
 
+    /// The size of the BTree encoding of this update at [org.apache.cassandra.net.MessagingService#VERSION_DS_21],
+    /// where [PartitionUpdate.PartitionUpdateSerializer] writes whichever of the two encodings is the smaller one and
+    /// therefore has to know both. Memoized next to the trie's size and for the same reason: a mutation is sized and
+    /// then serialized, and the choice has to be made in both.
+    int btreeSerializedSizeDS21 = -1;
+
     /// The trie as [TriePartitionUpdateSerializer#serializedSize] laid it out, kept so that the write that follows
     /// does not have to lay it out again. Sizing the trie means writing it -- the on-disk writer accounts a branch's
     /// size as it emits it -- and [org.apache.cassandra.db.Mutation] sizes a mutation and then immediately
     /// serializes it, so without this every update is laid out twice.
     ///
-    /// Cleared by the write that consumes it. Volatile because the same update can be serialized from more than one
+    /// Cleared by the write that consumes it, or, when the BTree encoding turns out to be the smaller one, by the
+    /// choice that rules that write out. Volatile because the same update can be serialized from more than one
     /// thread: the volatile write is what publishes the buffer, whose position and limit are not final and could
     /// otherwise be read as they were before the flip.
     volatile SerializedTrie serializedTrie;

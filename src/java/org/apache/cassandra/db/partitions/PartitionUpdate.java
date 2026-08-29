@@ -25,6 +25,7 @@ import java.util.List;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.primitives.Ints;
 
 import net.openhft.chronicle.core.util.ThrowingFunction;
 import org.apache.cassandra.db.Clustering;
@@ -494,7 +495,7 @@ public interface PartitionUpdate extends Partition
 
             if (version >= MessagingService.VERSION_DS_21)
             {
-                if (update instanceof TriePartitionUpdate)
+                if (update instanceof TriePartitionUpdate && useTrieFormat((TriePartitionUpdate) update, version))
                 {
                     out.writeByte(1);
                     TriePartitionUpdateSerializer.serialize(update, out, version);
@@ -560,10 +561,15 @@ public interface PartitionUpdate extends Partition
 
             if (version >= MessagingService.VERSION_DS_21)
             {
-                if (update instanceof TriePartitionUpdate)
-                    return size + 1L + TriePartitionUpdateSerializer.serializedSize(update, version);
+                size += 1L; // format byte (0 = BTree, 1 = trie)
 
-                size += 1L; // format byte (0 = BTree)
+                if (update instanceof TriePartitionUpdate)
+                {
+                    TriePartitionUpdate trieUpdate = (TriePartitionUpdate) update;
+                    return size + (useTrieFormat(trieUpdate, version)
+                                   ? TriePartitionUpdateSerializer.serializedSize(trieUpdate, version)
+                                   : btreeSerializedSize(trieUpdate, version));
+                }
             }
 
             if (version == MessagingService.VERSION_DSE_68)
@@ -573,6 +579,50 @@ public interface PartitionUpdate extends Partition
             {
                 return size + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
             }
+        }
+
+        /// Which of the two encodings a trie-backed update goes out in from [MessagingService#VERSION_DS_21] on. The
+        /// trie encoding is the smaller one where the partition's clusterings share prefixes, which it stores once
+        /// and the BTree encoding repeats per row; where they do not -- a single row above all, the shape a commit
+        /// log of single-row inserts is made of -- its nodes and pointers are overhead with nothing to pay for them.
+        /// So write whichever is smaller and let the format byte say which one it was.
+        ///
+        /// [#serialize] and [#serializedSize] both decide here, and the decision is a function of the update and the
+        /// version alone: the two sizes it compares are, and the memos they fill only avoid recomputing the same
+        /// values. So a `serialize` reaches the same answer whether or not a `serializedSize` ran before it, and two
+        /// threads serializing one update cannot pick different formats -- which is what makes the size handed to
+        /// [org.apache.cassandra.db.Mutation] and the commit log the size of the bytes that are then written.
+        private static boolean useTrieFormat(TriePartitionUpdate update, int version)
+        {
+            boolean useTrie = TriePartitionUpdateSerializer.serializedSize(update, version)
+                              <= btreeSerializedSize(update, version);
+            if (!useTrie)
+            {
+                // Sizing the trie lays it out and leaves the bytes on the update for the write to reuse. That write
+                // is not going to happen, so nothing would ever consume them.
+                TriePartitionUpdateSerializer.discardRetainedTrie(update, version);
+            }
+            return useTrie;
+        }
+
+        /// The size of the BTree encoding of a trie-backed update's body, memoized on the update alongside the size
+        /// of its trie encoding so that sizing an update twice -- which the mutation path does -- does not walk it
+        /// twice. [MessagingService#VERSION_DS_21] is the only version whose format byte offers the choice.
+        private static long btreeSerializedSize(TriePartitionUpdate update, int version)
+        {
+            if (version == MessagingService.VERSION_DS_21 && update.btreeSerializedSizeDS21 >= 0)
+                return update.btreeSerializedSizeDS21;
+
+            long size;
+            try (UnfilteredRowIterator iter = update.unfilteredIterator())
+            {
+                size = UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
+            }
+
+            if (version == MessagingService.VERSION_DS_21)
+                update.btreeSerializedSizeDS21 = Ints.saturatedCast(size);
+
+            return size;
         }
     }
 

@@ -127,7 +127,10 @@ public class PartitionUpdateTest extends CQLTester
 
             Assert.assertEquals(update.partitionKey(), deserializedUpdate.partitionKey());
             Assert.assertEquals(update.rowCount(), deserializedUpdate.rowCount());
-            Assert.assertEquals(update.dataSize(), deserializedUpdate.dataSize());
+            // dataSize is the accounting an update makes of the rows it was handed, and rows that have been through
+            // the BTree encoding account for themselves differently from the ones a trie builder produced, at
+            // VERSION_DS_20 as much as here. What a round trip owes the caller is the content, so assert that.
+            Assert.assertEquals(TriePartitionUpdate.asTrieUpdate(update), TriePartitionUpdate.asTrieUpdate(deserializedUpdate));
             Assert.assertEquals(update.operationCount(), deserializedUpdate.operationCount());
         }
     }
@@ -161,7 +164,8 @@ public class PartitionUpdateTest extends CQLTester
 
         Assert.assertEquals(trieUpdate.partitionKey(), deserialized.partitionKey());
         Assert.assertEquals(trieUpdate.rowCount(), deserialized.rowCount());
-        Assert.assertEquals(trieUpdate.dataSize(), deserialized.dataSize());
+        // As above: dataSize is accounting that a round trip does not carry, so compare the content instead.
+        Assert.assertEquals(trieUpdate, TriePartitionUpdate.asTrieUpdate(deserialized));
         Assert.assertEquals(trieUpdate.stats().minTimestamp, deserialized.stats().minTimestamp);
 
         // 2. Build update with expiring cells (TTL)
