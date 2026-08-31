@@ -41,7 +41,7 @@ import org.apache.cassandra.utils.ChecksumType;
 public class DataComponent
 {
     private static final ChecksumType checksumType = CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE.getEnum(ChecksumType.CRC32);
-    private static final Component digestComponent = getDigestComponent();
+    static final Component digestComponent = getDigestComponent();
 
     private static Component getDigestComponent()
     {

@@ -168,9 +168,9 @@ public interface SSTableFormat<R extends SSTableReader, W extends SSTableWriter>
             public static final Component.Type FILTER = Component.Type.createSingleton("FILTER", "Filter.db", true, null);
             // holds CRC32 checksum of the data file
             public static final Component.Type DIGEST = Component.Type.createSingleton("DIGEST", "Digest.crc32", true, null);
-            // holds CRC32 checksum of the data file
+            // holds CRC32C checksum of the data file
             public static final Component.Type DIGEST_CRC32C = Component.Type.createSingleton("DIGEST_CRC32C", "Digest.crc32c", SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS.getBoolean(), null);
-            // holds CRC32 checksum of the data file
+            // holds CRC64-NVME checksum of the data file
             public static final Component.Type DIGEST_CRC64NVME = Component.Type.createSingleton("DIGEST_CRC64NVME", "Digest.crc64nvme", SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS.getBoolean(), null);
             // holds the CRC32 for chunks in an uncompressed file.
             public static final Component.Type CRC = Component.Type.createSingleton("CRC", "CRC.db", true, null);

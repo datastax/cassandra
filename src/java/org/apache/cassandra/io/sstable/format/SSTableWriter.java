@@ -546,7 +546,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         {
             checkNotNull(getTableMetadataRef());
 
-            addComponents(ImmutableSet.of(Components.DATA, Components.STATS, Components.DIGEST, Components.TOC));
+            addComponents(ImmutableSet.of(Components.DATA, Components.STATS, DataComponent.digestComponent, Components.TOC));
 
             if (getTableMetadataRef().getLocal().params.compression.isEnabled())
             {

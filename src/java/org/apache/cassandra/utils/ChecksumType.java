@@ -95,7 +95,7 @@ public enum ChecksumType
         @Override
         public void update(Checksum checksum, ByteBuffer buf)
         {
-            ((CRC32C)checksum).update(buf);
+            ((CRC64NVME)checksum).update(buf);
         }
 
     };
