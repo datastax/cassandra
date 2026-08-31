@@ -79,26 +79,8 @@ public final class SensorsCustomParams
     }
 
     /**
-     * Iterate over all sensors in the {@link RequestSensors} and encodes each sensor value by applying the given
-     * {@param valueFunction} in the internode response message as custom parameters.
-     *
-     * @param sensors the collection of sensors to encode in the response
-     * @param valueFunction the function to get the sensor value
-     * @param response the response message builder to add the sensors to
-     * @param <T> the response message builder type
-     */
-    public static <T> void addSensorsToInternodeResponse(RequestSensors sensors, Function<Sensor, Double> valueFunction, Message.Builder<T> response)
-    {
-        Preconditions.checkNotNull(sensors);
-        Preconditions.checkNotNull(response);
-
-        for (Sensor sensor : sensors.getSensors(ignored -> true))
-            addSensorToInternodeResponse(response, sensor, valueFunction);
-    }
-
-    /**
-     * Iterate over all sensors in the {@link RequestSensors} and encodes each sensor values in the internode response
-     * message as custom parameters.
+     * Iterate over all sensors in the {@link RequestSensors} and encodes each sensor value in the internode
+     * response message as custom parameters.
      *
      * @param sensors the collection of sensors to encode in the response
      * @param response the response message builder to add the sensors to
@@ -106,7 +88,11 @@ public final class SensorsCustomParams
      */
     public static <T> void addSensorsToInternodeResponse(RequestSensors sensors, Message.Builder<T> response)
     {
-        addSensorsToInternodeResponse(sensors, Sensor::getValue, response);
+        Preconditions.checkNotNull(sensors);
+        Preconditions.checkNotNull(response);
+
+        for (Sensor sensor : sensors.getSensors(ignored -> true))
+            addSensorToInternodeResponse(response, sensor, Sensor::getValue);
     }
 
     /**
@@ -161,6 +147,10 @@ public final class SensorsCustomParams
 
         Optional<Sensor> requestSensor = sensors.getSensor(context, type);
         if (requestSensor.isEmpty())
+            return;
+
+        // Skip zero-valued sensors — they carry no useful information and needlessly inflate the custom payload.
+        if (requestSensor.get().getValue() == 0D)
             return;
 
         Optional<String> headerName = SENSOR_ENCODER.encodeRequestSensorName(requestSensor.get());

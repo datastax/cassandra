@@ -44,17 +44,17 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.locator.InOurDc;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
-import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
-import static org.apache.cassandra.net.Verb.*;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.concurrent.CountDownLatch.newCountDownLatch;
 import static com.google.common.collect.Iterables.all;
+import static org.apache.cassandra.net.Verb.READ_REPAIR_REQ;
 
 public class BlockingPartitionRepair
         extends AsyncFuture<Object> implements RequestCallback<Object>
@@ -97,7 +97,7 @@ public class BlockingPartitionRepair
         latch = newCountDownLatch(Math.max(blockFor, 0));
     }
 
-    int blockFor()
+    public int blockFor()
     {
         return writePlan.writeQuorum();
     }

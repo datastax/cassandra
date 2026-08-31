@@ -42,17 +42,17 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
     {
         // Initialize the sensor and set ExecutorLocals
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
+        RequestTracker.instance.set(sensors);
         Context context = Context.from(message.payload.update.metadata());
 
-        // Commit phase reads from the Paxos table and writes the proposal to the user table
-        sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
-        RequestTracker.instance.set(sensors);
-
+        long commitStartNanos = System.nanoTime();
         PaxosState.commitDirect(message.payload, WriteOrigin.fromMessage(message), p -> MutatorProvider.instance.onAppliedProposal(p));
+        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - commitStartNanos);
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();

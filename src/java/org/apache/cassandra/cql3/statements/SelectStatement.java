@@ -48,6 +48,7 @@ import org.apache.commons.lang3.builder.ToStringStyle;
 import com.google.common.math.IntMath;
 
 import org.apache.cassandra.cql3.Ordering;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,6 +68,7 @@ import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
+import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -79,7 +81,6 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.ResultSetBuilder;
 import org.apache.cassandra.cql3.selection.Selectable;
@@ -645,10 +646,20 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         try (PartitionIterator data = query.execute(options.getConsistency(), state, requestTime))
         {
             msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset, aggregationSpec, unmask, state);
+            RequestSensors sensors = RequestTracker.instance.get();
+            if (sensors != null)
+            {
+                Context context = Context.from(this.table);
+                sensors.syncAllSensors();
+
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+                // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
+                // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
+            }
         }
-        RequestSensors sensors = RequestTracker.instance.get();
-        Context context = Context.from(this.table);
-        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
         return msg;
     }
 
@@ -788,12 +799,19 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                           : pager.readAll(pageSize, requestTime))
         {
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset, aggregationSpec, unmask, state.getClientState());
+            RequestSensors sensors = RequestTracker.instance.get();
+            if (sensors != null)
+            {
+                Context context = Context.from(this.table);
+                sensors.syncAllSensors();
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+                // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
+                // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
+            }
         }
-
-        RequestSensors sensors = RequestTracker.instance.get();
-        Context context = Context.from(this.table);
-        Type sensorType = Type.READ_BYTES;
-        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, sensorType);
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
@@ -851,6 +869,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    userOffset,
                                    aggregationSpec);
 
+        // Sensors are not tracked for internal execution: RequestSensors is only initialised by StorageProxy and the
+        // verb handlers (for internode messages), so RequestTracker.instance.get() always returns null here. This path
+        // is reached via executeLocally(), which is only invoked for NODE_LOCAL consistency — a debug-only mode that
+        // deliberately bypasses the coordinator stack entirely.
         try (ReadExecutionController executionController = query.executionController())
         {
             if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))

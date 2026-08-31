@@ -290,12 +290,14 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     {
         // either a Mutation, or a Paxos Commit (MessageOut)
         private final Object mutation;
+        final int sentPayloadSize;
 
         @VisibleForTesting
         WriteCallbackInfo(Message message, InetAddressAndPort peer, RequestCallback<?> callback)
         {
             super(message, peer, callback);
             this.mutation = message.payload;
+            this.sentPayloadSize = message.payloadSize(MessagingService.current_version);
         }
 
         /**
