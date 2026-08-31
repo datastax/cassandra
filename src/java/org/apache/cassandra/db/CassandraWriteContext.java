@@ -81,10 +81,12 @@ public class CassandraWriteContext implements WriteContext
     /**
      * Where the enclosing mutation came from, or null when this context was not opened for a mutation.
      * <p>
-     * Null and {@link WriteOrigin#LOCAL} are different answers. Null means "there is no mutation here at
-     * all" -- an index build, a compaction, a cleanup, or the read path. {@code LOCAL} means "there is a
-     * mutation and it did not arrive over the wire", which is a real, common origin: a write this node
-     * coordinated, a commit log replay, a paxos commit applied where it was proposed.
+     * Null, {@link WriteOrigin#LOCAL} and {@link WriteOrigin#UNKNOWN} are three different answers. Null
+     * means "there is no mutation here at all" -- an index build, a compaction, a cleanup, or the read
+     * path. {@code LOCAL} means "there is a mutation and it provably did not arrive over the wire", which
+     * is a real, common origin: a write this node coordinated, a commit log replay, a paxos commit applied
+     * where it was proposed. {@code UNKNOWN} means the origin could not be determined (snitch missing or
+     * failing, local datacenter unresolved) -- the write may have come from anywhere.
      */
     public WriteOrigin getOrigin()
     {

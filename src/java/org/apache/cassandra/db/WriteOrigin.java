@@ -67,9 +67,21 @@ public final class WriteOrigin
     /**
      * A write with no inbound message behind it: coordinated by this node on behalf of a client, or applied
      * by an internal path such as commit log replay, batchlog replay of a locally owned mutation, or a
-     * paxos commit applied where it was proposed. Never cross-datacenter.
+     * paxos commit applied where it was proposed. Never cross-datacenter -- this constant means the write
+     * genuinely originated here, not "we could not tell"; that is {@link #UNKNOWN}.
      */
     public static final WriteOrigin LOCAL = new WriteOrigin(null, null, false, false);
+
+    /**
+     * The origin could not be determined: the snitch is missing or misbehaving, this node's own datacenter
+     * is not configured, or placing an endpoint threw. The write may well have come from another
+     * datacenter -- there is just no way to tell -- so this is deliberately NOT {@link #LOCAL}, whose
+     * contract is "genuinely originated here".
+     * <p>
+     * Both boolean accessors answer false, because answering true to either would be a guess; a consumer
+     * that must distinguish "provably local" from "undetermined" checks {@link #isUnknown()}.
+     */
+    public static final WriteOrigin UNKNOWN = new WriteOrigin(null, null, false, false);
 
     private final InetAddressAndPort coordinator;
     private final String datacenter;
@@ -90,7 +102,8 @@ public final class WriteOrigin
     /**
      * Derives the origin of an inbound mutation-carrying message.
      * <p>
-     * Never throws: any failure yields {@link #LOCAL}.
+     * Never throws: any failure yields {@link #UNKNOWN} -- not {@link #LOCAL}, because a write we could
+     * not place may well be cross-datacenter, and LOCAL promises it is not.
      * <p>
      * Note that "the snitch cannot place this endpoint" is mostly <em>not</em> such a failure. Most snitches
      * in this tree ({@code GossipingPropertyFileSnitch}, the cloud metadata snitches) answer an endpoint they
@@ -110,22 +123,22 @@ public final class WriteOrigin
 
             IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
             if (snitch == null)
-                return LOCAL;
+                return UNKNOWN;
 
             String localDatacenter = DatabaseDescriptor.getLocalDataCenter();
             if (localDatacenter == null)
                 localDatacenter = snitch.getLocalDatacenter();
 
-            return create(message.respondTo(), message.from(), localDatacenter, snitch::getDatacenter);
+            return origin(message.respondTo(), message.from(), localDatacenter, snitch::getDatacenter);
         }
         catch (Throwable t)
         {
             JVMStabilityInspector.inspectThrowable(t);
             // A snitch that throws for an endpoint (PropertyFileSnitch does, for one it has no entry for)
-            // must not fail the write. Degrade to "no origin" and say so once per problem endpoint rather
-            // than on every mutation -- this runs on the mutation stage.
+            // must not fail the write. Degrade to "undetermined" and say so once per problem endpoint
+            // rather than on every mutation -- this runs on the mutation stage.
             logger.debug("Could not determine the origin of a {} from {}", message.verb(), message.from(), t);
-            return LOCAL;
+            return UNKNOWN;
         }
     }
 
@@ -145,19 +158,19 @@ public final class WriteOrigin
 
             IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
             if (snitch == null)
-                return LOCAL;
+                return UNKNOWN;
 
             String localDatacenter = DatabaseDescriptor.getLocalDataCenter();
             if (localDatacenter == null)
                 localDatacenter = snitch.getLocalDatacenter();
 
-            return create(peer, peer, localDatacenter, snitch::getDatacenter);
+            return origin(peer, peer, localDatacenter, snitch::getDatacenter);
         }
         catch (Throwable t)
         {
             JVMStabilityInspector.inspectThrowable(t);
             logger.debug("Could not determine the origin of an apply from {}", peer, t);
-            return LOCAL;
+            return UNKNOWN;
         }
     }
 
@@ -165,26 +178,31 @@ public final class WriteOrigin
      * The datacenter-placement logic, free of any snitch or configuration lookup: the coordinator and
      * the sender of the message, this node's datacenter, and the topology to place them with.
      * <p>
-     * {@code datacenterOf} may return null for an endpoint it cannot place. Both unplaceable cases resolve
-     * <em>away</em> from claiming something we cannot support: an unplaceable coordinator yields
-     * {@link #LOCAL} rather than a guess at a remote datacenter, and an unplaceable sender leaves
-     * {@link #isDirectFromRemoteDatacenter()} false rather than asserting a delivery path we did not observe.
+     * {@code datacenterOf} may return null for an endpoint it cannot place. Undetermined cases resolve
+     * <em>away</em> from claiming something we cannot support, and are honest about which kind of
+     * "cannot" they are: no coordinator at all means the write genuinely started here ({@link #LOCAL}),
+     * while a coordinator or a local datacenter we cannot place means we simply do not know
+     * ({@link #UNKNOWN}). An unplaceable sender leaves {@link #isDirectFromRemoteDatacenter()} false
+     * rather than asserting a delivery path we did not observe.
      * (In practice most snitches here never return null — see {@link #fromMessage}.)
      * <p>
      * Public so that code reacting to an origin -- a secondary index, typically -- can build one
      * deterministically in a unit test instead of standing up a cluster.
      */
-    public static WriteOrigin create(@Nullable InetAddressAndPort coordinator,
+    public static WriteOrigin origin(@Nullable InetAddressAndPort coordinator,
                                      @Nullable InetAddressAndPort sender,
                                      @Nullable String localDatacenter,
                                      Function<InetAddressAndPort, String> datacenterOf)
     {
-        if (coordinator == null || localDatacenter == null)
+        if (coordinator == null)
             return LOCAL;
+
+        if (localDatacenter == null)
+            return UNKNOWN;
 
         String coordinatorDatacenter = datacenterOf.apply(coordinator);
         if (coordinatorDatacenter == null)
-            return LOCAL;
+            return UNKNOWN;
 
         if (localDatacenter.equals(coordinatorDatacenter))
             return new WriteOrigin(coordinator, coordinatorDatacenter, false, false);
@@ -247,9 +265,17 @@ public final class WriteOrigin
         return directFromRemoteDatacenter;
     }
 
+    /** True only for {@link #UNKNOWN}: the origin could not be determined, as opposed to provably local. */
+    public boolean isUnknown()
+    {
+        return this == UNKNOWN;
+    }
+
     @Override
     public String toString()
     {
+        if (this == UNKNOWN)
+            return "WriteOrigin{unknown}";
         if (coordinator == null)
             return "WriteOrigin{local}";
 
