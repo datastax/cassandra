@@ -106,13 +106,31 @@ public abstract class CASTestBase extends TestBaseImpl
                 Murmur3Partitioner.instance.getTokenFactory().fromString(ub.config().getString("initial_token")));
     }
 
+    static int pk(Cluster cluster, int lb, int ub, int skip)
+    {
+        return pk(Murmur3Partitioner.instance.getTokenFactory().fromString(cluster.get(lb).config().getString("initial_token")),
+                  Murmur3Partitioner.instance.getTokenFactory().fromString(cluster.get(ub).config().getString("initial_token")),
+                  skip);
+    }
+
     static int pk(Token lb, Token ub)
+    {
+        return pk(lb, ub, 0);
+    }
+
+    static int pk(Token lb, Token ub, int skip)
     {
         int pk = 0;
         Token pkt;
-        while (lb.compareTo(pkt = Murmur3Partitioner.instance.getToken(Int32Type.instance.decompose(pk))) >= 0 || ub.compareTo(pkt) < 0)
+        int skipped = 0;
+        while (true)
+        {
+            while (lb.compareTo(pkt = Murmur3Partitioner.instance.getToken(Int32Type.instance.decompose(pk))) >= 0 || ub.compareTo(pkt) < 0)
+                ++pk;
+            if (skipped++ == skip)
+                return pk;
             ++pk;
-        return pk;
+        }
     }
 
     int[] to(int ... nodes)

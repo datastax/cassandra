@@ -348,7 +348,7 @@ public class MutatorVetoTest extends CASTestBase
     {
         // schema changes need the whole ring: create the table before taking {4} out
         String tableName = "veto_repair";
-        int pk = pk(cluster, 1, 2);
+        int pk = pk(cluster, 1, 2, 0);
 
         commitOnlyOn(1, 3, tableName, pk, to(1, 2), to(1, 2));
 
@@ -399,7 +399,7 @@ public class MutatorVetoTest extends CASTestBase
     public void paxosRepairPoisonRefreshDeliversApplied() throws Throwable
     {
         String tableName = "veto_poison";
-        int pk = pk(cluster, 1, 2);
+        int pk = pk(cluster, 1, 2, 1);
 
         commitOnlyOn(1, 3, tableName, pk, to(1, 2), to(1, 2));
 
@@ -455,7 +455,7 @@ public class MutatorVetoTest extends CASTestBase
         }
         try
         {
-            int pk = pk(cluster, 3, 4);
+            int pk = pk(cluster, 3, 4, 2);
 
             // commit lands only on the pending {4}: dropped towards the natural replicas
             commitOnlyOn(2, 4, tableName, pk, to(1, 2, 3), to(1, 2, 3));
