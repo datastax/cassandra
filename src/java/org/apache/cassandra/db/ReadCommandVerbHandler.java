@@ -35,9 +35,9 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
@@ -117,6 +117,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
             command.trackWarnings();
 
         ReadResponse response;
+        long readStartNanos = System.nanoTime();
         try (ReadExecutionController controller = command.executionController(message.trackRepairedData());
              UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
@@ -153,6 +154,10 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         if (command.complete())
         {
+            long readElapsedNanos = System.nanoTime() - readStartNanos;
+            requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+            requestSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, readElapsedNanos);
+
             Message.Builder<ReadResponse> replyBuilder = message.responseWithBuilder(response);
             int size = replyBuilder.currentPayloadSize(MessagingService.current_version);
             requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);

@@ -45,14 +45,17 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.service.reads.thresholds.WarningContext;
 import org.apache.cassandra.service.reads.thresholds.WarningsSnapshot;
+import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.concurrent.Condition;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
-import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
-import org.apache.cassandra.net.MessagingService;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.atomic.AtomicIntegerFieldUpdater.newUpdater;
@@ -80,6 +83,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         = AtomicReferenceFieldUpdater.newUpdater(ReadCallback.class, WarningContext.class, "warningContext");
     private final boolean couldSpeculate;
     private final RequestSensors requestSensors;
+    private final ExecutionTimeSensorAccumulator execTimeAccumulator;
 
     public ReadCallback(ResponseResolver<E, P> resolver, ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, Dispatcher.RequestTime requestTime)
     {
@@ -101,6 +105,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockFor, this.replicaPlan);
         this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(blockFor);
     }
 
     protected P replicaPlan()
@@ -117,6 +122,12 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     public RequestSensors getRequestSensors()
     {
         return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     public boolean await(long commandTimeout, TimeUnit unit)
@@ -222,9 +233,9 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
                 return;
             }
         }
-
+        execTimeAccumulator.onResponse(requestSensors);
         resolver.preprocess(message);
-        
+
         trackReplicaResponseSize(message);
 
         /*

@@ -31,7 +31,7 @@ import com.google.common.util.concurrent.AtomicDouble;
  * and values are managed by the {@link RequestSensors} and {@link SensorsRegistry} classes, more specifically:
  * <ul>
  *     <li>In order to track a given measurement for a given request/response, register a sensor of the related type via
- *     {@link RequestSensors#registerSensor(Type)}.</li>
+ *     {@link RequestSensors#registerSensor(Context context, Type)}.</li>
  *     <li>Once registered, the sensor lifecycle spans across multiple request/response cycles, and its "global"
  *     value can be accessed via {@link SensorsRegistry}.</li>
  * </ul>
@@ -52,6 +52,11 @@ public class Sensor
         this.hashCode = Objects.hash(context, type);
     }
 
+    /**
+     * Atomically adds the specified amount to the current measured value of this sensor.
+     *
+     * @param value The amount to increment by.
+     */
     @VisibleForTesting
     public void increment(double value)
     {

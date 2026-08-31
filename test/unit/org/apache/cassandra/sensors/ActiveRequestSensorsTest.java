@@ -226,4 +226,5 @@ public class ActiveRequestSensorsTest
         assertThat(allSensors).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context1, type2).get(),
                                                          sensors.getSensor(context2, type1).get(), sensors.getSensor(context2, type2).get());
     }
+
 }
