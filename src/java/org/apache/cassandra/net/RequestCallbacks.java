@@ -327,6 +327,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         // either a Mutation, or a Paxos Commit (MessageOut)
         private final Object mutation;
         private final Replica replica;
+        final int sentPayloadSize;
 
         @VisibleForTesting
         WriteCallbackInfo(Message message, Replica replica, RequestCallback<?> callback, ConsistencyLevel consistencyLevel, boolean allowHints)
@@ -334,6 +335,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
             super(message, replica.endpoint(), callback);
             this.shouldHint = shouldHint(allowHints, message, consistencyLevel);
             this.mutation = message.payload;
+            this.sentPayloadSize = message.payloadSize(MessagingService.current_version);
             //Local writes shouldn't go through messaging service (https://issues.apache.org/jira/browse/CASSANDRA-10477)
             //noinspection AssertWithSideEffects
             assert !peer.equals(FBUtilities.getBroadcastAddressAndPort());

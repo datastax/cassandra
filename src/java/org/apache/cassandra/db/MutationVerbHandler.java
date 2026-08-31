@@ -30,10 +30,10 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
-import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
@@ -90,16 +90,31 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             ExecutorLocals locals = ExecutorLocals.create(requestSensors);
             ExecutorLocals.set(locals);
 
-            // Initialize internode bytes with the inbound message size:
             Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toList());
             for (TableMetadata tm : tables)
             {
                 Context context = Context.from(tm);
                 requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-                requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+                requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, (double) message.payloadSize(MessagingService.current_version) / tables.size());
             }
 
-            message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> respond(requestSensors, message, respondToAddress)).exceptionally(wto -> {
+            long writeStartNanos = System.nanoTime();
+            Collection<TableMetadata> writeTables = message.payload.getPartitionUpdates().stream()
+                                                                   .map(PartitionUpdate::metadata)
+                                                                   .filter(tm -> !tm.isIndex())
+                                                                   .collect(Collectors.toList());
+
+            message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> {
+                long writeElapsedNanos = System.nanoTime() - writeStartNanos;
+                for (TableMetadata tm : writeTables)
+                {
+                    Context writeContext = Context.from(tm);
+                    requestSensors.registerSensor(writeContext, Type.WRITE_EXECUTION_TIME);
+                    requestSensors.incrementSensor(writeContext, Type.WRITE_EXECUTION_TIME, (double) writeElapsedNanos / writeTables.size());
+                }
+                requestSensors.syncAllSensors();
+                respond(requestSensors, message, respondToAddress);
+            }).exceptionally(wto -> {
                 failed();
                 return null;
             });

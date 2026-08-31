@@ -29,9 +29,9 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
@@ -70,12 +70,12 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
 
         ReadResponse response;
+        long readStartNanos = System.nanoTime();
         try (ReadExecutionController controller = command.executionController(message.trackRepairedData());
              UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
             response = command.createResponse(iterator, controller.getRepairedDataInfo());
         }
-
         if (!command.complete())
         {
             Tracing.trace("Discarding partial response to {} (timed out)", message.from());
@@ -83,10 +83,16 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
             return;
         }
 
+        long readElapsedNanos = System.nanoTime() - readStartNanos;
+        requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        requestSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, readElapsedNanos);
+
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
         int size = reply.currentPayloadSize(MessagingService.current_version);
         requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+
         requestSensors.syncAllSensors();
+
         SensorsCustomParams.addSensorsToInternodeResponse(requestSensors, reply);
 
         Tracing.trace("Enqueuing response to {}", message.from());

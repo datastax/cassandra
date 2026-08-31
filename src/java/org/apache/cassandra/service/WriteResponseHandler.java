@@ -65,6 +65,8 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
     @Override
     public void onResponse(Message<T> m)
     {
+        execTimeAccumulator.onResponse(requestSensors);
+
         trackReplicaResponseSize(m);
         if (responsesUpdater.decrementAndGet(this) == 0)
             signal();

@@ -21,7 +21,9 @@ import javax.annotation.Nullable;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Type;
 
 /**
  * implementors of {@link RequestCallback} need to make sure that any public methods
@@ -51,6 +53,7 @@ public interface RequestCallback<T>
         return false;
     }
 
+
     /**
      * @return true if this callback is on the read path or it's expired counter leader response then its latency should be
      * given as input to the dynamic snitch.
@@ -68,5 +71,17 @@ public interface RequestCallback<T>
     default RequestSensors getRequestSensors()
     {
         return null;
+    }
+
+    /**
+     * Accumulates a replica's execution-time value into this callback's per-request accumulator.
+     * When enough responses have been received (callback-defined threshold), writes the accumulated
+     * max into the sensor (see {@link #onResponse(Message)} implementations) so it can be summed across sequential phases
+     * (e.g. CAS prepare + propose + commit).
+     *
+     * <p>Default is a no-op; callbacks that track execution time override this.</p>
+     */
+    default void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
     }
 }

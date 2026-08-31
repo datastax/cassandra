@@ -67,7 +67,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 public class DisabledSensorsTest
 {
-    public static final String KEYSPACE1 = "SensorsReadTest";
+    public static final String KEYSPACE1 = "DisabledSensorsTest";
     public static final String CF_STANDARD = "Standard";
     public static final String CF_STANDARD_SAI = "StandardSAI";
     private static final String CF_COUTNER = "Counter";
