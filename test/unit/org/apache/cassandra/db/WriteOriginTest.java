@@ -27,9 +27,15 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.SimpleSnitch;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -66,7 +72,7 @@ public class WriteOriginTest
 
     private static WriteOrigin origin(InetAddressAndPort coordinator, InetAddressAndPort sender)
     {
-        return WriteOrigin.create(coordinator, sender, LOCAL_DC, TOPOLOGY::get);
+        return WriteOrigin.origin(coordinator, sender, LOCAL_DC, TOPOLOGY::get);
     }
 
     @Test
@@ -137,7 +143,8 @@ public class WriteOriginTest
     }
 
     /**
-     * An unplaceable coordinator degrades to "local" rather than to a guessed remote datacenter.
+     * An unplaceable coordinator degrades to UNKNOWN -- not to LOCAL, whose contract is "provably
+     * originated here", and not to a guessed remote datacenter.
      *
      * Note what this does NOT protect against: most snitches in this tree never return null, they return a
      * synthetic datacenter name ("UNKNOWN_DC") for an endpoint they cannot place, which compares unequal to
@@ -145,15 +152,146 @@ public class WriteOriginTest
      * return null. isCrossDatacenter() is best-effort during a topology change, and says so.
      */
     @Test
-    public void unplacedCoordinatorDegradesToLocal()
+    public void unplacedCoordinatorDegradesToUnknown()
     {
-        assertSame(WriteOrigin.LOCAL, origin(unplaced, unplaced));
+        WriteOrigin origin = origin(unplaced, unplaced);
+
+        assertSame(WriteOrigin.UNKNOWN, origin);
+        assertTrue(origin.isUnknown());
+        // Conservative on both questions -- but distinguishable from LOCAL, which answers the same.
+        assertFalse(origin.isCrossDatacenter());
+        assertFalse(origin.isDirectFromRemoteDatacenter());
+        assertFalse(WriteOrigin.LOCAL.isUnknown());
     }
 
     @Test
-    public void unknownLocalDatacenterDegradesToLocal()
+    public void unknownLocalDatacenterDegradesToUnknown()
     {
-        assertSame(WriteOrigin.LOCAL, WriteOrigin.create(remoteCoordinator, remoteCoordinator, null, TOPOLOGY::get));
+        assertSame(WriteOrigin.UNKNOWN, WriteOrigin.origin(remoteCoordinator, remoteCoordinator, null, TOPOLOGY::get));
+    }
+
+    /**
+     * A missing sender is a determinable case, not an UNKNOWN one: the coordinator places fine, so the
+     * cross-datacenter answer stands -- only the delivery path is unclaimed.
+     */
+    @Test
+    public void missingSenderLeavesTheDeliveryPathUnclaimed()
+    {
+        WriteOrigin origin = origin(remoteCoordinator, null);
+
+        assertTrue(origin.isCrossDatacenter());
+        assertFalse(origin.isDirectFromRemoteDatacenter());
+        assertFalse(origin.isUnknown());
+    }
+
+    /**
+     * The environment-reading entry points, on their happy paths: fromMessage places both endpoints
+     * through the installed snitch, and fromPeer is its single-endpoint equivalent for the paxos verbs.
+     */
+    @Test
+    public void fromMessageAndFromPeerPlaceEndpointsThroughTheInstalledSnitch()
+    {
+        withSnitchAndLocalDc(placingSnitch(), LOCAL_DC, () -> {
+            WriteOrigin fromMessage = WriteOrigin.fromMessage(Message.synthetic(remoteCoordinator, Verb.MUTATION_REQ, NoPayload.noPayload));
+            assertEquals(remoteCoordinator, fromMessage.coordinator());
+            assertTrue(fromMessage.isCrossDatacenter());
+            assertTrue(fromMessage.isDirectFromRemoteDatacenter());
+
+            WriteOrigin fromPeer = WriteOrigin.fromPeer(remoteCoordinator);
+            assertEquals(remoteCoordinator, fromPeer.coordinator());
+            assertTrue(fromPeer.isCrossDatacenter());
+            assertTrue(fromPeer.isDirectFromRemoteDatacenter());
+
+            // A delivery this node addressed to itself is a local apply, not an inbound one
+            // (PaxosCommit#executeOnSelf reuses its request handler with the node's own address).
+            InetAddressAndPort self = FBUtilities.getBroadcastAddressAndPort();
+            assertSame(WriteOrigin.LOCAL, WriteOrigin.fromMessage(Message.synthetic(self, Verb.MUTATION_REQ, NoPayload.noPayload)));
+            assertSame(WriteOrigin.LOCAL, WriteOrigin.fromPeer(self));
+        });
+    }
+
+    /** No snitch installed at all: nothing can be placed, so the answer is "undetermined", not "local". */
+    @Test
+    public void missingSnitchDegradesToUnknown()
+    {
+        withSnitchAndLocalDc(null, LOCAL_DC, () -> {
+            assertSame(WriteOrigin.UNKNOWN, WriteOrigin.fromMessage(Message.synthetic(remoteCoordinator, Verb.MUTATION_REQ, NoPayload.noPayload)));
+            assertSame(WriteOrigin.UNKNOWN, WriteOrigin.fromPeer(remoteCoordinator));
+        });
+    }
+
+    /**
+     * This node's own datacenter cannot be resolved: neither the config nor the snitch knows it, so the
+     * comparison that decides cross-datacenter has nothing to compare against.
+     */
+    @Test
+    public void unresolvableLocalDatacenterDegradesToUnknown()
+    {
+        IEndpointSnitch noLocalDc = new SimpleSnitch()
+        {
+            @Override
+            public String getLocalDatacenter()
+            {
+                return null;
+            }
+        };
+        withSnitchAndLocalDc(noLocalDc, null, () -> {
+            assertSame(WriteOrigin.UNKNOWN, WriteOrigin.fromMessage(Message.synthetic(remoteCoordinator, Verb.MUTATION_REQ, NoPayload.noPayload)));
+            assertSame(WriteOrigin.UNKNOWN, WriteOrigin.fromPeer(remoteCoordinator));
+        });
+    }
+
+    /**
+     * A snitch that throws while placing an endpoint (PropertyFileSnitch does, for one it has no entry
+     * for) must not fail the write -- and must not claim the write is local either.
+     */
+    @Test
+    public void throwingSnitchDegradesToUnknown()
+    {
+        IEndpointSnitch throwing = new SimpleSnitch()
+        {
+            @Override
+            public String getDatacenter(InetAddressAndPort endpoint)
+            {
+                throw new IllegalStateException("no topology entry for " + endpoint);
+            }
+        };
+        withSnitchAndLocalDc(throwing, LOCAL_DC, () -> {
+            assertSame(WriteOrigin.UNKNOWN, WriteOrigin.fromMessage(Message.synthetic(remoteCoordinator, Verb.MUTATION_REQ, NoPayload.noPayload)));
+            assertSame(WriteOrigin.UNKNOWN, WriteOrigin.fromPeer(remoteCoordinator));
+        });
+    }
+
+    /** Swaps the environment fromMessage/fromPeer read, restoring it whatever the body does. */
+    private static void withSnitchAndLocalDc(IEndpointSnitch snitch, String localDc, Runnable body)
+    {
+        IEndpointSnitch previousSnitch = DatabaseDescriptor.getEndpointSnitch();
+        String previousLocalDc = DatabaseDescriptor.getLocalDataCenter();
+        DatabaseDescriptor.setEndpointSnitch(snitch);
+        DatabaseDescriptor.setLocalDataCenter(localDc);
+        try
+        {
+            body.run();
+        }
+        finally
+        {
+            DatabaseDescriptor.setEndpointSnitch(previousSnitch);
+            DatabaseDescriptor.setLocalDataCenter(previousLocalDc);
+        }
+    }
+
+    /** A snitch backed by the same explicit topology map the pure-factory tests use. */
+    private static IEndpointSnitch placingSnitch()
+    {
+        return new SimpleSnitch()
+        {
+            @Override
+            public String getDatacenter(InetAddressAndPort endpoint)
+            {
+                String dc = TOPOLOGY.get(endpoint);
+                return dc != null ? dc : LOCAL_DC; // the local node itself is in LOCAL_DC
+            }
+        };
     }
 
     @Test
