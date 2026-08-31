@@ -71,7 +71,7 @@ public class BigFormat implements SSTableFormat
                                                                                Component.SUMMARY,
                                                                                Component.TOC);
 
-    private final static Set<Component> STREAMING_COMPONENTS = SSTableFormat.shouldStreamNewChecksums()
+    private final static Set<Component> STREAMING_COMPONENTS = SHOULD_STREAM_NEW_CHECKSUMS
                                                                ? ImmutableSet.of(Component.DATA,
                                                                                  Component.PRIMARY_INDEX,
                                                                                  Component.SUMMARY,

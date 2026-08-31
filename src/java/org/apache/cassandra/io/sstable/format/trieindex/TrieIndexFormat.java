@@ -83,7 +83,7 @@ public class TrieIndexFormat implements SSTableFormat
                                                                                Component.CRC,
                                                                                Component.TOC);
 
-    private final static Set<Component> STREAMING_COMPONENTS = SSTableFormat.shouldStreamNewChecksums()
+    private final static Set<Component> STREAMING_COMPONENTS = SHOULD_STREAM_NEW_CHECKSUMS
                                                                ? ImmutableSet.of(Component.DATA,
                                                                                  Component.PARTITION_INDEX,
                                                                                  Component.ROW_INDEX,

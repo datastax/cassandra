@@ -3787,14 +3787,4 @@ public class DatabaseDescriptor
     {
         return conf.invalid_legacy_protocol_magic_no_spam_enabled;
     }
-
-    public static void setSSTableDigestType(Config.SSTableDigestType sstableDigestType)
-    {
-        conf.sstable_digest_type = sstableDigestType;
-    }
-
-    public static Config.SSTableDigestType getSSTableDigestType()
-    {
-        return conf.sstable_digest_type;
-    }
 }

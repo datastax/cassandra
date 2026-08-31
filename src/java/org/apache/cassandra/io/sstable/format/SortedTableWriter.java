@@ -28,6 +28,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
@@ -73,6 +74,7 @@ import org.apache.cassandra.utils.Throwables;
 public abstract class SortedTableWriter extends SSTableWriter
 {
     protected static final Logger logger = LoggerFactory.getLogger(SortedTableWriter.class);
+    protected static final Component digestComponent = getDigestComponent();
     protected final FileHandle.Builder dbuilder;
     protected final SequentialWriter dataFile;
     protected DataPosition dataMark;
@@ -106,14 +108,14 @@ public abstract class SortedTableWriter extends SSTableWriter
 
     protected static Component getDigestComponent()
     {
-        Config.SSTableDigestType ssTableDigestType = DatabaseDescriptor.getSSTableDigestType();
+        String ssTableDigestType = CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE.getString();
         switch (ssTableDigestType)
         {
-            case CRC32:
+            case "CRC32":
                 return Component.DIGEST;
-            case CRC32C:
+            case "CRC32C":
                 return Component.DIGEST_CRC32C;
-            case CRC64NVME:
+            case "CRC64NVME":
                 return Component.DIGEST_CRC64NVME;
             default:
                 throw new IllegalStateException("Unexpected sstable digest type: " + ssTableDigestType);

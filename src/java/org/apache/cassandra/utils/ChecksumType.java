@@ -27,6 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import software.amazon.awssdk.crt.checksums.CRC64NVME;
 
 public enum ChecksumType
@@ -99,7 +100,7 @@ public enum ChecksumType
     };
 
     private static final Logger logger = LoggerFactory.getLogger(ChecksumType.class);
-    private static final boolean AWS_CRT_CHECKSUMS_ENABLED = Boolean.parseBoolean(System.getProperty("cassandra.checksums.aws_crt_detection_enabled", "true"));
+    private static final boolean AWS_CRT_CHECKSUMS_ENABLED = CassandraRelevantProperties.SSTABLE_CHECKSUM_AWS_CRT_DETECTION_ENABLED.getBoolean();
     private static final boolean HAS_AWS_CRT_CRC64NVME;
 
     static {
