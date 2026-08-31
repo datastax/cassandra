@@ -47,13 +47,13 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Dispatcher;
@@ -144,10 +144,16 @@ public class UpdateStatement extends ModificationStatement
 
         RequestSensors sensors = RequestTracker.instance.get();
         Context context = Context.from(this.metadata());
-        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
-        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.INDEX_WRITE_BYTES);
-        // CAS updates incorporate read sensors
-        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+        if (sensors != null)
+        {
+            sensors.syncAllSensors();
+
+            SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.INDEX_WRITE_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+            // CAS updates incorporate read sensors
+            SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+        }
 
         return result;
     }

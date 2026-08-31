@@ -28,11 +28,11 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
-import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
@@ -120,12 +120,28 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
         {
             Context context = Context.from(tm);
             requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, (double) message.payloadSize(MessagingService.current_version) / tables.size());
         }
+        long writeStartNanos = System.nanoTime();
+        Collection<TableMetadata> writeTables = message.payload.getPartitionUpdates().stream()
+                                                               .map(PartitionUpdate::metadata)
+                                                               .filter(tm -> !tm.isIndex())
+                                                               .collect(Collectors.toList());
 
         // The origin was stamped in doVerb, before the payload could be handed to the forwarding path.
         message.payload.applyFuture(WriteOptions.DEFAULT)
-                       .addCallback(o -> respond(requestSensors, message, respondToAddress), wto -> failed());
+                       .addCallback(o -> {
+                                        long writeElapsedNanos = System.nanoTime() - writeStartNanos;
+                                        for (TableMetadata tm : writeTables)
+                                        {
+                                            Context writeContext = Context.from(tm);
+                                            requestSensors.registerSensor(writeContext, Type.WRITE_EXECUTION_TIME);
+                                            requestSensors.incrementSensor(writeContext, Type.WRITE_EXECUTION_TIME, (double) writeElapsedNanos / writeTables.size());
+                                        }
+                                        requestSensors.syncAllSensors();
+                                        respond(requestSensors, message, respondToAddress);
+                                    },
+                                    wto -> failed());
     }
 
     private static void forwardToLocalNodes(Message<Mutation> originalMessage, ForwardingInfo forwardTo)

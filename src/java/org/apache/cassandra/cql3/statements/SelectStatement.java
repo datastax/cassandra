@@ -48,6 +48,7 @@ import org.apache.commons.lang3.builder.ToStringStyle;
 import com.google.common.math.IntMath;
 
 import org.apache.cassandra.cql3.Ordering;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,6 +68,7 @@ import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
+import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -79,7 +81,6 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.ResultSetBuilder;
 import org.apache.cassandra.cql3.selection.Selectable;
@@ -133,6 +134,7 @@ import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
@@ -642,13 +644,27 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        boolean unmask)
     {
         ResultMessage.Rows msg;
+        long totalStartNanos = System.nanoTime();
         try (PartitionIterator data = query.execute(options.getConsistency(), state, requestTime))
         {
             msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset, aggregationSpec, unmask, state);
+            RequestSensors sensors = RequestTracker.instance.get();
+            if (sensors != null)
+            {
+                Context context = Context.from(this.table);
+                // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
+                // (replica I/O + result processing + any short-read protection fetches) minus the replica max
+                // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
+                // clock skew or replica over-reporting producing a negative value.
+                double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
+                double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
+                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
+                sensors.syncAllSensors();
+
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+            }
         }
-        RequestSensors sensors = RequestTracker.instance.get();
-        Context context = Context.from(this.table);
-        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
         return msg;
     }
 
@@ -783,17 +799,28 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         // in memory all the rows that will be discarded by the offset. Key-based paging is also disabled if the offset
         // is explicitly set to zero.
         ResultMessage.Rows msg;
+        long totalStartNanos = System.nanoTime();
         try (PartitionIterator partitions = userOffset == NO_OFFSET
                                           ? pager.fetchPage(pageSize, requestTime)
                                           : pager.readAll(pageSize, requestTime))
         {
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset, aggregationSpec, unmask, state.getClientState());
+            RequestSensors sensors = RequestTracker.instance.get();
+            if (sensors != null)
+            {
+                Context context = Context.from(this.table);
+                // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
+                // (replica I/O + result processing + any short-read protection fetches) minus the replica max
+                // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
+                // clock skew or replica over-reporting producing a negative value.
+                double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
+                double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
+                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
+                sensors.syncAllSensors();
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+            }
         }
-
-        RequestSensors sensors = RequestTracker.instance.get();
-        Context context = Context.from(this.table);
-        Type sensorType = Type.READ_BYTES;
-        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, sensorType);
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
@@ -851,6 +878,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    userOffset,
                                    aggregationSpec);
 
+        // Sensors are not tracked for internal execution: RequestSensors is only initialised by StorageProxy and the
+        // verb handlers (for internode messages), so RequestTracker.instance.get() always returns null here. This path
+        // is reached via executeLocally(), which is only invoked for NODE_LOCAL consistency — a debug-only mode that
+        // deliberately bypasses the coordinator stack entirely.
         try (ReadExecutionController executionController = query.executionController())
         {
             if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))

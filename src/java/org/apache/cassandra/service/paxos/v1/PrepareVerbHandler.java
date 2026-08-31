@@ -43,23 +43,30 @@ public class PrepareVerbHandler extends AbstractPaxosVerbHandler
     {
         // Initialize the sensor and set ExecutorLocals
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
+        RequestTracker.instance.set(sensors);
+
         Context context = Context.from(message.payload.update.metadata());
 
         // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor.
         // INDEX_WRITE_BYTES is not registered here because prepare only writes to system.paxos, which has no indexes.
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
+
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
-        RequestTracker.instance.set(sensors);
 
+        long prepareStartNanos = System.nanoTime();
         Message.Builder<PrepareResponse> reply = message.responseWithBuilder(doPrepare(message.payload));
+        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - prepareStartNanos);
 
-        // calculate outbound internode bytes before adding the sensor to the response
         int size = reply.currentPayloadSize(MessagingService.current_version);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+
         sensors.syncAllSensors();
+
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
+
         MessagingService.instance().send(reply.build(), message.from());
     }
 }
