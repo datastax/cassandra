@@ -23,10 +23,29 @@ package org.apache.cassandra.sensors;
  */
 public enum Type
 {
+    /** Inbound and outbound internode message bytes for a request/response cycle. */
     INTERNODE_BYTES,
 
+    /** Bytes read from storage (memtable or SSTable) on a replica. */
     READ_BYTES,
 
+    /** Bytes written to the primary table memtable on a replica. */
     WRITE_BYTES,
-    INDEX_WRITE_BYTES
+
+    /** Bytes written to secondary indexes on a replica. */
+    INDEX_WRITE_BYTES,
+
+    /**
+     * Wall-clock execution time in nanoseconds for a read operation, taken on each replica and the
+     * coordinator: please note execution times are not summed up but rather recorded separately, with the coordinator
+     * one recording the whole span of a request.
+     */
+    READ_EXECUTION_TIME,
+
+    /**
+     * Wall-clock execution time in nanoseconds for a write operation, taken on each replica and the
+     * coordinator: please note execution times are not summed up but rather recorded separately, with the coordinator
+     * one recording the whole span of a request.
+     */
+    WRITE_EXECUTION_TIME;
 }

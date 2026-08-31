@@ -41,15 +41,23 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
     {
         // Initialize the sensor and set ExecutorLocals
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
-        Context context = Context.from(message.payload.update.metadata());
-        sensors.registerSensor(context, Type.WRITE_BYTES);
-        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
-        sensors.registerSensor(context, Type.INTERNODE_BYTES);
-        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
+        Context context = Context.from(message.payload.update.metadata());
+
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        sensors.registerSensor(context, Type.INTERNODE_BYTES);
+
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+
+        long commitStartNanos = System.nanoTime();
         PaxosState.commit(message.payload, p -> MutatorProvider.getCustomOrDefault().onAppliedProposal(p));
+        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - commitStartNanos);
+
+        sensors.syncAllSensors();
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();

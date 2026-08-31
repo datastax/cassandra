@@ -21,6 +21,9 @@ package org.apache.cassandra.service;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -69,6 +72,7 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         wrapped.get();
     }
 
+    @Override
     public int blockFor()
     {
         return wrapped.blockFor();
@@ -87,6 +91,21 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
     public void signal()
     {
         wrapped.signal();
+    }
+
+    // Delegate sensor methods to wrapped so that accumulateExecutionTimeSensor feeds wrapped's
+    // accumulator and wrapped.onResponse fires it — keeping one accumulator per write phase.
+
+    @Override
+    public RequestSensors getRequestSensors()
+    {
+        return wrapped.getRequestSensors();
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        wrapped.accumulateExecutionTimeSensor(context, type, value);
     }
 
     public static class BatchlogCleanup

@@ -28,8 +28,11 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
@@ -40,7 +43,8 @@ public abstract class AbstractPaxosCallback<T> implements RequestCallback<T>
     private final TableMetadata metadata;
     private final ConsistencyLevel consistency;
     private final long queryStartNanoTime;
-    private final RequestSensors requestSensors;
+    protected final RequestSensors requestSensors;
+    protected final ExecutionTimeSensorAccumulator execTimeAccumulator;
 
     public AbstractPaxosCallback(TableMetadata metadata, int targets, ConsistencyLevel consistency, long queryStartNanoTime)
     {
@@ -50,12 +54,19 @@ public abstract class AbstractPaxosCallback<T> implements RequestCallback<T>
         latch = new CountDownLatch(targets);
         this.queryStartNanoTime = queryStartNanoTime;
         this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(targets);
     }
 
     @Override
     public RequestSensors getRequestSensors()
     {
         return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     public int getResponseCount()

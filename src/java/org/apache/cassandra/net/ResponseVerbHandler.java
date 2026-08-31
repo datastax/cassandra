@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.net;
 
+import java.util.Collection;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,6 +73,23 @@ public class ResponseVerbHandler implements IVerbHandler
         }
     }
 
+    /**
+     * Accumulates sensors from a replica internode response into the coordinator's {@link RequestSensors}.
+     *
+     * <p><em>Bytes</em> sensors ({@link Type#WRITE_BYTES}, {@link Type#READ_BYTES},
+     * {@link Type#INDEX_WRITE_BYTES}, {@link Type#INTERNODE_BYTES}) are accumulated by addition
+     * because replicas execute sequentially from the coordinator's perspective and their byte
+     * contributions are independent.</p>
+     *
+     * <p><em>Execution-time</em> sensors ({@link Type#READ_EXECUTION_TIME},
+     * {@link Type#WRITE_EXECUTION_TIME}) are accumulated by {@code max} because replicas execute
+     * in parallel — only the slowest replica's time is relevant. The coordinator later adds its
+     * own local work on top (result processing for reads, post-mutate work for writes) via a
+     * regular {@code incrementSensor} at the CQL statement layer.</p>
+     *
+     * <p>Please note {@link RequestSensors#syncAllSensors()} is not invoked here, but at the CQL statement layer:
+     * this is to reduce number of calls, and because local-only requests would not go through this handler.</p>
+     */
     private void trackReplicaSensors(RequestCallbacks.CallbackInfo callbackInfo, Message<?> message)
     {
         RequestSensors sensors = callbackInfo.callback.getRequestSensors();
@@ -84,12 +103,19 @@ public class ResponseVerbHandler implements IVerbHandler
             if (mutation == null)
                 return;
 
-            for (PartitionUpdate pu : mutation.getPartitionUpdates())
+            Collection<PartitionUpdate> nonIndexUpdates = mutation.getPartitionUpdates().stream()
+                                                                  .filter(pu -> !pu.metadata().isIndex())
+                                                                  .collect(Collectors.toList());
+            int allTablesCount = mutation.getPartitionUpdates().size();
+            double internodeBytesPerTable = allTablesCount == 0 ? 0
+                                                                : (double) writerInfo.sentPayloadSize / allTablesCount;
+            for (PartitionUpdate pu : nonIndexUpdates)
             {
                 Context context = Context.from(pu.metadata());
-                if (pu.metadata().isIndex()) continue;
                 incrementSensor(sensors, context, Type.WRITE_BYTES, message);
                 incrementSensor(sensors, context, Type.INDEX_WRITE_BYTES, message);
+                sensors.incrementSensor(context, Type.INTERNODE_BYTES, internodeBytesPerTable);
+                accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
             }
         }
         else if (callbackInfo.callback instanceof ReadCallback)
@@ -97,6 +123,8 @@ public class ResponseVerbHandler implements IVerbHandler
             ReadCallback<?, ?> readCallback = (ReadCallback<?, ?>) callbackInfo.callback;
             Context context = Context.from(readCallback.command());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
+            incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
+            accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.READ_EXECUTION_TIME, message);
         }
         // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo.
         // INDEX_WRITE_BYTES is not tracked here: prepare/propose only write to system.paxos, which has no indexes.
@@ -106,11 +134,13 @@ public class ResponseVerbHandler implements IVerbHandler
             Context context = Context.from(paxosCallback.getMetadata());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+            incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
+            accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
         }
     }
 
     /**
-     * Increments the sensor for the given context and type based on the value encoded in the replica response message.
+     * Increments the sensor for the given context and type by adding the value encoded in the replica response message.
      */
     private void incrementSensor(RequestSensors sensors, Context context, Type type, Message<?> message)
     {
@@ -124,5 +154,24 @@ public class ResponseVerbHandler implements IVerbHandler
 
         double sensorValue = SensorsCustomParams.sensorValueFromInternodeResponse(message, customParam.get());
         sensors.incrementSensor(context, type, sensorValue);
+    }
+
+    /**
+     * Reads the execution-time value from the replica response message and feeds it into the
+     * callback's per-context running max. The response count is incremented separately inside
+     * the callback's {@code onResponse} implementation.
+     */
+    private void accumulateExecutionTimeSensor(RequestCallback callback, RequestSensors sensors, Context context, Type executionType, Message<?> message)
+    {
+        Optional<Sensor> sensor = sensors.getSensor(context, executionType);
+        if (sensor.isEmpty())
+            return;
+
+        Optional<String> customParam = SensorsCustomParams.paramForRequestSensor(sensor.get());
+        if (customParam.isEmpty())
+            return;
+
+        double sensorValue = SensorsCustomParams.sensorValueFromInternodeResponse(message, customParam.get());
+        callback.accumulateExecutionTimeSensor(context, executionType, sensorValue);
     }
 }
