@@ -20,12 +20,11 @@ package org.apache.cassandra.io.sstable.format;
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.Collection;
-import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +45,6 @@ import org.apache.cassandra.net.AsyncStreamingInputPlus;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadataRef;
 
-import static java.lang.String.format;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 
 public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
@@ -54,7 +52,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     private static final Logger logger = LoggerFactory.getLogger(SSTableZeroCopyWriter.class);
 
     private volatile SSTableReader finalReader;
-    private final Map<Component.Type, SequentialWriter> componentWriters;
+    private final Map<String, SequentialWriter> componentWriters;
     private final LifecycleNewTracker lifecycleNewTracker;
 
     private static final SequentialWriterOption WRITER_OPTION =
@@ -73,14 +71,10 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         this.lifecycleNewTracker = lifecycleNewTracker;
 
         lifecycleNewTracker.trackNew(this);
-        this.componentWriters = new EnumMap<>(Component.Type.class);
+        this.componentWriters = new HashMap<>();
 
-        if (!descriptor.getFormat().streamingComponents().containsAll(components))
-            throw new AssertionError(format("Unsupported streaming component detected %s",
-                                            Sets.difference(ImmutableSet.copyOf(components), descriptor.getFormat().streamingComponents())));
-
-        for (Component c : components)
-            componentWriters.put(c.type, makeWriter(descriptor, c));
+        for (Component c : components())
+            componentWriters.put(c.name, makeWriter(descriptor, c));
     }
 
     private static SequentialWriter makeWriter(Descriptor descriptor, Component component)
@@ -200,14 +194,15 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
             writer.close();
     }
 
-    public void writeComponent(Component.Type type, DataInputPlus in, long size)
+    public void writeComponent(Component component, DataInputPlus in, long size)
     {
-        logger.info("Writing component {} to {} length {}", type, componentWriters.get(type).getFile(), prettyPrintMemory(size));
+        SequentialWriter writer = componentWriters.get(component.name);
+        logger.info("Writing component {} to {} length {}", component, writer.getFile(), prettyPrintMemory(size));
 
         if (in instanceof AsyncStreamingInputPlus)
-            write((AsyncStreamingInputPlus) in, size, componentWriters.get(type));
+            write((AsyncStreamingInputPlus) in, size, writer);
         else
-            write(in, size, componentWriters.get(type));
+            write(in, size, writer);
     }
 
     private void write(AsyncStreamingInputPlus in, long size, SequentialWriter writer)
