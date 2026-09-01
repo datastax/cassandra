@@ -607,6 +607,24 @@ public enum OnDiskReadNodeType
             assert hasAscent | hasDescent;
             state.nodeImplData = -1;
 
+            if (state.alternateInAscentSlot)
+            {
+                // The ascent slot holds an alternate-branch pointer, not content to present on the return path: flag
+                // it on the position and step over its bytes. The branch is read on demand, by
+                // OnDiskCursor.alternateBranch(). A deletion-aware data trie is never written ordered, so the two
+                // sides are never swapped here.
+                assert !swap;
+                if (hasAscent)
+                    state.currentEncodedPosition |= Cursor.MAY_HAVE_DELETION_BRANCH_BIT;
+                if (hasDescent)
+                    currentPos = state.getContentAtPos(currentPos);
+                if (hasChild)
+                    state.descendPostPrefixOrRelay(maybeSkipOverContent(state, currentPos, hasAscent));
+                else
+                    state.descendPostPrefixToEmpty();
+                return;
+            }
+
             // ascent or descent-only prefix is presented immediately, possibly by switching position to return path
             if (!hasChild && (hasDescent != hasAscent))
             {
@@ -703,11 +721,29 @@ public enum OnDiskReadNodeType
         }
 
         @Override
+        public long getAlternateBranch(OnDiskCursor<?> state, int nodeCode, long postCodePos)
+        {
+            if ((nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) == 0)
+                return -1;
+            long pos = maybeSkipOverContent(state, postCodePos,
+                                            (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0);
+            int vintlen = state.readVIntLength(pos);
+            int len = state.readContentLength(pos, vintlen);
+            // These bytes can be a corrupt commit-log record; a width readSizedInt cannot hold would be an assertion
+            // failure there, so reject it the way readContentLength rejects an impossible length.
+            if (len < 1 || len > 8)
+                throw OnDiskCursor.corrupt("alternate branch pointer of " + len + " bytes before position " + pos);
+            return state.readSizedInt(pos - vintlen, len);
+        }
+
+        @Override
         public <T> T getContent(OnDiskCursor<T> state, Direction direction, boolean returnOtherDirectionIfNoChildren, int nodeCode, long postCodePos)
         {
             boolean hasDescent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0;
             boolean hasChild = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_CHILD) != 0;
-            boolean hasAscent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) != 0;
+            // An alternate-branch pointer in the ascent slot is not content and must never be handed back as such.
+            boolean hasAscent = !state.alternateInAscentSlot
+                                && (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) != 0;
             long pos = postCodePos;
             if (direction.isForward())
             {
@@ -746,8 +782,16 @@ public enum OnDiskReadNodeType
             String ascentContent = "";
             if (hasAscent)
             {
-                pos = state.getContentAtPos(pos);
-                ascentContent = "A[" + state.content + "]";
+                if (state.alternateInAscentSlot)
+                {
+                    ascentContent = "alt: " + getAlternateBranch(state, nodeCode, state.postCodePos);
+                    pos = maybeSkipOverContent(state, pos, true);
+                }
+                else
+                {
+                    pos = state.getContentAtPos(pos);
+                    ascentContent = "A[" + state.content + "]";
+                }
             }
             // getContentAtPos above also sets the content flag on the position; this method must not change state.
             state.content = saved;
@@ -821,6 +865,13 @@ public enum OnDiskReadNodeType
     public <T> T getContent(OnDiskCursor<T> state, Direction direction, boolean returnOtherDirectionIfNoChildren, int nodeCode, long postCodePos)
     {
         return null; // overridden by leaf and prefix
+    }
+
+    /// The alternate-branch pointer in this node's ascent-side content slot, or -1 if it has none.
+    /// Only PREFIX nodes can carry one.
+    public long getAlternateBranch(OnDiskCursor<?> state, int nodeCode, long postCodePos)
+    {
+        return -1;
     }
 
     /// Return the position of the first child in the given direction of the node described by `nodeCode` and

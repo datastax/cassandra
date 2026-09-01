@@ -100,9 +100,10 @@ public class OnDiskCursor<T> implements Cursor<T>
                         ByteComparable.Version byteComparableVersion,
                         Direction direction,
                         boolean isOrdered,
+                        boolean alternateInAscentSlot,
                         long root)
     {
-        this(deserializer, source, byteComparableVersion, direction, isOrdered);
+        this(deserializer, source, byteComparableVersion, direction, isOrdered, alternateInAscentSlot);
         try
         {
             descendInto(Cursor.rootPosition(direction), root);
@@ -122,10 +123,11 @@ public class OnDiskCursor<T> implements Cursor<T>
                         ByteComparable.Version byteComparableVersion,
                         Direction direction,
                         boolean isOrdered,
+                        boolean alternateInAscentSlot,
                         long rootPostCodePos,
                         int rootNodeCode)
     {
-        this(deserializer, source, byteComparableVersion, direction, isOrdered);
+        this(deserializer, source, byteComparableVersion, direction, isOrdered, alternateInAscentSlot);
         try
         {
             descendInto(Cursor.rootPosition(direction), rootPostCodePos, rootNodeCode);
@@ -141,7 +143,8 @@ public class OnDiskCursor<T> implements Cursor<T>
                          RebuffererSource source,
                          ByteComparable.Version byteComparableVersion,
                          Direction direction,
-                         boolean isOrdered)
+                         boolean isOrdered,
+                         boolean alternateInAscentSlot)
     {
         this.source = source;
         this.rebufferer = source.takeRebufferer();
@@ -151,6 +154,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.rdr = new SharedStream(deserializer);
         this.byteComparableVersion = byteComparableVersion;
         this.isOrdered = isOrdered;
+        this.alternateInAscentSlot = alternateInAscentSlot;
         this.swapContentSides = direction.select(false, isOrdered);
         this.exhausted = Cursor.exhaustedPosition(direction);
     }
@@ -212,6 +216,10 @@ public class OnDiskCursor<T> implements Cursor<T>
     final ByteComparable.Version byteComparableVersion;
     final boolean swapContentSides;
     final boolean isOrdered; // determines swapContentSides above; needed if tailTrie switches direction
+    /// True when a node's ascent-side content slot holds an alternate-branch pointer rather than return-path content,
+    /// i.e. when this walks the data trie of a deletion-aware trie. The walk then never stops on that slot; it is read
+    /// on demand by [#alternateBranch]. See [DeletionAwareFileWriter].
+    final boolean alternateInAscentSlot;
 
 
     Rebufferer.BufferHolder currentBH;
@@ -248,8 +256,9 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.currentFullNodePostCodePos = postCodePos;
         this.currentFullNodeCode = nodeCode;
         this.content = null;
-        // Content is loaded by the node implementation below; until it is, this node is known to have none.
-        this.currentEncodedPosition = encodedPosition & ~MAY_HAVE_CONTENT_BIT;
+        // Both flags are set by the node implementation below; until they are, this node is known to have neither
+        // content nor a deletion branch.
+        this.currentEncodedPosition = encodedPosition & ~(MAY_HAVE_CONTENT_BIT | MAY_HAVE_DELETION_BRANCH_BIT);
         this.postCodePos = postCodePos;
         this.nodeCode = nodeCode;
         this.currentImpl = selectNodeImpl(nodeCode);
@@ -344,7 +353,15 @@ public class OnDiskCursor<T> implements Cursor<T>
     @Override
     public Cursor<T> tailCursor(Direction direction)
     {
-        return new OnDiskCursor<>(rdr.deserializer, source, byteComparableVersion, direction, isOrdered, currentFullNodePostCodePos, currentFullNodeCode);
+        return new OnDiskCursor<>(rdr.deserializer, source, byteComparableVersion, direction, isOrdered, alternateInAscentSlot, currentFullNodePostCodePos, currentFullNodeCode);
+    }
+
+    /// The position of the alternate branch the current node carries in its ascent-side content slot, or -1 if it
+    /// has none. Only meaningful when [#alternateInAscentSlot] is set.
+    long alternateBranch()
+    {
+        return OnDiskReadNodeType.selectNodeImpl(currentFullNodeCode)
+                                 .getAlternateBranch(this, currentFullNodeCode, currentFullNodePostCodePos);
     }
 
     long getContentAtPos(long currentPos)
@@ -538,7 +555,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// Used for debugging.
     String dumpNode(long node)
     {
-        return new OnDiskCursor<>(rdr.deserializer, source, byteComparableVersion, direction(), swapContentSides, node).dumpNode();
+        return new OnDiskCursor<>(rdr.deserializer, source, byteComparableVersion, direction(), swapContentSides, alternateInAscentSlot, node).dumpNode();
     }
 
     static class Range<S extends RangeState<S>> extends OnDiskCursor<S> implements RangeCursor<S>
@@ -550,13 +567,13 @@ public class OnDiskCursor<T> implements Cursor<T>
 
         public Range(DataDeserializer<S> deserializer, RebuffererSource source, ByteComparable.Version byteComparableVersion, Direction direction, long root)
         {
-            super(deserializer, source, byteComparableVersion, direction, true, root);
+            super(deserializer, source, byteComparableVersion, direction, true, false, root);
             initActiveState();
         }
 
         public Range(DataDeserializer<S> deserializer, RebuffererSource source, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode)
         {
-            super(deserializer, source, byteComparableVersion, direction, true, rootPostCodePos, rootNodeCode);
+            super(deserializer, source, byteComparableVersion, direction, true, false, rootPostCodePos, rootNodeCode);
             initActiveState();
         }
 
