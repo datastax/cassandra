@@ -26,10 +26,12 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
-import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.disk.v2.TokenOnlyPrimaryKey;
+import org.apache.cassandra.index.sai.disk.v2.V2RowAwarePrimaryKeyFactory;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+
+import static org.apache.cassandra.db.ClusteringPrefix.Kind.STATIC_CLUSTERING;
 
 /**
  * Representation of the primary key for a row consisting of the {@link DecoratedKey} and
@@ -40,7 +42,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * For the V2 on-disk format the {@link DecoratedKey} and {@link Clustering} are supported.
  *
  */
-public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
+public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable, ByteComparable
 {
     /**
      * A factory for creating {@link PrimaryKey} instances
@@ -105,14 +107,14 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
      * returned is based on the capabilities of the {@link IndexFeatureSet}.
      *
      * @param clusteringComparator the {@link ClusteringComparator} used by the
-     *                             {@link RowAwarePrimaryKeyFactory} for clustering comparisons
+     *                             {@link V2RowAwarePrimaryKeyFactory} for clustering comparisons
      * @param indexFeatureSet the {@link IndexFeatureSet} used to decide the type of
      *                        factory to use
      * @return a {@link Factory} for {@link PrimaryKey} creation
      */
     static Factory factory(ClusteringComparator clusteringComparator, IndexFeatureSet indexFeatureSet)
     {
-        return indexFeatureSet.isRowAware() ? new RowAwarePrimaryKeyFactory(clusteringComparator)
+        return indexFeatureSet.isRowAware() ? new V2RowAwarePrimaryKeyFactory(clusteringComparator)
                                             : new PartitionAwarePrimaryKeyFactory();
     }
 
@@ -159,6 +161,16 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
     }
 
     /**
+     * Return whether this primary key represents a static row (i.e., its clustering is
+     * {@link Clustering#STATIC_CLUSTERING}).
+     */
+    default boolean isStaticRow()
+    {
+        Clustering<?> c = clustering();
+        return c != null && c.kind() == STATIC_CLUSTERING;
+    }
+
+    /**
      * Load the primary key from the {@link Supplier<PrimaryKey>} (if one
      * is available) and fully populate the primary key.
      *
@@ -176,6 +188,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
      * @param version the {@link ByteComparable.Version} to use for the implementation
      * @return the {@code ByteSource} byte comparable.
      */
+    @Override
     ByteSource asComparableBytes(ByteComparable.Version version);
 
     /**
