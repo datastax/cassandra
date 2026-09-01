@@ -27,8 +27,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import software.amazon.awssdk.crt.checksums.CRC64NVME;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_CHECKSUM_AWS_CRT_DETECTION_ENABLED;
 
 public enum ChecksumType
 {
@@ -86,8 +86,17 @@ public enum ChecksumType
         @Override
         public Checksum newInstance()
         {
-            if (HAS_AWS_CRT_CRC64NVME)
-                return new CRC64NVME();
+            if (AWS_CRT_CRC64NVME_CLASS != null)
+            {
+                try
+                {
+                    return (Checksum) AWS_CRT_CRC64NVME_CLASS.getDeclaredConstructor().newInstance();
+                }
+                catch (ReflectiveOperationException e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }
             return new PureJavaCRC64NVME();
         }
 
@@ -96,21 +105,20 @@ public enum ChecksumType
         {
             checksum.update(buf);
         }
-
     };
 
     private static final Logger logger = LoggerFactory.getLogger(ChecksumType.class);
-    private static final boolean AWS_CRT_CHECKSUMS_ENABLED = CassandraRelevantProperties.SSTABLE_CHECKSUM_AWS_CRT_DETECTION_ENABLED.getBoolean();
-    private static final boolean HAS_AWS_CRT_CRC64NVME;
+    private static final Class<?> AWS_CRT_CRC64NVME_CLASS;
 
     static {
-        boolean available = false;
-        if (AWS_CRT_CHECKSUMS_ENABLED)
+        Class<?> cls = null;
+        if (SSTABLE_CHECKSUM_AWS_CRT_DETECTION_ENABLED.getBoolean())
         {
             try
             {
-                Class.forName("software.amazon.awssdk.crt.checksums.CRC64NVME");
-                available = true;
+                cls = Class.forName("software.amazon.awssdk.crt.checksums.CRC64NVME");
+                logger.debug("software.amazon.awssdk.crt.checksums.CRC64NVME found, " +
+                             "using it for CRC64NVME checksum");
             }
             catch (ClassNotFoundException e)
             {
@@ -118,7 +126,7 @@ public enum ChecksumType
                              "falling back to PureJavaCRC64NVME for CRC64NVME checksum");
             }
         }
-        HAS_AWS_CRT_CRC64NVME = available;
+        AWS_CRT_CRC64NVME_CLASS = cls;
     }
 
     public abstract Checksum newInstance();
