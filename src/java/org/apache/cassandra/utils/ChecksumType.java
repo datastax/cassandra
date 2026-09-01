@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.utils;
 
-import java.lang.reflect.Method;
+import java.lang.reflect.Constructor;
 import java.nio.ByteBuffer;
 import java.util.zip.CRC32C;
 import java.util.zip.Checksum;
@@ -87,11 +87,11 @@ public enum ChecksumType
         @Override
         public Checksum newInstance()
         {
-            if (AWS_CRT_CRC64NVME_CLASS != null)
+            if (AWS_CRT_CRC64NVME_CONSTRUCTOR != null)
             {
                 try
                 {
-                    return (Checksum) AWS_CRT_CRC64NVME_CLASS.getDeclaredConstructor().newInstance();
+                    return (Checksum) AWS_CRT_CRC64NVME_CONSTRUCTOR.newInstance();
                 }
                 catch (ReflectiveOperationException e)
                 {
@@ -109,25 +109,26 @@ public enum ChecksumType
     };
 
     private static final Logger logger = LoggerFactory.getLogger(ChecksumType.class);
-    private static final Class<?> AWS_CRT_CRC64NVME_CLASS;
+    private static final Constructor<?> AWS_CRT_CRC64NVME_CONSTRUCTOR;
 
     static {
-        Class<?> cls = null;
+        Constructor<?> constructor = null;
         if (SSTABLE_CHECKSUM_AWS_CRT_DETECTION_ENABLED.getBoolean())
         {
             try
             {
-                cls = Class.forName("software.amazon.awssdk.crt.checksums.CRC64NVME");
+                Class<?> cls = Class.forName("software.amazon.awssdk.crt.checksums.CRC64NVME");
+                constructor = cls.getDeclaredConstructor();
                 logger.debug("software.amazon.awssdk.crt.checksums.CRC64NVME found, " +
                              "using it for CRC64NVME checksum");
             }
-            catch (ClassNotFoundException e)
+            catch (ClassNotFoundException | NoSuchMethodException e)
             {
                 logger.debug("software.amazon.awssdk.crt.checksums.CRC64NVME not found, " +
                              "falling back to PureJavaCRC64NVME for CRC64NVME checksum");
             }
         }
-        AWS_CRT_CRC64NVME_CLASS = cls;
+        AWS_CRT_CRC64NVME_CONSTRUCTOR = constructor;
     }
 
     public abstract Checksum newInstance();
