@@ -24,32 +24,26 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 
 /// Serializes a [DeletionAwareTrie] using the [FileWriter] on-disk trie format.
 ///
-/// ## Why the deletion branch lives in the payload
+/// ## Where the deletion branch pointer lives
 ///
 /// [OnDiskWriteNodeType] has no room for a deletion branch: the node code is
 /// `nodeCode >> 3`, all 32 type codes are assigned (LEAF 0-7, CHAIN 8-15, SPARSE 16-27,
 /// BITMAP 28, DENSE 29, PREFIX 30, RELAY 31), and PREFIX's three flag bits are all in
 /// use (`HAS_CHILD`, `HAS_ASCENT_CONTENT`, `HAS_DESCENT_CONTENT`).
 ///
-/// Rather than steal encoding space from a format that is also the basis of the on-disk
-/// table format, the deletion branch is recorded in the node's **payload**, which is
-/// pluggable per use case via [FileWriter.DataSerializer]. The node encoding is
-/// untouched, so this cannot conflict with changes to the shared format, and the choice
-/// is reversible: if node-level support is added later, only the codec below changes.
+/// A node does, however, have a spare payload slot. A generic-content node carries content on both the
+/// descent and the ascent (return) path, and the data trie of a deletion-aware trie only ever presents
+/// content on descent (see the `presentContentOnDescentPath` argument
+/// [InMemoryDeletionAwareTrie] passes to its base) — so nothing ever fills its ascent-side slot. The
+/// deletion branch's root position goes there, as a minimal-width reversed integer whose length the
+/// node's own length prefix carries. This is the same reuse the in-memory trie makes of a prefix node's
+/// secondary pointer, which holds return-path content in a range trie and the alternate branch in a
+/// deletion-aware one (see `PREFIX_ALTERNATE_OFFSET` and the prefix node section of `InMemoryTrie.md`).
 ///
-/// ## Payload layout
-///
-/// Every payload written by this class is:
-///
-/// ```
-///   unsigned vint : deletionBranchRoot + 1   (0 when the node has no deletion branch)
-///   bytes         : content, as written by the caller's serializer (may be empty)
-/// ```
-///
-/// The content carries no length of its own: the node encoding already length-prefixes the
-/// whole payload, so the reader derives the content length from the payload length it is
-/// given minus the bytes consumed by the vint. Overhead over a plain trie is therefore one
-/// byte per payload for any branch root below 128.
+/// A payload with no deletion branch is therefore byte-for-byte what a plain trie would write for the
+/// same content, and the node code's descent- and ascent-content bits are exactly
+/// [Cursor#MAY_HAVE_CONTENT_BIT] and [Cursor#MAY_HAVE_DELETION_BRANCH_BIT], so the reader produces both
+/// flags without decoding anything.
 ///
 /// ## Ordering
 ///
@@ -64,69 +58,70 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// been fully written — the same convention [OnDiskTrie#open] uses when it takes the
 /// file length as the root.
 /// Note this *holds* a [FileWriter] rather than extending it: the underlying writer is a
-/// `Walker<Payload<T>>` while this is a `Walker<T>`, and Java does not permit inheriting the
+/// `Walker<Slot<T>>` while this is a `Walker<T>`, and Java does not permit inheriting the
 /// same interface with two different type arguments.
 public class DeletionAwareFileWriter<T, D extends RangeState<D>>
 implements Cursor.Walker<T, DataOutputPlus>
 {
-    /// A node's live content together with the position of its deletion branch, if any.
-    static class Payload<T>
+    /// The contents of one of a node's two payload slots: live content on the descent side, or the
+    /// position of the node's deletion branch on the ascent side. Exactly one of the two is set.
+    static class Slot<T>
     {
-        final T content;                 // null if the node only carries a deletion branch
-        final long deletionBranchRoot;   // -1 if the node has no deletion branch
+        final T content;
+        final long deletionBranchRoot;   // -1 unless this is an ascent-side slot
 
-        Payload(T content, long deletionBranchRoot)
+        private Slot(T content, long deletionBranchRoot)
         {
             this.content = content;
             this.deletionBranchRoot = deletionBranchRoot;
         }
+
+        static <T> Slot<T> content(T content)
+        {
+            return new Slot<>(content, -1);
+        }
+
+        static <T> Slot<T> branch(long deletionBranchRoot)
+        {
+            return new Slot<>(null, deletionBranchRoot);
+        }
     }
 
-    /// Wraps the caller's content serializer with the deletion-branch pointer.
-    private static class PayloadSerializer<T> implements FileWriter.DataSerializer<Payload<T>>
+    /// Writes whichever of the two kinds of slot it is handed: the caller's content, or the branch pointer as a
+    /// minimal-width reversed integer, whose length the node's own length prefix records.
+    private static class SlotSerializer<T> implements FileWriter.DataSerializer<Slot<T>>
     {
         final FileWriter.DataSerializer<T> contentSerializer;
 
-        PayloadSerializer(FileWriter.DataSerializer<T> contentSerializer)
+        SlotSerializer(FileWriter.DataSerializer<T> contentSerializer)
         {
             this.contentSerializer = contentSerializer;
         }
 
         @Override
-        public int serializedSize(Payload<T> value)
+        public int serializedSize(Slot<T> value)
         {
-            int contentSize = value.content != null ? contentSerializer.serializedSize(value.content) : 0;
-            return vintSize(value.deletionBranchRoot + 1) + contentSize;
+            return value.content != null ? contentSerializer.serializedSize(value.content)
+                                         : FileWriter.bytesFor(value.deletionBranchRoot);
         }
 
         @Override
-        public int serialize(DataOutputPlus out, Payload<T> value) throws IOException
+        public int serialize(DataOutputPlus out, Slot<T> value) throws IOException
         {
-            // No length is written for the content: the node encoding already length-prefixes the
-            // whole payload (see OnDiskWriteNodeType.PREFIX, which writes serialize()'s return value
-            // as a reversed vint). The reader recovers the content length by subtracting the bytes
-            // consumed by the branch vint from the payload length it is handed.
-            out.writeUnsignedVInt(value.deletionBranchRoot + 1);
             if (value.content != null)
-                contentSerializer.serialize(out, value.content);
-            return serializedSize(value);
-        }
+                return contentSerializer.serialize(out, value.content);
 
-        private static int vintSize(long value)
-        {
-            int size = 1;
-            while ((value >>>= 7) != 0)
-                ++size;
-            return size;
+            int bytes = FileWriter.bytesFor(value.deletionBranchRoot);
+            FileWriter.writeReversedSized(out, value.deletionBranchRoot, bytes);
+            return bytes;
         }
     }
 
     final DataOutputPlus out;
     final FileWriter.DataSerializer<D> deletionSerializer;
-    final boolean swapAscentAndDescentSides;
 
     /// The writer for the data trie itself.
-    final FileWriter<Payload<T>> inner;
+    final FileWriter<Slot<T>> inner;
 
     /// Non-null only while the walk is inside a deletion branch.
     private FileWriter<D> branchWriter;
@@ -139,13 +134,14 @@ implements Cursor.Walker<T, DataOutputPlus>
 
     public DeletionAwareFileWriter(DataOutputPlus out,
                                    FileWriter.DataSerializer<T> contentSerializer,
-                                   FileWriter.DataSerializer<D> deletionSerializer,
-                                   boolean swapAscentAndDescentSides)
+                                   FileWriter.DataSerializer<D> deletionSerializer)
     {
         this.out = out;
         this.deletionSerializer = deletionSerializer;
-        this.swapAscentAndDescentSides = swapAscentAndDescentSides;
-        this.inner = new FileWriter<>(out, new PayloadSerializer<>(contentSerializer), swapAscentAndDescentSides);
+        // Never ordered: OnDiskDeletionAwareTrie always reads the data trie with isOrdered = false, and an ordered
+        // write would swap the two content slots in FileWriter.InProgressNode.complete, putting the branch pointer
+        // where the reader expects the live content.
+        this.inner = new FileWriter<>(out, new SlotSerializer<>(contentSerializer), false);
     }
 
     /// Write out every node the walk has finished with. Called by the driving loop on ascent,
@@ -160,7 +156,7 @@ implements Cursor.Walker<T, DataOutputPlus>
     @Override
     public void content(T content)
     {
-        inner.content(new Payload<>(content, -1));
+        inner.content(Slot.content(content));
     }
 
     /// Not [DeletionAwareCursor.DeletionAwareWalker]: that contract reports a branch's markers but
@@ -186,7 +182,7 @@ implements Cursor.Walker<T, DataOutputPlus>
         branchWriter.content(marker);
     }
 
-    /// @return the position of the branch just written, to be recorded in the node's payload, or
+    /// @return the position of the branch just written, to be recorded in the node's ascent-side slot, or
     ///         -1 if the branch turned out to have no content.
     public long exitDeletionsBranch()
     {
@@ -256,13 +252,12 @@ implements Cursor.Walker<T, DataOutputPlus>
     /// Writes in [Direction#REVERSE] like [FileWriter#write], so the root ends up last and the trie
     /// is read from the end of the stream.
     public static <T, D extends RangeState<D>> void write(DeletionAwareTrie<T, D> trie,
-                                                          boolean isOrdered,
                                                           FileWriter.DataSerializer<T> contentSerializer,
                                                           FileWriter.DataSerializer<D> deletionSerializer,
                                                           DataOutputPlus out) throws IOException
     {
         DeletionAwareFileWriter<T, D> fw =
-            new DeletionAwareFileWriter<>(out, contentSerializer, deletionSerializer, isOrdered);
+            new DeletionAwareFileWriter<>(out, contentSerializer, deletionSerializer);
         DeletionAwareCursor<T, D> c = trie.cursor(Direction.REVERSE);
 
         emitAt(fw, c);
@@ -316,12 +311,14 @@ implements Cursor.Walker<T, DataOutputPlus>
         }
 
         // Emit once both halves are known. This must happen while the walk is still at this
-        // position: FileWriter.content asserts on the path state, so it cannot be deferred past
-        // the next ascent. Writing the branch first is still correct — content() only attaches
-        // the payload to the in-progress node, whose bytes are emitted later on ascent, so the
-        // recorded root remains a backward pointer.
-        if (content != null || branchRoot >= 0)
-            fw.inner.content(new Payload<>(content, branchRoot));
+        // position: the calls below attach to the node the walk is on, so they cannot be deferred
+        // past the next ascent. Writing the branch first is still correct — these only attach the
+        // slots to the in-progress node, whose bytes are emitted later on ascent, so the recorded
+        // root remains a backward pointer.
+        if (content != null)
+            fw.inner.content(Slot.content(content));
+        if (branchRoot >= 0)
+            fw.inner.ascentContent(Slot.branch(branchRoot));
     }
 
     /// The same ascent-driven loop as above, over one deletion branch, feeding the nested writer.

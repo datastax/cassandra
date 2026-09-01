@@ -38,7 +38,7 @@ public abstract class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>
     public Cursor<T> makeCursor(Direction direction)
     {
         if (root != 0)
-            return new OnDiskCursor<>(deserializer, this, byteComparableVersion, direction, isOrdered, root);
+            return new OnDiskCursor<>(deserializer, this, byteComparableVersion, direction, isOrdered, false, root);
         else
             return new Cursor.Empty<>(direction, byteComparableVersion);
     }

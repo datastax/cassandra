@@ -18,35 +18,32 @@
 
 package org.apache.cassandra.db.tries;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Set;
 
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
-import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.vint.VIntCoding;
 
 /// Reads a [DeletionAwareTrie] written by [DeletionAwareFileWriter].
 ///
-/// The data trie is read as an ordinary on-disk trie whose payload is a
-/// [DeletionAwareFileWriter.Payload] — live content plus the position of the node's deletion
-/// branch. A deletion branch is itself a complete range trie in the same stream, so
-/// [Cursor#deletionBranchCursor] is just an [OnDiskCursor.Range] opened at that position.
+/// The data trie is read as an ordinary on-disk trie of the caller's content, walked with
+/// [OnDiskCursor#alternateInAscentSlot] set so that the ascent-side content slot is understood as the
+/// position of the node's deletion branch. A deletion branch is itself a complete range trie in the same
+/// stream, so [Cursor#deletionBranchCursor] is just an [OnDiskCursor.Range] opened at that position.
 ///
-/// See [DeletionAwareFileWriter] for why the branch position lives in the payload rather than
-/// in the node encoding.
+/// See [DeletionAwareFileWriter] for why the branch position lives in that slot rather than in the node
+/// encoding.
 public class OnDiskDeletionAwareTrie<T, D extends RangeState<D>>
 implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
 {
     final RebuffererFactory rebuffererFactory;
     final Set<Rebufferer> outstandingRebufferers;
-    final OnDiskCursor.DataDeserializer<DeletionAwareFileWriter.Payload<T>> payloadDeserializer;
+    final OnDiskCursor.DataDeserializer<T> contentDeserializer;
     final OnDiskCursor.DataDeserializer<D> deletionDeserializer;
     final ByteComparable.Version byteComparableVersion;
     final long root;
@@ -62,36 +59,12 @@ implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
     {
         this.rebuffererFactory = rebuffererFactory;
         this.outstandingRebufferers = OnDiskCursor.RebuffererSource.trackerFor(rebuffererFactory);
-        this.payloadDeserializer = new PayloadDeserializer<>(contentDeserializer);
+        this.contentDeserializer = contentDeserializer;
         this.deletionDeserializer = deletionDeserializer;
         this.byteComparableVersion = byteComparableVersion;
         this.root = root;
         this.channel = channel;
         this.ownsChannel = channel != null;
-    }
-
-    /// Reads the payload written by [DeletionAwareFileWriter]: the branch position as a vint,
-    /// followed by the content occupying whatever of the payload remains.
-    static class PayloadDeserializer<T> implements OnDiskCursor.DataDeserializer<DeletionAwareFileWriter.Payload<T>>
-    {
-        final OnDiskCursor.DataDeserializer<T> contentDeserializer;
-
-        PayloadDeserializer(OnDiskCursor.DataDeserializer<T> contentDeserializer)
-        {
-            this.contentDeserializer = contentDeserializer;
-        }
-
-        @Override
-        public DeletionAwareFileWriter.Payload<T> deserialize(DataInputPlus rdr, int length) throws IOException
-        {
-            long encoded = rdr.readUnsignedVInt();
-            long branchRoot = encoded - 1;
-            // DataInputPlus does not expose a position, but a vint's encoded length is a function
-            // of its value, so the bytes consumed can be recomputed exactly.
-            int contentLength = length - VIntCoding.computeUnsignedVIntSize(encoded);
-            T content = contentLength > 0 ? contentDeserializer.deserialize(rdr, contentLength) : null;
-            return new DeletionAwareFileWriter.Payload<>(content, branchRoot);
-        }
     }
 
     @Override
@@ -175,77 +148,51 @@ implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
         }
     }
 
-    /// Presents the payload trie as a deletion-aware cursor.
+    /// Presents the data trie as a deletion-aware cursor.
     ///
-    /// The underlying cursor sets [Cursor#MAY_HAVE_CONTENT_BIT] whenever a payload is present, but a
-    /// payload is also written for a node that carries only a deletion branch. Every returned position
-    /// is therefore re-flagged from the decoded payload, so that the flags mean the same thing they do
-    /// on an in-memory deletion-aware cursor. This costs a payload decode where a node-level encoding
-    /// would not — see [DeletionAwareFileWriter] on that trade.
+    /// A node's descent- and ascent-content bits are exactly [Cursor#MAY_HAVE_CONTENT_BIT] and
+    /// [Cursor#MAY_HAVE_DELETION_BRANCH_BIT], so the underlying cursor already reports both flags and the
+    /// positions it returns are passed through unchanged. The branch itself is only read when the caller
+    /// asks for it.
     static class OnDiskDeletionAwareCursor<T, D extends RangeState<D>> implements DeletionAwareCursor<T, D>
     {
         final OnDiskDeletionAwareTrie<T, D> trie;
-        final OnDiskCursor<DeletionAwareFileWriter.Payload<T>> source;
+        final OnDiskCursor<T> source;
 
         OnDiskDeletionAwareCursor(OnDiskDeletionAwareTrie<T, D> trie, Direction direction, long root)
         {
             this.trie = trie;
-            this.source = new OnDiskCursor<>(trie.payloadDeserializer, trie,
-                                             trie.byteComparableVersion, direction, false, root);
+            this.source = new OnDiskCursor<>(trie.contentDeserializer, trie,
+                                             trie.byteComparableVersion, direction, false, true, root);
         }
 
         OnDiskDeletionAwareCursor(OnDiskDeletionAwareTrie<T, D> trie, Direction direction, long rootPostCodePos, int rootNodeCode)
         {
             this.trie = trie;
-            this.source = new OnDiskCursor<>(trie.payloadDeserializer, trie,
-                                             trie.byteComparableVersion, direction, false, rootPostCodePos, rootNodeCode);
-        }
-
-        private DeletionAwareFileWriter.Payload<T> payload()
-        {
-            return (source.encodedPosition() & MAY_HAVE_CONTENT_BIT) != 0 ? source.content() : null;
-        }
-
-        /// Replace the source's single "has payload" flag with the two flags a deletion-aware cursor
-        /// is expected to expose.
-        private long reflag(long position)
-        {
-            if ((position & MAY_HAVE_CONTENT_BIT) == 0)
-                return position;    // no payload here at all, nothing to correct
-
-            DeletionAwareFileWriter.Payload<T> p = source.content();
-            long flags = 0;
-            if (p != null)
-            {
-                if (p.content != null)
-                    flags |= MAY_HAVE_CONTENT_BIT;
-                if (p.deletionBranchRoot >= 0)
-                    flags |= MAY_HAVE_DELETION_BRANCH_BIT;
-            }
-            return (position & ~(MAY_HAVE_CONTENT_BIT | MAY_HAVE_DELETION_BRANCH_BIT)) | flags;
+            this.source = new OnDiskCursor<>(trie.contentDeserializer, trie,
+                                             trie.byteComparableVersion, direction, false, true, rootPostCodePos, rootNodeCode);
         }
 
         @Override
         public RangeCursor<D> deletionBranchCursor(Direction direction)
         {
-            DeletionAwareFileWriter.Payload<T> p = payload();
-            if (p == null || p.deletionBranchRoot < 0)
+            long root = source.alternateBranch();
+            if (root < 0)
                 return null;
             return new OnDiskCursor.Range<>(trie.deletionDeserializer, trie,
-                                            trie.byteComparableVersion, direction, p.deletionBranchRoot);
+                                            trie.byteComparableVersion, direction, root);
         }
 
         @Override
         public T content()
         {
-            DeletionAwareFileWriter.Payload<T> p = payload();
-            return p != null ? p.content : null;
+            return source.content();
         }
 
         @Override
         public long encodedPosition()
         {
-            return reflag(source.encodedPosition());
+            return source.encodedPosition();
         }
 
         @Override
@@ -257,19 +204,19 @@ implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
         @Override
         public long advance()
         {
-            return reflag(source.advance());
+            return source.advance();
         }
 
         @Override
         public long advanceMultiple(TransitionsReceiver receiver)
         {
-            return reflag(source.advanceMultiple(receiver));
+            return source.advanceMultiple(receiver);
         }
 
         @Override
         public long skipTo(long encodedSkipPosition)
         {
-            return reflag(source.skipTo(encodedSkipPosition));
+            return source.skipTo(encodedSkipPosition);
         }
 
         @Override
