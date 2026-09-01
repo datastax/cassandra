@@ -23,8 +23,6 @@ import java.nio.channels.ClosedChannelException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
@@ -46,7 +44,6 @@ import org.apache.cassandra.net.AsyncStreamingInputPlus;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-import static java.lang.String.format;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 
 public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
@@ -54,7 +51,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     private static final Logger logger = LoggerFactory.getLogger(SSTableZeroCopyWriter.class);
 
     private volatile SSTableReader finalReader;
-    private final Map<String, ZeroCopySequentialWriter> componentWriters; // indexed by component name
+    private final Map<Component, ZeroCopySequentialWriter> componentWriters;
     private final LifecycleNewTracker lifecycleNewTracker;
 
     public SSTableZeroCopyWriter(Builder<?, ?> builder,
@@ -68,7 +65,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         this.componentWriters = new HashMap<>();
 
         for (Component c : components())
-            componentWriters.put(c.name, makeWriter(descriptor, c));
+            componentWriters.put(c, makeWriter(descriptor, c));
     }
 
     @Override
@@ -207,7 +204,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
 
     public void writeComponent(Component component, DataInputPlus in, long size) throws ClosedChannelException
     {
-        ZeroCopySequentialWriter writer = componentWriters.get(component.name);
+        ZeroCopySequentialWriter writer = componentWriters.get(component);
         logger.info("Writing component {} to {} length {}", component, writer.getFile(), prettyPrintMemory(size));
 
         if (in instanceof AsyncStreamingInputPlus)
