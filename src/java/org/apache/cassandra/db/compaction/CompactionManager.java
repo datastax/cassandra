@@ -532,7 +532,6 @@ public class CompactionManager implements CompactionManagerMBean
 
     public AllSSTableOpStatus performScrub(final ColumnFamilyStore cfs, final boolean skipCorrupted, final boolean checkData,
                                            final boolean reinsertOverflowedTTL, int jobs)
-    throws InterruptedException, ExecutionException
     {
         return performScrub(cfs, skipCorrupted, checkData,
                             reinsertOverflowedTTL ? Scrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : Scrubber.OverwriteTTLMode.NONE,
@@ -541,7 +540,6 @@ public class CompactionManager implements CompactionManagerMBean
 
     public AllSSTableOpStatus performScrub(final ColumnFamilyStore cfs, final boolean skipCorrupted, final boolean checkData,
                                            final Scrubber.OverwriteTTLMode overwriteTTLMode, int jobs)
-    throws InterruptedException, ExecutionException
     {
         return parallelAllSSTableOperation(cfs, new OneSSTableOperation()
         {

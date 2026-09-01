@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -435,8 +436,8 @@ public class Scrubber implements Closeable
             outputHandler.output("Scrub of " + sstable + " complete: " + goodPartitions + " partitions in new sstable and " + emptyPartitions + " empty (tombstoned) partitions dropped");
             if (negativeLocalDeletionInfoMetrics.fixedRows > 0)
                 outputHandler.output("Fixed " + negativeLocalDeletionInfoMetrics.fixedRows + " rows with overflowed local deletion time.");
-            if (overwritenTTLInfoMetrics.NOTTLOverwrittenRows > 0)
-                outputHandler.output("Overwrote " + overwritenTTLInfoMetrics.NOTTLOverwrittenRows + " rows with NO_TTL.");
+            if (overwritenTTLInfoMetrics.getNoTTLOverwrittenRows() > 0)
+                outputHandler.output("Overwrote " + overwritenTTLInfoMetrics.getNoTTLOverwrittenRows() + " rows with NO_TTL.");
             if (badPartitions > 0)
                 outputHandler.warn("Unable to recover " + badPartitions + " partitions that were skipped.  You can attempt manual recovery from the pre-scrub snapshot.  You can also run nodetool repair to transfer the data from a healthy replica, if any");
         }
@@ -654,6 +655,7 @@ public class Scrubber implements Closeable
         public final int goodPartitions;
         public final int badPartitions;
         public final int emptyPartitions;
+        public final int noTTLOverwrittenRows;
         public final List<SSTableReader> scrubbed;
 
         public ScrubResult(Scrubber scrubber, List<SSTableReader> scrubbed)
@@ -661,6 +663,7 @@ public class Scrubber implements Closeable
             this.goodPartitions = scrubber.goodPartitions;
             this.badPartitions = scrubber.badPartitions;
             this.emptyPartitions = scrubber.emptyPartitions;
+            this.noTTLOverwrittenRows = scrubber.overwritenTTLInfoMetrics.getNoTTLOverwrittenRows();
             this.scrubbed = scrubbed;
         }
     }
@@ -672,7 +675,17 @@ public class Scrubber implements Closeable
 
     public class OverwritenTTLInfoMetrics
     {
-        public volatile int NOTTLOverwrittenRows = 0;
+        private final AtomicInteger noTTLOverwrittenRows = new AtomicInteger(0);
+
+        public int getNoTTLOverwrittenRows()
+        {
+            return noTTLOverwrittenRows.get();
+        }
+
+        public void incrementNoTTLOverwrittenRows()
+        {
+            noTTLOverwrittenRows.incrementAndGet();
+        }
     }
 
     private static class NoTTLTransformer extends Transformation<UnfilteredRowIterator>
@@ -724,40 +737,40 @@ public class Scrubber implements Closeable
             for (ColumnData cd : row)
             {
                 if (cd.column().isSimple())
-                {
-                    Cell<?> cell = (Cell<?>) cd;
-                    if (cell.isExpiring())
-                    {
-                        builder.addCell(BufferCell.live(cell.column(), cell.timestamp(), cell.buffer(), cell.path()));
-                        ttlWasOverwritten = true;
-                    }
-                    else
-                        builder.addCell(cell);
-                }
+                    ttlWasOverwritten |= stripCellTTL(builder, (Cell<?>) cd);
                 else
-                {
-                    ComplexColumnData complexData = (ComplexColumnData) cd;
-                    builder.addComplexDeletion(complexData.column(), complexData.complexDeletion());
-                    for (Cell<?> cell : complexData)
-                    {
-                        if (cell.isExpiring())
-                        {
-                            builder.addCell(BufferCell.live(cell.column(), cell.timestamp(), cell.buffer(), cell.path()));
-                            ttlWasOverwritten = true;
-                        }
-                        else
-                            builder.addCell(cell);
-                    }
-                }
+                    ttlWasOverwritten |= stripComplexColumnTTL(builder, (ComplexColumnData) cd);
             }
 
             if (ttlWasOverwritten)
             {
                 outputHandler.debug(String.format("Found row with TTL to remove: %s", row.toString(metadata, false)));
-                overwritenTTLInfoMetrics.NOTTLOverwrittenRows++;
+                overwritenTTLInfoMetrics.incrementNoTTLOverwrittenRows();
             }
 
             return builder.build();
+        }
+
+        // Returns true if the cell's TTL was stripped.
+        private boolean stripCellTTL(Row.Builder builder, Cell<?> cell)
+        {
+            if (cell.isExpiring())
+            {
+                builder.addCell(BufferCell.live(cell.column(), cell.timestamp(), cell.buffer(), cell.path()));
+                return true;
+            }
+            builder.addCell(cell);
+            return false;
+        }
+
+        // Returns true if any cell in the complex column had its TTL stripped.
+        private boolean stripComplexColumnTTL(Row.Builder builder, ComplexColumnData complexData)
+        {
+            boolean stripped = false;
+            builder.addComplexDeletion(complexData.column(), complexData.complexDeletion());
+            for (Cell<?> cell : complexData)
+                stripped |= stripCellTTL(builder, cell);
+            return stripped;
         }
     }
 
