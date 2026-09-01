@@ -1878,7 +1878,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     }
 
     @VisibleForTesting
-    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, Scrubber.OverwriteTTLMode overwriteTTLMode, boolean alwaysFail, boolean checkData, int jobs) throws ExecutionException, InterruptedException
+    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, Scrubber.OverwriteTTLMode overwriteTTLMode, boolean alwaysFail, boolean checkData, int jobs)
     {
         // skip snapshot creation during scrub, SEE JIRA 5891
         if(!disableSnapshot)
