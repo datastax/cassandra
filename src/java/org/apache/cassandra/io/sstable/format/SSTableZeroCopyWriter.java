@@ -52,7 +52,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     private static final Logger logger = LoggerFactory.getLogger(SSTableZeroCopyWriter.class);
 
     private volatile SSTableReader finalReader;
-    private final Map<String, SequentialWriter> componentWriters;
+    private final Map<Component, SequentialWriter> componentWriters;
     private final LifecycleNewTracker lifecycleNewTracker;
 
     private static final SequentialWriterOption WRITER_OPTION =
@@ -74,7 +74,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         this.componentWriters = new HashMap<>();
 
         for (Component c : components())
-            componentWriters.put(c.name, makeWriter(descriptor, c));
+            componentWriters.put(c, makeWriter(descriptor, c));
     }
 
     private static SequentialWriter makeWriter(Descriptor descriptor, Component component)
@@ -196,7 +196,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
 
     public void writeComponent(Component component, DataInputPlus in, long size)
     {
-        SequentialWriter writer = componentWriters.get(component.name);
+        SequentialWriter writer = componentWriters.get(component);
         logger.info("Writing component {} to {} length {}", component, writer.getFile(), prettyPrintMemory(size));
 
         if (in instanceof AsyncStreamingInputPlus)
