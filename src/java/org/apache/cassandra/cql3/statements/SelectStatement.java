@@ -492,19 +492,23 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         try (PartitionIterator data = query.execute(options.getConsistency(), queryState, queryStartNanoTime))
         {
             msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset);
-            RequestSensors sensors = RequestTracker.instance.get();
-            if (sensors != null)
-            {
-                Context context = Context.from(this.table);
-                sensors.syncAllSensors();
+        }
+        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's populateCostSensors)
+        // have fired and sensor values are fully populated before we read them below.
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+        {
+            sensors.syncAllSensors();
 
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
-                // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
-                // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
-            }
+            Context context = Context.from(this.table);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, Context.from(sensors), Type.READ_COST);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, Context.from(sensors), Type.TOTAL_COST);
+            // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
+            // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
         }
         return msg;
     }
@@ -636,23 +640,27 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         // is explicitly set to zero.
         ResultMessage.Rows msg;
         try (PartitionIterator partitions = userOffset == NO_OFFSET
-                                          ? pager.fetchPage(pageSize, queryStartNanoTime)
-                                          : pager.readAll(pageSize, queryStartNanoTime))
+                                            ? pager.fetchPage(pageSize, queryStartNanoTime)
+                                            : pager.readAll(pageSize, queryStartNanoTime))
         {
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset);
-            RequestSensors sensors = RequestTracker.instance.get();
-            if (sensors != null)
-            {
-                Context context = Context.from(this.table);
-                sensors.syncAllSensors();
+        }
+        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's populateCostSensors)
+        // have fired and sensor values are fully populated before we read them below.
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+        {
+            sensors.syncAllSensors();
 
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
-                // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
-                // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
-            }
+            Context context = Context.from(this.table);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, Context.from(sensors), Type.READ_COST);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, Context.from(sensors), Type.TOTAL_COST);
+            // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
+            // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this

@@ -27,6 +27,7 @@ import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.NoOpCostCalculator;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
@@ -663,6 +664,14 @@ public enum CassandraRelevantProperties
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */
     SENSORS_FACTORY("cassandra.sensors_factory_class"),
+
+    /**
+     * Allows plugging a custom {@link org.apache.cassandra.sensors.CostCalculator} implementation
+     * without having to subclass {@link SensorsFactory}.
+     * When set, the named class is instantiated directly via {@link org.apache.cassandra.utils.FBUtilities#construct}.
+     * When absent, {@link NoOpCostCalculator} is used.
+     */
+    COST_CALCULATOR("cassandra.cost_calculator_class"),
 
     /**
      * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a

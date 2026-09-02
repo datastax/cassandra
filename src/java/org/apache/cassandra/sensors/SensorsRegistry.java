@@ -52,31 +52,31 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.concurrent.Timer;
 
 /**
- * This class tracks {@link Sensor}s at a "global" level, allowing to:
+ * Tracks {@link Sensor}s at a global level across all requests. Sensors can be retrieved or created
+ * for a given {@link Context} and {@link Type}, and looked up by keyspace, table id, or type.
+ * <p>
+ * The sensors held here are global: their value accumulates across all requests, but cannot be modified
+ * directly through this class (update methods are package-protected). To modify a sensor value it must
+ * first be registered to a request via {@link RequestSensors#registerSensor(Context, Type)}, incremented
+ * via {@link RequestSensors#incrementSensor(Context, Type, double)}, and then flushed to the registry via
+ * {@link RequestSensors#syncAllSensors()}.
+ * <p>
+ * <b>Sensor lifecycle — table-context vs. request-context:</b>
  * <ul>
- *     <li>Getting or creating (if not existing) sensors of a given {@link Context} and {@link Type}.</li>
- *     <li>Accessing sensors by keyspace, table id or type.</li>
+ *     <li><b>Table-context sensors</b> (those whose {@link Context} carries a keyspace and table) are
+ *         removed automatically when the corresponding keyspace or table is dropped from the schema.
+ *         Callers do not need to manage their lifecycle explicitly.</li>
+ *     <li><b>Request-context sensors</b> (those created via {@link Context#from(RequestSensors)}) have
+ *         no schema anchor and are therefore <em>never removed automatically</em>. Callers that assign a
+ *         unique per-request owner (see {@link RequestSensors#getRequestOwner()}) are responsible for
+ *         explicitly removing those sensors once the request is complete, by calling
+ *         {@link #removeSensorsByRequestOwner(String)}. Failure to do so will cause the registry to
+ *         accumulate stale request-level sensors indefinitely.</li>
  * </ul>
- * The returned sensors are global, meaning that their value spans across requests/responses, but cannot be modified either
- * directly or indirectly via this class (whose update methods are package protected). In order to modify a sensor value,
- * it must be registered to a request/response via {@link RequestSensors#registerSensor(Context, Type)} and incremented via
- * {@link RequestSensors#incrementSensor(Context, Type, double)}, then synced via {@link RequestSensors#syncAllSensors()}, which
- * will update the related global sensors.
- * <br/><br/>
- * Given sensors are tied to a context, that is to a given keyspace and table, their global instance will be deleted
- * if the related keyspace/table is dropped.
- * <br/><br/>
- * It's also possible to:
- * <ul>
- *     <li>
- *         Register listeners via the {@link #registerListener(SensorsRegistryListener)} method.
- *         Such listeners will get notified on creation and removal of sensors.
- *     </li>
- *     <li>
- *         Unregister listeners via the {@link #unregisterListener(SensorsRegistryListener)} method.
- *         Such listeners will not be notified anymore about creation or removal of sensors.
- *     </li>
- * </ul>
+ * <p>
+ * Listeners can be registered via {@link #registerListener(SensorsRegistryListener)} to be notified
+ * whenever a sensor is created or removed, and unregistered via
+ * {@link #unregisterListener(SensorsRegistryListener)}.
  */
 public class SensorsRegistry implements SchemaChangeListener
 {
@@ -105,6 +105,14 @@ public class SensorsRegistry implements SchemaChangeListener
     private SensorsRegistry()
     {
         Schema.instance.registerListener(this);
+        // Backfill keyspaces and tableIds from schema already loaded at construction time.
+        // Without this, any keyspace/table that existed before SensorsRegistry was class-loaded
+        // would silently fail the gate in getOrCreateSensorFast() and produce no sensors.
+        Schema.instance.distributedKeyspaces().forEach(ksm -> {
+            keyspaces.add(ksm.name);
+            ksm.tables.forEach(t -> tableIds.add(t.id.toString()));
+            ksm.views.forEach(v -> tableIds.add(v.metadata.id.toString()));
+        });
     }
 
     public void registerListener(SensorsRegistryListener listener)
@@ -165,11 +173,12 @@ public class SensorsRegistry implements SchemaChangeListener
         {
             byKeyspace.remove(keyspaceName);
 
-            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getKeyspace().equals(keyspaceName));
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()),
+                                                     s -> s.getContext().getKeyspace().map(keyspaceName::equals).orElse(false));
             removed.forEach(this::notifyOnSensorRemoved);
 
-            removeSensor(byTableId.values(), s -> s.getContext().getKeyspace().equals(keyspaceName));
-            removeSensor(byType.values(), s -> s.getContext().getKeyspace().equals(keyspaceName));
+            removeSensor(byTableId.values(), s -> s.getContext().getKeyspace().map(keyspaceName::equals).orElse(false));
+            removeSensor(byType.values(), s -> s.getContext().getKeyspace().map(keyspaceName::equals).orElse(false));
         }
         finally
         {
@@ -182,15 +191,33 @@ public class SensorsRegistry implements SchemaChangeListener
         stripedUpdateLock.getAt(getLockStripe(keyspaceName.hashCode())).writeLock().lock();
         try
         {
-            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()),
+                                                     s -> s.getContext().getTableId().map(tableId::equals).orElse(false));
             removed.forEach(this::notifyOnSensorRemoved);
 
             byTableId.remove(tableId);
-            removeSensor(byType.values(), s -> s.getContext().getTableId().equals(tableId));
+            removeSensor(byType.values(), s -> s.getContext().getTableId().map(tableId::equals).orElse(false));
         }
         finally
         {
             stripedUpdateLock.getAt(getLockStripe(keyspaceName.hashCode())).writeLock().unlock();
+        }
+    }
+
+    public void removeSensorsByRequestOwner(String requestOwner)
+    {
+        stripedUpdateLock.getAt(getLockStripe(requestOwner.hashCode())).writeLock().lock();
+        try
+        {
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()),
+                                                     s -> s.getContext().getRequestOwner().map(requestOwner::equals).orElse(false));
+            removed.forEach(this::notifyOnSensorRemoved);
+
+            removeSensor(byType.values(), s -> s.getContext().getRequestOwner().map(requestOwner::equals).orElse(false));
+        }
+        finally
+        {
+            stripedUpdateLock.getAt(getLockStripe(requestOwner.hashCode())).writeLock().unlock();
         }
     }
 
@@ -215,11 +242,12 @@ public class SensorsRegistry implements SchemaChangeListener
             keyspaces.remove(keyspace.name);
             byKeyspace.remove(keyspace.name);
 
-            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getKeyspace().equals(keyspace.name));
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()),
+                                                     s -> s.getContext().getKeyspace().map(keyspace.name::equals).orElse(false));
             removed.forEach(this::notifyOnSensorRemoved);
 
-            removeSensor(byTableId.values(), s -> s.getContext().getKeyspace().equals(keyspace.name));
-            removeSensor(byType.values(), s -> s.getContext().getKeyspace().equals(keyspace.name));
+            removeSensor(byTableId.values(), s -> s.getContext().getKeyspace().map(keyspace.name::equals).orElse(false));
+            removeSensor(byType.values(), s -> s.getContext().getKeyspace().map(keyspace.name::equals).orElse(false));
         }
         finally
         {
@@ -237,11 +265,12 @@ public class SensorsRegistry implements SchemaChangeListener
             tableIds.remove(tableId);
             byTableId.remove(tableId);
 
-            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
+            Set<Sensor> removed = removeSensorArrays(ImmutableSet.of(identity.values()),
+                                                     s -> s.getContext().getTableId().map(tableId::equals).orElse(false));
             removed.forEach(this::notifyOnSensorRemoved);
 
-            removeSensor(byKeyspace.values(), s -> s.getContext().getTableId().equals(tableId));
-            removeSensor(byType.values(), s -> s.getContext().getTableId().equals(tableId));
+            removeSensor(byKeyspace.values(), s -> s.getContext().getTableId().map(tableId::equals).orElse(false));
+            removeSensor(byType.values(), s -> s.getContext().getTableId().map(tableId::equals).orElse(false));
         }
         finally
         {
@@ -293,7 +322,11 @@ public class SensorsRegistry implements SchemaChangeListener
     }
 
     /**
-     * To get best perfromance we are not returning Optional here
+     * To get best performance we are not returning Optional here.
+     *
+     * <p>For a {@link Context#request()} context the sensor is stored only in {@link #identity}
+     * and {@link #byType} — it is not indexed by keyspace or table-id, and does not require the
+     * keyspace/table to be known to the schema.
      */
     @Nullable
     private Sensor getOrCreateSensorFast(Context context, Type type)
@@ -302,10 +335,15 @@ public class SensorsRegistry implements SchemaChangeListener
         if (sensor != null)
             return sensor;
 
-        stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().lock();
+        if (context.isRequestContext())
+            return getOrCreateRequestSensor(context, type);
+
+        String keyspace = context.getKeyspace().get();
+        String tableId = context.getTableId().get();
+        stripedUpdateLock.getAt(getLockStripe(keyspace.hashCode())).readLock().lock();
         try
         {
-            if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
+            if (!keyspaces.contains(keyspace) || !tableIds.contains(tableId))
                 return null;
 
             Sensor[] typeSensors = identity.compute(context, (key, types) -> {
@@ -319,12 +357,14 @@ public class SensorsRegistry implements SchemaChangeListener
             });
             sensor = typeSensors[type.ordinal()];
 
-            Set<Sensor> keyspaceSet = byKeyspace.get(sensor.getContext().getKeyspace());
-            keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
+            String ks = sensor.getContext().getKeyspace().get();
+            Set<Sensor> keyspaceSet = byKeyspace.get(ks);
+            keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(ks, (ignored) -> Sets.newConcurrentHashSet());
             keyspaceSet.add(sensor);
 
-            Set<Sensor> tableSet = byTableId.get(sensor.getContext().getTableId());
-            tableSet = tableSet != null ? tableSet : byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
+            String tid = sensor.getContext().getTableId().get();
+            Set<Sensor> tableSet = byTableId.get(tid);
+            tableSet = tableSet != null ? tableSet : byTableId.computeIfAbsent(tid, (ignored) -> Sets.newConcurrentHashSet());
             tableSet.add(sensor);
 
             Set<Sensor> opSet = byType.get(sensor.getType().name());
@@ -335,8 +375,33 @@ public class SensorsRegistry implements SchemaChangeListener
         }
         finally
         {
-            stripedUpdateLock.getAt(getLockStripe(context.getKeyspace().hashCode())).readLock().unlock();
+            stripedUpdateLock.getAt(getLockStripe(keyspace.hashCode())).readLock().unlock();
         }
+    }
+
+    /**
+     * Creates (or returns existing) sensor for a {@link Context#request()} context.
+     * Stored in {@link #identity} and {@link #byType} only — never in byKeyspace or byTableId.
+     */
+    @Nullable
+    private Sensor getOrCreateRequestSensor(Context context, Type type)
+    {
+        Sensor[] typeSensors = identity.compute(context, (key, types) -> {
+            Sensor[] computed = types != null ? types : new Sensor[Type.values().length];
+            if (computed[type.ordinal()] == null)
+            {
+                computed[type.ordinal()] = new Sensor(context, type);
+                notifyOnSensorCreated(computed[type.ordinal()]);
+            }
+            return computed;
+        });
+        Sensor sensor = typeSensors[type.ordinal()];
+
+        Set<Sensor> opSet = byType.get(sensor.getType().name());
+        opSet = opSet != null ? opSet : byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
+        opSet.add(sensor);
+
+        return sensor;
     }
 
     /**
