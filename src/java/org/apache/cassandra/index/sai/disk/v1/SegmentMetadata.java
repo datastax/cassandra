@@ -36,6 +36,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -231,7 +232,26 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     @SuppressWarnings("resource")
     public static List<SegmentMetadata> loadForTesting(MetadataSource source, IndexContext context) throws IOException
     {
+        logger.warn("Loading segment metadata without full primary key boundary resolution. Some ORDER BY queries" +
+                    " may not work correctly.");
         return load(source, context, null, false);
+    }
+
+    /**
+     * Returns the number of rows the index of the provided components has indexed in its sstable, that is the sum of
+     * the rows of all its segments.
+     * <p>
+     * Only the (small) metadata component is read: no searcher, primary key map or graph is opened, so this can be
+     * used where the index is not, or cannot be, loaded for reads &mdash; on compactors, which do not open SAI
+     * searchers, or before the sstable index has made it into the index view. For the same reason the primary key
+     * boundaries of the returned segments are not fully resolved, which is why they are not exposed here.
+     */
+    public static long totalRowCount(IndexComponents.ForRead perIndexComponents, IndexContext context) throws IOException
+    {
+        long rows = 0;
+        for (SegmentMetadata metadata : load(MetadataSource.loadMetadata(perIndexComponents), context, null, false))
+            rows += metadata.numRows;
+        return rows;
     }
 
     /**

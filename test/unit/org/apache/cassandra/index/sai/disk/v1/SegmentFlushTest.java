@@ -181,6 +181,10 @@ public class SegmentFlushTest
         List<SegmentMetadata> segmentMetadatas = SegmentMetadata.loadForTesting(source, indexContext);
         assertEquals(segments, segmentMetadatas.size());
 
+        // the indexed rows of the sstable are counted across all its segments, without opening the index for reads
+        assertEquals(2, SegmentMetadata.totalRowCount(components, indexContext));
+        assertEquals(segmentMetadatas.stream().mapToLong(metadata -> metadata.numRows).sum(), SegmentMetadata.totalRowCount(components, indexContext));
+
         // verify segment metadata
         SegmentMetadata segmentMetadata = segmentMetadatas.get(0);
         segmentRowIdOffset = sstableRowId1;
