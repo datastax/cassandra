@@ -27,8 +27,8 @@ import java.nio.channels.FileChannel;
 import java.util.Optional;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
+import java.util.zip.Checksum;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,6 +73,7 @@ public class CompressedSequentialWriter extends SequentialWriter
 
     private final ByteBuffer crcCheckBuffer = ByteBuffer.allocate(4);
     private final Optional<File> digestFile;
+    private final ChecksumType checksumType;
 
     private final int maxCompressedLength;
 
@@ -109,6 +110,7 @@ public class CompressedSequentialWriter extends SequentialWriter
                                           .build());
         this.compressor = parameters.getSstableCompressor();
         this.digestFile = Optional.ofNullable(digestFile);
+        this.checksumType = checksumType;
 
         // buffer for compression should be the same size as buffer itself
         compressed = compressor.preferredBufferType().allocate(compressor.initialCompressedBufferLength(buffer.capacity()));
@@ -120,17 +122,6 @@ public class CompressedSequentialWriter extends SequentialWriter
 
         this.sstableMetadataCollector = sstableMetadataCollector;
         crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)), checksumType);
-    }
-
-    @VisibleForTesting
-    public CompressedSequentialWriter(File file,
-                                      File offsetsPath,
-                                      File digestFile,
-                                      SequentialWriterOption option,
-                                      CompressionParams parameters,
-                                      MetadataCollector sstableMetadataCollector)
-    {
-        this(file, offsetsPath, digestFile, ChecksumType.CRC32, option, parameters, sstableMetadataCollector);
     }
 
     @Override
@@ -478,7 +469,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             try (FileChannel fileChannel = StorageProvider.instance.writeTimeReadFileChannelFor(file);
                  InputStream stream = Channels.newInputStream(fileChannel))
             {
-                CRC32 checksum = new CRC32();
+                Checksum checksum = checksumType.newInstance();
                 try (CheckedInputStream checkedInputStream = new CheckedInputStream(stream, checksum))
                 {
                     byte[] chunk = new byte[64 * 1024];
