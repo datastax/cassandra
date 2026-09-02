@@ -47,5 +47,18 @@ public enum Type
      * coordinator: please note execution times are not summed up but rather recorded separately, with the coordinator
      * one recording the whole span of a request.
      */
-    WRITE_EXECUTION_TIME;
+    WRITE_EXECUTION_TIME,
+    /**
+     * Read Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeRMU(RequestSensors, long)}
+     */
+    RMU,
+
+    /**
+     * Write Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeWMU(RequestSensors, long)}
+     */
+    WMU,
+    /**
+     * Total Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeTMU(RequestSensors)}
+     */
+    TMU;
 }

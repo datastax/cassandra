@@ -90,6 +90,133 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     }
 
     @Test
+    public void testAddRMUSensorToInternodeResponse()
+    {
+        // RMU is now a coordinator-side computation; replicas just propagate READ_BYTES.
+        // Verify that an RMU sensor registered and incremented on the coordinator is encoded
+        // correctly in an internode response message (used when the coordinator forwards the
+        // aggregated result to a peer or for testing the internode encoding path).
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        UUID tableId = UUID.randomUUID();
+        Context context = new Context("ks1", "t1", tableId.toString());
+
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.RMU);
+
+        sensors.incrementSensor(context, Type.READ_BYTES, 500_000.0);
+        // With default baseline=-1, RMU = read_bytes * 4000
+        SensorsCustomParams.computeRMU(sensors, 100_000_000L); // 100 ms
+
+        Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_1, noPayload).withId(1);
+        SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);
+
+        Message<NoPayload> msg = builder.build();
+        assertNotNull(msg.header.customParams());
+
+        Sensor rmuSensor = sensors.getSensor(context, Type.RMU).get();
+        String rmuRequestParam = SensorsCustomParams.paramForRequestSensor(rmuSensor).get();
+        assertTrue(msg.header.customParams().containsKey(rmuRequestParam));
+
+        // baseline=-1 → RMU = read_bytes * MU_SCALE = 500_000 * 4000 = 2_000_000_000
+        double expectedRMU = 500_000.0 * 4000.0;
+        assertEquals(expectedRMU, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(rmuRequestParam)), 0.0);
+    }
+
+    @Test
+    public void testComputeTMU_viaCustomParams_readPath()
+    {
+        // Pure read: TMU = RMU (WMU absent); baseline=-1 → RMU = read_bytes * MU_SCALE
+        String ks = "ks_tmu1";
+        Context context = new Context(ks, "t", UUID.randomUUID().toString());
+
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.RMU);
+        sensors.registerSensor(context, Type.TMU);
+        sensors.incrementSensor(context, Type.READ_BYTES, 400_000.0);
+
+        SensorsCustomParams.computeRMU(sensors, 100_000_000L); // 100 ms
+        SensorsCustomParams.computeTMU(sensors);
+
+        double expectedRMU = 400_000.0 * 4000.0;
+        assertEquals(expectedRMU, sensors.getSensor(context, Type.TMU).get().getValue(), 0.0);
+    }
+
+    @Test
+    public void testComputeTMU_viaCustomParams_writePath()
+    {
+        // Pure write: TMU = WMU (RMU absent); baseline=-1 → WMU = write_bytes * MU_SCALE
+        String ks = "ks_tmu2";
+        Context context = new Context(ks, "t", UUID.randomUUID().toString());
+
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WMU);
+        sensors.registerSensor(context, Type.TMU);
+        sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000.0);
+
+        SensorsCustomParams.computeWMU(sensors, 200_000_000L); // 200 ms
+        SensorsCustomParams.computeTMU(sensors);
+
+        double expectedWMU = 250_000.0 * 4000.0;
+        assertEquals(expectedWMU, sensors.getSensor(context, Type.TMU).get().getValue(), 0.0);
+    }
+
+    @Test
+    public void testComputeTMU_viaCustomParams_casPath()
+    {
+        // CAS: TMU = WMU + RMU; baseline=-1 → each = bytes * MU_SCALE
+        String ks = "ks_tmu3";
+        Context context = new Context(ks, "t", UUID.randomUUID().toString());
+
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+        sensors.registerSensor(context, Type.RMU);
+        sensors.registerSensor(context, Type.WMU);
+        sensors.registerSensor(context, Type.TMU);
+        sensors.incrementSensor(context, Type.READ_BYTES, 300_000.0);
+        sensors.incrementSensor(context, Type.WRITE_BYTES, 150_000.0);
+
+        long latency = 200_000_000L; // 200 ms
+        SensorsCustomParams.computeRMU(sensors, latency);
+        SensorsCustomParams.computeWMU(sensors, latency);
+        SensorsCustomParams.computeTMU(sensors);
+
+        double expectedTMU = (300_000.0 + 150_000.0) * 4000.0;
+        assertEquals(expectedTMU, sensors.getSensor(context, Type.TMU).get().getValue(), 0.0);
+    }
+
+    @Test
+    public void testAddWMUSensorToInternodeResponse()
+    {
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        UUID tableId = UUID.randomUUID();
+        Context context = new Context("ks1", "t1", tableId.toString());
+
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WMU);
+
+        sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000.0);
+        // With default baseline=-1, WMU = write_bytes * 4000
+        SensorsCustomParams.computeWMU(sensors, 200_000_000L); // 200 ms
+
+        Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_2, noPayload).withId(2);
+        SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);
+
+        Message<NoPayload> msg = builder.build();
+        assertNotNull(msg.header.customParams());
+
+        Sensor wmuSensor = sensors.getSensor(context, Type.WMU).get();
+        String wmuRequestParam = SensorsCustomParams.paramForRequestSensor(wmuSensor).get();
+        assertTrue(msg.header.customParams().containsKey(wmuRequestParam));
+
+        double expectedWMU = 300_000.0 * 4000.0;
+        assertEquals(expectedWMU, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(wmuRequestParam)), 0.0);
+    }
+
+    @Test
     public void testSensorValueAsByteBuffer()
     {
         double d = Double.MAX_VALUE;

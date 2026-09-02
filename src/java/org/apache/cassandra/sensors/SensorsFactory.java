@@ -74,4 +74,12 @@ public interface SensorsFactory
     {
         return NOOP_SENSOR_ENCODER;
     }
+
+    /**
+     * Returns the {@link MUCalculator} used to compute RMU and WMU scalar values.
+     */
+    default MUCalculator getMUCalculator()
+    {
+        return DefaultMUCalculator.instance;
+    }
 }

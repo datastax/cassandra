@@ -21,6 +21,7 @@ package org.apache.cassandra.db;
 import java.util.Collection;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -63,7 +64,7 @@ public class CounterMutationCallback implements Runnable
     public void run()
     {
         Collection<TableMetadata> allTables = requestMessage.payload.getPartitionUpdates().stream()
-                                                                    .map(pu -> pu.metadata())
+                                                                    .map(Partition::metadata)
                                                                     .collect(Collectors.toList());
 
         double internodeBytesPerTable = (double) requestMessage.payloadSize(MessagingService.current_version) / allTables.size();

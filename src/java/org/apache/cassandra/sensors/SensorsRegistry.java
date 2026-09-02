@@ -105,6 +105,14 @@ public class SensorsRegistry implements SchemaChangeListener
     private SensorsRegistry()
     {
         Schema.instance.registerListener(this);
+        // Backfill keyspaces and tableIds from schema already loaded at construction time.
+        // Without this, any keyspace/table that existed before SensorsRegistry was class-loaded
+        // would silently fail the gate in getOrCreateSensorFast() and produce no sensors.
+        Schema.instance.distributedKeyspaces().forEach(ksm -> {
+            keyspaces.add(ksm.name);
+            ksm.tables.forEach(t -> tableIds.add(t.id.toString()));
+            ksm.views.forEach(v -> tableIds.add(v.metadata.id.toString()));
+        });
     }
 
     public void registerListener(SensorsRegistryListener listener)
