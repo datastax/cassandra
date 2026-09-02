@@ -1872,7 +1872,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                      checkData, jobs);
     }
 
-    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, Scrubber.OverwriteTTLMode overwriteTTLMode, boolean checkData, int jobs) throws ExecutionException, InterruptedException
+    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, Scrubber.OverwriteTTLMode overwriteTTLMode, boolean checkData, int jobs)
     {
         return scrub(disableSnapshot, skipCorrupted, overwriteTTLMode, false, checkData, jobs);
     }

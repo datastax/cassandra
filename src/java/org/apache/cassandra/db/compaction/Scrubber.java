@@ -28,7 +28,6 @@ import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -675,16 +674,16 @@ public class Scrubber implements Closeable
 
     public class OverwritenTTLInfoMetrics
     {
-        private final AtomicInteger noTTLOverwrittenRows = new AtomicInteger(0);
+        private volatile int  noTTLOverwrittenRows = 0;
 
         public int getNoTTLOverwrittenRows()
         {
-            return noTTLOverwrittenRows.get();
+            return noTTLOverwrittenRows;
         }
 
         public void incrementNoTTLOverwrittenRows()
         {
-            noTTLOverwrittenRows.incrementAndGet();
+            noTTLOverwrittenRows++;
         }
     }
 

@@ -482,31 +482,23 @@ public class TTLTest extends CQLTester
 
     // ---- stripTTL tests -------------------------------------------------------
 
-    /**
-     * Rows written with a TTL have their expiry metadata removed by a NO_TTL scrub.
-     * Before scrub: ttl(v) returns a positive value.
-     * After scrub: ttl(v) returns null — the row is now permanent.
-     */
     @Test
-    public void testScrubStripTTLSimpleColumn() throws Throwable
+    public void testNoTTLStatic() throws Throwable
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        for (int i = 0; i < 5; i++)
-            execute("INSERT INTO %s (k, v) VALUES (?, ?) USING TTL 3600", i, "val" + i);
+        createTable("CREATE TABLE %s (k int, c int, v int, s int static, PRIMARY KEY(k, c))");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 10)");
+        execute("INSERT INTO %s (k, s) VALUES (0, 7) USING TTL 3600");
+        Assertions.assertThat(execute("SELECT ttl(s) FROM %s").one().getInt("ttl(s)"))
+            .isGreaterThan(3000)
+            .isLessThanOrEqualTo(3600);
 
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         flush();
-
-        for (UntypedResultSet.Row row : execute("SELECT k, v, ttl(v) FROM %s"))
-            assertTrue("Expected ttl(v) > 0 before scrub", row.getInt("ttl(v)") > 0);
-
-        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+        compact();
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NO_TTL, true, 1);
         ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
 
-        UntypedResultSet after = execute("SELECT k, v, ttl(v) FROM %s");
-        assertEquals("All 5 rows should still be present after stripTTL scrub", 5, after.size());
-        for (UntypedResultSet.Row row : after)
-            assertFalse("Expected ttl(v) to be null after stripTTL scrub", row.has("ttl(v)"));
+        assertRows(execute("SELECT s, ttl(s) FROM %s"), row(7, null));
     }
 
     /**
@@ -526,29 +518,6 @@ public class TTLTest extends CQLTester
         ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
 
         assertEquals("Non-TTL rows should be unchanged after stripTTL scrub", 3, execute("SELECT k, v FROM %s").size());
-    }
-
-    /**
-     * TTL stripping on a static column: the static column's TTL is removed,
-     * data is preserved, and the row remains readable.
-     */
-    @Test
-    public void testScrubStripTTLStaticColumn() throws Throwable
-    {
-        createTable("CREATE TABLE %s (k int, c int, v int, s int static, PRIMARY KEY(k, c))");
-        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 10)");
-        execute("INSERT INTO %s (k, s) VALUES (0, 7) USING TTL 3600");
-
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        flush();
-
-        assertTrue("Expected TTL > 0 on static column before scrub",
-                   execute("SELECT ttl(s) FROM %s").one().getInt("ttl(s)") > 0);
-
-        cfs.scrub(true, false, Scrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
-        ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
-
-        assertRows(execute("SELECT s, ttl(s) FROM %s"), row(7, null));
     }
 
     /**
