@@ -509,6 +509,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.RMU);
             }
         }
         return msg;
@@ -661,6 +662,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.RMU);
             }
         }
 

@@ -125,6 +125,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit;
@@ -515,6 +516,9 @@ public class StorageProxy implements StorageProxyMBean
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME); // tracks Prepare + Propose + Commit execution time across all replicas
         // please note no READ_EXECUTION_TIME is recorded: CAS is a write operation and recording two different execution
         // times would be confusing
+        sensors.registerSensor(context, Type.RMU);
+        sensors.registerSensor(context, Type.WMU);
+        sensors.registerSensor(context, Type.TMU);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         try
@@ -560,6 +564,11 @@ public class StorageProxy implements StorageProxyMBean
         {
             final long endTime = System.nanoTime();
             final long latency = endTime - startTimeForMetrics;
+            // Compute RMU and WMU with coordinator-measured latency before syncing into SensorsRegistry
+            SensorsCustomParams.computeRMU(sensors, latency);
+            SensorsCustomParams.computeWMU(sensors, latency);
+            SensorsCustomParams.computeTMU(sensors);
+            sensors.syncAllSensors();
             metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
             metrics.casWriteMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
@@ -1148,6 +1157,8 @@ public class StorageProxy implements StorageProxyMBean
                     sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
                     sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.WMU);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.TMU);
                 }
 
                 if (mutation instanceof CounterMutation)
@@ -1216,6 +1227,10 @@ public class StorageProxy implements StorageProxyMBean
         {
             long endTime = System.nanoTime();
             long latency = endTime - startTime;
+            // Compute WMU with coordinator-measured latency before syncing into SensorsRegistry
+            SensorsCustomParams.computeWMU(sensors, latency);
+            SensorsCustomParams.computeTMU(sensors);
+            sensors.syncAllSensors();
             metrics.writeMetrics.executionTimeMetrics.addNano(latency);
             metrics.writeMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             metrics.writeMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
@@ -1455,10 +1470,24 @@ public class StorageProxy implements StorageProxyMBean
                 sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
                 sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
                 sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.WMU);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.TMU);
             }
         }
 
-        mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
+        long startTime = System.nanoTime();
+        try
+        {
+            mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
+        }
+        finally
+        {
+            long latency = System.nanoTime() - startTime;
+            // Compute WMU with coordinator-measured latency before syncing into SensorsRegistry
+            SensorsCustomParams.computeWMU(sensors, latency);
+            SensorsCustomParams.computeTMU(sensors);
+            sensors.syncAllSensors();
+        }
     }
 
     public static void updateCoordinatorWriteLatencyTableMetric(Collection<? extends IMutation> mutations, long latency)
@@ -2111,10 +2140,18 @@ public class StorageProxy implements StorageProxyMBean
         Context context = Context.from(group.metadata());
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.RMU);
+        requestSensors.registerSensor(context, Type.TMU);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
-
+        long readStart = System.nanoTime();
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
+        // All replica responses have been received by the time read() returns.
+        // Compute RMU with coordinator-measured latency before syncing into SensorsRegistry.
+        long readLatency = System.nanoTime() - readStart;
+        SensorsCustomParams.computeRMU(requestSensors, readLatency);
+        SensorsCustomParams.computeTMU(requestSensors);
+        requestSensors.syncAllSensors();
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
         return PartitionIterators.doOnClose(partitions, readTracker::onDone);
@@ -2497,13 +2534,23 @@ public class StorageProxy implements StorageProxyMBean
         Context context = Context.from(command);
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        sensors.registerSensor(context, Type.RMU);
+        sensors.registerSensor(context, Type.TMU);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
+        long readStart = System.nanoTime();
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
-        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
+        // Range reads are lazy: compute RMU and sync sensor values once the iterator is fully consumed.
+        return PartitionIterators.doOnClose(partitions, () -> {
+            long readLatency = System.nanoTime() - readStart;
+            SensorsCustomParams.computeRMU(sensors, readLatency);
+            SensorsCustomParams.computeTMU(sensors);
+            sensors.syncAllSensors();
+            readTracker.onDone();
+        });
     }
 
     public Map<String, List<String>> getSchemaVersions()

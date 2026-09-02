@@ -758,6 +758,20 @@ public enum CassandraRelevantProperties
     SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false"),
 
     /**
+     * The baseline read bytes per second used in the Read Measure Units (RMU) calculation.
+     * This value represents the established baseline throughput measured by running benchmarks against the coordinator.
+     * A value &lt;= 0 means the baseline is not configured and only byte counts contribute to RMU.
+     */
+    BASELINE_READ_BYTES("cassandra.baseline_read_bytes", "-1"),
+
+    /**
+     * The baseline write bytes per second used in the Write Measure Units (WMU) calculation.
+     * This value represents the established baseline throughput measured by running benchmarks against the coordinator.
+     * A value &lt;= 0 means the baseline is not configured and only byte counts contribute to WMU.
+     */
+    BASELINE_WRITE_BYTES("cassandra.baseline_write_bytes", "-1"),
+
+    /**
      * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
      * or to force the node to use a specific version for testing purposes.
      */
