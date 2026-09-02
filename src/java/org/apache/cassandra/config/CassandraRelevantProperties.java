@@ -26,6 +26,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.DefaultCompressionSelector;
+import org.apache.cassandra.sensors.NoOpCostCalculator;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
@@ -678,6 +679,14 @@ public enum CassandraRelevantProperties
     SENSORS_FACTORY("cassandra.sensors_factory_class"),
 
     /**
+     * Allows plugging a custom {@link org.apache.cassandra.sensors.CostCalculator} implementation
+     * without having to subclass {@link SensorsFactory}.
+     * When set, the named class is instantiated directly via {@link org.apache.cassandra.utils.FBUtilities#construct}.
+     * When absent, {@link NoOpCostCalculator} is used.
+     */
+    COST_CALCULATOR("cassandra.cost_calculator_class"),
+
+    /**
      * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
      * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
      */
@@ -694,7 +703,7 @@ public enum CassandraRelevantProperties
 
     /**
      * Whether to enable SAI per-query metrics for different kinds of query, such as filter-only queries, top-k-only
-     * queries, hybrid queries, single-partition queries, and multipartition queries. These metrics are histograms and
+     * queries, hybrid queries, single-partition queries, and multipartition queries. Tihese metrics are histograms and
      * timers.
      */
     SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_query.enabled", "false"),

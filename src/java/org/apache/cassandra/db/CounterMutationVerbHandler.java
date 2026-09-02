@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.util.Collection;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -47,7 +48,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         final CounterMutation cm = message.payload;
         logger.trace("Applying forwarded {}", cm);
 
-        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.getKeyspaceName()));
         ExecutorLocals.set(ExecutorLocals.create(requestSensors));
 
         // Register sensors that need to exist before applyCounterMutationOnLeader constructs the
@@ -64,7 +65,11 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         {
             requestSensors.registerSensor(Context.from(tm), Type.INTERNODE_BYTES);
             if (!tm.isIndex())
+            {
+                requestSensors.registerSensor(Context.from(tm), Type.WRITE_BYTES);
+                requestSensors.registerSensor(Context.from(tm), Type.INDEX_WRITE_BYTES);
                 requestSensors.registerSensor(Context.from(tm), Type.WRITE_EXECUTION_TIME);
+            }
         }
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
