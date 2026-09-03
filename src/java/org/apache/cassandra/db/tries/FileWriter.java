@@ -55,7 +55,7 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walker<T, DataOutputPlus>
 {
 
-    interface DataSerializer<T>
+    public interface DataSerializer<T>
     {
         int serializedSize(T value);
         int serialize(DataOutputPlus out, T value) throws IOException;

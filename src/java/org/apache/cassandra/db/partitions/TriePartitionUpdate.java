@@ -80,18 +80,70 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         EnumSet.of(TrieTombstoneMarker.Kind.ROW, TrieTombstoneMarker.Kind.RANGE, TrieTombstoneMarker.Kind.PARTITION);
 
     final int dataSize;
+    final int cellCount;
+    int serializedSizeDS21 = -1;
+    int serializedSizeDS20 = -1;
 
-    private TriePartitionUpdate(TableMetadata metadata,
-                                DecoratedKey key,
-                                RegularAndStaticColumns columns,
-                                EncodingStats stats,
-                                int rowCountIncludingStatic,
-                                int tombstoneCount,
-                                int dataSize,
-                                InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    /// The size of the BTree encoding of this update at [org.apache.cassandra.net.MessagingService#VERSION_DS_21],
+    /// where [PartitionUpdate.PartitionUpdateSerializer] writes whichever of the two encodings is the smaller one and
+    /// therefore has to know both. Memoized next to the trie's size and for the same reason: a mutation is sized and
+    /// then serialized, and the choice has to be made in both.
+    int btreeSerializedSizeDS21 = -1;
+
+    /// The trie as [TriePartitionUpdateSerializer#serializedSize] laid it out, kept so that the write that follows
+    /// does not have to lay it out again. Sizing the trie means writing it -- the on-disk writer accounts a branch's
+    /// size as it emits it -- and [org.apache.cassandra.db.Mutation] sizes a mutation and then immediately
+    /// serializes it, so without this every update is laid out twice.
+    ///
+    /// Cleared by the write that consumes it, or, when the BTree encoding turns out to be the smaller one, by the
+    /// choice that rules that write out. Volatile because the same update can be serialized from more than one
+    /// thread: the volatile write is what publishes the buffer, whose position and limit are not final and could
+    /// otherwise be read as they were before the flip.
+    volatile SerializedTrie serializedTrie;
+
+    /// A laid-out trie and the messaging version it was laid out for, held together so that the two are read as a
+    /// pair -- writing one version's bytes under another would put a message on the wire that the peer cannot read.
+    static final class SerializedTrie
+    {
+        final int version;
+        final ByteBuffer bytes;
+
+        SerializedTrie(int version, ByteBuffer bytes)
+        {
+            this.version = version;
+            this.bytes = bytes;
+        }
+    }
+
+    /**
+     * Package-private constructor used by {@link TriePartitionUpdateSerializer} and {@link TrieBuilder}
+     * to instantiate immutable trie partition update instances.
+     */
+    TriePartitionUpdate(TableMetadata metadata,
+                        DecoratedKey key,
+                        RegularAndStaticColumns columns,
+                        EncodingStats stats,
+                        int rowCountIncludingStatic,
+                        int tombstoneCount,
+                        int dataSize,
+                        DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
+    {
+        this(metadata, key, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, -1, trie);
+    }
+
+    TriePartitionUpdate(TableMetadata metadata,
+                        DecoratedKey key,
+                        RegularAndStaticColumns columns,
+                        EncodingStats stats,
+                        int rowCountIncludingStatic,
+                        int tombstoneCount,
+                        int dataSize,
+                        int cellCount,
+                        DeletionAwareTrie<Object, TrieTombstoneMarker> trie)
     {
         super(key, columns, stats, rowCountIncludingStatic, tombstoneCount, trie, metadata);
         this.dataSize = dataSize;
+        this.cellCount = cellCount;
     }
 
     /// This is extremely inefficient and is to be used by tests only.
@@ -160,7 +212,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
 
         putInTrie(makeNoConflictMutator(trie), metadata, metadata.comparator, row);
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.deletion().isLive() ? 0 : 1, row.dataSize(), trie);
+        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.deletion().isLive() ? 0 : 1, row.dataSize(), row.columnCount(), trie);
     }
 
     /** @see PartitionUpdate.Factory#fromIterator(UnfilteredRowIterator)  */
@@ -301,6 +353,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         // If there is a partition-level deletion, we intend to delete at least the columns of one row.
         if (!partitionLevelDeletion().isLive())
             return metadata().regularAndStaticColumns().size();
+
+        if (cellCount >= 0)
+            return cellCount + tombstoneCount * metadata().regularColumns().size();
 
         return TrieBackedRow.countColumns(trie) +
                // Each range delete should correspond to at least one intended row deletion, and with it, its regular columns.
@@ -474,6 +529,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         private int rowCountIncludingStatic;
         /// Counts tombstone ranges and row deletions
         private int tombstoneCount;
+        private int cellCount;
         private long dataSize;
 
         private boolean isBuilt;
@@ -488,6 +544,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             isBuilt = false;
             rowCountIncludingStatic = 0;
             tombstoneCount = 0;
+            cellCount = 0;
             dataSize = 0;
             mutator = trie.mutator(this::mergeIncomingData,
                                    this::mergeTombstones,
@@ -555,6 +612,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                            rowCountIncludingStatic,
                                            tombstoneCount,
                                            Ints.saturatedCast(dataSize),
+                                           cellCount,
                                            trie);
         }
 
@@ -569,6 +627,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 Cell<?> reconciled;
                 if (existingCell == null)
                 {
+                    ++cellCount;
                     reconciled = updateCell;
                     dataSize += reconciled.dataSizeWithoutPath();
                 }
@@ -640,7 +699,10 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 if (!deletion.deletes(cell))
                     return o;
                 if (updateDataSize)
+                {
                     dataSize -= cell.dataSizeWithoutPath();
+                    --cellCount;
+                }
                 return null;
             }
             else if (o == TrieBackedRow.COMPLEX_COLUMN_MARKER)
