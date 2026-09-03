@@ -1718,8 +1718,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 {
                     Row oldRow = toRemove.build();
                     Row newRow = toInsert.build();
-                    for (Index.Indexer indexer : indexers)
-                        indexer.updateRow(oldRow, newRow);
+                    if (newRow != null && !newRow.isEmpty())
+                        for (Index.Indexer indexer : indexers)
+                            indexer.updateRow(oldRow, newRow);
                 }
                 else
                 {

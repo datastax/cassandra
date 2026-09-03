@@ -189,7 +189,7 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
         // all removed cells. Note that if any cells are deleted this will always be called with `LevelMarker.ROW`,
         // possibly with null `applicableToPointForward`.
         if (existingContent instanceof LivenessInfo)
-            return applyRowDeletion((LivenessInfo) existingContent, updateMarker.applicableToPointForward());
+            return applyRowDeletionMarker((LivenessInfo) existingContent, updateMarker);
         else
             return super.applyIncomingMarker(existingContent, updateMarker);
     }
@@ -208,12 +208,17 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
         return mergedCellData;
     }
 
-    @Override
-    public LivenessInfo applyRowDeletion(LivenessInfo existing, DeletionTime deletion)
+    public LivenessInfo applyRowDeletionMarker(LivenessInfo existing, TrieTombstoneMarker marker)
     {
+        DeletionTime deletion = marker.applicableToPointForward();
         LivenessInfo mergedInfo = deletion != null ? super.applyRowDeletion(existing, deletion) : existing;
         Clustering<?> clustering = clusteringForCurrentKey();
-        indexer.startRow(clustering, existing, Row.Deletion.LIVE, mergedInfo, deletion != null ? Row.Deletion.regular(deletion) : Row.Deletion.LIVE);
+        // Note: Earlier memtable implementations do not apply range or partition deletions to rows.
+        // To emulate this behaviour, we don't set the incoming deletion time to the row, resulting
+        // in empty row for indexing, which is filtered out by the indexer.
+        indexer.startRow(clustering, existing, Row.Deletion.LIVE, mergedInfo,
+                         marker.leftDeletion() != marker.rightDeletion() ? Row.Deletion.regular(deletion)
+                                                                         : Row.Deletion.LIVE);
 
         currentRowDepth = mutator.currentDepth();
         currentColumns = metadata.regularAndStaticColumns().columns(clustering == Clustering.STATIC_CLUSTERING);
