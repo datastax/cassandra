@@ -41,9 +41,8 @@ import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.data.Offset.offset;
 
 /**
  * Reproduces the disk-usage difference between the first on-heap vector segment and a subsequent
@@ -119,26 +118,28 @@ public class VectorSegmentDiskUsageTest extends VectorTester
         StorageAttachedIndex sai = (StorageAttachedIndex) getCurrentColumnFamilyStore()
                                                            .indexManager
                                                            .getIndexByName(indexName);
-        assertNotNull("Index not found: " + indexName, sai);
+        assertThat(sai).as("Index not found: " + indexName).isNotNull();
 
         IndexContext indexContext = sai.getIndexContext();
         Collection<SSTableIndex> indexes = indexContext.getView().getIndexes();
-        assertEquals("Expected one SSTable index", 1, indexes.size());
+        assertThat(indexes).as("Expected one SSTable index").hasSize(1);
 
         List<Segment> segments = indexes.iterator().next().getSegments();
-        assertEquals("Expected exactly two segments", 2, segments.size());
+        assertThat(segments).as("Expected exactly two segments").hasSize(2);
 
         SegmentMeasurement onHeap = measure(segments.get(0));
         SegmentMeasurement offHeap = measure(segments.get(1));
 
-        assertEquals(ROWS_PER_SEGMENT, onHeap.rows);
-        assertEquals(ROWS_PER_SEGMENT, offHeap.rows);
-        assertEquals(0, onHeap.rowIdOffset);
-        assertEquals(ROWS_PER_SEGMENT, offHeap.rowIdOffset);
-        assertEquals(FIRST_SEGMENT_DISTINCT_VECTORS, onHeap.graphNodes);
-        assertEquals(FIRST_SEGMENT_DISTINCT_VECTORS, offHeap.graphNodes);
-        assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, onHeap.postingsStructure);
-        assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, offHeap.postingsStructure);
+        assertThat(onHeap.rows).as("on-heap rows").isEqualTo((long) ROWS_PER_SEGMENT);
+        assertThat(offHeap.rows).as("off-heap rows").isEqualTo((long) ROWS_PER_SEGMENT);
+        assertThat(onHeap.rowIdOffset).as("on-heap rowIdOffset").isEqualTo(0L);
+        assertThat(offHeap.rowIdOffset).as("off-heap rowIdOffset").isEqualTo((long) ROWS_PER_SEGMENT);
+        assertThat(onHeap.graphNodes).as("on-heap graphNodes").isEqualTo(FIRST_SEGMENT_DISTINCT_VECTORS);
+        assertThat(offHeap.graphNodes).as("off-heap graphNodes").isEqualTo(FIRST_SEGMENT_DISTINCT_VECTORS);
+        assertThat(onHeap.postingsStructure).as("on-heap postingsStructure")
+                                            .isEqualTo(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY);
+        assertThat(offHeap.postingsStructure).as("off-heap postingsStructure")
+                                             .isEqualTo(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY);
 
         logMeasurement("segment 1 / on-heap / dense ordinals", onHeap);
         logMeasurement("segment 2 / off-heap / sparse ordinals", offHeap);
@@ -148,13 +149,13 @@ public class VectorSegmentDiskUsageTest extends VectorTester
         logger.info("Off-heap/on-heap size ratio: TERMS_DATA={}x, all segment components={}x",
                     String.format("%.3f", termsRatio), String.format("%.3f", totalRatio));
 
-        // With 3000 serialized ordinal slots versus 1024 densely remapped nodes, TERMS_DATA should
-        // be close to 3x larger. Keep the assertion loose enough to tolerate jvector header changes.
-        assertTrue("Expected sparse off-heap TERMS_DATA to be more than 2x the dense on-heap " +
-                   "TERMS_DATA, but ratio was "
-                   + termsRatio, termsRatio > 2.0);
-        assertTrue("Expected the sparse off-heap segment to be larger overall, but ratio was " + totalRatio,
-                   totalRatio > 2.0);
+        // After the bug fix both segments hold the same number of distinct vectors and use dense
+        // ordinal mapping, so their sizes should be within 20% of each other.
+        double tolerance = 0.20;
+        assertThat(termsRatio).as("TERMS_DATA size ratio (off-heap / on-heap)")
+                              .isCloseTo(1.0, offset(tolerance));
+        assertThat(totalRatio).as("total segment size ratio (off-heap / on-heap)")
+                              .isCloseTo(1.0, offset(tolerance));
     }
 
     private static SegmentMeasurement measure(Segment segment)
