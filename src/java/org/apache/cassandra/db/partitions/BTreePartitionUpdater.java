@@ -20,9 +20,9 @@ package org.apache.cassandra.db.partitions;
 
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
@@ -31,9 +31,10 @@ import org.apache.cassandra.utils.memory.Cloner;
 import org.apache.cassandra.utils.memory.HeapCloner;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 
-/**
- *  the function we provide to the trie and btree utilities to perform any row and column replacements
- */
+/// The function we provide to the trie and btree utilities to perform any row and column replacements.
+///
+/// The user is responsible for starting and committing the indexer's transaction, as well as for calling
+/// [#reportAllocatedMemory] to account for any added memory usage (see e.g. [AtomicBTreePartition.Updater#addAll].
 public class BTreePartitionUpdater extends BasePartitionUpdater implements UpdateFunction<Row, Row>
 {
     final MemtableAllocator allocator;
@@ -63,7 +64,7 @@ public class BTreePartitionUpdater extends BasePartitionUpdater implements Updat
     @Override
     public Row merge(Row existing, Row update)
     {
-        Row reconciled = Rows.merge(existing, update, this);
+        Row reconciled = ((BTreeRow) existing).mergeWith((BTreeRow) update, this);
         indexer.onUpdated(existing, reconciled);
 
         return reconciled;
@@ -78,17 +79,7 @@ public class BTreePartitionUpdater extends BasePartitionUpdater implements Updat
             ++partitionsAdded;
         }
 
-        try
-        {
-            indexer.start();
-
-            return makeMergedPartition(current, update);
-        }
-        finally
-        {
-            indexer.commit();
-            reportAllocatedMemory();
-        }
+        return makeMergedPartition(current, update);
     }
 
     protected BTreePartitionData makeMergedPartition(BTreePartitionData current, BTreePartitionUpdate update)

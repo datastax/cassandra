@@ -23,7 +23,7 @@ import java.util.Arrays;
 import org.agrona.DirectBuffer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-public class TriePathReconstructor implements Trie.ResettingTransitionsReceiver
+public class TriePathReconstructor implements Cursor.ResettingTransitionsReceiver
 {
     protected byte[] keyBytes = new byte[32];
     protected int keyPos = 0;
@@ -47,6 +47,11 @@ public class TriePathReconstructor implements Trie.ResettingTransitionsReceiver
     public void resetPathLength(int newLength)
     {
         keyPos = newLength;
+    }
+
+    public byte[] getTrimmedPathBytes()
+    {
+        return Arrays.copyOf(keyBytes, keyPos);
     }
 
     static ByteComparable.Preencoded toByteComparable(ByteComparable.Version byteComparableVersion, byte[] bytes, int byteLength)

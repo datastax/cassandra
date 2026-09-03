@@ -315,7 +315,7 @@ public abstract class AbstractBTreePartition implements Partition
         {
             Unfiltered unfiltered = iterator.next();
             if (unfiltered.kind() == Unfiltered.Kind.ROW)
-                builder.add((Row)unfiltered);
+                builder.add(BTreeRow.asBTreeRow((Row)unfiltered));
             else
                 deletionBuilder.add((RangeTombstoneMarker)unfiltered);
         }
@@ -368,6 +368,12 @@ public abstract class AbstractBTreePartition implements Partition
                && a.deletionInfo.equals(b.deletionInfo)
                && a.staticRow.equals(b.staticRow)
                && Iterators.elementsEqual(rowIterator(), that.rowIterator());
+    }
+
+    @Override
+    public int hashCode()
+    {
+        throw new UnsupportedOperationException();
     }
 
     public int rowCount()

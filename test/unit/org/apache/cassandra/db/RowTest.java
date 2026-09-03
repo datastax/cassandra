@@ -132,7 +132,7 @@ public class RowTest
         ColumnMetadata defA = metadata.getColumn(new ColumnIdentifier("a", true));
         ColumnMetadata defB = metadata.getColumn(new ColumnIdentifier("b", true));
 
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(metadata, false, false);
         builder.newRow(metadata.comparator.make("c1"));
         writeSimpleCellValue(builder, defA, "a1", 0);
         writeSimpleCellValue(builder, defA, "a2", 1);
@@ -176,7 +176,7 @@ public class RowTest
         ColumnMetadata defA = metadata.getColumn(new ColumnIdentifier("a", true));
         ColumnMetadata defB = metadata.getColumn(new ColumnIdentifier("b", true));
 
-        Row.Builder builder = BTreeRow.unsortedBuilder();
+        Row.Builder builder = PartitionUpdate.rowBuilder(metadata, false, false);
         builder.newRow(metadata.comparator.make("c1"));
         writeSimpleCellValue(builder, defA, "a1", 0);
         writeSimpleCellValue(builder, defA, "a2", 1);

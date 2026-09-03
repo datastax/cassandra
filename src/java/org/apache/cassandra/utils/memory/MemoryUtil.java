@@ -143,11 +143,6 @@ public abstract class MemoryUtil
         return instance;
     }
 
-    public static ByteBuffer getByteBuffer(long address, int length)
-    {
-        return getByteBuffer(address, length, ByteOrder.nativeOrder());
-    }
-
     public static ByteBuffer getByteBuffer(long address, int length, ByteOrder order)
     {
         ByteBuffer instance = getHollowDirectByteBuffer(order);
