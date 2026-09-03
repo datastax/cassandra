@@ -37,6 +37,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.CassandraWriteContext;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -45,6 +46,8 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.WriteContext;
+import org.apache.cassandra.db.WriteOptions;
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -653,6 +656,87 @@ public interface Index
      */
 
     /**
+     * An opaque handle returned by {@link #prepareWrite}, carried by the write context of the enclosing mutation
+     * and taken back by the index in {@link #indexerFor} ({@link CassandraWriteContext#takePreparedWrite}) for
+     * the same partition update, so an index can carry state from before the write is persisted to the moment
+     * its rows are applied. Cassandra never inspects it.
+     */
+    interface PreparedWrite
+    {
+    }
+
+    /**
+     * Whether this index wants {@link #prepareWrite} called. Off by default, and cached by the index manager
+     * when the index is registered, so that a table whose indexes do not use the hook pays nothing for it on
+     * the write path -- no call, no allocation. An index that overrides {@link #prepareWrite} must override
+     * this to return {@code true}, or it is never called.
+     */
+    default boolean preparesWrites()
+    {
+        return false;
+    }
+
+    /**
+     * Gives the index a look at a partition update BEFORE it is persisted anywhere on this replica: before the
+     * mutation is appended to the commit log, and before it reaches the memtable (where
+     * {@link #indexerFor} and the resulting {@link Indexer} callbacks observe it).
+     * <p>
+     * The one guarantee this ordering provides, and the reason the hook exists: if the process dies at any
+     * point after this method returns, either the write never made it to the commit log or, if it did and is
+     * replayed at the next startup, the index has already been told about it. An index that keeps its own
+     * write-ahead record of in-flight updates can therefore record the update here and treat the commit log
+     * replay as already covered, instead of having to detect and track replayed rows. Nothing has been fsync'd
+     * when this runs; an index that needs its own record durable before Cassandra's must arrange that itself,
+     * off the mutation thread.
+     * <p>
+     * Called, when {@link #preparesWrites} is true, for every update applied on the write path -- client writes,
+     * hints, read repair, batchlog replay, paxos commits, and the commit log replay itself -- with the
+     * {@link WriteOptions} the mutation is applied with, so an index can tell those apart (a replayed mutation,
+     * {@link WriteOptions#FOR_COMMITLOG_REPLAY}, was already prepared when it was first written). Not called for
+     * updates that skip indexing, nor while the index is not writable. The writability test is the one
+     * {@link #indexerFor} is later gated by, but it is evaluated twice, at each end of the write: an index that
+     * becomes writable in between is asked for an {@link Indexer} it was not prepared for, and its
+     * {@link CassandraWriteContext#takePreparedWrite} then returns null. An index must accept an Indexer with no
+     * handle; it can rely on every handle it did return reaching exactly one of the two outcomes below.
+     * <p>
+     * Runs on the mutation thread, before the write, while the keyspace's write order group is held: it must be
+     * fast, and it must not wait on anything the write path itself produces (a flush barrier, an fsync of this
+     * mutation). A thrown exception fails the write before anything is persisted; the handles other indexes
+     * returned for the same mutation are then {@linkplain #abortWrite aborted}. The default does nothing and
+     * returns {@code null}.
+     * <p>
+     * The handle returned here travels in the mutation's {@link CassandraWriteContext}, from which the index takes
+     * it back in {@link #indexerFor} with {@link CassandraWriteContext#takePreparedWrite}. It is handed to exactly
+     * one of those two outcomes: taken there, or {@linkplain #abortWrite aborted} because the update is never
+     * applied to this index -- never both, never neither.
+     *
+     * @param update the partition update about to be written
+     * @param options the options the enclosing mutation is applied with
+     * @param origin where the enclosing mutation came from (never null on this path)
+     * @return a handle the index will take back from the write context when the update is applied, or
+     * {@code null} if the index has nothing to carry over
+     */
+    default PreparedWrite prepareWrite(PartitionUpdate update, WriteOptions options, WriteOrigin origin)
+    {
+        return null;
+    }
+
+    /**
+     * Tells the index that a handle {@link #prepareWrite} returned was NOT taken back in {@link #indexerFor}:
+     * the write failed between the two (another index's {@code prepareWrite} threw, the commit log append
+     * failed, the memtable apply of an earlier update of the same mutation failed), the update was dropped
+     * because its table no longer exists, the index is no longer writable so it was not asked for an indexer,
+     * or the index's own {@code indexerFor} simply did not take it. Whatever {@code prepareWrite} recorded for
+     * the update should be undone: as far as this replica is concerned the write never happened. Runs on the
+     * mutation thread when the write context is closed. The default does nothing.
+     *
+     * @param prepared the handle {@link #prepareWrite} returned, never null
+     */
+    default void abortWrite(PreparedWrite prepared)
+    {
+    }
+
+    /**
      * Creates a new {@code Indexer} object for updates to a given partition.
      *
      * @param key key of the partition being modified
@@ -660,7 +744,10 @@ public interface Index
      * This can be empty as an update might only contain partition, range and row deletions, but
      * the indexer is guaranteed to not get any cells for a column that is not part of {@code columns}.
      * @param nowInSec current time of the update operation
-     * @param ctx WriteContext spanning the update operation
+     * @param ctx WriteContext spanning the update operation. On the write path it is the
+     *            {@link CassandraWriteContext} of the enclosing mutation, carrying what {@link #prepareWrite}
+     *            returned for this update: an index that prepares writes takes its handle back with
+     *            {@link CassandraWriteContext#takePreparedWrite}.
      * @param transactionType indicates what kind of update is being performed on the base data
      *                        i.e. a write time insert/update/delete or the result of compaction
      * @param memtable current memtable that the write goes into. It's to make sure memtable and index memtable
