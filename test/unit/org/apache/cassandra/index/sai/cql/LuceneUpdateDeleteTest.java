@@ -30,6 +30,7 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
+import org.apache.cassandra.cql3.validation.miscellaneous.TombstonesTest;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -605,40 +606,39 @@ public class LuceneUpdateDeleteTest extends SAITester
         // delete range
         execute("DELETE FROM %s WHERE pk = 0");
 
-        if (version.equals(Version.AA))
-        {
-            // Still expect both rows to be in the index because range deletion doesn't remove from index
-            searchMemtable(indexName, "indexed", 0);
-            searchMemtable(indexName, "random", 1, 0);
-            searchMemtable(indexName, "something", 0); // range deleted, but not yet removed
-        }
-        else
-        {
-            // The range deletion causes an update since trie memtable stage 3
-            searchMemtable(indexName, "indexed");
-            searchMemtable(indexName, "random", 1);
-            searchMemtable(indexName, "something");
-        }
+        // Still expect both rows to be in the index because range deletion doesn't remove from index
+        searchMemtable(indexName, "indexed", 0);
+        searchMemtable(indexName, "random", 1, 0);
 
         // Overwrite the value for the first of the 2 rows in partition 0
         execute("INSERT INTO %s (pk, x, val) VALUES (0, 0, 'random')");
 
-        // Confirm the expected behavior (AA does not support updates, so we have to branch)
+        // Confirm the expected behavior
         if (version.equals(Version.AA))
         {
+            // AA does not support deletions;
             searchMemtable(indexName, "indexed", 0);
             searchMemtable(indexName, "phrase", 1, 0);
             // random is in all 3 memtable index rows, but only 2 partitions, and AA indexes partition keys
             searchMemtable(indexName, "random", 1, 0);
-            searchMemtable(indexName, "something", 0); // range deleted, but not yet removed
+        }
+        else if (TombstonesTest.tombstoneIndependentMemtables.contains(getCurrentColumnFamilyStore().getCurrentMemtable().getClass()))
+        {
+            // trie memtable stage 3 and later delete the row on the partition delete, so we don't know what the update
+            // above deletes.
+            searchMemtable(indexName, "indexed", 0);
+            searchMemtable(indexName, "phrase", 1, 0);
+            // random is in all 3 memtable index rows
+            searchMemtable(indexName, "random", 1, 0, 0);
         }
         else
         {
             searchMemtable(indexName, "indexed"); // overwritten, and the update removes the value
             searchMemtable(indexName, "phrase", 1); // was deleted/overwritten in 0, so just in 1 now
-            searchMemtable(indexName, "random", 1, 0); // random is in all 3 memtable index rows
-            searchMemtable(indexName, "something");
+            searchMemtable(indexName, "random", 1, 0, 0); // random is in all 3 memtable index rows
         }
+        // True for all versions
+        searchMemtable(indexName, "something", 0); // range deleted, but not yet removed
     }
 
     @Test

@@ -93,6 +93,39 @@ public class IndexMetricsTest extends AbstractMetricsTest
                 .hasCauseInstanceOf(javax.management.InstanceNotFoundException.class);
     }
 
+
+    @Test
+    public void testMetricsAfterDeletions()
+    {
+        String table = createTable("CREATE TABLE %s (ID1 TEXT, ID2 INT, v1 INT, v2 TEXT, PRIMARY KEY (ID1, ID2)) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        int rowCount = 10;
+        for (int i = 0; i < rowCount; i++)
+            execute("INSERT INTO %s (id1, id2, v1, v2) VALUES (?, ?, ?, '0')", Integer.toString(i), i, i);
+
+        assertEquals(rowCount + 0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Deleting a row should count as a row update.
+        execute("INSERT INTO %s (id1, id2, v1, v2) VALUES (?, ?, ?, '0')", Integer.toString(rowCount), rowCount, rowCount);
+        execute("DELETE FROM %s WHERE id1 = ? AND id2 = ?", Integer.toString(rowCount), rowCount);
+        ++rowCount;
+        assertEquals(rowCount + 1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Deleting a row range should not count as row updates for the affected rows.
+        execute("INSERT INTO %s (id1, id2, v1, v2) VALUES (?, ?, ?, '0')", Integer.toString(rowCount), rowCount, rowCount);
+        execute("DELETE FROM %s WHERE id1 = ?", Integer.toString(rowCount));
+        ++rowCount;
+        assertEquals(rowCount + 1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Deleting a partition should not count as row updates for the contained rows.
+        execute("INSERT INTO %s (id1, id2, v1, v2) VALUES (?, ?, ?, '0')", Integer.toString(rowCount), rowCount, rowCount);
+        execute("DELETE FROM %s WHERE id1 = ? AND id2 > 0", Integer.toString(rowCount));
+        ++rowCount;
+        assertEquals(rowCount + 1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+    }
+
     @Test
     public void testMetricsThroughWriteLifecycle()
     {
