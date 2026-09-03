@@ -45,7 +45,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 /// @param <T> The content type for live data stored in the trie
 /// @param <D> The deletion marker type, must extend [RangeState] for range operations
 public class InMemoryDeletionAwareTrie<T, D extends RangeState<D>>
-extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
+extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> implements DeletionAwareTrie<T, D>
 {
     // constants for space calculations
     private static final long EMPTY_SIZE_ON_HEAP;
@@ -53,7 +53,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     static
     {
         // Measuring the empty size of long-lived tries, because these are the ones for which we want to track size.
-        InMemoryBaseTrie<Object> empty = new InMemoryDeletionAwareTrie<>(ByteComparable.Version.OSS50, null, BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
+        InMemoryDeletionAwareTrie<?, ?> empty = new InMemoryDeletionAwareTrie<>(ByteComparable.Version.OSS50, null, BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
         EMPTY_SIZE_ON_HEAP = ObjectSizes.measureDeep(empty);
         empty = new InMemoryDeletionAwareTrie<>(ByteComparable.Version.OSS50, null, BufferType.OFF_HEAP, ExpectedLifetime.LONG, null);
         EMPTY_SIZE_OFF_HEAP = ObjectSizes.measureDeep(empty);
@@ -115,7 +115,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     static class DeletionAwareInMemoryCursor<T, D extends RangeState<D>>
     extends InMemoryCursor<T> implements DeletionAwareCursor<T, D>
     {
-        DeletionAwareInMemoryCursor(InMemoryBaseTrie<T> trie, Direction direction, int root)
+        DeletionAwareInMemoryCursor(InMemoryReadTrie<T> trie, Direction direction, int root)
         {
             super(trie, direction, root);
         }
@@ -267,7 +267,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     /// This treats this data buffers as a range trie and uses an unchecked cast to treat the deletion branches as
     /// containing only deletion states of type `D`.
     @SuppressWarnings("unchecked")
-    final InMemoryRangeTrie.ApplyState<D> deletionState = new InMemoryRangeTrie.ApplyState<>((InMemoryBaseTrie<D>) this);
+    final InMemoryRangeTrie.ApplyState<D> deletionState = new InMemoryRangeTrie.ApplyState<>((InMemoryBaseTrie<D, ?, ?>) this);
 
     /// Deletion-aware trie mutator, binding the trie with a merge configuration (i.e. transformers and predicates).
     /// Can be used to apply multiple modifications to the trie using [#apply(DeletionAwareTrie)].

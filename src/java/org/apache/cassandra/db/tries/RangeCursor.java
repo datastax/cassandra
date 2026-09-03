@@ -153,6 +153,12 @@ interface RangeCursor<S extends RangeState<S>> extends Cursor<S>
         }
 
         @Override
+        public void close()
+        {
+            source.close();
+        }
+
+        @Override
         public S state()
         {
             return source.nonNullState().applyToCoveringState(marker);

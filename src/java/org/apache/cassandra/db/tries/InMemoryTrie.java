@@ -57,7 +57,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 ///     to permit recursive execution.
 ///
 ///     Because it uses 32-bit pointers in byte buffers, this trie has a fixed size limit of 2GB.
-public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
+public class InMemoryTrie<T> extends InMemoryBaseTrie<T, Cursor<T>, Trie<T>> implements Trie<T>
 {
     // constants for space calculations
     private static final long EMPTY_SIZE_ON_HEAP;
@@ -65,7 +65,7 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     static
     {
         // Measuring the empty size of long-lived tries, because these are the ones for which we want to track size.
-        InMemoryBaseTrie<Object> empty = new InMemoryTrie<>(ByteComparable.Version.OSS50, BufferType.ON_HEAP, ExpectedLifetime.LONG, null, true);
+        InMemoryTrie<Object> empty = new InMemoryTrie<>(ByteComparable.Version.OSS50, BufferType.ON_HEAP, ExpectedLifetime.LONG, null, true);
         EMPTY_SIZE_ON_HEAP = ObjectSizes.measureDeep(empty);
         empty = new InMemoryTrie<>(ByteComparable.Version.OSS50, BufferType.OFF_HEAP, ExpectedLifetime.LONG, null, true);
         EMPTY_SIZE_OFF_HEAP = ObjectSizes.measureDeep(empty);

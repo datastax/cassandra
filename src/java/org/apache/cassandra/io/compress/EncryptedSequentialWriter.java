@@ -268,12 +268,12 @@ public class EncryptedSequentialWriter extends SequentialWriter
     }
 
     @Override
-    public void padToPageBoundary()
+    public long padToPageBoundary()
     {
-        if (buffer.position() == 0)
-            return;
+        if (buffer.position() > 0)
+            doFlush(0);
 
-        doFlush(0);
+        return bufferOffset;
     }
 
     @Override
