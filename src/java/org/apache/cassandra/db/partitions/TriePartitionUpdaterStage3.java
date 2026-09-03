@@ -169,7 +169,7 @@ implements InMemoryBaseTrie.UpsertTransformer<Object, Object>
         if (existingContent instanceof TrieMemtableStage3.PartitionData)
             return applyPartitionDeletion((TrieMemtableStage3.PartitionData) existingContent, deletion);
         else if (existingContent instanceof RowData)
-            return applyRowDeletion((RowData) existingContent, deletion);
+            return applyRowDeletion((RowData) existingContent, updateMarker, deletion);
         else
             throw new AssertionError("Unexpected content in trie: " + existingContent);
     }
@@ -181,7 +181,7 @@ implements InMemoryBaseTrie.UpsertTransformer<Object, Object>
         return existing;
     }
 
-    public Object applyRowDeletion(RowData existing, DeletionTime deletion)
+    public Object applyRowDeletion(RowData existing, TrieTombstoneMarker marker, DeletionTime deletion)
     {
         RowData updated = existing.delete(deletion);
         if (updated != existing)
@@ -189,7 +189,8 @@ implements InMemoryBaseTrie.UpsertTransformer<Object, Object>
         if (updated == null)
             currentPartition.markInsertedRows(-1);
 
-        if (indexer != UpdateTransaction.NO_OP && updated != existing)
+        // Do not issue an update for a row deleted by a range or partition tombstone
+        if (indexer != UpdateTransaction.NO_OP && updated != existing && marker.pointDeletion() != null)
         {
             Clustering<?> clustering = clusteringForCurrentKey();
             if (updated != null)

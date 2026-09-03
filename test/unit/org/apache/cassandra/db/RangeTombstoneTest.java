@@ -743,10 +743,10 @@ public class RangeTombstoneTest
 
         if (TombstonesTest.tombstoneIndependentMemtables.contains(cfs.getCurrentMemtable().getClass()))
         {
-            // TrieMemtable deletes the row on receiving the tombstone (issuing an update), and then insert it a second
+            // TrieMemtable deletes the row on receiving the tombstone, and then insert it a second
             // time.
             assertEquals(2, index.rowsInserted.size());
-            assertEquals(1, index.rowsUpdated.size());
+            assertEquals(0, index.rowsUpdated.size());
         }
         else
         {
