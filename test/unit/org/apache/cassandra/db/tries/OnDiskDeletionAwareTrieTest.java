@@ -28,6 +28,7 @@ import java.util.Random;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -53,6 +54,7 @@ public class OnDiskDeletionAwareTrieTest
     @BeforeClass
     public static void setUp()
     {
+        CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
         // The on-disk readers pull in BufferPools, whose static initializer needs configuration.
         DatabaseDescriptor.toolInitialization();
     }
@@ -143,6 +145,12 @@ public class OnDiskDeletionAwareTrieTest
         }
 
         assertRoundTripsInMemory(source);
+
+        // The same data with the deletion branch hoisted to the root. That is the only shape that fills both the
+        // descent and the ascent content slot of a node, which is where the on-disk payload order can be observed at
+        // all -- a swap of the two makes partition-level deletions vanish and leaves rows and range tombstones
+        // looking healthy. DataPoint.fromList(points) builds it below the root, so no other case here reaches it.
+        assertRoundTripsInMemory(DataPoint.fromList(points, false, true));
     }
 
     /// The same round trip without a file, which is how the commit log and messaging will use this:
@@ -478,11 +486,21 @@ public class OnDiskDeletionAwareTrieTest
             // Taking a tail on the return path is not permitted.
             if (!Cursor.isOnReturnPath(position))
                 for (Direction tailDirection : Direction.values())
-                    TrieUtil.assertCursorWalksEqual(expected.tailCursor(tailDirection),
-                                                    actual.tailCursor(tailDirection));
+                    assertTailEqual(expected.tailCursor(tailDirection), actual.tailCursor(tailDirection));
             position = expected.advance();
             assertEquals(Cursor.toString(position), Cursor.toString(actual.advance()));
         }
+    }
+
+    /// The deletion that applies at a tail's root is asked for by every merge and intersection the tail takes
+    /// part in, and it is not the same question as the content the root presents: a tail rooted where a range
+    /// ends has no content on the side it walks towards, but still has to say that nothing is active there.
+    /// A walk comparison never asks, so the two have to be compared before the tails are consumed.
+    private static void assertTailEqual(RangeCursor<DeletionMarker> expected, RangeCursor<DeletionMarker> actual)
+    {
+        assertEquals("Tail root state", expected.state(), actual.state());
+        assertEquals("Tail root preceding state", expected.precedingState(), actual.precedingState());
+        TrieUtil.assertCursorWalksEqual(expected, actual);
     }
 
     /// A deletion spanning every consecutive pair of the given transitions, over the keys [#wideKey]
