@@ -494,23 +494,25 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         try (PartitionIterator data = query.execute(options.getConsistency(), queryState, queryStartNanoTime))
         {
             msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset);
-            RequestSensors sensors = RequestTracker.instance.get();
-            if (sensors != null)
-            {
-                Context context = Context.from(this.table);
-                // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
-                // (replica I/O + result processing + any short-read protection fetches) minus the replica max
-                // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
-                // clock skew or replica over-reporting producing a negative value.
-                double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
-                double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
-                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
-                sensors.syncAllSensors();
+        }
+        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's computeRMU)
+        // have fired and sensor values are fully populated before we read them below.
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+        {
+            Context context = Context.from(this.table);
+            // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
+            // (replica I/O + result processing + any short-read protection fetches) minus the replica max
+            // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
+            // clock skew or replica over-reporting producing a negative value.
+            double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
+            double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
+            sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
+            sensors.syncAllSensors();
 
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.RMU);
-            }
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.RMU);
         }
         return msg;
     }
@@ -647,23 +649,25 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                           : pager.readAll(pageSize, queryStartNanoTime))
         {
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset);
-            RequestSensors sensors = RequestTracker.instance.get();
-            if (sensors != null)
-            {
-                Context context = Context.from(this.table);
-                // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
-                // (replica I/O + result processing + any short-read protection fetches) minus the replica max
-                // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
-                // clock skew or replica over-reporting producing a negative value.
-                double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
-                double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
-                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
-                sensors.syncAllSensors();
+        }
+        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's computeRMU)
+        // have fired and sensor values are fully populated before we read them below.
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+        {
+            Context context = Context.from(this.table);
+            // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
+            // (replica I/O + result processing + any short-read protection fetches) minus the replica max
+            // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
+            // clock skew or replica over-reporting producing a negative value.
+            double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
+            double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
+            sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
+            sensors.syncAllSensors();
 
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
-                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.RMU);
-            }
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.RMU);
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
