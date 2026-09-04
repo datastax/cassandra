@@ -24,6 +24,7 @@ import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import org.agrona.DirectBuffer;
+import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -124,7 +125,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// prefixes will still be reported before their descendants.
 ///
 /// Also see [Trie.md](./Trie.md) for further documentation.
-interface Cursor<T>
+interface Cursor<T> extends Closeable
 {
     /// The depth is stored in the high-order 32-bits of the long.
     int DEPTH_SHIFT = 32;
@@ -318,7 +319,7 @@ interface Cursor<T>
     /// visited position at that depth.
     static long positionForSkippingBranch(long encodedBranchPosition)
     {
-        return (encodedBranchPosition & ~FLAGS_MASK) + (1L << TRANSITION_SHIFT);
+        return (encodedBranchPosition & ~(FLAGS_MASK | ON_RETURN_PATH_BIT)) + (1L << TRANSITION_SHIFT);
     }
 
     /// Returns true if the given `currPosition` as returned by `advance`, `advanceMultiple` or `skipTo` is the result
@@ -530,6 +531,16 @@ interface Cursor<T>
     ///
     /// Descendants that override this class should return their specific cursor type.
     Cursor<T> tailCursor(Direction direction);
+
+    /// Release whatever the cursor holds. It must not be used afterwards.
+    ///
+    /// A cursor over a trie in memory holds nothing, hence the default; a cursor over a file holds a buffer for as
+    /// long as it lives, and only gives it back here. Cursors that wrap others must pass this on to all of them.
+    @Override
+    default void close()
+    {
+        // nothing by default
+    }
 
     /// Used by [#advanceMultiple] to feed the transitions taken.
     interface TransitionsReceiver

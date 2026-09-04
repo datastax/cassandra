@@ -55,6 +55,20 @@ class DeletionAwareMergeSource<T, D extends RangeState<D>, E extends RangeState<
     }
 
     @Override
+    public void close()
+    {
+        try
+        {
+            data.close();
+        }
+        finally
+        {
+            if (deletions != null)
+                deletions.close();
+        }
+    }
+
+    @Override
     public long encodedPosition()
     {
         return data.encodedPosition();

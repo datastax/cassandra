@@ -490,7 +490,10 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     /// Process the trie using the given [DeletionAwareCursor.DeletionAwareWalker].
     default <R> R process(Direction direction, DeletionAwareCursor.DeletionAwareWalker<? super T, ? super D, R> walker)
     {
-        return cursor(direction).process(walker);
+        try (DeletionAwareCursor<T, D> cursor = cursor(direction))
+        {
+            return cursor.process(walker);
+        }
     }
 
 
@@ -498,29 +501,34 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     /// the range that covers it (i.e. the `precedingState` of the next marker).
     default D applicableDeletion(ByteComparable key)
     {
-        DeletionAwareCursor<T, D> dac = cursor(Direction.FORWARD);
-        final ByteSource bytes = key.asComparableBytes(dac.byteComparableVersion());
-        long currentPosition = dac.encodedPosition();
-        RangeCursor<D> rc;
-        while (true)
+        try (DeletionAwareCursor<T, D> dac = cursor(Direction.FORWARD))
         {
-            rc = DeletionAwareCursor.deletionBranchCursor(dac, currentPosition);
-            if (rc != null)
-                break;
+            final ByteSource bytes = key.asComparableBytes(dac.byteComparableVersion());
+            long currentPosition = dac.encodedPosition();
+            RangeCursor<D> rc;
+            while (true)
+            {
+                rc = DeletionAwareCursor.deletionBranchCursor(dac, currentPosition);
+                if (rc != null)
+                    break;
 
-            int next = bytes.next();
-            if (next == ByteSource.END_OF_STREAM)
-                return null; // no deletion branch found
-            long nextPosition = Cursor.positionForDescentWithByte(currentPosition, next);
-            currentPosition = dac.skipTo(nextPosition);
-            if (Cursor.compare(currentPosition, nextPosition) != 0)
-                return null;
+                int next = bytes.next();
+                if (next == ByteSource.END_OF_STREAM)
+                    return null; // no deletion branch found
+                long nextPosition = Cursor.positionForDescentWithByte(currentPosition, next);
+                currentPosition = dac.skipTo(nextPosition);
+                if (Cursor.compare(currentPosition, nextPosition) != 0)
+                    return null;
+            }
+
+            try (RangeCursor<D> deletions = rc)
+            {
+                if (deletions.descendAlong(bytes))
+                    return deletions.state();
+                else
+                    return deletions.precedingState();
+            }
         }
-
-        if (rc.descendAlong(bytes))
-            return rc.state();
-        else
-            return rc.precedingState();
     }
 
 
@@ -562,11 +570,15 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     /// position.
     default D deletionAtRoot()
     {
-        DeletionAwareCursor<T, D> cursor = cursor(Direction.FORWARD);
-        RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(Direction.FORWARD);
-        if (deletionBranch == null)
-            return null;
-        return deletionBranch.content();
+        try (DeletionAwareCursor<T, D> cursor = cursor(Direction.FORWARD))
+        {
+            try (RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(Direction.FORWARD))
+            {
+                if (deletionBranch == null)
+                    return null;
+                return deletionBranch.content();
+            }
+        }
     }
 
     /// Returns a view of the combination of the live data and deletions in this trie as a regular [Trie], using
