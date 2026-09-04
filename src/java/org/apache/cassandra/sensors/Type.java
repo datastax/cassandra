@@ -49,12 +49,12 @@ public enum Type
      */
     WRITE_EXECUTION_TIME,
     /**
-     * Read Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeRMU(RequestSensors, long)}
+     * Read Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeRMU(RequestSensors)}
      */
     RMU,
 
     /**
-     * Write Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeWMU(RequestSensors, long)}
+     * Write Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeWMU(RequestSensors)}
      */
     WMU,
     /**

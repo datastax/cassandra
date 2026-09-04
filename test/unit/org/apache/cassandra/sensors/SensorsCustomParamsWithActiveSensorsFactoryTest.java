@@ -101,11 +101,13 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         Context context = new Context("ks1", "t1", tableId.toString());
 
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
 
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000.0);
+        sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
         // With default baseline=-1, RMU = read_bytes * 4000
-        SensorsCustomParams.computeRMU(sensors, 100_000_000L); // 100 ms
+        SensorsCustomParams.computeRMU(sensors);
 
         Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_1, noPayload).withId(1);
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);
@@ -131,11 +133,13 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 400_000.0);
+        sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
 
-        SensorsCustomParams.computeRMU(sensors, 100_000_000L); // 100 ms
+        SensorsCustomParams.computeRMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
 
         double expectedRMU = 400_000.0 * 4000.0;
@@ -151,11 +155,13 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WMU);
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000.0);
+        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
 
-        SensorsCustomParams.computeWMU(sensors, 200_000_000L); // 200 ms
+        SensorsCustomParams.computeWMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
 
         double expectedWMU = 250_000.0 * 4000.0;
@@ -171,7 +177,9 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.WMU);
@@ -179,9 +187,8 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.READ_BYTES, 300_000.0);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 150_000.0);
 
-        long latency = 200_000_000L; // 200 ms
-        SensorsCustomParams.computeRMU(sensors, latency);
-        SensorsCustomParams.computeWMU(sensors, latency);
+        SensorsCustomParams.computeRMU(sensors);
+        SensorsCustomParams.computeWMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
 
         double expectedTMU = (300_000.0 + 150_000.0) * 4000.0;
@@ -196,11 +203,13 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         Context context = new Context("ks1", "t1", tableId.toString());
 
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WMU);
 
         sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000.0);
+        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
         // With default baseline=-1, WMU = write_bytes * 4000
-        SensorsCustomParams.computeWMU(sensors, 200_000_000L); // 200 ms
+        SensorsCustomParams.computeWMU(sensors);
 
         Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_2, noPayload).withId(2);
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);

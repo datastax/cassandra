@@ -75,14 +75,15 @@ public class CoordinatorMUTest
     @Test
     public void testCoordinatorRMU_bytesDominate()
     {
-        // read_bytes = 600 000, latency = 100 ms
-        // normalized_bytes = 0.6, normalized_latency = 0.1 → RMU = 0.6 * 4000 = 2400
+        // read_bytes = 600 000, read_execution_time = 100 ms
+        // normalized_bytes = 0.6, normalized_execution_time = 0.1 → RMU = 0.6 * 4000 = 2400
         String ks = "ks_rmu";
         String table = "t_rmu";
         Context context = new Context(ks, table, UUID.randomUUID().toString());
 
         RequestSensors coordinatorSensors = SensorsFactory.instance.createRequestSensors(ks);
         coordinatorSensors.registerSensor(context, Type.READ_BYTES);
+        coordinatorSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         coordinatorSensors.registerSensor(context, Type.RMU);
 
         // Simulate replica responses carrying READ_BYTES
@@ -91,10 +92,10 @@ public class CoordinatorMUTest
 
         assertThat(coordinatorSensors.getSensor(context, Type.READ_BYTES).get().getValue()).isEqualTo(600_000.0);
 
-        // Coordinator computes RMU with 100 ms latency
-        long latencyNanos = (long) (0.1 * NANOS_PER_SECOND);
-        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE);
-        double rmuValue = calculator.computeRMU(coordinatorSensors, context, latencyNanos);
+        // Coordinator records 100 ms execution time and computes RMU
+        coordinatorSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND);
+        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE, 1);
+        double rmuValue = calculator.computeRMU(coordinatorSensors, context);
         coordinatorSensors.incrementSensor(context, Type.RMU, rmuValue);
 
         double expectedRMU = (600_000.0 / BASELINE) * MU_SCALE; // bytes dominate
@@ -112,26 +113,27 @@ public class CoordinatorMUTest
     }
 
     @Test
-    public void testCoordinatorRMU_latencyDominates()
+    public void testCoordinatorRMU_executionTimeDominates()
     {
-        // read_bytes = 100 000, latency = 800 ms
-        // normalized_bytes = 0.1, normalized_latency = 0.8 → RMU = 0.8 * 4000 = 3200
+        // read_bytes = 100 000, read_execution_time = 800 ms
+        // normalized_bytes = 0.1, normalized_execution_time = 0.8 → RMU = 0.8 * 4000 = 3200
         String ks = "ks_rmu2";
         String table = "t_rmu2";
         Context context = new Context(ks, table, UUID.randomUUID().toString());
 
         RequestSensors coordinatorSensors = SensorsFactory.instance.createRequestSensors(ks);
         coordinatorSensors.registerSensor(context, Type.READ_BYTES);
+        coordinatorSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         coordinatorSensors.registerSensor(context, Type.RMU);
 
         simulateReplicaReadBytes(context, ks, 100_000, coordinatorSensors);
 
-        long latencyNanos = (long) (0.8 * NANOS_PER_SECOND);
-        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE);
-        double rmuValue = calculator.computeRMU(coordinatorSensors, context, latencyNanos);
+        coordinatorSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.8 * NANOS_PER_SECOND);
+        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE, 1);
+        double rmuValue = calculator.computeRMU(coordinatorSensors, context);
         coordinatorSensors.incrementSensor(context, Type.RMU, rmuValue);
 
-        double expectedRMU = 0.8 * MU_SCALE; // latency dominates
+        double expectedRMU = 0.8 * MU_SCALE; // execution time dominates
         assertThat(coordinatorSensors.getSensor(context, Type.RMU).get().getValue()).isEqualTo(expectedRMU);
     }
 
@@ -140,14 +142,15 @@ public class CoordinatorMUTest
     @Test
     public void testCoordinatorWMU_bytesDominate()
     {
-        // write_bytes = 700 000, latency = 200 ms
-        // normalized_bytes = 0.7, normalized_latency = 0.2 → WMU = 0.7 * 4000 = 2800
+        // write_bytes = 700 000, write_execution_time = 200 ms
+        // normalized_bytes = 0.7, normalized_execution_time = 0.2 → WMU = 0.7 * 4000 = 2800
         String ks = "ks_wmu";
         String table = "t_wmu";
         Context context = new Context(ks, table, UUID.randomUUID().toString());
 
         RequestSensors coordinatorSensors = SensorsFactory.instance.createRequestSensors(ks);
         coordinatorSensors.registerSensor(context, Type.WRITE_BYTES);
+        coordinatorSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         coordinatorSensors.registerSensor(context, Type.WMU);
 
         simulateReplicaWriteBytes(context, ks, 300_000, coordinatorSensors);
@@ -155,9 +158,9 @@ public class CoordinatorMUTest
 
         assertThat(coordinatorSensors.getSensor(context, Type.WRITE_BYTES).get().getValue()).isEqualTo(700_000.0);
 
-        long latencyNanos = (long) (0.2 * NANOS_PER_SECOND);
-        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE);
-        double wmuValue = calculator.computeWMU(coordinatorSensors, context, latencyNanos);
+        coordinatorSensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 0.2 * NANOS_PER_SECOND);
+        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE, 1);
+        double wmuValue = calculator.computeWMU(coordinatorSensors, context);
         coordinatorSensors.incrementSensor(context, Type.WMU, wmuValue);
 
         double expectedWMU = (700_000.0 / BASELINE) * MU_SCALE;
@@ -175,23 +178,24 @@ public class CoordinatorMUTest
     }
 
     @Test
-    public void testCoordinatorWMU_latencyDominates()
+    public void testCoordinatorWMU_executionTimeDominates()
     {
-        // write_bytes = 50 000, latency = 900 ms
-        // normalized_bytes = 0.05, normalized_latency = 0.9 → WMU = 0.9 * 4000 = 3600
+        // write_bytes = 50 000, write_execution_time = 900 ms
+        // normalized_bytes = 0.05, normalized_execution_time = 0.9 → WMU = 0.9 * 4000 = 3600
         String ks = "ks_wmu2";
         String table = "t_wmu2";
         Context context = new Context(ks, table, UUID.randomUUID().toString());
 
         RequestSensors coordinatorSensors = SensorsFactory.instance.createRequestSensors(ks);
         coordinatorSensors.registerSensor(context, Type.WRITE_BYTES);
+        coordinatorSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         coordinatorSensors.registerSensor(context, Type.WMU);
 
         simulateReplicaWriteBytes(context, ks, 50_000, coordinatorSensors);
 
-        long latencyNanos = (long) (0.9 * NANOS_PER_SECOND);
-        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE);
-        double wmuValue = calculator.computeWMU(coordinatorSensors, context, latencyNanos);
+        coordinatorSensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 0.9 * NANOS_PER_SECOND);
+        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE, 1);
+        double wmuValue = calculator.computeWMU(coordinatorSensors, context);
         coordinatorSensors.incrementSensor(context, Type.WMU, wmuValue);
 
         double expectedWMU = 0.9 * MU_SCALE;
@@ -208,12 +212,14 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000);
+        sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND);
 
         // No baseline configured in system properties for unit tests → falls back to raw bytes * MU_SCALE
         // (DefaultMUCalculator instance reads from CassandraRelevantProperties which default to -1)
-        SensorsCustomParams.computeRMU(sensors, (long) (0.1 * NANOS_PER_SECOND));
+        SensorsCustomParams.computeRMU(sensors);
 
         // With baseline=-1, RMU = read_bytes * MU_SCALE
         double expectedRMU = 500_000.0 * MU_SCALE;
@@ -228,10 +234,12 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WMU);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 200_000);
+        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 0.2 * NANOS_PER_SECOND);
 
-        SensorsCustomParams.computeWMU(sensors, (long) (0.2 * NANOS_PER_SECOND));
+        SensorsCustomParams.computeWMU(sensors);
 
         // With baseline=-1, WMU = write_bytes * MU_SCALE
         double expectedWMU = 200_000.0 * MU_SCALE;
@@ -250,11 +258,12 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000);
 
-        SensorsCustomParams.computeRMU(sensors, (long) (0.1 * NANOS_PER_SECOND));
+        SensorsCustomParams.computeRMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
 
         double expectedRMU = 500_000.0 * MU_SCALE; // no baseline → bytes * MU_SCALE
@@ -273,11 +282,12 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WMU);
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000);
 
-        SensorsCustomParams.computeWMU(sensors, (long) (0.2 * NANOS_PER_SECOND));
+        SensorsCustomParams.computeWMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
 
         double expectedWMU = 300_000.0 * MU_SCALE;
@@ -296,7 +306,9 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.WMU);
@@ -304,9 +316,8 @@ public class CoordinatorMUTest
         sensors.incrementSensor(context, Type.READ_BYTES, 400_000);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 200_000);
 
-        long latency = (long) (0.5 * NANOS_PER_SECOND);
-        SensorsCustomParams.computeRMU(sensors, latency);
-        SensorsCustomParams.computeWMU(sensors, latency);
+        SensorsCustomParams.computeRMU(sensors);
+        SensorsCustomParams.computeWMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
 
         double expectedRMU = 400_000.0 * MU_SCALE;
@@ -325,9 +336,10 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 100_000);
-        SensorsCustomParams.computeRMU(sensors, (long) (0.1 * NANOS_PER_SECOND));
+        SensorsCustomParams.computeRMU(sensors);
 
         // no exception, no TMU sensor created
         SensorsCustomParams.computeTMU(sensors);
@@ -349,11 +361,12 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 600_000);
 
-        SensorsCustomParams.computeRMU(sensors, (long) (0.1 * NANOS_PER_SECOND));
+        SensorsCustomParams.computeRMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
         sensors.syncAllSensors();
 
@@ -375,11 +388,12 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WMU);
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000);
 
-        SensorsCustomParams.computeWMU(sensors, (long) (0.2 * NANOS_PER_SECOND));
+        SensorsCustomParams.computeWMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
         sensors.syncAllSensors();
 
@@ -401,7 +415,9 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.WMU);
@@ -409,9 +425,8 @@ public class CoordinatorMUTest
         sensors.incrementSensor(context, Type.READ_BYTES, 200_000);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 100_000);
 
-        long latency = (long) (0.3 * NANOS_PER_SECOND);
-        SensorsCustomParams.computeRMU(sensors, latency);
-        SensorsCustomParams.computeWMU(sensors, latency);
+        SensorsCustomParams.computeRMU(sensors);
+        SensorsCustomParams.computeWMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
         sensors.syncAllSensors();
 
@@ -435,10 +450,11 @@ public class CoordinatorMUTest
         {
             RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
             sensors.registerSensor(context, Type.READ_BYTES);
+            sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
             sensors.registerSensor(context, Type.RMU);
             sensors.registerSensor(context, Type.TMU);
             sensors.incrementSensor(context, Type.READ_BYTES, 100_000);
-            SensorsCustomParams.computeRMU(sensors, (long) (0.1 * NANOS_PER_SECOND));
+            SensorsCustomParams.computeRMU(sensors);
             SensorsCustomParams.computeTMU(sensors);
             sensors.syncAllSensors();
         }
@@ -461,10 +477,12 @@ public class CoordinatorMUTest
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000);
-        SensorsCustomParams.computeRMU(sensors, (long) (0.1 * NANOS_PER_SECOND));
+        sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND);
+        SensorsCustomParams.computeRMU(sensors);
         SensorsCustomParams.computeTMU(sensors);
 
         ResultMessage result = new ResultMessage.Void();

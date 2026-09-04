@@ -18,20 +18,25 @@
 
 package org.apache.cassandra.sensors;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Default implementation of {@link MUCalculator}.
  *
  * <p>RMU and WMU are each computed as:
  * <pre>
- *   RMU = max(read_latency_nanos / 1_000_000_000, read_bytes / baseline_read_bytes) * 4000
- *   WMU = max(write_latency_nanos / 1_000_000_000, (write_bytes + index_write_bytes) / baseline_write_bytes) * 4000
+ *   RMU = max(read_latency_ns / 1_000_000_000, read_bytes / (baseline_read_bytes_sec / num_cores)) * 4000
+ *   WMU = max(write_latency_ns / 1_000_000_000, (write_bytes + index_write_bytes) / (baseline_write_bytes_sec / num_cores)) * 4000
  * </pre>
  *
  * <p>The baseline values are read from the
  * {@link CassandraRelevantProperties#BASELINE_READ_BYTES} and
- * {@link CassandraRelevantProperties#BASELINE_WRITE_BYTES} system properties at construction time.
+ * {@link CassandraRelevantProperties#BASELINE_WRITE_BYTES} system properties at construction time
+ * and divided by the number of available CPU cores (via {@link FBUtilities#getAvailableProcessors()})
+ * to obtain a per-core baseline.
  * If a baseline value is &lt;= 0 the latency term is dropped and the formula simplifies to
  * {@code bytes * 4000}.
  */
@@ -42,47 +47,52 @@ public class DefaultMUCalculator implements MUCalculator
 
     public static final DefaultMUCalculator instance = new DefaultMUCalculator();
 
-    private final double baselineReadBytes;
-    private final double baselineWriteBytes;
+    private final double baselineReadBytesPerCore;
+    private final double baselineWriteBytesPerCore;
 
-    public DefaultMUCalculator()
+    private DefaultMUCalculator()
     {
         this(CassandraRelevantProperties.BASELINE_READ_BYTES.getLong(),
-             CassandraRelevantProperties.BASELINE_WRITE_BYTES.getLong());
+             CassandraRelevantProperties.BASELINE_WRITE_BYTES.getLong(),
+             FBUtilities.getAvailableProcessors());
     }
 
-    public DefaultMUCalculator(double baselineReadBytes, double baselineWriteBytes)
+    @VisibleForTesting
+    public DefaultMUCalculator(double baselineReadBytes, double baselineWriteBytes, int numCores)
     {
-        this.baselineReadBytes = baselineReadBytes;
-        this.baselineWriteBytes = baselineWriteBytes;
+        int cores = numCores > 0 ? numCores : 1;
+        this.baselineReadBytesPerCore = baselineReadBytes > 0 ? baselineReadBytes / cores : baselineReadBytes;
+        this.baselineWriteBytesPerCore = baselineWriteBytes > 0 ? baselineWriteBytes / cores : baselineWriteBytes;
     }
 
     @Override
-    public double computeRMU(RequestSensors sensors, Context context, long readLatencyNanos)
+    public double computeRMU(RequestSensors sensors, Context context)
     {
         if (sensors == null || context == null)
             return 0.0;
 
         double readBytes = sensors.getSensor(context, Type.READ_BYTES).map(Sensor::getValue).orElse(0.0);
+        double readExecutionTimeNanos = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
 
-        double normalizedBytes = baselineReadBytes > 0 ? readBytes / baselineReadBytes : readBytes;
-        double normalizedLatency = baselineReadBytes > 0 ? readLatencyNanos / NANOS_PER_SECOND : 0.0;
+        double normalizedBytes = baselineReadBytesPerCore > 0 ? readBytes / baselineReadBytesPerCore : readBytes;
+        double normalizedExecutionTime = baselineReadBytesPerCore > 0 ? readExecutionTimeNanos / NANOS_PER_SECOND : 0.0;
 
-        return Math.max(normalizedLatency, normalizedBytes) * MU_SCALE;
+        return Math.max(normalizedExecutionTime, normalizedBytes) * MU_SCALE;
     }
 
     @Override
-    public double computeWMU(RequestSensors sensors, Context context, long writeLatencyNanos)
+    public double computeWMU(RequestSensors sensors, Context context)
     {
         if (sensors == null || context == null)
             return 0.0;
 
         double writeBytes = sensors.getSensor(context, Type.WRITE_BYTES).map(Sensor::getValue).orElse(0.0)
                             + sensors.getSensor(context, Type.INDEX_WRITE_BYTES).map(Sensor::getValue).orElse(0.0);
+        double writeExecutionTimeNanos = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
 
-        double normalizedBytes = baselineWriteBytes > 0 ? writeBytes / baselineWriteBytes : writeBytes;
-        double normalizedLatency = baselineWriteBytes > 0 ? writeLatencyNanos / NANOS_PER_SECOND : 0.0;
+        double normalizedBytes = baselineWriteBytesPerCore > 0 ? writeBytes / baselineWriteBytesPerCore : writeBytes;
+        double normalizedExecutionTime = baselineWriteBytesPerCore > 0 ? writeExecutionTimeNanos / NANOS_PER_SECOND : 0.0;
 
-        return Math.max(normalizedLatency, normalizedBytes) * MU_SCALE;
+        return Math.max(normalizedExecutionTime, normalizedBytes) * MU_SCALE;
     }
 }
