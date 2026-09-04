@@ -70,6 +70,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(4, snapshot.rowsFetched);
         assertEquals(4, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(8, snapshot.cellsFetched);
+        assertEquals(8, snapshot.cellsReturned);
 
         // index filtering that accepts no rows
         snapshot = queryContext("SELECT * FROM %s WHERE a < 0 ALLOW FILTERING");
@@ -80,6 +82,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(0, snapshot.rowsFetched);
         assertEquals(0, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(0, snapshot.cellsFetched);
+        assertEquals(0, snapshot.cellsReturned);
 
         // index filtering that accepts some rows
         snapshot = queryContext("SELECT * FROM %s WHERE a = 0 ALLOW FILTERING",
@@ -92,6 +96,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(2, snapshot.rowsFetched);
         assertEquals(2, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(4, snapshot.cellsFetched);
+        assertEquals(4, snapshot.cellsReturned);
 
         // index filtering that accepts some rows, different value
         snapshot = queryContext("SELECT * FROM %s WHERE a = 1 ALLOW FILTERING",
@@ -104,6 +110,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(2, snapshot.rowsFetched);
         assertEquals(2, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(4, snapshot.cellsFetched);
+        assertEquals(4, snapshot.cellsReturned);
 
         // not-indexed column filtering that accepts all rows
         snapshot = queryContext("SELECT * FROM %s WHERE a = 0 AND b = 0 ALLOW FILTERING",
@@ -116,6 +124,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(2, snapshot.rowsFetched);
         assertEquals(2, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(4, snapshot.cellsFetched);
+        assertEquals(4, snapshot.cellsReturned);
 
         // not-indexed column filtering that accepts no rows
         snapshot = queryContext("SELECT * FROM %s WHERE a = 0 AND b = 1 ALLOW FILTERING");
@@ -126,6 +136,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(2, snapshot.rowsFetched);
         assertEquals(0, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(4, snapshot.cellsFetched);
+        assertEquals(0, snapshot.cellsReturned);
 
         // not-indexed column filtering that accepts some rows
         snapshot = queryContext("SELECT * FROM %s WHERE a >= 0 AND b = 0 ALLOW FILTERING",
@@ -138,6 +150,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(4, snapshot.rowsFetched);
         assertEquals(2, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(8, snapshot.cellsFetched);
+        assertEquals(4, snapshot.cellsReturned);
 
         // partition/primary key query
         snapshot = queryContext("SELECT * FROM %s WHERE a >= 0 AND k = 0 ALLOW FILTERING",
@@ -149,6 +163,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(1, snapshot.rowsFetched);
         assertEquals(1, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(2, snapshot.cellsFetched);
+        assertEquals(2, snapshot.cellsReturned);
 
         // partition/primary key filtering
         snapshot = queryContext("SELECT * FROM %s WHERE a >= 0 AND k != 1 ALLOW FILTERING",
@@ -162,6 +178,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(4, snapshot.rowsFetched);
         assertEquals(3, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(8, snapshot.cellsFetched);
+        assertEquals(6, snapshot.cellsReturned);
 
         // delete a partition/row
         execute("DELETE FROM %s WHERE k = 1");
@@ -176,6 +194,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(3, snapshot.rowsFetched);
         assertEquals(3, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(6, snapshot.cellsFetched);
+        assertEquals(6, snapshot.cellsReturned);
 
         // delete an indexed cell
         execute("DELETE a FROM %s WHERE k = 2");
@@ -189,6 +209,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(3, snapshot.rowsFetched);
         assertEquals(2, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(1 + 2 + 2, snapshot.cellsFetched);
+        assertEquals(4, snapshot.cellsReturned);
 
         // compact to rebuild the index, and verify that tombstones are gone
         flush();
@@ -203,6 +225,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(2, snapshot.rowsFetched);
         assertEquals(2, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(4, snapshot.cellsFetched);
+        assertEquals(4, snapshot.cellsReturned);
 
         // truncate the table
         truncate(false);
@@ -214,6 +238,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(0, snapshot.rowsFetched);
         assertEquals(0, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
+        assertEquals(0, snapshot.cellsFetched);
+        assertEquals(0, snapshot.cellsReturned);
 
         // insert some data using TTLs
         execute("INSERT INTO %s (k, a, b) VALUES (0, 0, 0)");
@@ -232,6 +258,8 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(2, snapshot.rowsFetched);
         assertEquals(2, snapshot.rowsReturned);
         assertEquals(2, snapshot.rowTombstonesFetched);
+        assertEquals(8, snapshot.cellsFetched);
+        assertEquals(4, snapshot.cellsReturned);
     }
 
     @Test
