@@ -44,6 +44,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteOptions;
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
@@ -679,7 +680,18 @@ public class PaxosState implements PaxosOperationLock
 
     public void commit(Agreed commit)
     {
-        applyCommit(commit, this, c -> {}, (apply, to) ->
+        commit(commit, WriteOrigin.LOCAL);
+    }
+
+    /**
+     * As {@link #commit(Agreed)}, but recording where the commit came from. The verb handlers that learn
+     * a commit from a peer (a prepare-phase refresh, a commit-and-prepare) pass the origin so the base
+     * table mutation applied here is attributed to the node that delivered it -- the same contract as
+     * every other replica-side apply; see {@link WriteOrigin}.
+     */
+    public void commit(Agreed commit, WriteOrigin origin)
+    {
+        applyCommit(commit, origin, this, c -> {}, (apply, to) ->
             currentUpdater.accumulateAndGet(to, new UnsafeSnapshot(apply), Snapshot::merge)
         );
     }
@@ -688,10 +700,21 @@ public class PaxosState implements PaxosOperationLock
     {
         commitDirect(commit, c -> {});
     }
-    
+
     public static void commitDirect(Commit commit, Consumer<Commit> callback)
     {
-        applyCommit(commit, null, callback, (apply, ignore) -> {
+        commitDirect(commit, WriteOrigin.LOCAL, callback);
+    }
+
+    /**
+     * As {@link #commitDirect(Commit, Consumer)}, but recording where the commit came from.
+     * {@link WriteOrigin#LOCAL} remains correct for the paths with no message behind them -- a
+     * coordinator applying its own commit ({@code PaxosCommit#executeOnSelf},
+     * {@code StorageProxy#commitPaxosLocal}).
+     */
+    public static void commitDirect(Commit commit, WriteOrigin origin, Consumer<Commit> callback)
+    {
+        applyCommit(commit, origin, null, callback, (apply, ignore) -> {
             try (PaxosState state = tryGetUnsafe(apply.update.partitionKey(), apply.update.metadata()))
             {
                 if (state != null)
@@ -700,7 +723,7 @@ public class PaxosState implements PaxosOperationLock
         });
     }
 
-    private static void applyCommit(Commit commit, PaxosState state, Consumer<Commit> callback, BiConsumer<Commit, PaxosState> postCommit)
+    private static void applyCommit(Commit commit, WriteOrigin origin, PaxosState state, Consumer<Commit> callback, BiConsumer<Commit, PaxosState> postCommit)
     {
         if (paxosStatePurging() == legacy && !(commit instanceof CommittedWithTTL))
             commit = CommittedWithTTL.withDefaultTTL(commit);
@@ -714,7 +737,10 @@ public class PaxosState implements PaxosOperationLock
             if (commit.ballot.unixMicros() >= SystemKeyspace.getTruncatedAt(commit.update.metadata().id))
             {
                 Tracing.trace("Committing proposal {}", commit);
-                Mutation mutation = commit.makeMutation();
+                // The mutation is manufactured here, replica-side, from the commit -- it never travelled
+                // as a Mutation, so MutationVerbHandler's stamping cannot have covered it. The origin is
+                // threaded down from the verb handler instead (never serialized; see WriteOrigin).
+                Mutation mutation = commit.makeMutation().withOrigin(origin);
                 Keyspace.open(mutation.getKeyspaceName()).apply(mutation, WriteOptions.FOR_PAXOS_COMMIT);
                 callback.accept(commit);
             }

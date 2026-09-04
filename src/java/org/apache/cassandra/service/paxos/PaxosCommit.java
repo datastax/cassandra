@@ -29,6 +29,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InOurDc;
@@ -350,7 +351,10 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
             if (!Paxos.isInRangeAndShouldProcess(from, agreed.update.partitionKey(), agreed.update.metadata(), false))
                 return null;
 
-            PaxosState.commitDirect(agreed);
+            // Attribute the base-table apply to the peer that delivered the commit, so a secondary index
+            // can tell a commit from another datacenter apart from one proposed here. This covers every
+            // inbound PAXOS_COMMIT_REQ regardless of paxos_variant; the executeOnSelf path stays LOCAL.
+            PaxosState.commitDirect(agreed, WriteOrigin.fromPeer(from), c -> {});
             Tracing.trace("Enqueuing acknowledge to {}", from);
             return NoPayload.noPayload;
         }

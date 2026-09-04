@@ -25,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.IVerbHandler;
@@ -120,6 +121,10 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
         else
         {
             // the common path - the node is both the destination and a valid replica for the hint.
+            // The origin of a replayed hint is the node that held it, which is where the write was
+            // coordinated from and so may well be another datacenter; Mutation.without preserves it across
+            // the truncation filtering Hint.applyFuture does.
+            hint.mutation.withOrigin(WriteOrigin.fromMessage(message));
             hint.applyFuture().addCallback(o -> respond(message), e -> logger.debug("Failed to apply hint", e));
         }
     }

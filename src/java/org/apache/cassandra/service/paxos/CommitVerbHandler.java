@@ -20,6 +20,7 @@
  */
 package org.apache.cassandra.service.paxos;
 
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -50,7 +51,7 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
         RequestTracker.instance.set(sensors);
 
-        PaxosState.commitDirect(message.payload, p -> MutatorProvider.instance.onAppliedProposal(p));
+        PaxosState.commitDirect(message.payload, WriteOrigin.fromMessage(message), p -> MutatorProvider.instance.onAppliedProposal(p));
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();

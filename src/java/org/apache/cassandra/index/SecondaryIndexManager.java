@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +69,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
+import org.apache.cassandra.db.CassandraWriteContext;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -83,6 +85,8 @@ import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
+import org.apache.cassandra.db.WriteOptions;
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -209,6 +213,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * The indexes that are available for writing.
      */
     private final Map<String, Index> writableIndexes = Maps.newConcurrentMap();
+
+    /**
+     * Whether any registered index answers true to {@link Index#preparesWrites()}. Recomputed when an index is
+     * registered or removed, so the write path can skip {@link #prepareWrite} -- no call, no allocation -- for
+     * the tables (nearly all of them) whose indexes do not use the hook.
+     */
+    private volatile boolean preparesWrites;
 
     /**
      * The groups of all the registered indexes
@@ -420,6 +431,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         if (null != removed)
         {
+            updatePreparesWrites();
             removed.unregister(this);
 
             markIndexRemoved(removed);
@@ -1470,6 +1482,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         String name = index.getIndexMetadata().name;
         indexes.put(name, index);
+        updatePreparesWrites();
         logger.trace("Registered index {}", name);
 
         // instantiate and add the index group if it hasn't been already added
@@ -1571,6 +1584,94 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * Implementations of the various IndexTransaction interfaces, for keeping indexes in sync with base data
      * during updates, compaction and cleanup. Plus factory methods for obtaining transaction instances.
      */
+
+    /**
+     * Whether {@link #prepareWrite} has anything to do for this table: true iff a registered index answers true
+     * to {@link Index#preparesWrites()}. A volatile read, nothing else -- the write path checks it for every
+     * partition update it applies.
+     */
+    public boolean preparesWrites()
+    {
+        return preparesWrites;
+    }
+
+    private void updatePreparesWrites()
+    {
+        boolean any = false;
+        for (Index index : indexes.values())
+            any |= index.preparesWrites();
+        preparesWrites = any;
+    }
+
+    /**
+     * Offers {@code update} to every writable index that {@linkplain Index#preparesWrites prepares writes},
+     * BEFORE the enclosing mutation is appended to the commit log (see {@link Index#prepareWrite}). Called by
+     * the keyspace write handler, and only when {@link #preparesWrites()} is true, with the same writability
+     * test {@link #newUpdateTransaction} will apply, so an index is prepared for exactly the updates it will
+     * later be asked an {@link Index.Indexer} for.
+     * <p>
+     * The handles the indexes return are added to {@code handles}, keyed by index (identity), which the caller
+     * puts in the {@link CassandraWriteContext} of the mutation for {@link CassandraWriteContext#takePreparedWrite}.
+     * The map is created lazily, when the first index actually returns a handle, and only then.
+     * <p>
+     * If an index throws, the handles already collected for this mutation -- including those of other tables,
+     * {@code handles} being per mutation -- are {@linkplain #abortPreparedWrites aborted} and the map emptied
+     * before the exception propagates: the write is failing before anything was persisted.
+     *
+     * @param handles the mutation's handles collected so far, or null if none yet
+     * @return {@code handles}, or the map created for the first handle; null if there is still none
+     */
+    public @Nullable Map<Index, Index.PreparedWrite> prepareWrite(PartitionUpdate update,
+                                                                   WriteOptions options,
+                                                                   WriteOrigin origin,
+                                                                   @Nullable Map<Index, Index.PreparedWrite> handles)
+    {
+        try
+        {
+            for (Index index : indexes.values())
+            {
+                if (!index.preparesWrites() || !writableIndexes.containsKey(index.getIndexMetadata().name))
+                    continue;
+                Index.PreparedWrite handle = index.prepareWrite(update, options, origin);
+                if (handle == null)
+                    continue;
+                if (handles == null)
+                    handles = new IdentityHashMap<>(2);
+                handles.put(index, handle);
+            }
+            return handles;
+        }
+        catch (Throwable t)
+        {
+            if (handles != null)
+            {
+                abortPreparedWrites(handles);
+                handles.clear();
+            }
+            throw t;
+        }
+    }
+
+    /**
+     * Tells each index that the handle it returned from {@link Index#prepareWrite} will not be taken back in
+     * {@link Index#indexerFor} (see {@link Index#abortWrite}). Never throws: an index failing to abort is
+     * logged, and the others are still told.
+     */
+    public static void abortPreparedWrites(Map<Index, Index.PreparedWrite> handles)
+    {
+        for (Map.Entry<Index, Index.PreparedWrite> entry : handles.entrySet())
+        {
+            try
+            {
+                entry.getKey().abortWrite(entry.getValue());
+            }
+            catch (Throwable t)
+            {
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.error("Index {} failed to abort a prepared write", entry.getKey().getIndexMetadata().name, t);
+            }
+        }
+    }
 
     /**
      * Transaction for updates on the write path.
