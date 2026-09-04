@@ -116,7 +116,8 @@ public class CompactionGraph implements Closeable, Accountable
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
 
-    private static boolean PARALLEL_ENCODING_WRITING = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED.getBoolean();
+    @VisibleForTesting
+    public static boolean PARALLEL_ENCODING_WRITING = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED.getBoolean();
     private static int PARALLEL_ENCODING_WRITING_NUM_THREADS = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_NUM_THREADS.getInt();
     private static boolean PARALLEL_ENCODING_WRITING_USE_DIRECT_BUFFERS = CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS.getBoolean();
 
@@ -457,8 +458,15 @@ public class CompactionGraph implements Closeable, Accountable
             // write PQ (time to do this is negligible, don't bother doing it async)
             long pqOffset = pqOutput.getFilePointer();
             Version version = context.version();
+            boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(version);
             CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION, version);
-            compressedVectors.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
+            if (writeFusedPQ)
+                // With FusedPQ the per-vector codes are embedded in TERMS_DATA; only the codebook
+                // (compressor metadata) is needed in the PQ file so that the query vector can be
+                // encoded at search time. Writing full PQVectors here would duplicate the codes on disk.
+                compressor.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
+            else
+                compressedVectors.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings asynchronously while we run cleanup()
