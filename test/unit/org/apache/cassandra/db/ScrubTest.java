@@ -917,7 +917,7 @@ public class ScrubTest
                 { //make sure the next scrub fails
                     overrideWithGarbage(indexCfs.getLiveSSTables().iterator().next(), ByteBufferUtil.bytes(1L), ByteBufferUtil.bytes(2L), (byte)0x7A);
                 }
-                CompactionManager.AllSSTableOpStatus result = indexCfs.scrub(false, false, false, true, false, 0);
+                CompactionManager.AllSSTableOpStatus result = indexCfs.scrub(false, false, Scrubber.OverwriteTTLMode.NONE, true, false, 0);
                 assertEquals(failure ?
                              CompactionManager.AllSSTableOpStatus.ABORTED :
                              CompactionManager.AllSSTableOpStatus.SUCCESSFUL,
@@ -996,7 +996,7 @@ public class ScrubTest
 
             cfs.loadNewSSTables();
 
-            cfs.scrub(true, true, false, false, false, 1);
+            cfs.scrub(true, true, Scrubber.OverwriteTTLMode.NONE, false, false, 1);
 
             UntypedResultSet rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
             assertNotNull(rs);
@@ -1012,4 +1012,40 @@ public class ScrubTest
             DatabaseDescriptor.setPartitionerUnsafe(oldPart);
         }
     }
+
+    /**
+     * Verifies that noTTLOverwrittenRows in ScrubResult counts only rows with TTL,
+     * leaving permanent rows uncounted.
+     */
+    @Test
+    public void testScrubNoTTLMetricsCountsStrippedRows() throws Exception
+    {
+        QueryProcessor.process(String.format(
+            "CREATE TABLE \"%s\".strip_ttl_metrics (k int PRIMARY KEY, v text)", ksName),
+            ConsistencyLevel.ONE);
+
+        // 3 rows with TTL, 2 without
+        for (int i = 0; i < 3; i++)
+            QueryProcessor.executeInternal(String.format(
+                "INSERT INTO \"%s\".strip_ttl_metrics (k, v) VALUES (%d, 'expiring') USING TTL 3600", ksName, i));
+        for (int i = 3; i < 5; i++)
+            QueryProcessor.executeInternal(String.format(
+                "INSERT INTO \"%s\".strip_ttl_metrics (k, v) VALUES (%d, 'permanent')", ksName, i));
+
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("strip_ttl_metrics");
+        cfs.forceBlockingFlush(UNIT_TESTS);
+
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        Scrubber.ScrubResult result;
+        try (LifecycleTransaction txn = cfs.getTracker().tryModify(Collections.singletonList(sstable), OperationType.SCRUB);
+             Scrubber scrubber = new Scrubber(cfs, txn, false, true, Scrubber.OverwriteTTLMode.NO_TTL))
+        {
+            result = scrubber.scrubWithResult();
+        }
+
+        assertEquals("Only the 3 TTL rows should be counted", 3, result.noTTLOverwrittenRows);
+        assertEquals(5, result.goodPartitions);
+        assertEquals(0, result.badPartitions);
+    }
+
 }
