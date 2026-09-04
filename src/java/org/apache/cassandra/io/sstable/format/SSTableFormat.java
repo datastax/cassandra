@@ -31,6 +31,7 @@ import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 public interface SSTableFormat
 {
     public final static String FORMAT_DEFAULT_PROP = "cassandra.sstable.format.default";
+    public final static String FORMAT_STREAM_NEW_CHECKSUMS = "cassandra.sstable.format.stream_new_checksums";
 
     Type getType();
 
@@ -76,6 +77,11 @@ public interface SSTableFormat
 
             throw new IllegalArgumentException("No Type constant " + name);
         }
+    }
+
+    static boolean shouldStreamNewChecksums()
+    {
+        return Boolean.parseBoolean(System.getProperty(FORMAT_STREAM_NEW_CHECKSUMS, "false"));
     }
 
     /**
