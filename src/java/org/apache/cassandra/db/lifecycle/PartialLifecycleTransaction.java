@@ -55,6 +55,12 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
         // don't do anything, composite will checkpoint at end
     }
 
+    public Throwable abortCheckpoint(Throwable accumulate)
+    {
+        // treat like checkpoint above
+        return accumulate;
+    }
+
     private RuntimeException earlyOpenUnsupported()
     {
         throw new UnsupportedOperationException("PartialLifecycleTransaction does not support early opening of SSTables");
