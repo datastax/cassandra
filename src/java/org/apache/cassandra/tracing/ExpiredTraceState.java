@@ -21,6 +21,9 @@
 
 package org.apache.cassandra.tracing;
 
+import java.net.InetAddress;
+import java.util.Map;
+
 import org.apache.cassandra.utils.FBUtilities;
 
 class ExpiredTraceState extends TraceState
@@ -29,7 +32,7 @@ class ExpiredTraceState extends TraceState
 
     ExpiredTraceState(TraceState delegate)
     {
-        super(delegate.clientState, FBUtilities.getBroadcastAddressAndPort(), delegate.sessionId, delegate.traceType);
+        super(delegate.clientState, FBUtilities.getBroadcastAddressAndPort(), delegate.sessionId, delegate.traceType, delegate.isProbabilistic);
         this.delegate = delegate;
     }
 
@@ -51,5 +54,23 @@ class ExpiredTraceState extends TraceState
     TraceState getDelegate()
     {
         return delegate;
+    }
+
+    @Override
+    public TraceStorage getStorage()
+    {
+        return delegate.getStorage();
+    }
+
+    @Override
+    public void stopSession()
+    {
+        delegate.stopSession();
+    }
+
+    @Override
+    public void begin(InetAddress client, String request, Map<String, String> parameters)
+    {
+        delegate.begin(client, request, parameters);
     }
 }
