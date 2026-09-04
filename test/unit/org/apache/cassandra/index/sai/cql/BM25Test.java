@@ -30,13 +30,16 @@ import org.assertj.core.api.Assertions;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import org.junit.runner.RunWith;
@@ -192,6 +195,7 @@ public class BM25Test extends SAITester
 
         // Re-inserting the deleted key in a third sstable must not fail either, and the row must come back exactly once
         execute("INSERT INTO %s (k, c, query_lexical_value, array_contains) VALUES (2, 1, 'apple juice', {'target'}) USING TIMESTAMP 4");
+        assertRows(execute(select, "target", "apple"), row(1, 1), row(2, 1));
         flush();
         assertRows(execute(select, "target", "apple"), row(1, 1), row(2, 1));
         compact();
@@ -662,6 +666,62 @@ public class BM25Test extends SAITester
     {
         QueryController.QUERY_OPT_LEVEL = 0;
         testWithPredicate();
+    }
+
+    @Test
+    public void testAdaptiveFallbackMatchesForcedStrategies()
+    {
+        int defaultOptimizationLevel = QueryController.QUERY_OPT_LEVEL;
+        boolean defaultQueryPlanMetrics = CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean();
+        try
+        {
+            CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(true);
+            createTable("CREATE TABLE %s(id int PRIMARY KEY, site text, extension text, body text)");
+            createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'StorageAttachedIndex'");
+            createAnalyzedIndex("body");
+
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (1, 'pepsi', 'pdf', 'freight freight freight')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (2, 'pepsi', 'pdf', 'freight freight')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (3, 'pepsi', 'pdf', 'freight orders and notes')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (99, 'other', 'docx', 'freight freight freight freight')");
+
+            String query = "SELECT id FROM %s WHERE site = 'pepsi' AND extension = 'pdf' " +
+                           "ORDER BY body BM25 OF 'freight' LIMIT 2";
+
+            var indexGroup = Objects.requireNonNull(StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore()));
+            var tableMetrics = indexGroup.queryMetrics().perTableMetrics.get(TableQueryMetrics.QueryKind.ALL);
+            var queryPlanMetrics = Objects.requireNonNull(tableMetrics.queryPlanMetrics);
+            long sortThenFilterCount = queryPlanMetrics.sortThenFilterQueriesCompleted.getCount();
+            long filterThenSortCount = queryPlanMetrics.filterThenSortQueriesCompleted.getCount();
+
+            // Four posting visits cost more than scoring three filtered candidates, so filter-first is retained.
+            QueryController.QUERY_OPT_LEVEL = 0;
+            assertRows(execute(query), row(1), row(2));
+            assertEquals(sortThenFilterCount, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
+            assertEquals(filterThenSortCount + 1, queryPlanMetrics.filterThenSortQueriesCompleted.getCount());
+
+            // These additional candidates do not contain the query term, so they cannot change the expected top rows.
+            for (int id = 4; id <= 8; id++)
+                execute("INSERT INTO %s(id, site, extension, body) VALUES (?, 'pepsi', 'pdf', 'inventory notes')", id);
+
+            // Eight filtered candidates now exceed the same four posting visits and trigger BM25-first execution.
+            QueryController.QUERY_OPT_LEVEL = 0;
+            assertRows(execute(query), row(1), row(2));
+            assertEquals(sortThenFilterCount + 1, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
+            assertEquals(filterThenSortCount + 1, queryPlanMetrics.filterThenSortQueriesCompleted.getCount());
+
+            // The optimizer-selected BM25-first control must return the same rows in the same order.
+            QueryController.QUERY_OPT_LEVEL = 1;
+            assertRows(execute(query), row(1), row(2));
+            assertEquals(sortThenFilterCount + 2, queryPlanMetrics.sortThenFilterQueriesCompleted.getCount());
+            assertEquals(filterThenSortCount + 1, queryPlanMetrics.filterThenSortQueriesCompleted.getCount());
+        }
+        finally
+        {
+            QueryController.QUERY_OPT_LEVEL = defaultOptimizationLevel;
+            CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.setBoolean(defaultQueryPlanMetrics);
+        }
     }
 
     @Test

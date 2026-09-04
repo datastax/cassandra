@@ -22,6 +22,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.TracingTestImpl;
@@ -106,6 +107,49 @@ public class QueryTracingTest extends SAITester
                            "v ANN OF [1.2, 3.4] DESC");
     }
 
+    @Test
+    public void testAdaptiveBm25Fallback()
+    {
+        int defaultOptimizationLevel = QueryController.QUERY_OPT_LEVEL;
+        try
+        {
+            QueryController.QUERY_OPT_LEVEL = 0;
+
+            createTable("CREATE TABLE %s(id int PRIMARY KEY, site text, extension text, body text)");
+            createIndex("CREATE CUSTOM INDEX ON %s(site) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(extension) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(body) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (1, 'pepsi', 'pdf', 'freight freight freight')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (2, 'pepsi', 'pdf', 'freight freight')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (3, 'pepsi', 'pdf', 'freight orders and notes')");
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (99, 'other', 'docx', 'freight freight freight freight')");
+
+            String query = "SELECT id FROM %s WHERE site = 'pepsi' AND extension = 'pdf' ORDER BY body BM25 OF 'freight' LIMIT 2";
+            // Four BM25 postings are more work than scoring three candidates against one source.
+            assertRows(execute(query), row(1), row(2));
+            assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
+
+            flush();
+            // The same work estimates in one SSTable retain filter-first execution.
+            assertRows(execute(query), row(1), row(2));
+            assertTraceDoesNotContain("Switching filtered BM25 query to ordered index scan");
+
+            execute("INSERT INTO %s(id, site, extension, body) VALUES (4, 'pepsi', 'pdf', 'freight details')");
+            assertRows(execute(query), row(1), row(2));
+            assertTraceContains("after materializing 4 candidates across 2 ordering index sources (estimated 5 BM25 posting visits, fallback soft limit ");
+
+            flush();
+            // Two SSTables produce the same derived cap as one SSTable plus a memtable.
+            assertRows(execute(query), row(1), row(2));
+            assertTraceContains("after materializing 4 candidates across 2 ordering index sources (estimated 5 BM25 posting visits, fallback soft limit ");
+        }
+        finally
+        {
+            QueryController.QUERY_OPT_LEVEL = defaultOptimizationLevel;
+        }
+    }
+
     private void assertTraceHasPlan(String query, String... expected)
     {
         TracingTestImpl tracing = (TracingTestImpl) Tracing.instance;
@@ -125,5 +169,17 @@ public class QueryTracingTest extends SAITester
             return;
         }
         Assert.fail("Query plan not found in traces");
+    }
+
+    private void assertTraceContains(String expected)
+    {
+        Assertions.assertThat(tracing.getTraces()).anyMatch(trace -> trace.contains(expected));
+        tracing.getTraces().clear();
+    }
+
+    private void assertTraceDoesNotContain(String unexpected)
+    {
+        Assertions.assertThat(tracing.getTraces()).noneMatch(trace -> trace.contains(unexpected));
+        tracing.getTraces().clear();
     }
 }

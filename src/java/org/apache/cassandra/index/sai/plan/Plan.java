@@ -1499,7 +1499,15 @@ abstract public class Plan
         {
             KeyRangeIterator sourceIterator = (KeyRangeIterator) source.execute(executor);
             int softLimit = max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows)));
-            return executor.getTopKRows(sourceIterator, softLimit);
+            if (!ordering.isBM25() || source.usesIncludedIndex())
+                return executor.getTopKRows(sourceIterator, softLimit);
+
+            Access fallbackAccess = access.scaleCount(1.0 / boundedSelectivity(source.selectivity()));
+            int fallbackSoftLimit = max(softLimit,
+                                        round((float) fallbackAccess.expectedAccessCount(factory.tableMetrics.rows)));
+            return executor.getTopKRows(sourceIterator,
+                                        softLimit,
+                                        fallbackSoftLimit);
         }
 
         @Override
@@ -2191,6 +2199,13 @@ abstract public class Plan
         Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate);
         Iterator<? extends PrimaryKey> getTopKRows(Expression predicate, int softLimit);
         Iterator<? extends PrimaryKey> getTopKRows(KeyRangeIterator keys, int softLimit);
+
+        default Iterator<? extends PrimaryKey> getTopKRows(KeyRangeIterator keys,
+                                                           int softLimit,
+                                                           int fallbackSoftLimit)
+        {
+            return getTopKRows(keys, softLimit);
+        }
     }
 
     /**
