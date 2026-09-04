@@ -26,6 +26,9 @@ import java.util.Optional;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -44,7 +47,18 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public final class SensorsCustomParams
 {
+    private static final Logger logger = LoggerFactory.getLogger(SensorsCustomParams.class);
+
     private static final SensorEncoder SENSOR_ENCODER = SensorsFactory.instance.createSensorEncoder();
+
+    private static final MUCalculator MU_CALCULATOR = initMUCalculator();
+
+    private static MUCalculator initMUCalculator()
+    {
+        MUCalculator calculator = SensorsFactory.instance.getMUCalculator();
+        logger.info("MUCalculator loaded: {}", calculator != null ? calculator.getClass().getName() : "null");
+        return calculator;
+    }
 
     private SensorsCustomParams()
     {
@@ -76,6 +90,84 @@ public final class SensorsCustomParams
     {
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         return buffer.getDouble();
+    }
+
+    /**
+     * Computes the RMU value for every RMU sensor registered in {@code sensors} and increments each sensor by the
+     * computed value. The execution time is read from the {@link Type#READ_EXECUTION_TIME} sensor already
+     * recorded in {@code sensors}. Must be called <em>after</em> all other sensor increments for the request are
+     * complete and <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
+     * {@code syncAllSensors()} calls earlier in the request path skip RMU (its value is 0 until this method runs,
+     * so the delta is 0 and the registry is not touched), the final sync after this call is the one that delivers
+     * the correct RMU value to the global {@link SensorsRegistry}.
+     * Must also be called before {@link #addSensorsToInternodeResponse} so the response message carries the
+     * correct RMU value.
+     *
+     * @param sensors the request sensors for the current request
+     */
+    public static void computeRMU(RequestSensors sensors)
+    {
+        Preconditions.checkNotNull(sensors);
+
+        if (MU_CALCULATOR == null)
+            return;
+
+        for (Sensor rmuSensor : sensors.getSensors(s -> s.getType() == Type.RMU))
+        {
+            Context context = rmuSensor.getContext();
+            double rmuValue = MU_CALCULATOR.computeRMU(sensors, context);
+            sensors.incrementSensor(context, Type.RMU, rmuValue);
+        }
+    }
+
+    /**
+     * Computes the WMU value for every WMU sensor registered in {@code sensors} and increments each sensor by the
+     * computed value. The execution time is read from the {@link Type#WRITE_EXECUTION_TIME} sensor already
+     * recorded in {@code sensors}. Must be called <em>after</em> all other sensor increments for the request are
+     * complete and <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
+     * {@code syncAllSensors()} calls earlier in the request path skip WMU (its value is 0 until this method runs,
+     * so the delta is 0 and the registry is not touched), the final sync after this call is the one that delivers
+     * the correct WMU value to the global {@link SensorsRegistry}.
+     * Must also be called before {@link #addSensorsToInternodeResponse} so the response message carries the
+     * correct WMU value.
+     *
+     * @param sensors the request sensors for the current request
+     */
+    public static void computeWMU(RequestSensors sensors)
+    {
+        Preconditions.checkNotNull(sensors);
+
+        if (MU_CALCULATOR == null)
+            return;
+
+        for (Sensor wmuSensor : sensors.getSensors(s -> s.getType() == Type.WMU))
+        {
+            Context context = wmuSensor.getContext();
+            double wmuValue = MU_CALCULATOR.computeWMU(sensors, context);
+            sensors.incrementSensor(context, Type.WMU, wmuValue);
+        }
+    }
+
+    /**
+     * Computes the TMU (Total Measure Units) value for every TMU sensor registered in {@code sensors} and increments
+     * each sensor by the computed value. TMU is defined as the sum of WMU and RMU for the same context.
+     * Must be called <em>after</em> both {@link #computeRMU} and {@link #computeWMU} so that WMU and RMU values
+     * are already populated. TMU is synced to the global {@link SensorsRegistry} via the normal
+     * {@link RequestSensors#syncAllSensors()} call but is <em>never</em> included in CQL responses.
+     *
+     * @param sensors the request sensors for the current request
+     */
+    public static void computeTMU(RequestSensors sensors)
+    {
+        Preconditions.checkNotNull(sensors);
+
+        for (Sensor tmuSensor : sensors.getSensors(s -> s.getType() == Type.TMU))
+        {
+            Context context = tmuSensor.getContext();
+            double wmu = sensors.getSensor(context, Type.WMU).map(Sensor::getValue).orElse(0.0);
+            double rmu = sensors.getSensor(context, Type.RMU).map(Sensor::getValue).orElse(0.0);
+            sensors.incrementSensor(context, Type.TMU, wmu + rmu);
+        }
     }
 
     /**
