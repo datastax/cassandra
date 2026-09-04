@@ -94,18 +94,18 @@ public final class SensorsCustomParams
 
     /**
      * Computes the RMU value for every RMU sensor registered in {@code sensors} and increments each sensor by the
-     * computed value. Must be called <em>after</em> all other sensor increments for the request are complete and
-     * <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
+     * computed value. The execution time is read from the {@link Type#READ_EXECUTION_TIME} sensor already
+     * recorded in {@code sensors}. Must be called <em>after</em> all other sensor increments for the request are
+     * complete and <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
      * {@code syncAllSensors()} calls earlier in the request path skip RMU (its value is 0 until this method runs,
      * so the delta is 0 and the registry is not touched), the final sync after this call is the one that delivers
      * the correct RMU value to the global {@link SensorsRegistry}.
      * Must also be called before {@link #addSensorsToInternodeResponse} so the response message carries the
      * correct RMU value.
      *
-     * @param sensors          the request sensors for the current request
-     * @param readLatencyNanos the end-to-end read latency observed by the coordinator, in nanoseconds
+     * @param sensors the request sensors for the current request
      */
-    public static void computeRMU(RequestSensors sensors, long readLatencyNanos)
+    public static void computeRMU(RequestSensors sensors)
     {
         Preconditions.checkNotNull(sensors);
 
@@ -115,25 +115,25 @@ public final class SensorsCustomParams
         for (Sensor rmuSensor : sensors.getSensors(s -> s.getType() == Type.RMU))
         {
             Context context = rmuSensor.getContext();
-            double rmuValue = MU_CALCULATOR.computeRMU(sensors, context, readLatencyNanos);
+            double rmuValue = MU_CALCULATOR.computeRMU(sensors, context);
             sensors.incrementSensor(context, Type.RMU, rmuValue);
         }
     }
 
     /**
      * Computes the WMU value for every WMU sensor registered in {@code sensors} and increments each sensor by the
-     * computed value. Must be called <em>after</em> all other sensor increments for the request are complete and
-     * <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
+     * computed value. The execution time is read from the {@link Type#WRITE_EXECUTION_TIME} sensor already
+     * recorded in {@code sensors}. Must be called <em>after</em> all other sensor increments for the request are
+     * complete and <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
      * {@code syncAllSensors()} calls earlier in the request path skip WMU (its value is 0 until this method runs,
      * so the delta is 0 and the registry is not touched), the final sync after this call is the one that delivers
      * the correct WMU value to the global {@link SensorsRegistry}.
      * Must also be called before {@link #addSensorsToInternodeResponse} so the response message carries the
      * correct WMU value.
      *
-     * @param sensors           the request sensors for the current request
-     * @param writeLatencyNanos the end-to-end write latency observed by the coordinator, in nanoseconds
+     * @param sensors the request sensors for the current request
      */
-    public static void computeWMU(RequestSensors sensors, long writeLatencyNanos)
+    public static void computeWMU(RequestSensors sensors)
     {
         Preconditions.checkNotNull(sensors);
 
@@ -143,7 +143,7 @@ public final class SensorsCustomParams
         for (Sensor wmuSensor : sensors.getSensors(s -> s.getType() == Type.WMU))
         {
             Context context = wmuSensor.getContext();
-            double wmuValue = MU_CALCULATOR.computeWMU(sensors, context, writeLatencyNanos);
+            double wmuValue = MU_CALCULATOR.computeWMU(sensors, context);
             sensors.incrementSensor(context, Type.WMU, wmuValue);
         }
     }

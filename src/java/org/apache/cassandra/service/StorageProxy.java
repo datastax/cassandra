@@ -564,9 +564,9 @@ public class StorageProxy implements StorageProxyMBean
         {
             final long endTime = System.nanoTime();
             final long latency = endTime - startTimeForMetrics;
-            // Compute RMU and WMU with coordinator-measured latency before syncing into SensorsRegistry
-            SensorsCustomParams.computeRMU(sensors, latency);
-            SensorsCustomParams.computeWMU(sensors, latency);
+            // Compute RMU and WMU from sensors before syncing into SensorsRegistry
+            SensorsCustomParams.computeRMU(sensors);
+            SensorsCustomParams.computeWMU(sensors);
             SensorsCustomParams.computeTMU(sensors);
             sensors.syncAllSensors();
             metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
@@ -1227,8 +1227,8 @@ public class StorageProxy implements StorageProxyMBean
         {
             long endTime = System.nanoTime();
             long latency = endTime - startTime;
-            // Compute WMU with coordinator-measured latency before syncing into SensorsRegistry
-            SensorsCustomParams.computeWMU(sensors, latency);
+            // Compute WMU from sensors before syncing into SensorsRegistry
+            SensorsCustomParams.computeWMU(sensors);
             SensorsCustomParams.computeTMU(sensors);
             sensors.syncAllSensors();
             metrics.writeMetrics.executionTimeMetrics.addNano(latency);
@@ -1483,8 +1483,8 @@ public class StorageProxy implements StorageProxyMBean
         finally
         {
             long latency = System.nanoTime() - startTime;
-            // Compute WMU with coordinator-measured latency before syncing into SensorsRegistry
-            SensorsCustomParams.computeWMU(sensors, latency);
+            // Compute WMU from sensors before syncing into SensorsRegistry
+            SensorsCustomParams.computeWMU(sensors);
             SensorsCustomParams.computeTMU(sensors);
             sensors.syncAllSensors();
         }
@@ -2144,12 +2144,10 @@ public class StorageProxy implements StorageProxyMBean
         requestSensors.registerSensor(context, Type.TMU);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
-        long readStart = System.nanoTime();
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
         // All replica responses have been received by the time read() returns.
-        // Compute RMU with coordinator-measured latency before syncing into SensorsRegistry.
-        long readLatency = System.nanoTime() - readStart;
-        SensorsCustomParams.computeRMU(requestSensors, readLatency);
+        // Compute RMU from sensors before syncing into SensorsRegistry.
+        SensorsCustomParams.computeRMU(requestSensors);
         SensorsCustomParams.computeTMU(requestSensors);
         requestSensors.syncAllSensors();
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
@@ -2539,14 +2537,12 @@ public class StorageProxy implements StorageProxyMBean
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
-        long readStart = System.nanoTime();
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
         // Range reads are lazy: compute RMU and sync sensor values once the iterator is fully consumed.
         return PartitionIterators.doOnClose(partitions, () -> {
-            long readLatency = System.nanoTime() - readStart;
-            SensorsCustomParams.computeRMU(sensors, readLatency);
+            SensorsCustomParams.computeRMU(sensors);
             SensorsCustomParams.computeTMU(sensors);
             sensors.syncAllSensors();
             readTracker.onDone();
