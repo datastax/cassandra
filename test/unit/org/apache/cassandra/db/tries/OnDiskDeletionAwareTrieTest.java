@@ -43,7 +43,9 @@ import static org.apache.cassandra.db.tries.TrieUtil.assertTriesEqual;
 import static org.apache.cassandra.io.util.RandomAccessReader.DEFAULT_BUFFER_SIZE;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /// Round-trips deletion-aware tries through [DeletionAwareFileWriter] and
 /// [OnDiskDeletionAwareTrie], which is the only real check that the deletion-branch pointer
@@ -208,6 +210,118 @@ public class OnDiskDeletionAwareTrieTest
             for (Direction d : Direction.values())
                 assertDeletionBranchesEqual(source.cursor(d), read.cursor(d));
             read.close();
+        }
+    }
+
+    /// A deletion branch the walk enters but which turns out to have nothing to write. `intersect` gives such a
+    /// branch when only a prefix of the branch's data is matched by the set: the walk descends into the branch,
+    /// which the set covers at that point, and then finds no marker below.
+    ///
+    /// [DeletionAwareFileWriter#exitDeletionsBranch] must report no root for it. The position it would otherwise
+    /// hand back is that of whatever node was written last -- here the live point's, written before the walk
+    /// reaches the branch -- and the reader has no way to tell that apart from a real root: it sets
+    /// [Cursor#MAY_HAVE_DELETION_BRANCH_BIT] and decodes the byte there as a node code.
+    @Test
+    public void testDeletionBranchEmptiedByIntersection() throws IOException, TrieSpaceExhaustedException
+    {
+        // Raw keys, because one has to be a prefix of another and TrieUtil.comparable appends a terminator.
+        LivePoint live = new LivePoint(TrieUtil.directComparable("zzzz"), 1);
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = liveOnlyTrie(live);
+        source.mutator(DataPoint::combineLive, DataPoint::combineDeletion, DataPoint::deleteLive,
+                       DataPoint::deleteLive, false, v -> false)
+              .apply(DeletionAwareTrie.deletedRange(TrieUtil.directComparable("pre"),
+                                                    TrieUtil.directComparable("abc"),
+                                                    TrieUtil.directComparable("abd"),
+                                                    VERSION,
+                                                    new DeletionMarker(TrieUtil.directComparable("preabc"), 7, 7)));
+
+        // "preabqu" shares "preab" with the branch's only path and diverges at the byte after it, so the branch is
+        // entered and produces nothing. "zzz" keeps the live point, whose node the writer emits before it gets to
+        // the branch, and which is therefore what an empty branch would report as its root.
+        DeletionAwareTrie<LivePoint, DeletionMarker> intersected =
+            source.intersect(TrieSet.branch(VERSION, TrieUtil.directComparable("preabqu"))
+                                    .union(TrieSet.branch(VERSION, TrieUtil.directComparable("zzz"))));
+        assertHasEmptyDeletionBranch(intersected);
+
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            DeletionAwareFileWriter.write(intersected, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
+            assertNoDeletionBranchRecorded(read);
+            // A branch that writes nothing leaves no node behind either, so what is left is the live point alone.
+            assertTriesEqual(liveOnlyTrie(live), read);
+            read.close();
+        }
+    }
+
+    private static InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> liveOnlyTrie(LivePoint live)
+    throws TrieSpaceExhaustedException
+    {
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> trie = InMemoryDeletionAwareTrie.shortLived(VERSION);
+        trie.mutator(DataPoint::combineLive, DataPoint::combineDeletion, DataPoint::deleteLive,
+                     DataPoint::deleteLive, false, v -> false)
+            .apply(DeletionAwareTrie.singleton(live.position, VERSION, live));
+        return trie;
+    }
+
+    /// The premise of the test above: the trie really does present a deletion branch, and walking it really does
+    /// yield no marker. Without this the test would still pass if `intersect` stopped producing such a branch, and
+    /// it would no longer be testing anything.
+    private static void assertHasEmptyDeletionBranch(DeletionAwareTrie<LivePoint, DeletionMarker> trie)
+    {
+        int emptyBranches = 0;
+        try (DeletionAwareCursor<LivePoint, DeletionMarker> cursor = trie.cursor(Direction.REVERSE))
+        {
+            long position = cursor.encodedPosition();
+            while (!Cursor.isExhausted(position))
+            {
+                RangeCursor<DeletionMarker> branch = DeletionAwareCursor.deletionBranchCursor(cursor, position);
+                if (branch != null)
+                {
+                    try
+                    {
+                        long branchPosition = branch.encodedPosition();
+                        while (!Cursor.isExhausted(branchPosition))
+                        {
+                            assertNull("Deletion branch must have no content", branch.content());
+                            branchPosition = branch.advance();
+                        }
+                        ++emptyBranches;
+                    }
+                    finally
+                    {
+                        branch.close();
+                    }
+                }
+                position = cursor.advance();
+            }
+        }
+        assertEquals("Empty deletion branches presented", 1, emptyBranches);
+    }
+
+    /// No node of the trie read back may claim a deletion branch. Comparing the walks alone would not catch a root
+    /// recorded for an empty branch, since a pointer to an unrelated node can decode into something consistent.
+    private static void assertNoDeletionBranchRecorded(DeletionAwareTrie<LivePoint, DeletionMarker> trie)
+    {
+        for (Direction direction : Direction.values())
+        {
+            try (DeletionAwareCursor<LivePoint, DeletionMarker> cursor = trie.cursor(direction))
+            {
+                long position = cursor.encodedPosition();
+                while (!Cursor.isExhausted(position))
+                {
+                    assertEquals("Deletion branch flagged at " + Cursor.toString(position),
+                                 0L, position & Cursor.MAY_HAVE_DELETION_BRANCH_BIT);
+                    RangeCursor<DeletionMarker> branch = cursor.deletionBranchCursor(Cursor.direction(position));
+                    if (branch != null)
+                    {
+                        branch.close();
+                        fail("Deletion branch present at " + Cursor.toString(position));
+                    }
+                    position = cursor.advance();
+                }
+            }
         }
     }
 

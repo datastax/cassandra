@@ -187,6 +187,10 @@ implements Cursor.Walker<T, DataOutputPlus>
     public long exitDeletionsBranch()
     {
         branchWriter.complete();
+        // A branch can be entered and produce nothing: `intersect` gives one when the set matches only a prefix
+        // of the branch's data, so the walk descends into the branch and then finds no marker below (see
+        // OnDiskDeletionAwareTrieTest.testDeletionBranchEmptiedByIntersection).
+        //
         // A trie with no content leaves the stream untouched (see FileWriter.ascendTo), so the
         // position is that of whatever node was written last, or 0 if nothing has been written
         // yet. Report "no branch" rather than a root that is not a node: a recorded root makes
