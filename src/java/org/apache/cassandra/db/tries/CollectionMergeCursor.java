@@ -630,6 +630,34 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         }
 
         @Override
+        public void close()
+        {
+            try
+            {
+                super.close();
+            }
+            finally
+            {
+                // Released, but not dropped: [Cursor#close] leaves `tailCursor` callable, and ours reads this to give
+                // the tail the deletions that cover it.
+                if (relevantDeletions != null)
+                    relevantDeletions.close();
+            }
+        }
+
+        /// Drop the merged deletion branch when the walk leaves the branch it was introduced in. It is made here out
+        /// of the sources' branches, so it is ours to release, and a file-backed one holds a buffer until we do.
+        private void dropRelevantDeletions()
+        {
+            if (relevantDeletions != null)
+            {
+                relevantDeletions.close();
+                relevantDeletions = null;
+            }
+            relevantDeletionsState = DeletionState.NONE;
+        }
+
+        @Override
         public long advance()
         {
             return processRelevantDeletions(super.advance());
@@ -728,8 +756,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
                 {
                     // ascended above the common deletions root, we need to track and report deletion branches again.
                     deletionBranchDepth = -1;
-                    relevantDeletions = null;
-                    relevantDeletionsState = DeletionState.NONE;
+                    dropRelevantDeletions();
                 }
             }
 

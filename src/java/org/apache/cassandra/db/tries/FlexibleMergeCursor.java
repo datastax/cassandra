@@ -85,7 +85,10 @@ abstract class FlexibleMergeCursor<C extends Cursor<?>, D extends Cursor<?>, T> 
         }
         finally
         {
-            closeC2();
+            // Released, but not dropped: [Cursor#close] leaves `tailCursor` callable, and the descendants' versions
+            // of it read c2. Only leaving the branch drops it.
+            if (c2 != null)
+                c2.close();
         }
     }
 
