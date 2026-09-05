@@ -35,7 +35,7 @@ public abstract class OnDiskRangeTrie<S extends RangeState<S>> extends OnDiskBas
     public RangeCursor<S> makeCursor(Direction direction)
     {
         if (root != 0)
-            return new OnDiskCursor.Range<>(deserializer, this, byteComparableVersion, direction, root);
+            return new OnDiskCursor.Range<>(deserializer, rebuffererFactory, byteComparableVersion, direction, root);
         else
             return new RangeCursor.Empty<>(null, byteComparableVersion, direction);
     }

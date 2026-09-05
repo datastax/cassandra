@@ -19,12 +19,10 @@
 package org.apache.cassandra.db.tries;
 
 import java.nio.ByteBuffer;
-import java.util.Set;
 
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -39,10 +37,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// See [DeletionAwareFileWriter] for why the branch position lives in that slot rather than in the node
 /// encoding.
 public class OnDiskDeletionAwareTrie<T, D extends RangeState<D>>
-implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
+implements DeletionAwareTrie<T, D>, Closeable
 {
     final RebuffererFactory rebuffererFactory;
-    final Set<Rebufferer> outstandingRebufferers;
     final OnDiskCursor.DataDeserializer<T> contentDeserializer;
     final OnDiskCursor.DataDeserializer<D> deletionDeserializer;
     final ByteComparable.Version byteComparableVersion;
@@ -58,7 +55,6 @@ implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
                             ChannelProxy channel)
     {
         this.rebuffererFactory = rebuffererFactory;
-        this.outstandingRebufferers = OnDiskCursor.RebuffererSource.trackerFor(rebuffererFactory);
         this.contentDeserializer = contentDeserializer;
         this.deletionDeserializer = deletionDeserializer;
         this.byteComparableVersion = byteComparableVersion;
@@ -80,24 +76,12 @@ implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
         return byteComparableVersion;
     }
 
-    @Override
-    public RebuffererFactory rebuffererFactory()
-    {
-        return rebuffererFactory;
-    }
-
-    @Override
-    public Set<Rebufferer> outstandingRebufferers()
-    {
-        return outstandingRebufferers;
-    }
-
-    /// Mirrors [OnDiskBaseTrie.WithOwnChannel]: whatever the cursors still hold is released first, then the factory,
-    /// then the channel, which the factory holds a shared copy of. The caller must have stopped reading by now.
+    /// Mirrors [OnDiskBaseTrie.WithOwnChannel]: the factory first, then the channel, which the factory holds a shared
+    /// copy of. The cursors have given their rebufferers back as they were closed; the caller must have stopped
+    /// reading by now.
     @Override
     public void close()
     {
-        releaseOutstandingRebufferers();
         if (!ownsChannel)
             return;
 
@@ -162,14 +146,14 @@ implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
         OnDiskDeletionAwareCursor(OnDiskDeletionAwareTrie<T, D> trie, Direction direction, long root)
         {
             this.trie = trie;
-            this.source = new OnDiskCursor<>(trie.contentDeserializer, trie,
+            this.source = new OnDiskCursor<>(trie.contentDeserializer, trie.rebuffererFactory,
                                              trie.byteComparableVersion, direction, false, true, root);
         }
 
         OnDiskDeletionAwareCursor(OnDiskDeletionAwareTrie<T, D> trie, Direction direction, long rootPostCodePos, int rootNodeCode)
         {
             this.trie = trie;
-            this.source = new OnDiskCursor<>(trie.contentDeserializer, trie,
+            this.source = new OnDiskCursor<>(trie.contentDeserializer, trie.rebuffererFactory,
                                              trie.byteComparableVersion, direction, false, true, rootPostCodePos, rootNodeCode);
         }
 
@@ -179,7 +163,7 @@ implements DeletionAwareTrie<T, D>, OnDiskCursor.RebuffererSource, Closeable
             long root = source.alternateBranch();
             if (root < 0)
                 return null;
-            return new OnDiskCursor.Range<>(trie.deletionDeserializer, trie,
+            return new OnDiskCursor.Range<>(trie.deletionDeserializer, trie.rebuffererFactory,
                                             trie.byteComparableVersion, direction, root);
         }
 

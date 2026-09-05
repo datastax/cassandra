@@ -18,11 +18,8 @@
 
 package org.apache.cassandra.db.tries;
 
-import java.util.Set;
-
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.ChannelProxy;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.io.util.SimpleChunkReader;
 import org.apache.cassandra.utils.Closeable;
@@ -31,10 +28,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import static org.apache.cassandra.io.util.RandomAccessReader.DEFAULT_BUFFER_SIZE;
 
 public abstract class OnDiskBaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>>
-implements BaseTrie<T, C, Q>, OnDiskCursor.RebuffererSource, Closeable
+implements BaseTrie<T, C, Q>, Closeable
 {
     final RebuffererFactory rebuffererFactory;
-    final Set<Rebufferer> outstandingRebufferers;
     final OnDiskCursor.DataDeserializer<T> deserializer;
     final ByteComparable.Version byteComparableVersion;
     final long root;
@@ -42,22 +38,15 @@ implements BaseTrie<T, C, Q>, OnDiskCursor.RebuffererSource, Closeable
     public OnDiskBaseTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, long root)
     {
         this.rebuffererFactory = rebuffererFactory;
-        this.outstandingRebufferers = OnDiskCursor.RebuffererSource.trackerFor(rebuffererFactory);
         this.deserializer = deserializer;
         this.byteComparableVersion = byteComparableVersion;
         this.root = root;
     }
 
-    @Override
+    /// The trie's buffer source. Each cursor takes a rebufferer of its own from it; see [OnDiskCursor#rebufferer].
     public RebuffererFactory rebuffererFactory()
     {
         return rebuffererFactory;
-    }
-
-    @Override
-    public Set<Rebufferer> outstandingRebufferers()
-    {
-        return outstandingRebufferers;
     }
 
     /// Open a factory over the given channel, which hands each cursor of a file-backed trie a rebufferer of its own.
@@ -73,21 +62,24 @@ implements BaseTrie<T, C, Q>, OnDiskCursor.RebuffererSource, Closeable
         return new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);
     }
 
-    protected interface WithoutChannel extends OnDiskCursor.RebuffererSource, Closeable
+    /// A trie over a buffer someone else owns -- a commit-log record or a message payload. The cursors give their
+    /// rebufferers back as they are closed, and there is nothing else here to release.
+    protected interface WithoutChannel extends Closeable
     {
         @Override
         default void close()
         {
-            releaseOutstandingRebufferers();
+            // nothing to release
         }
     }
 
-    protected interface WithOwnChannel extends OnDiskCursor.RebuffererSource, Closeable
+    protected interface WithOwnChannel extends Closeable
     {
+        RebuffererFactory rebuffererFactory();
+
         @Override
         default void close()
         {
-            releaseOutstandingRebufferers();
             RebuffererFactory factory = rebuffererFactory();
             try
             {

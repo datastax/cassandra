@@ -178,12 +178,22 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
     default RangeTrie<S> tailTrie(ByteComparable prefix)
     {
         RangeCursor<S> c = cursor(Direction.FORWARD);
-        if (c.descendAlong(prefix.asComparableBytes(c.byteComparableVersion())))
-            return c::tailCursor;
-        else if (c.precedingState() != null)
-            return c::precedingStateCursor;
-        else
-            return null;
+        try
+        {
+            if (c.descendAlong(prefix.asComparableBytes(c.byteComparableVersion())))
+                return c::tailCursor;
+            else if (c.precedingState() != null)
+                return c::precedingStateCursor;
+            else
+                return null;
+        }
+        finally
+        {
+            // The returned trie keeps the cursor as the position to make its cursors from, and has no close of its
+            // own for the caller to reach it with. Release it here; [Cursor#close] leaves `tailCursor` and
+            // [#precedingStateCursor] callable precisely for this.
+            c.close();
+        }
     }
 
     @Override

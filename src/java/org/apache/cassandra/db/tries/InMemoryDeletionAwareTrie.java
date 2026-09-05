@@ -345,6 +345,10 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
             return this;
         }
 
+        /// Merge the incoming deletion branch into ours and apply it to the data below this point.
+        ///
+        /// Takes ownership of `incomingAlternateBranch` and closes it, together with the cursors made from it here.
+        /// The incoming trie can be file-backed, in which case each of these holds a buffer until it is closed.
         private int applyDeletionBranch(int existingAlternateBranch, RangeCursor<E> incomingAlternateBranch) throws TrieSpaceExhaustedException
         {
             int updatedAlternateBranch = existingAlternateBranch;
@@ -367,14 +371,22 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
 
             if (incomingAlternateBranch != null)
             {
-                // Duplicate cursor as we need it for both deletion and data branches.
-                RangeCursor<E> deletionBranch = incomingAlternateBranch.tailCursor(Direction.FORWARD);
+                try
+                {
+                    // Duplicate cursor as we need it for both deletion and data branches.
+                    try (RangeCursor<E> deletionBranch = incomingAlternateBranch.tailCursor(Direction.FORWARD))
+                    {
+                        // Delete data that is covered by the new deletions.
+                        applyDeletions(incomingAlternateBranch);
 
-                // Delete data that is covered by the new deletions.
-                applyDeletions(incomingAlternateBranch);
-
-                // Merge the deletions into our deletion branch.
-                updatedAlternateBranch = mergeDeletionBranch(updatedAlternateBranch, deletionBranch);
+                        // Merge the deletions into our deletion branch.
+                        updatedAlternateBranch = mergeDeletionBranch(updatedAlternateBranch, deletionBranch);
+                    }
+                }
+                finally
+                {
+                    incomingAlternateBranch.close();
+                }
             }
 
             // Continue processing to also insert the incoming data at this branch.

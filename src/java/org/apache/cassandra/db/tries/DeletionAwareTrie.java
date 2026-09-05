@@ -656,38 +656,63 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     default DeletionAwareTrie<T, D> tailTrie(ByteComparable prefix, boolean includeCoveringDeletions)
     {
         DeletionAwareCursor<T, D> c = cursor(Direction.FORWARD);
-        ByteSource bytes = prefix.asComparableBytes(c.byteComparableVersion());
-        long currPosition = c.encodedPosition();
-        while (true)
+        try
         {
-            int next = bytes.next();
-            if (next == ByteSource.END_OF_STREAM)
-                return c::tailCursor;
+            ByteSource bytes = prefix.asComparableBytes(c.byteComparableVersion());
+            long currPosition = c.encodedPosition();
+            while (true)
+            {
+                int next = bytes.next();
+                if (next == ByteSource.END_OF_STREAM)
+                    return c::tailCursor;
 
-            RangeCursor<D> deletionBranch = DeletionAwareCursor.deletionBranchCursor(c, currPosition);
-            if (deletionBranch != null)
-                return tailTrieSeparately(next, ByteSource.duplicatable(bytes), c, deletionBranch, includeCoveringDeletions);
+                RangeCursor<D> deletionBranch = DeletionAwareCursor.deletionBranchCursor(c, currPosition);
+                if (deletionBranch != null)
+                    return tailTrieSeparately(next, ByteSource.duplicatable(bytes), c, deletionBranch, includeCoveringDeletions);
 
-            long nextPosition = Cursor.positionForDescentWithByte(currPosition, next);
-            currPosition = c.skipTo(nextPosition);
-            if (Cursor.compare(currPosition, nextPosition) != 0)
-                return null;
+                long nextPosition = Cursor.positionForDescentWithByte(currPosition, next);
+                currPosition = c.skipTo(nextPosition);
+                if (Cursor.compare(currPosition, nextPosition) != 0)
+                    return null;
+            }
+        }
+        finally
+        {
+            // The returned trie keeps the cursor as the position to make its cursors from, and has no close of its
+            // own for the caller to reach it with. Release it here; [Cursor#close] leaves `tailCursor` callable
+            // precisely for this. (The tries built by `tailTrieSeparately` retain a tail of it, not it.)
+            c.close();
         }
     }
 
     private static <T, D extends RangeState<D>> DeletionAwareTrie<T, D>
     tailTrieSeparately(int next, ByteSource.Duplicatable bytes, DeletionAwareCursor<T, D> c, RangeCursor<D> deletionBranch, boolean includeCoveringDeletions)
     {
-        ByteSource.Duplicatable bytesDeletion = bytes.duplicate();
-        if (!deletionBranch.descendAlong(next, bytesDeletion))
-            deletionBranch = includeCoveringDeletions ? deletionBranch.precedingStateCursor(Direction.FORWARD) : null;
-        else if (!includeCoveringDeletions)
-            deletionBranch = DeletionAwareCursor.dropCoveringDeletions(deletionBranch);
+        // The branch was made for us by deletionBranchCursor and is ours to release, as is whatever we derive from it
+        // below -- it is either the branch itself, a wrapper over it, or a fresh cursor. combineTails only keeps tails
+        // of the two cursors, so both can go as soon as it has returned. Closing twice is harmless.
+        RangeCursor<D> deletions = null;
+        try
+        {
+            ByteSource.Duplicatable bytesDeletion = bytes.duplicate();
+            if (!deletionBranch.descendAlong(next, bytesDeletion))
+                deletions = includeCoveringDeletions ? deletionBranch.precedingStateCursor(Direction.FORWARD) : null;
+            else if (!includeCoveringDeletions)
+                deletions = DeletionAwareCursor.dropCoveringDeletions(deletionBranch);
+            else
+                deletions = deletionBranch;
 
-        if (!c.descendAlong(next, bytes))
-            c = null;
+            if (!c.descendAlong(next, bytes))
+                c = null;
 
-        return DeletionAwareCursor.combineTails(c, deletionBranch);
+            return DeletionAwareCursor.combineTails(c, deletions);
+        }
+        finally
+        {
+            if (deletions != null)
+                deletions.close();
+            deletionBranch.close();
+        }
     }
 
     /// @inheritDoc

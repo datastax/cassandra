@@ -29,6 +29,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -385,6 +386,85 @@ public class OnDiskDeletionAwareTrieTest
             assertTriesEqual(source, read);
             for (Direction direction : Direction.values())
                 assertDeletionBranchesEqual(source.cursor(direction), read.cursor(direction));
+        }
+    }
+
+    /// [BaseTrie#tailTrie] hands back a trie that keeps a cursor as the position to make its cursors from, and has
+    /// no close of its own for the caller to reach that cursor with. The cursor must therefore be released before the
+    /// trie is returned, and must still produce working tails afterwards.
+    ///
+    /// The deletion-aware form is the intricate one: when the descent passes a deletion branch, the tail is built out
+    /// of a data cursor and a deletion cursor combined, and every cursor made along the way is ours to release. The
+    /// probes below are prefixes of the trie's own keys, so they stop above, at and below the points where the
+    /// branches hang.
+    @Test
+    public void testTailTrieReleasesItsCursor() throws IOException
+    {
+        List<DataPoint> points = largeMixedPoints(600);
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
+
+        File file = new File(java.io.File.createTempFile("deletionawaretails", ".trie"));
+        try (SequentialWriter writer = new SequentialWriter(file))
+        {
+            DeletionAwareFileWriter.write(source, LIVE, MARKER, writer);
+            writer.finish();
+        }
+
+        ChannelProxy channel = new ChannelProxy(file);
+        TrieUtil.CountingRebuffererFactory factory =
+            new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(channel));
+        try (OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                 new OnDiskDeletionAwareTrie<>(factory, LIVE, MARKER, VERSION, factory.fileLength(), channel))
+        {
+            for (DataPoint point : points)
+            {
+                byte[] key = positionBytes(point.position());
+                for (int length = 0; length <= key.length; ++length)
+                {
+                    ByteComparable prefix = ByteComparable.preencoded(VERSION, key, 0, length);
+                    int outstandingBefore = factory.outstanding;
+                    DeletionAwareTrie<LivePoint, DeletionMarker> tail = read.tailTrie(prefix);
+                    assertEquals("tailTrie must not keep a rebufferer, at " + prefix.byteComparableAsString(VERSION),
+                                 outstandingBefore, factory.outstanding);
+                    if (tail != null)
+                        walkAndClose(tail.cursor(Direction.FORWARD));
+                    assertEquals("Walking a tail must give its rebufferers back, at " + prefix.byteComparableAsString(VERSION),
+                                 outstandingBefore, factory.outstanding);
+                }
+            }
+        }
+    }
+
+    /// Walks the cursor and every deletion branch it presents to the end, then gives all of them back. The trie a
+    /// [BaseTrie#tailTrie] hands out makes its cursors from a closed one, so a mistake in that hand-over surfaces
+    /// here as a read through a buffer that has already gone back to the pool.
+    private static void walkAndClose(DeletionAwareCursor<LivePoint, DeletionMarker> cursor)
+    {
+        try
+        {
+            long position = cursor.encodedPosition();
+            while (!Cursor.isExhausted(position))
+            {
+                RangeCursor<DeletionMarker> branch = DeletionAwareCursor.deletionBranchCursor(cursor, position);
+                if (branch != null)
+                {
+                    try
+                    {
+                        long branchPosition = branch.encodedPosition();
+                        while (!Cursor.isExhausted(branchPosition))
+                            branchPosition = branch.advance();
+                    }
+                    finally
+                    {
+                        branch.close();
+                    }
+                }
+                position = cursor.advance();
+            }
+        }
+        finally
+        {
+            cursor.close();
         }
     }
 
