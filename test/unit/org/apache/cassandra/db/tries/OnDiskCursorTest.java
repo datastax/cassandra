@@ -161,6 +161,7 @@ public class OnDiskCursorTest
                                   VERSION,
                                   Direction.FORWARD,
                                   true,
+                                  false,
                                   buffer.limit());
     }
 }

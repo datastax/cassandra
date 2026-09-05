@@ -47,9 +47,13 @@ import com.google.common.collect.Sets;
 import com.google.common.collect.Streams;
 import org.junit.Assert;
 
+import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.RebuffererFactory;
+import org.apache.cassandra.io.util.WrappingRebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.Pair;
@@ -601,6 +605,12 @@ public class TrieUtil
                         return makeCursor(d);
                     else
                         throw new UnsupportedOperationException("tailTrie on test cursor");
+                }
+
+                @Override
+                public void close()
+                {
+                    // nothing to release
                 }
             }
         };
@@ -1157,6 +1167,12 @@ public class TrieUtil
         }
 
         @Override
+        public void close()
+        {
+            // nothing to release
+        }
+
+        @Override
         public String toString()
         {
             StringBuilder stringBuilder = new StringBuilder();
@@ -1172,4 +1188,75 @@ public class TrieUtil
             return stringBuilder.toString();
         }
     }
+
+    /// A [RebuffererFactory] that counts the rebufferers it has handed out and not been given back, so that a test
+    /// can tell whether the cursors made over it were closed.
+    public static class CountingRebuffererFactory implements RebuffererFactory
+    {
+        private final RebuffererFactory wrapped;
+        public int outstanding;
+
+        public CountingRebuffererFactory(RebuffererFactory wrapped)
+        {
+            this.wrapped = wrapped;
+        }
+
+        @Override
+        public Rebufferer instantiateRebufferer(boolean isScan)
+        {
+            ++outstanding;
+            return new WrappingRebufferer(wrapped.instantiateRebufferer(isScan))
+            {
+                @Override
+                public void closeReader()
+                {
+                    --outstanding;
+                    super.closeReader();
+                }
+            };
+        }
+
+        @Override
+        public int chunkSize()
+        {
+            return wrapped.chunkSize();
+        }
+
+        @Override
+        public void invalidateIfCached(long position)
+        {
+            wrapped.invalidateIfCached(position);
+        }
+
+        @Override
+        public ChannelProxy channel()
+        {
+            return wrapped.channel();
+        }
+
+        @Override
+        public long fileLength()
+        {
+            return wrapped.fileLength();
+        }
+
+        @Override
+        public double getCrcCheckChance()
+        {
+            return wrapped.getCrcCheckChance();
+        }
+
+        @Override
+        public long adjustPosition(long position)
+        {
+            return wrapped.adjustPosition(position);
+        }
+
+        @Override
+        public void close()
+        {
+            wrapped.close();
+        }
+    }
+
 }

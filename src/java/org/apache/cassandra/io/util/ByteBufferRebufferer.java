@@ -29,7 +29,10 @@ import java.nio.ByteBuffer;
 ///
 /// Owns nothing. The buffer must outlive every cursor reading through it, and closing this does
 /// not release it.
-public class ByteBufferRebufferer implements Rebufferer
+///
+/// It is also its own [RebuffererFactory]: the holders it hands out are independent duplicates over immutable
+/// content, so one instance can serve any number of concurrent readers, as [MmapRebufferer] does.
+public class ByteBufferRebufferer implements Rebufferer, RebuffererFactory
 {
     private final ByteBuffer buffer;
     private final BufferHolder holder;
@@ -68,13 +71,31 @@ public class ByteBufferRebufferer implements Rebufferer
     }
 
     @Override
+    public Rebufferer instantiateRebufferer(boolean isScan)
+    {
+        return this;
+    }
+
+    @Override
+    public int chunkSize()
+    {
+        return -1;      // not chunked, the whole content is always available
+    }
+
+    @Override
+    public void invalidateIfCached(long position)
+    {
+        // Nothing is cached.
+    }
+
+    @Override
     public long fileLength()
     {
         return buffer.limit();
     }
 
     /// There is no file behind this, so there is no channel. Nothing on the trie read path calls
-    /// this — [org.apache.cassandra.db.tries.OnDiskBaseTrie.WithoutChannel] closes only the reader.
+    /// this — [org.apache.cassandra.db.tries.OnDiskBaseTrie.WithoutChannel] has nothing to close.
     @Override
     public ChannelProxy channel()
     {

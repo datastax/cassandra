@@ -28,6 +28,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -196,6 +197,41 @@ public class OnDiskRangeTrieTest
             TrieUtil.assertCursorWalksEqual(expected.tailCursor(nestedDirection),
                                             actual.tailCursor(nestedDirection));
         TrieUtil.assertCursorWalksEqual(expected, actual);
+    }
+
+    /// [BaseTrie#tailTrie] hands back a trie that keeps a cursor as the position to make its cursors from, and has
+    /// no close of its own for the caller to reach that cursor with. The cursor must therefore be released before the
+    /// trie is returned, and must still be able to produce tails afterwards -- which, for a range cursor, means the
+    /// deletions active at the tail's root have to be taken out of the file before the buffer goes back.
+    ///
+    /// The probes stop above the wide node, on it, inside a key and past the end of one, and land on transitions the
+    /// trie does not have, so that both the tail branch of [RangeTrie#tailTrie] and its covering-state one are taken.
+    @Test
+    public void testTailTrieReleasesItsCursor() throws IOException
+    {
+        final int prefixLength = 2;
+        final int suffixLength = 4;
+        InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, BITMAP_TRANSITIONS, suffixLength));
+        File file = FileWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
+
+        TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(new ChannelProxy(file)));
+        try (OnDiskRangeTrie<TestRangeState> actual = new OnDiskRangeTrie.WithOwnChannel<>(factory, RANGE_SERDE, VERSION, factory.fileLength()))
+        {
+            for (int transition = 0; transition <= 0xFF; ++transition)
+            {
+                for (int suffix = 0; suffix <= suffixLength + 1; ++suffix)
+                {
+                    ByteComparable.Preencoded key = key(prefixLength, transition, suffix);
+                    // The walks below do not close the cursors they make, so compare against the count before the call
+                    // rather than against zero.
+                    int before = factory.outstanding;
+                    RangeTrie<TestRangeState> tail = actual.tailTrie(key);
+                    assertEquals("tailTrie must not keep a rebufferer, at " + key.byteComparableAsString(VERSION),
+                                 before, factory.outstanding);
+                    TrieUtil.assertTriesEqual(expected.tailTrie(key), tail);
+                }
+            }
+        }
     }
 
     /// A range that covers a whole branch puts a marker on both sides of the same node: one presented

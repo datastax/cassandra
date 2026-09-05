@@ -95,8 +95,10 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     /// Call the given consumer on all (path, content) pairs with non-null content in the trie in order.
     default void forEachEntry(Direction direction, BiConsumer<ByteComparable.Preencoded, ? super T> consumer)
     {
-        Cursor<T> cursor = cursor(direction);
-        cursor.process(new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
+        try (Cursor<T> cursor = cursor(direction))
+        {
+            cursor.process(new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
+        }
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
         // implemented with default methods alone.
     }
@@ -104,7 +106,10 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     /// Process the trie using the given [Cursor.Walker].
     default <R> R process(Direction direction, Cursor.Walker<? super T, R> walker)
     {
-        return cursor(direction).process(walker);
+        try (Cursor<T> cursor = cursor(direction))
+        {
+            return cursor.process(walker);
+        }
     }
 
     /// Process the trie using the given [ValueConsumer], skipping all branches below the top content-bearing node.
@@ -117,8 +122,10 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     /// branches below the top content-bearing node.
     default void forEachEntrySkippingBranches(Direction direction, Predicate<? super T> acceptancePredicate, BiConsumer<ByteComparable.Preencoded, ? super T> consumer)
     {
-        Cursor<T> cursor = cursor(direction);
-        cursor.processSkippingBranches(acceptancePredicate, new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
+        try (Cursor<T> cursor = cursor(direction))
+        {
+            cursor.processSkippingBranches(acceptancePredicate, new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
+        }
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
         // implemented with default methods alone.
     }
@@ -139,17 +146,22 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     /// Process the trie using the given [Cursor.Walker], skipping all branches below the top content-bearing node.
     default <R> R processSkippingBranches(Direction direction, Predicate<? super T> acceptancePredicate, Cursor.Walker<? super T, R> walker)
     {
-        return cursor(direction).processSkippingBranches(acceptancePredicate, walker);
+        try (Cursor<T> cursor = cursor(direction))
+        {
+            return cursor.processSkippingBranches(acceptancePredicate, walker);
+        }
     }
 
     /// Map-like get by key.
     default T get(ByteComparable key)
     {
-        Cursor<T> cursor = cursor(Direction.FORWARD);
-        if (cursor.descendAlong(key.asComparableBytes(cursor.byteComparableVersion())))
-            return cursor.content();
-        else
-            return null;
+        try (Cursor<T> cursor = cursor(Direction.FORWARD))
+        {
+            if (cursor.descendAlong(key.asComparableBytes(cursor.byteComparableVersion())))
+                return cursor.content();
+            else
+                return null;
+        }
     }
 
     /// Constuct a textual representation of the trie.
@@ -269,7 +281,10 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     /// including both bounds, their prefixes and branches.
     default Q subtrie(ByteComparable left, ByteComparable right)
     {
-        return intersect(TrieSet.rangeInclusiveEnd(cursor(Direction.FORWARD).byteComparableVersion(), left, right));
+        try (Cursor<T> cursor = cursor(Direction.FORWARD))
+        {
+            return intersect(TrieSet.rangeInclusiveEnd(cursor.byteComparableVersion(), left, right));
+        }
     }
 
     /// Returns a view of this trie that is an intersection of its content with the given set. Note that intersections

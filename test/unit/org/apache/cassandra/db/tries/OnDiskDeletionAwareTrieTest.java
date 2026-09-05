@@ -20,6 +20,7 @@ package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -28,6 +29,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -39,12 +41,16 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.apache.cassandra.db.tries.TrieUtil.assertTriesEqual;
 import static org.apache.cassandra.io.util.RandomAccessReader.DEFAULT_BUFFER_SIZE;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /// Round-trips deletion-aware tries through [DeletionAwareFileWriter] and
 /// [OnDiskDeletionAwareTrie], which is the only real check that the deletion-branch pointer
-/// written into the payload is recovered and that the branch bytes land where the pointer says.
+/// written into a node's ascent-side slot is recovered and that the branch bytes land where the
+/// pointer says.
 public class OnDiskDeletionAwareTrieTest
 {
     @BeforeClass
@@ -129,7 +135,7 @@ public class OnDiskDeletionAwareTrieTest
         File file = new File(java.io.File.createTempFile("deletionaware", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            DeletionAwareFileWriter.write(source, false, LIVE, MARKER, writer);
+            DeletionAwareFileWriter.write(source, LIVE, MARKER, writer);
             writer.finish();
         }
 
@@ -148,7 +154,7 @@ public class OnDiskDeletionAwareTrieTest
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            DeletionAwareFileWriter.write(source, false, LIVE, MARKER, out);
+            DeletionAwareFileWriter.write(source, LIVE, MARKER, out);
             ByteBuffer buffer = out.asNewBuffer();
 
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
@@ -170,7 +176,7 @@ public class OnDiskDeletionAwareTrieTest
         assertRoundTrips(points(marker("abc", -1, 5), marker("abd", 5, -1)));
     }
 
-    /// The case the payload encoding exists for: a node carrying both live content and a branch.
+    /// A node carrying both live content and a branch, which fills both content slots of a generic-content node.
     @Test
     public void testLiveAndDeletionsTogether() throws IOException
     {
@@ -185,6 +191,173 @@ public class OnDiskDeletionAwareTrieTest
     public void testEmpty() throws IOException
     {
         assertRoundTrips(new ArrayList<>());
+    }
+
+    /// A deletion branch hanging off the root, i.e. a root node with an ascent-side slot and no descent-side one.
+    /// Without the branch pointer in that slot, [OnDiskReadNodeType#PREFIX] would present a node's lone slot on the
+    /// return path, which a pointer must never be.
+    @Test
+    public void testDeletionBranchAtRoot() throws IOException
+    {
+        List<DataPoint> points = points(marker("abc", -1, 5), marker("abd", 5, -1), live("xyz", 3));
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points, false, true);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            DeletionAwareFileWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
+            assertTriesEqual(source, read);
+            for (Direction d : Direction.values())
+                assertDeletionBranchesEqual(source.cursor(d), read.cursor(d));
+            read.close();
+        }
+    }
+
+    /// A deletion branch the walk enters but which turns out to have nothing to write. `intersect` gives such a
+    /// branch when only a prefix of the branch's data is matched by the set: the walk descends into the branch,
+    /// which the set covers at that point, and then finds no marker below.
+    ///
+    /// [DeletionAwareFileWriter#exitDeletionsBranch] must report no root for it. The position it would otherwise
+    /// hand back is that of whatever node was written last -- here the live point's, written before the walk
+    /// reaches the branch -- and the reader has no way to tell that apart from a real root: it sets
+    /// [Cursor#MAY_HAVE_DELETION_BRANCH_BIT] and decodes the byte there as a node code.
+    @Test
+    public void testDeletionBranchEmptiedByIntersection() throws IOException, TrieSpaceExhaustedException
+    {
+        // Raw keys, because one has to be a prefix of another and TrieUtil.comparable appends a terminator.
+        LivePoint live = new LivePoint(TrieUtil.directComparable("zzzz"), 1);
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = liveOnlyTrie(live);
+        source.mutator(DataPoint::combineLive, DataPoint::combineDeletion, DataPoint::deleteLive,
+                       DataPoint::deleteLive, false, v -> false)
+              .apply(DeletionAwareTrie.deletedRange(TrieUtil.directComparable("pre"),
+                                                    TrieUtil.directComparable("abc"),
+                                                    TrieUtil.directComparable("abd"),
+                                                    VERSION,
+                                                    new DeletionMarker(TrieUtil.directComparable("preabc"), 7, 7)));
+
+        // "preabqu" shares "preab" with the branch's only path and diverges at the byte after it, so the branch is
+        // entered and produces nothing. "zzz" keeps the live point, whose node the writer emits before it gets to
+        // the branch, and which is therefore what an empty branch would report as its root.
+        DeletionAwareTrie<LivePoint, DeletionMarker> intersected =
+            source.intersect(TrieSet.branch(VERSION, TrieUtil.directComparable("preabqu"))
+                                    .union(TrieSet.branch(VERSION, TrieUtil.directComparable("zzz"))));
+        assertHasEmptyDeletionBranch(intersected);
+
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            DeletionAwareFileWriter.write(intersected, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
+            assertNoDeletionBranchRecorded(read);
+            // A branch that writes nothing leaves no node behind either, so what is left is the live point alone.
+            assertTriesEqual(liveOnlyTrie(live), read);
+            read.close();
+        }
+    }
+
+    private static InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> liveOnlyTrie(LivePoint live)
+    throws TrieSpaceExhaustedException
+    {
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> trie = InMemoryDeletionAwareTrie.shortLived(VERSION);
+        trie.mutator(DataPoint::combineLive, DataPoint::combineDeletion, DataPoint::deleteLive,
+                     DataPoint::deleteLive, false, v -> false)
+            .apply(DeletionAwareTrie.singleton(live.position, VERSION, live));
+        return trie;
+    }
+
+    /// The premise of the test above: the trie really does present a deletion branch, and walking it really does
+    /// yield no marker. Without this the test would still pass if `intersect` stopped producing such a branch, and
+    /// it would no longer be testing anything.
+    private static void assertHasEmptyDeletionBranch(DeletionAwareTrie<LivePoint, DeletionMarker> trie)
+    {
+        int emptyBranches = 0;
+        try (DeletionAwareCursor<LivePoint, DeletionMarker> cursor = trie.cursor(Direction.REVERSE))
+        {
+            long position = cursor.encodedPosition();
+            while (!Cursor.isExhausted(position))
+            {
+                RangeCursor<DeletionMarker> branch = DeletionAwareCursor.deletionBranchCursor(cursor, position);
+                if (branch != null)
+                {
+                    try
+                    {
+                        long branchPosition = branch.encodedPosition();
+                        while (!Cursor.isExhausted(branchPosition))
+                        {
+                            assertNull("Deletion branch must have no content", branch.content());
+                            branchPosition = branch.advance();
+                        }
+                        ++emptyBranches;
+                    }
+                    finally
+                    {
+                        branch.close();
+                    }
+                }
+                position = cursor.advance();
+            }
+        }
+        assertEquals("Empty deletion branches presented", 1, emptyBranches);
+    }
+
+    /// No node of the trie read back may claim a deletion branch. Comparing the walks alone would not catch a root
+    /// recorded for an empty branch, since a pointer to an unrelated node can decode into something consistent.
+    private static void assertNoDeletionBranchRecorded(DeletionAwareTrie<LivePoint, DeletionMarker> trie)
+    {
+        for (Direction direction : Direction.values())
+        {
+            try (DeletionAwareCursor<LivePoint, DeletionMarker> cursor = trie.cursor(direction))
+            {
+                long position = cursor.encodedPosition();
+                while (!Cursor.isExhausted(position))
+                {
+                    assertEquals("Deletion branch flagged at " + Cursor.toString(position),
+                                 0L, position & Cursor.MAY_HAVE_DELETION_BRANCH_BIT);
+                    RangeCursor<DeletionMarker> branch = cursor.deletionBranchCursor(Cursor.direction(position));
+                    if (branch != null)
+                    {
+                        branch.close();
+                        fail("Deletion branch present at " + Cursor.toString(position));
+                    }
+                    position = cursor.advance();
+                }
+            }
+        }
+    }
+
+    /// A node with content and no deletion branch must cost exactly what a plain trie's node costs: the branch
+    /// pointer occupies the ascent-side content slot, which live-only data never fills. Writing the same keys and
+    /// values both ways must therefore produce the same bytes.
+    @Test
+    public void testLiveOnlyMatchesPlainTrieByteForByte() throws IOException, TrieSpaceExhaustedException
+    {
+        Random rand = new Random(3);
+        java.util.TreeSet<String> keys = new java.util.TreeSet<>();
+        while (keys.size() < 200)
+            keys.add(String.format("%04d", rand.nextInt(2000)));
+
+        List<DataPoint> points = new ArrayList<>();
+        InMemoryTrie<LivePoint> plain = InMemoryTrie.shortLived(VERSION);
+        for (String key : keys)
+        {
+            LivePoint point = live(key, rand.nextInt(100));
+            points.add(point);
+            plain.putRecursive(TrieUtil.comparable(key), point, (x, y) -> y);
+        }
+
+        File deletionAwareFile = new File(java.io.File.createTempFile("deletionawarelive", ".trie"));
+        try (SequentialWriter writer = new SequentialWriter(deletionAwareFile))
+        {
+            DeletionAwareFileWriter.write(DataPoint.fromList(points), LIVE, MARKER, writer);
+            writer.finish();
+        }
+
+        File plainFile = new File(java.io.File.createTempFile("plainlive", ".trie"));
+        FileWriter.write(plain, false, LIVE, plainFile);
+
+        assertArrayEquals("Live-only data must serialize identically with and without deletion awareness",
+                          Files.readAllBytes(plainFile.toPath()),
+                          Files.readAllBytes(deletionAwareFile.toPath()));
     }
 
     /// Ordering and pointer mistakes show up here rather than in the hand-built cases.
@@ -270,7 +443,7 @@ public class OnDiskDeletionAwareTrieTest
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            DeletionAwareFileWriter.write(source, false, LIVE, MARKER, out);
+            DeletionAwareFileWriter.write(source, LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             for (int transition = 0; transition <= 0xFF; ++transition)
@@ -293,7 +466,7 @@ public class OnDiskDeletionAwareTrieTest
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            DeletionAwareFileWriter.write(source, false, LIVE, MARKER, out);
+            DeletionAwareFileWriter.write(source, LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             for (Direction direction : Direction.values())
@@ -315,7 +488,7 @@ public class OnDiskDeletionAwareTrieTest
         File file = new File(java.io.File.createTempFile("deletionawarelarge", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            DeletionAwareFileWriter.write(source, false, LIVE, MARKER, writer);
+            DeletionAwareFileWriter.write(source, LIVE, MARKER, writer);
             writer.finish();
         }
         assertTrue("The trie must not fit in one buffer, was " + file.length() + " bytes",
@@ -327,6 +500,85 @@ public class OnDiskDeletionAwareTrieTest
             assertTriesEqual(source, read);
             for (Direction direction : Direction.values())
                 assertDeletionBranchesEqual(source.cursor(direction), read.cursor(direction));
+        }
+    }
+
+    /// [BaseTrie#tailTrie] hands back a trie that keeps a cursor as the position to make its cursors from, and has
+    /// no close of its own for the caller to reach that cursor with. The cursor must therefore be released before the
+    /// trie is returned, and must still produce working tails afterwards.
+    ///
+    /// The deletion-aware form is the intricate one: when the descent passes a deletion branch, the tail is built out
+    /// of a data cursor and a deletion cursor combined, and every cursor made along the way is ours to release. The
+    /// probes below are prefixes of the trie's own keys, so they stop above, at and below the points where the
+    /// branches hang.
+    @Test
+    public void testTailTrieReleasesItsCursor() throws IOException
+    {
+        List<DataPoint> points = largeMixedPoints(600);
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
+
+        File file = new File(java.io.File.createTempFile("deletionawaretails", ".trie"));
+        try (SequentialWriter writer = new SequentialWriter(file))
+        {
+            DeletionAwareFileWriter.write(source, LIVE, MARKER, writer);
+            writer.finish();
+        }
+
+        ChannelProxy channel = new ChannelProxy(file);
+        TrieUtil.CountingRebuffererFactory factory =
+            new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(channel));
+        try (OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                 new OnDiskDeletionAwareTrie<>(factory, LIVE, MARKER, VERSION, factory.fileLength(), channel))
+        {
+            for (DataPoint point : points)
+            {
+                byte[] key = positionBytes(point.position());
+                for (int length = 0; length <= key.length; ++length)
+                {
+                    ByteComparable prefix = ByteComparable.preencoded(VERSION, key, 0, length);
+                    int outstandingBefore = factory.outstanding;
+                    DeletionAwareTrie<LivePoint, DeletionMarker> tail = read.tailTrie(prefix);
+                    assertEquals("tailTrie must not keep a rebufferer, at " + prefix.byteComparableAsString(VERSION),
+                                 outstandingBefore, factory.outstanding);
+                    if (tail != null)
+                        walkAndClose(tail.cursor(Direction.FORWARD));
+                    assertEquals("Walking a tail must give its rebufferers back, at " + prefix.byteComparableAsString(VERSION),
+                                 outstandingBefore, factory.outstanding);
+                }
+            }
+        }
+    }
+
+    /// Walks the cursor and every deletion branch it presents to the end, then gives all of them back. The trie a
+    /// [BaseTrie#tailTrie] hands out makes its cursors from a closed one, so a mistake in that hand-over surfaces
+    /// here as a read through a buffer that has already gone back to the pool.
+    private static void walkAndClose(DeletionAwareCursor<LivePoint, DeletionMarker> cursor)
+    {
+        try
+        {
+            long position = cursor.encodedPosition();
+            while (!Cursor.isExhausted(position))
+            {
+                RangeCursor<DeletionMarker> branch = DeletionAwareCursor.deletionBranchCursor(cursor, position);
+                if (branch != null)
+                {
+                    try
+                    {
+                        long branchPosition = branch.encodedPosition();
+                        while (!Cursor.isExhausted(branchPosition))
+                            branchPosition = branch.advance();
+                    }
+                    finally
+                    {
+                        branch.close();
+                    }
+                }
+                position = cursor.advance();
+            }
+        }
+        finally
+        {
+            cursor.close();
         }
     }
 
