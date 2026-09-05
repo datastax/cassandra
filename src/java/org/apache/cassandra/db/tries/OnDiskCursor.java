@@ -381,13 +381,23 @@ public class OnDiskCursor<T> implements Cursor<T>
 
     /// Read the first byte of a variable-length-encoded unsigned integer, positioned immediately before position `pos`
     /// in the file, and return the length of the encoded int.
+    ///
+    /// The byte is read without a bounds check of our own; the buffer is left to reject a position it does not hold.
+    /// [#seekTo] does not make one readable: it does not re-check the index after rebuffering, and
+    /// [org.apache.cassandra.io.util.ByteBufferRebufferer], which serves a commit-log record or a message payload,
+    /// returns the same buffer whatever position it is asked for. The bytes can be corrupt, so the rejection is
+    /// reported as corruption like every other bad length.
     int readVIntLength(long pos)
     {
         seekTo(pos);
-        int vintLength = VIntCoding.computeUnsignedVIntSize(currentBuffer, (int) (pos - 1 - currentBufferOffset));
-        if (vintLength < 0)
+        try
+        {
+            return VIntCoding.computeUnsignedVIntSizeUnchecked(currentBuffer, (int) (pos - 1 - currentBufferOffset));
+        }
+        catch (IndexOutOfBoundsException e)
+        {
             throw corrupt("no length byte before position " + pos);
-        return vintLength;
+        }
     }
 
     /// Read a variable-length-encoded unsigned integer with the given length (obtained using [#readVIntLength]),
