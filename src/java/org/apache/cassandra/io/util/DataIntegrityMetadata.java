@@ -105,11 +105,11 @@ public class DataIntegrityMetadata
         private final File dataFile;
         private final File digestFile;
 
-        public FileDigestValidator(File dataFile, File digestFile) throws IOException
+        public FileDigestValidator(File dataFile, File digestFile, ChecksumType checksumType) throws IOException
         {
             this.dataFile = dataFile;
             this.digestFile = digestFile;
-            this.checksum = ChecksumType.CRC32.newInstance();
+            this.checksum = checksumType.newInstance();
         }
 
         // Validate the entire file

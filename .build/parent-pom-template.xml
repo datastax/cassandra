@@ -1304,6 +1304,11 @@
         <artifactId>de.huxhorn.sulky.ulid</artifactId>
         <version>8.2.0</version>
       </dependency>
+      <dependency>
+        <groupId>software.amazon.awssdk.crt</groupId>
+        <artifactId>aws-crt</artifactId>
+        <version>0.45.4</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 </project>

@@ -121,7 +121,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
 
         public DataOutputStreamPlus getOutputStream(File dataPath, File crcPath)
         {
-            return new ChecksummedSequentialWriter(dataPath, crcPath, null, writerOption);
+            return new ChecksummedSequentialWriter(dataPath, crcPath, writerOption);
         }
     };
 

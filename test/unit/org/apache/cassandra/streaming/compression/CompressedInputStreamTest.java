@@ -131,6 +131,7 @@ public class CompressedInputStreamTest
         try (CompressedSequentialWriter writer = new CompressedSequentialWriter(tmp,
                                                                                 desc.fileFor(Components.COMPRESSION_INFO),
                                                                                 null,
+                                                                                ChecksumType.CRC32,
                                                                                 SequentialWriterOption.DEFAULT,
                                                                                 param, collector))
         {
