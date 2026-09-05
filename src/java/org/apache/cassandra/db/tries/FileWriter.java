@@ -88,23 +88,40 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     @Override
     public void content(T content)
     {
+        InProgressNode<T> node = nodeAtCurrentPosition();
+        if (onAscentPath)
+        {
+            assert node.ascentPathContent == null;
+            node.ascentPathContent = content;
+        }
+        else
+        {
+            assert node.descentPathContent == null;
+            node.descentPathContent = content;
+        }
+    }
+
+    /// Attach a payload to the ascent-side content slot of the node at the current position, whatever path the walk
+    /// is on. [DeletionAwareFileWriter] uses this for the deletion-branch pointer: the slot a range trie fills with
+    /// return-path content is free in a trie whose content is descent-side only, which is the same reuse
+    /// [InMemoryTrie] makes of a prefix node's alternate branch pointer.
+    public void ascentContent(T content)
+    {
+        InProgressNode<T> node = nodeAtCurrentPosition();
+        assert node.ascentPathContent == null;
+        node.ascentPathContent = content;
+    }
+
+    private InProgressNode<T> nodeAtCurrentPosition()
+    {
         if (lastNodeOnPath >= 0)
         {
             InProgressNode<T> lastNode = nodesOnPath[lastNodeOnPath];
             if (lastNode.depth == keyPos)
-            {
-                assert onAscentPath;
-                lastNode.ascentPathContent = content;
-                return;
-            }
+                return lastNode;
             assert lastNode.depth < keyPos;
         }
-
-        InProgressNode<T> node = addNewNode(keyPos);
-        if (onAscentPath)
-            node.ascentPathContent = content;
-        else
-            node.descentPathContent = content;
+        return addNewNode(keyPos);
     }
 
     private InProgressNode<T> addNewNode(int depth)

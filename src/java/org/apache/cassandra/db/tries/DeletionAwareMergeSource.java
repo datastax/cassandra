@@ -55,6 +55,20 @@ class DeletionAwareMergeSource<T, D extends RangeState<D>, E extends RangeState<
     }
 
     @Override
+    public void close()
+    {
+        try
+        {
+            data.close();
+        }
+        finally
+        {
+            if (deletions != null)
+                deletions.close();
+        }
+    }
+
+    @Override
     public long encodedPosition()
     {
         return data.encodedPosition();
@@ -137,6 +151,9 @@ class DeletionAwareMergeSource<T, D extends RangeState<D>, E extends RangeState<
 
     private long leaveDeletionsBranch(long dataPosition)
     {
+        // The deletions cursor is only attached for the span of a branch; release it as soon as we leave that branch
+        // rather than waiting for [#close], as a file-backed one holds a buffer.
+        deletions.close();
         deletions = null;
         return setAtDeletionsAndReturnPosition(false, dataPosition);
     }

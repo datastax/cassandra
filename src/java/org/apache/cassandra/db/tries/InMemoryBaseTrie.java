@@ -1484,10 +1484,12 @@ public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTri
 
             // This is not very efficient, but we only currently use this option in tests.
             // If it's needed for production use, isBranching should be implemented in the cursor interface.
-            Cursor<U> dupe = mutationCursor.tailCursor(Direction.FORWARD);
-            long childPosition = dupe.advance();
-            return !Cursor.isExhausted(childPosition) &&
-                   !Cursor.isExhausted(dupe.skipTo(Cursor.positionForSkippingBranch(childPosition)));
+            try (Cursor<U> dupe = mutationCursor.tailCursor(Direction.FORWARD))
+            {
+                long childPosition = dupe.advance();
+                return !Cursor.isExhausted(childPosition) &&
+                       !Cursor.isExhausted(dupe.skipTo(Cursor.positionForSkippingBranch(childPosition)));
+            }
         }
 
         @Override

@@ -28,6 +28,12 @@ abstract class ContentMappingCursor<T, C extends Cursor<T>, V> implements Cursor
     final Function<T, V> mapper;
     final C source;
 
+    @Override
+    public void close()
+    {
+        source.close();
+    }
+
     ContentMappingCursor(Function<T, V> mapper, C source)
     {
         this.mapper = mapper;
