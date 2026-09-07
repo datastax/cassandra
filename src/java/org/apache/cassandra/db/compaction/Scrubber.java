@@ -394,11 +394,21 @@ public class Scrubber implements Closeable
                 finished.forEach(sstable -> sstable.selfRef().release());
         }
 
+        /*
+         * As discussed in PR {@link https://github.com/datastax/cassandra/pull/2614},
+         * retrying running {@code tryAppend} for the same partition will result in iterating
+         * over the same rows with {@code computeNext()} and the static row more than once
+         * in constructor of {@code FixNegativeLocalDeletionTimeIterator}, thus incrementing
+         * fields in {@code negativeLocalDeletionInfoMetrics} multiple times upon the same trigger (same row/same static row).
+         */
         if (!finished.isEmpty())
         {
             outputHandler.output("Scrub of " + sstable + " complete: " + goodPartitions + " partitions in new sstable and " + emptyPartitions + " empty (tombstoned) partitions dropped");
             if (negativeLocalDeletionInfoMetrics.fixedRows > 0)
                 outputHandler.output("Fixed " + negativeLocalDeletionInfoMetrics.fixedRows + " rows with overflowed local deletion time.");
+            if (negativeLocalDeletionInfoMetrics.partitionsWithFixedStaticRow > 0)
+                outputHandler.output("Fixed static columns with overflowed local deletion time in " + negativeLocalDeletionInfoMetrics.partitionsWithFixedStaticRow + " partitions.");
+            
             if (badPartitions > 0)
                 outputHandler.warn("Unable to recover " + badPartitions + " partitions that were skipped.  You can attempt manual recovery from the pre-scrub snapshot.  You can also run nodetool repair to transfer the data from a healthy replica, if any");
         }
@@ -618,6 +628,7 @@ public class Scrubber implements Closeable
     public class NegativeLocalDeletionInfoMetrics
     {
         public volatile int fixedRows = 0;
+        public volatile int partitionsWithFixedStaticRow = 0;
     }
 
     /**
@@ -782,6 +793,7 @@ public class Scrubber implements Closeable
 
         private final OutputHandler outputHandler;
         private final NegativeLocalDeletionInfoMetrics negativeLocalExpirationTimeMetrics;
+        private final Row fixedStaticRow;
 
         public FixNegativeLocalDeletionTimeIterator(UnfilteredRowIterator iterator, OutputHandler outputHandler,
                                                     NegativeLocalDeletionInfoMetrics negativeLocalDeletionInfoMetrics)
@@ -789,6 +801,15 @@ public class Scrubber implements Closeable
             this.iterator = iterator;
             this.outputHandler = outputHandler;
             this.negativeLocalExpirationTimeMetrics = negativeLocalDeletionInfoMetrics;
+            
+            // Fixing static row at construction time
+            Row staticRow = iterator.staticRow();
+            if (hasNegativeLocalExpirationTime(staticRow))
+            {
+                staticRow = fixNegativeLocalExpirationTime(staticRow);
+                this.negativeLocalExpirationTimeMetrics.partitionsWithFixedStaticRow++;
+            }
+            this.fixedStaticRow = staticRow;
         }
 
         public TableMetadata metadata()
@@ -813,7 +834,7 @@ public class Scrubber implements Closeable
 
         public Row staticRow()
         {
-            return iterator.staticRow();
+            return fixedStaticRow;
         }
 
         @Override
@@ -886,7 +907,7 @@ public class Scrubber implements Closeable
             return false;
         }
 
-        private Unfiltered fixNegativeLocalExpirationTime(Row row)
+        private Row fixNegativeLocalExpirationTime(Row row)
         {
             LivenessInfo livenessInfo = row.primaryKeyLivenessInfo();
             if (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() < 0)
