@@ -20,6 +20,11 @@ package org.apache.cassandra.cql3.validation.operations;
 
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.HashSet;
 
 import org.junit.After;
 import org.junit.Assume;
@@ -27,6 +32,8 @@ import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import com.google.common.collect.ImmutableMap;
+
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Attributes;
@@ -66,6 +73,7 @@ public class TTLTest extends CQLTester
     public static final String SIMPLE_CLUSTERING = "table2";
     public static final String COMPLEX_NOCLUSTERING = "table3";
     public static final String COMPLEX_CLUSTERING = "table4";
+    public static final String SIMPLE_CLUSTERING_WITH_STATIC = "table5";
     private Config.CorruptedTombstoneStrategy corruptTombstoneStrategy;
 
     // We should start applying overflow policies depending on supported sstable formats. Either in year 2038 or 2086
@@ -329,6 +337,7 @@ public class TTLTest extends CQLTester
     {
         // simple column, clustering
         testRecoverOverflowedExpirationWithScrub(true, true, runScrub, runSStableScrub, reinsertOverflowedTTL);
+        
         // simple column, noclustering
         testRecoverOverflowedExpirationWithScrub(true, false, runScrub, runSStableScrub, reinsertOverflowedTTL);
         // complex column, clustering
@@ -339,10 +348,21 @@ public class TTLTest extends CQLTester
 
     private void createTable(boolean simple, boolean clustering)
     {
+        createTable(simple, clustering, false);
+    }
+
+    private void createTable(boolean simple, boolean clustering, boolean withStatic)    
+    {
+        assert !(withStatic && !clustering);
+        assert !(withStatic && !simple);
+        
         if (simple)
         {
             if (clustering)
-                createTable("create table %s (k int, a int, b int, primary key(k, a))");
+                if (withStatic)
+                    createTable("create table %s (a int, b int, c int static, d text, primary key(a, b))");
+                else
+                    createTable("create table %s (k int, a int, b int, primary key(k, a))");
             else
                 createTable("create table %s (k int primary key, a int, b int)");
         }
@@ -412,9 +432,9 @@ public class TTLTest extends CQLTester
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(currentTable());
 
         assertEquals(0, cfs.getLiveSSTables().size());
-
+        
         copySSTablesToTableDir(currentTable(), simple, clustering);
-
+        
         cfs.loadNewSSTables();
 
         if (runScrub)
@@ -472,19 +492,72 @@ public class TTLTest extends CQLTester
         }
     }
 
+    @Test
+    public void testScrubOverflowedSSTableWithStaticColumn() throws Throwable
+    {
+        DatabaseDescriptor.setCorruptedTombstoneStrategy(Config.CorruptedTombstoneStrategy.disabled);
+        createTable(true, true, true);
+
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(currentTable());
+
+        assertEquals(0, cfs.getLiveSSTables().size());
+
+        copySSTablesToTableDir(currentTable(), true, true, true);
+
+        cfs.loadNewSSTables();
+
+        cfs.scrub(true, IScrubber.options().checkData().reinsertOverflowedTTLRows(true).build(), 1);             
+
+        List<ImmutableMap<String, Long>> rows = execute("SELECT c, ttl(c) FROM %s").stream()
+                                                                                   .map(row -> ImmutableMap.of("c", (long) row.getInt("c"),
+                                                                                                               "ttl(c)", (long) row.getInt("ttl(c)")))
+                                                                                   .collect(Collectors.toList());
+
+        rows = new ArrayList<>(new HashSet<>(rows));
+        rows.sort(Comparator.comparingInt(m -> m.get("c").intValue()));
+
+        assertEquals(2, rows.size());
+
+        assertEquals(2, rows.get(0).get("c").longValue());
+        // assert that ttl is no longer negative
+        assertTrue(rows.get(0).get("ttl(c)")> 0);
+
+        assertEquals(4, rows.get(1).get("c").longValue());
+        // assert that ttl is no longer negative
+        assertTrue(rows.get(1).get("ttl(c)") > 0);
+
+        try
+        {
+            cfs.truncateBlocking();
+            dropTable("DROP TABLE %s");
+        }
+        catch (Throwable e)
+        {
+            // StandaloneScrubber.class should be ran as a tool with a stable env. In a test env there are things moving
+            // under its feet such as the async CQLTester.afterTest() operations. We try to sync cleanup of tables here
+            // but we need to catch any exceptions we might run into bc of the hack. See CASSANDRA-16546
+        }
+    }
+
     private void copySSTablesToTableDir(String table, boolean simple, boolean clustering) throws IOException
     {
+        copySSTablesToTableDir(table, simple, clustering, false);
+    }
+
+    private void copySSTablesToTableDir(String table, boolean simple, boolean clustering, boolean withStatic) throws IOException
+    {
         File destDir = Keyspace.open(keyspace()).getColumnFamilyStore(table).getDirectories().getCFDirectories().iterator().next();
-        File sourceDir = getTableDir(table, simple, clustering);
+        File sourceDir = getTableDir(table, simple, clustering, withStatic);
         for (File file : sourceDir.tryList())
         {
             copyFile(file, destDir);
         }
     }
 
-    private static File getTableDir(String table, boolean simple, boolean clustering)
+    private static File getTableDir(String table, boolean simple, boolean clustering, boolean withStatic)
     {
-        return new File(String.format(NEGATIVE_LOCAL_EXPIRATION_TEST_DIR, getTableName(simple, clustering)));
+        return new File(String.format(NEGATIVE_LOCAL_EXPIRATION_TEST_DIR, getTableName(simple, clustering, withStatic)));
     }
 
     private static void copyFile(File src, File dest) throws IOException
@@ -502,10 +575,12 @@ public class TTLTest extends CQLTester
         }
     }
 
-    public static String getTableName(boolean simple, boolean clustering)
+    public static String getTableName(boolean simple, boolean clustering, boolean withStatic)
     {
+        assert !(withStatic && !clustering);
+        assert !(withStatic && !simple);
         if (simple)
-            return clustering ? SIMPLE_CLUSTERING : SIMPLE_NOCLUSTERING;
+            return clustering ? (withStatic ? SIMPLE_CLUSTERING_WITH_STATIC : SIMPLE_CLUSTERING) : SIMPLE_NOCLUSTERING;
         else
             return clustering ? COMPLEX_CLUSTERING : COMPLEX_NOCLUSTERING;
     }
