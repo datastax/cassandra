@@ -104,13 +104,24 @@ public class Scrubber implements Closeable
     private int emptyPartitions;
 
     private NegativeLocalDeletionInfoMetrics negativeLocalDeletionInfoMetrics = new NegativeLocalDeletionInfoMetrics();
-    private OverwritenTTLInfoMetrics overwritenTTLInfoMetrics = new OverwritenTTLInfoMetrics();
+    private OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics = new OverwrittenTTLInfoMetrics();
 
     private final OutputHandler outputHandler;
 
     private static final Comparator<Partition> partitionComparator = Comparator.comparing(Partition::partitionKey);
     private final SortedSet<Partition> outOfOrder = new TreeSet<>(partitionComparator);
 
+    /**
+     * Controls how the scrubber handles TTL during scrubbing.
+     *
+     * <ul>
+     *   <li>{@link #NONE} — default behaviour; TTL values are left as-is.</li>
+     *   <li>{@link #REINSERT_OVERFLOWED_TTL} — fixes cells whose local deletion time overflowed a 32-bit
+     *       integer (see CASSANDRA-14092) by wrapping them through {@link FixNegativeLocalDeletionTimeIterator}.</li>
+     *   <li>{@link #NO_TTL} — strips all TTL information from every cell via {@link NoTTLTransformer},
+     *       useful when TTL data is corrupt or must be removed entirely.</li>
+     * </ul>
+     */
     public enum OverwriteTTLMode
     {
         // Do nothing
@@ -137,19 +148,6 @@ public class Scrubber implements Closeable
                     OverwriteTTLMode overwriteTTLMode)
     {
         this(realm, transaction, transaction.isOffline(), skipCorrupted, new OutputHandler.LogOutput(), checkData, overwriteTTLMode);
-    }
-
-    @SuppressWarnings("resource")
-    public Scrubber(CompactionRealm realm,
-                    LifecycleTransaction transaction,
-                    boolean isOffline,
-                    boolean skipCorrupted,
-                    OutputHandler outputHandler,
-                    boolean checkData,
-                    boolean reinsertOverflowedTTLRows)
-    {
-        this(realm, transaction, isOffline, skipCorrupted, outputHandler, checkData,
-             reinsertOverflowedTTLRows ? OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : OverwriteTTLMode.NONE);
     }
 
     @SuppressWarnings("resource")
@@ -435,8 +433,8 @@ public class Scrubber implements Closeable
             outputHandler.output("Scrub of " + sstable + " complete: " + goodPartitions + " partitions in new sstable and " + emptyPartitions + " empty (tombstoned) partitions dropped");
             if (negativeLocalDeletionInfoMetrics.fixedRows > 0)
                 outputHandler.output("Fixed " + negativeLocalDeletionInfoMetrics.fixedRows + " rows with overflowed local deletion time.");
-            if (overwritenTTLInfoMetrics.getNoTTLOverwrittenRows() > 0)
-                outputHandler.output("Overwrote " + overwritenTTLInfoMetrics.getNoTTLOverwrittenRows() + " rows with NO_TTL.");
+            if (overwrittenTTLInfoMetrics.getNoTTLOverwrittenRows() > 0)
+                outputHandler.output("Overwrote " + overwrittenTTLInfoMetrics.getNoTTLOverwrittenRows() + " rows with NO_TTL.");
             if (badPartitions > 0)
                 outputHandler.warn("Unable to recover " + badPartitions + " partitions that were skipped.  You can attempt manual recovery from the pre-scrub snapshot.  You can also run nodetool repair to transfer the data from a healthy replica, if any");
         }
@@ -499,7 +497,7 @@ public class Scrubber implements Closeable
                 res = new FixNegativeLocalDeletionTimeIterator(rowMergingIterator, outputHandler, negativeLocalDeletionInfoMetrics);
                 break;
             case NO_TTL:
-                res = Transformation.apply(rowMergingIterator, new NoTTLTransformer(outputHandler, realm.metadata(), overwritenTTLInfoMetrics));
+                res = Transformation.apply(rowMergingIterator, new NoTTLTransformer(outputHandler, realm.metadata(), overwrittenTTLInfoMetrics));
                 break;
             default:
                 res = rowMergingIterator;
@@ -662,7 +660,7 @@ public class Scrubber implements Closeable
             this.goodPartitions = scrubber.goodPartitions;
             this.badPartitions = scrubber.badPartitions;
             this.emptyPartitions = scrubber.emptyPartitions;
-            this.noTTLOverwrittenRows = scrubber.overwritenTTLInfoMetrics.getNoTTLOverwrittenRows();
+            this.noTTLOverwrittenRows = scrubber.overwrittenTTLInfoMetrics.getNoTTLOverwrittenRows();
             this.scrubbed = scrubbed;
         }
     }
@@ -672,7 +670,7 @@ public class Scrubber implements Closeable
         public volatile int fixedRows = 0;
     }
 
-    public class OverwritenTTLInfoMetrics
+    private static class OverwrittenTTLInfoMetrics
     {
         private volatile int  noTTLOverwrittenRows = 0;
 
@@ -691,9 +689,9 @@ public class Scrubber implements Closeable
     {
         private final TableMetadata metadata;
         private final OutputHandler outputHandler;
-        private final OverwritenTTLInfoMetrics overwritenTTLInfoMetrics;
+        private final OverwrittenTTLInfoMetrics overwritenTTLInfoMetrics;
 
-        public NoTTLTransformer(OutputHandler outputHandler, TableMetadata metadata, OverwritenTTLInfoMetrics overwritenTTLInfoMetrics)
+        public NoTTLTransformer(OutputHandler outputHandler, TableMetadata metadata, OverwrittenTTLInfoMetrics overwritenTTLInfoMetrics)
         {
             this.metadata = metadata;
             this.outputHandler = outputHandler;
@@ -715,6 +713,9 @@ public class Scrubber implements Closeable
         // Rewrites the row replacing expiring liveness/cells with permanent equivalents, preserving timestamp and value.
         protected Row removeTTL(Row row)
         {
+            if (!hasAnyTTL(row))
+                return row;
+
             boolean ttlWasOverwritten = false;
             Row.Builder builder = BTreeRow.sortedBuilder();
             builder.newRow(row.clustering());
@@ -770,6 +771,18 @@ public class Scrubber implements Closeable
             for (Cell<?> cell : complexData)
                 stripped |= stripCellTTL(builder, cell);
             return stripped;
+        }
+
+        //Checks if the row has any ttl columns
+        private boolean hasAnyTTL(Row row)
+        {
+            if (row.primaryKeyLivenessInfo().isExpiring()) return true;
+            for (ColumnData cd : row)
+            {
+                if (cd.column().isSimple()) { if (((Cell<?>) cd).isExpiring()) return true; }
+                else { for (Cell<?> c : (ComplexColumnData) cd) if (c.isExpiring()) return true; }
+            }
+            return false;
         }
     }
 
