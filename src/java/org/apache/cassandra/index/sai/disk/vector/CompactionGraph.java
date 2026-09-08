@@ -39,7 +39,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
+import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
+import io.github.jbellis.jvector.graph.OnHeapGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.OnDiskParallelGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.RandomAccessOnDiskGraphIndexWriter;
@@ -374,6 +376,7 @@ public class CompactionGraph implements Closeable, Accountable
 
                         // Keep the existing edges but recompute their scores
                         builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
+                        markCopiedNodesComplete((OnHeapGraphIndex) builder.getGraph());
                     }
                     finally
                     {
@@ -416,6 +419,24 @@ public class CompactionGraph implements Closeable, Accountable
             postingsEntry.doReplaceValue(updatedPostings); // re-serialize value to disk
 
             return new InsertionResult(bytesUsed);
+        }
+    }
+
+    /**
+     * {@link GraphIndexBuilder#rescore} copies the nodes and edges of the old graph into a new builder with
+     * {@code connectNode}, which never marks the copied nodes as complete. The concurrent view that the builder
+     * uses for every subsequent insertion hides neighbours that are not complete, so without this step every
+     * search performed while adding the remaining vectors would be blind to all the nodes inserted before the
+     * PQ refinement: the new nodes end up connected only among themselves and the segment is not navigable
+     * (recall drops to the fraction of vectors added after the refinement).
+     */
+    private static void markCopiedNodesComplete(OnHeapGraphIndex graph)
+    {
+        for (int node = 0; node < graph.getIdUpperBound(); node++)
+        {
+            int maxLevel = graph.getMaxLevelForNode(node);
+            if (maxLevel >= 0)
+                graph.markComplete(new ImmutableGraphIndex.NodeAtLevel(maxLevel, node));
         }
     }
 
