@@ -36,8 +36,8 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.sensors.ActiveSensorsFactory;
 import org.apache.cassandra.sensors.SensorsRegistry;
+import org.apache.cassandra.sensors.TestSensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -69,7 +69,7 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
     @BeforeClass
     public static void setupCluster() throws IOException
     {
-        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(TestSensorsFactory.class.getName());
         cluster = init(Cluster.build(NODES_COUNT).start());
     }
 
