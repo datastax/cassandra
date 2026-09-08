@@ -41,6 +41,7 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.SyncUtil;
 import org.assertj.core.api.Assertions;
 
@@ -105,7 +106,7 @@ public class CompressedRandomAccessReaderTest
         String filename = f.absolutePath();
         MetadataCollector sstableMetadataCollector = new MetadataCollector(new ClusteringComparator(BytesType.instance));
         try(CompressedSequentialWriter writer = new CompressedSequentialWriter(f, new File(filename + ".metadata"),
-                                                                               null, SequentialWriterOption.DEFAULT,
+                                                                               null, ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
                                                                                CompressionParams.snappy(32),
                                                                                sstableMetadataCollector))
         {
@@ -208,7 +209,7 @@ public class CompressedRandomAccessReaderTest
         MetadataCollector sstableMetadataCollector = new MetadataCollector(new ClusteringComparator(BytesType.instance));
         try(SequentialWriter writer = params != null
                 ? new CompressedSequentialWriter(f, new File(filename + ".metadata"),
-                                                 null, SequentialWriterOption.DEFAULT,
+                                                 null, ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
                                                  params, sstableMetadataCollector)
                 : new SequentialWriter(f))
         {
@@ -248,7 +249,7 @@ public class CompressedRandomAccessReaderTest
 
         MetadataCollector sstableMetadataCollector = new MetadataCollector(new ClusteringComparator(BytesType.instance));
         try (SequentialWriter writer = new CompressedSequentialWriter(file, metadata,
-                                                                      null, SequentialWriterOption.DEFAULT,
+                                                                      null, ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
                                                                       CompressionParams.snappy(), sstableMetadataCollector))
         {
             writer.write(CONTENT.getBytes());
