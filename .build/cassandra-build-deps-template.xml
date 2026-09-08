@@ -155,5 +155,9 @@
       <groupId>com.bpodgursky</groupId>
       <artifactId>jbool_expressions</artifactId>
     </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk.crt</groupId>
+      <artifactId>aws-crt</artifactId>
+    </dependency>
   </dependencies>
 </project>

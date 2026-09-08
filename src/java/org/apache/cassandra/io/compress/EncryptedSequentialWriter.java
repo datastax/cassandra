@@ -36,6 +36,7 @@ import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.io.util.PageAware;
+import org.apache.cassandra.utils.ChecksumType;
 
 /**
  * Encryption-only writer. This is not a normal file writer in the sense that it is not meant to just accept a sequence
@@ -104,7 +105,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
         this.encrypted = BufferType.preferredForCompression().allocate(CHUNK_SIZE);
 
         maxBytesInChunk = buffer.capacity();
-        crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)));
+        crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)), ChecksumType.CRC32);
     }
 
     public static int maxBytesInPage(ICompressor encryptor)

@@ -122,6 +122,8 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
                                                                              FILTER,
                                                                              SUMMARY,
                                                                              DIGEST,
+                                                                             DIGEST_CRC32C,
+                                                                             DIGEST_CRC64NVME,
                                                                              CRC,
                                                                              TOC);
     }

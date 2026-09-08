@@ -39,6 +39,7 @@ import org.apache.cassandra.io.compress.CompressionMetadata.Chunk;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -345,7 +346,7 @@ public class MmappedRegionsTest
 
         MetadataCollector sstableMetadataCollector = new MetadataCollector(new ClusteringComparator(BytesType.instance));
         try (SequentialWriter writer = new CompressedSequentialWriter(f, cf,
-                                                                      null, SequentialWriterOption.DEFAULT,
+                                                                      null, ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
                                                                       CompressionParams.snappy(), sstableMetadataCollector))
         {
             writer.write(buffer);
@@ -428,7 +429,7 @@ public class MmappedRegionsTest
         cf.deleteOnExit();
 
         MetadataCollector sstableMetadataCollector = new MetadataCollector(new ClusteringComparator(BytesType.instance));
-        try (CompressedSequentialWriter writer = new CompressedSequentialWriter(f, cf, null,
+        try (CompressedSequentialWriter writer = new CompressedSequentialWriter(f, cf, null, ChecksumType.CRC32,
                                                                                 SequentialWriterOption.DEFAULT,
                                                                                 CompressionParams.deflate(chunkSize << 10),
                                                                                 sstableMetadataCollector))

@@ -997,7 +997,10 @@ public enum CassandraRelevantProperties
     SNAPSHOT_MIN_ALLOWED_TTL_SECONDS("cassandra.snapshot.min_allowed_ttl_seconds", "60"),
     SSL_ENABLE("ssl.enable"),
     SSL_STORAGE_PORT("cassandra.ssl_storage_port"),
+    SSTABLE_CHECKSUM_AWS_CRT_DETECTION_ENABLED("cassandra.sstable.checksums.aws_crt_detection_enabled", "true"),
+    SSTABLE_CHECKSUM_TYPE("cassandra.sstable.checksums.type", "CRC32"),
     SSTABLE_FORMAT_DEFAULT("cassandra.sstable.format.default"),
+    SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS("cassandra.sstable.format.stream_new_checksums", "false"),
 
     // in OSS, when UUID based SSTable generation identifiers are enabled, they use TimeUUID
     // though, for CNDB we want to use ULID - this property allows for that
