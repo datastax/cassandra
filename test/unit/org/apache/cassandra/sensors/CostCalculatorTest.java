@@ -23,7 +23,7 @@ import org.junit.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class MUCalculatorTest
+public class CostCalculatorTest
 {
     private static final double NANOS_PER_SECOND = 1_000_000_000.0;
     private static final double MU_SCALE = 4000.0;
@@ -48,13 +48,13 @@ public class MUCalculatorTest
         // normalized_bytes = 500_000 / 1_000_000 = 0.5
         // normalized_execution_time = 0.1
         // RMU = max(0.1, 0.5) * 4000 = 2000.0
-        DefaultMUCalculator calc = new DefaultMUCalculator(1_000_000, 1_000_000, 1);
+        TestCostCalculator calc = new TestCostCalculator(1_000_000, 1_000_000, 1);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         requestSensors.incrementSensor(context, Type.READ_BYTES, 500_000);
         requestSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND); // 100 ms
 
-        double rmu = calc.computeRMU(requestSensors, context);
+        double rmu = calc.computeReadCost(requestSensors, context);
         // bytes dominate: max(0.1, 0.5) = 0.5 → RMU = 0.5 * 4000 = 2000.0
         assertThat(rmu).isEqualTo(0.5 * MU_SCALE);
     }
@@ -66,13 +66,13 @@ public class MUCalculatorTest
         // read_bytes = 100 000, read_execution_time = 500 ms
         // normalized_bytes = 0.1, normalized_execution_time = 0.5
         // RMU = max(0.5, 0.1) * 4000 = 2000.0
-        DefaultMUCalculator calc = new DefaultMUCalculator(1_000_000, 1_000_000, 1);
+        TestCostCalculator calc = new TestCostCalculator(1_000_000, 1_000_000, 1);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         requestSensors.incrementSensor(context, Type.READ_BYTES, 100_000);
         requestSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.5 * NANOS_PER_SECOND); // 500 ms
 
-        double rmu = calc.computeRMU(requestSensors, context);
+        double rmu = calc.computeReadCost(requestSensors, context);
         assertThat(rmu).isEqualTo(0.5 * MU_SCALE);
     }
 
@@ -82,13 +82,13 @@ public class MUCalculatorTest
         // 1 second execution time, read_bytes == baseline_read_bytes, num_cores = 1 → both normalized = 1.0
         // RMU = max(1.0, 1.0) * 4000 = 4000.0
         double baseline = 2_000_000;
-        DefaultMUCalculator calc = new DefaultMUCalculator(baseline, baseline, 1);
+        TestCostCalculator calc = new TestCostCalculator(baseline, baseline, 1);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         requestSensors.incrementSensor(context, Type.READ_BYTES, baseline);
         requestSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, NANOS_PER_SECOND); // exactly 1 second
 
-        double rmu = calc.computeRMU(requestSensors, context);
+        double rmu = calc.computeReadCost(requestSensors, context);
         assertThat(rmu).isEqualTo(MU_SCALE);
     }
 
@@ -100,13 +100,13 @@ public class MUCalculatorTest
         // normalized_bytes = 500_000 / 1_000_000 = 0.5
         // normalized_execution_time = 0.1
         // RMU = max(0.1, 0.5) * 4000 = 2000.0
-        DefaultMUCalculator calc = new DefaultMUCalculator(4_000_000, 4_000_000, 4);
+        TestCostCalculator calc = new TestCostCalculator(4_000_000, 4_000_000, 4);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         requestSensors.incrementSensor(context, Type.READ_BYTES, 500_000);
         requestSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND); // 100 ms
 
-        double rmu = calc.computeRMU(requestSensors, context);
+        double rmu = calc.computeReadCost(requestSensors, context);
         assertThat(rmu).isEqualTo(0.5 * MU_SCALE);
     }
 
@@ -114,28 +114,28 @@ public class MUCalculatorTest
     public void testRMU_noBaselineConfigured_usesRawBytes()
     {
         // baseline <= 0: execution-time term dropped, result = read_bytes * MU_SCALE
-        DefaultMUCalculator calc = new DefaultMUCalculator(-1, -1, 4);
+        TestCostCalculator calc = new TestCostCalculator(-1, -1, 4);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         requestSensors.incrementSensor(context, Type.READ_BYTES, 250.0);
         requestSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 2.0 * NANOS_PER_SECOND);
 
-        double rmu = calc.computeRMU(requestSensors, context);
+        double rmu = calc.computeReadCost(requestSensors, context);
         assertThat(rmu).isEqualTo(250.0 * MU_SCALE);
     }
 
     @Test
     public void testRMU_nullSensors_returnsZero()
     {
-        DefaultMUCalculator calc = new DefaultMUCalculator(1_000_000, 1_000_000, 1);
-        assertThat(calc.computeRMU(null, context)).isEqualTo(0.0);
+        TestCostCalculator calc = new TestCostCalculator(1_000_000, 1_000_000, 1);
+        assertThat(calc.computeReadCost(null, context)).isEqualTo(0.0);
     }
 
     @Test
     public void testRMU_nullContext_returnsZero()
     {
-        DefaultMUCalculator calc = new DefaultMUCalculator(1_000_000, 1_000_000, 1);
-        assertThat(calc.computeRMU(requestSensors, null)).isEqualTo(0.0);
+        TestCostCalculator calc = new TestCostCalculator(1_000_000, 1_000_000, 1);
+        assertThat(calc.computeReadCost(requestSensors, null)).isEqualTo(0.0);
     }
 
     // ── WMU tests ────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ public class MUCalculatorTest
         // write_bytes = 600 000, index_write_bytes = 200 000, write_execution_time = 200 ms
         // total_write_bytes = 800 000, normalized_bytes = 0.8, normalized_execution_time = 0.2
         // WMU = max(0.2, 0.8) * 4000 = 3200.0
-        DefaultMUCalculator calc = new DefaultMUCalculator(1_000_000, 1_000_000, 1);
+        TestCostCalculator calc = new TestCostCalculator(1_000_000, 1_000_000, 1);
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
@@ -155,7 +155,7 @@ public class MUCalculatorTest
         requestSensors.incrementSensor(context, Type.INDEX_WRITE_BYTES, 200_000);
         requestSensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 0.2 * NANOS_PER_SECOND); // 200 ms
 
-        double wmu = calc.computeWMU(requestSensors, context);
+        double wmu = calc.computeWriteCost(requestSensors, context);
         assertThat(wmu).isEqualTo(0.8 * MU_SCALE);
     }
 
@@ -166,7 +166,7 @@ public class MUCalculatorTest
         // write_bytes = 30 000, index_write_bytes = 20 000, write_execution_time = 700 ms
         // total_write_bytes = 50 000, normalized_bytes = 0.05, normalized_execution_time = 0.7
         // WMU = max(0.7, 0.05) * 4000 = 2800.0
-        DefaultMUCalculator calc = new DefaultMUCalculator(1_000_000, 1_000_000, 1);
+        TestCostCalculator calc = new TestCostCalculator(1_000_000, 1_000_000, 1);
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
@@ -174,7 +174,7 @@ public class MUCalculatorTest
         requestSensors.incrementSensor(context, Type.INDEX_WRITE_BYTES, 20_000);
         requestSensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 0.7 * NANOS_PER_SECOND); // 700 ms
 
-        double wmu = calc.computeWMU(requestSensors, context);
+        double wmu = calc.computeWriteCost(requestSensors, context);
         assertThat(wmu).isEqualTo(0.7 * MU_SCALE);
     }
 
@@ -187,14 +187,14 @@ public class MUCalculatorTest
         // total = 800 000, normalized_bytes = 0.8
         // WMU = 0.8 * 4000 = 3200.0
         // Without index_write_bytes it would be 0.4 * 4000 = 1600.0
-        DefaultMUCalculator calc = new DefaultMUCalculator(1_000_000, 1_000_000, 1);
+        TestCostCalculator calc = new TestCostCalculator(1_000_000, 1_000_000, 1);
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         requestSensors.incrementSensor(context, Type.WRITE_BYTES, 400_000);
         requestSensors.incrementSensor(context, Type.INDEX_WRITE_BYTES, 400_000);
 
-        double wmu = calc.computeWMU(requestSensors, context);
+        double wmu = calc.computeWriteCost(requestSensors, context);
         assertThat(wmu).isEqualTo(0.8 * MU_SCALE);
     }
 
@@ -205,7 +205,7 @@ public class MUCalculatorTest
         // write_bytes = 600 000, index_write_bytes = 200 000, write_execution_time = 200 ms
         // total_write_bytes = 800 000, normalized_bytes = 0.8, normalized_execution_time = 0.2
         // WMU = max(0.2, 0.8) * 4000 = 3200.0
-        DefaultMUCalculator calc = new DefaultMUCalculator(4_000_000, 4_000_000, 4);
+        TestCostCalculator calc = new TestCostCalculator(4_000_000, 4_000_000, 4);
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
@@ -213,7 +213,7 @@ public class MUCalculatorTest
         requestSensors.incrementSensor(context, Type.INDEX_WRITE_BYTES, 200_000);
         requestSensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 0.2 * NANOS_PER_SECOND); // 200 ms
 
-        double wmu = calc.computeWMU(requestSensors, context);
+        double wmu = calc.computeWriteCost(requestSensors, context);
         assertThat(wmu).isEqualTo(0.8 * MU_SCALE);
     }
 
@@ -221,7 +221,7 @@ public class MUCalculatorTest
     public void testWMU_noBaselineConfigured_usesRawBytes()
     {
         // baseline <= 0: execution-time term dropped, result = (write_bytes + index_write_bytes) * MU_SCALE
-        DefaultMUCalculator calc = new DefaultMUCalculator(-1, -1, 4);
+        TestCostCalculator calc = new TestCostCalculator(-1, -1, 4);
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
@@ -229,21 +229,21 @@ public class MUCalculatorTest
         requestSensors.incrementSensor(context, Type.INDEX_WRITE_BYTES, 100.0);
         requestSensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 2.0 * NANOS_PER_SECOND);
 
-        double wmu = calc.computeWMU(requestSensors, context);
+        double wmu = calc.computeWriteCost(requestSensors, context);
         assertThat(wmu).isEqualTo(300.0 * MU_SCALE);
     }
 
     @Test
     public void testWMU_nullSensors_returnsZero()
     {
-        DefaultMUCalculator calc = new DefaultMUCalculator(1_000_000, 1_000_000, 1);
-        assertThat(calc.computeWMU(null, context)).isEqualTo(0.0);
+        TestCostCalculator calc = new TestCostCalculator(1_000_000, 1_000_000, 1);
+        assertThat(calc.computeWriteCost(null, context)).isEqualTo(0.0);
     }
 
     @Test
     public void testWMU_nullContext_returnsZero()
     {
-        DefaultMUCalculator calc = new DefaultMUCalculator(1_000_000, 1_000_000, 1);
-        assertThat(calc.computeWMU(requestSensors, null)).isEqualTo(0.0);
+        TestCostCalculator calc = new TestCostCalculator(1_000_000, 1_000_000, 1);
+        assertThat(calc.computeWriteCost(requestSensors, null)).isEqualTo(0.0);
     }
 }

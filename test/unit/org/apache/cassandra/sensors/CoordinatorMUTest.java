@@ -57,7 +57,7 @@ public class CoordinatorMUTest
     @BeforeClass
     public static void setUpClass()
     {
-        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(TestSensorsFactory.class.getName());
         CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
 
         DatabaseDescriptor.daemonInitialization();
@@ -94,8 +94,8 @@ public class CoordinatorMUTest
 
         // Coordinator records 100 ms execution time and computes RMU
         coordinatorSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND);
-        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE, 1);
-        double rmuValue = calculator.computeRMU(coordinatorSensors, context);
+        CostCalculator calculator = new TestCostCalculator(BASELINE, BASELINE, 1);
+        double rmuValue = calculator.computeReadCost(coordinatorSensors, context);
         coordinatorSensors.incrementSensor(context, Type.RMU, rmuValue);
 
         double expectedRMU = (600_000.0 / BASELINE) * MU_SCALE; // bytes dominate
@@ -129,8 +129,8 @@ public class CoordinatorMUTest
         simulateReplicaReadBytes(context, ks, 100_000, coordinatorSensors);
 
         coordinatorSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.8 * NANOS_PER_SECOND);
-        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE, 1);
-        double rmuValue = calculator.computeRMU(coordinatorSensors, context);
+        CostCalculator calculator = new TestCostCalculator(BASELINE, BASELINE, 1);
+        double rmuValue = calculator.computeReadCost(coordinatorSensors, context);
         coordinatorSensors.incrementSensor(context, Type.RMU, rmuValue);
 
         double expectedRMU = 0.8 * MU_SCALE; // execution time dominates
@@ -159,8 +159,8 @@ public class CoordinatorMUTest
         assertThat(coordinatorSensors.getSensor(context, Type.WRITE_BYTES).get().getValue()).isEqualTo(700_000.0);
 
         coordinatorSensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 0.2 * NANOS_PER_SECOND);
-        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE, 1);
-        double wmuValue = calculator.computeWMU(coordinatorSensors, context);
+        CostCalculator calculator = new TestCostCalculator(BASELINE, BASELINE, 1);
+        double wmuValue = calculator.computeWriteCost(coordinatorSensors, context);
         coordinatorSensors.incrementSensor(context, Type.WMU, wmuValue);
 
         double expectedWMU = (700_000.0 / BASELINE) * MU_SCALE;
@@ -194,15 +194,15 @@ public class CoordinatorMUTest
         simulateReplicaWriteBytes(context, ks, 50_000, coordinatorSensors);
 
         coordinatorSensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 0.9 * NANOS_PER_SECOND);
-        MUCalculator calculator = new DefaultMUCalculator(BASELINE, BASELINE, 1);
-        double wmuValue = calculator.computeWMU(coordinatorSensors, context);
+        CostCalculator calculator = new TestCostCalculator(BASELINE, BASELINE, 1);
+        double wmuValue = calculator.computeWriteCost(coordinatorSensors, context);
         coordinatorSensors.incrementSensor(context, Type.WMU, wmuValue);
 
         double expectedWMU = 0.9 * MU_SCALE;
         assertThat(coordinatorSensors.getSensor(context, Type.WMU).get().getValue()).isEqualTo(expectedWMU);
     }
 
-    // ── computeRMU / computeWMU via SensorsCustomParams ──────────────────────
+    // ── computeReadCost / computeWriteCost via SensorsCustomParams ──────────────────────
 
     @Test
     public void testComputeRMU_viaCustomParams()
@@ -218,8 +218,8 @@ public class CoordinatorMUTest
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND);
 
         // No baseline configured in system properties for unit tests → falls back to raw bytes * MU_SCALE
-        // (DefaultMUCalculator instance reads from CassandraRelevantProperties which default to -1)
-        SensorsCustomParams.computeRMU(sensors);
+        // (TestCostCalculator reads from CassandraRelevantProperties which default to -1)
+        CostCalculator.computeReadCost(sensors);
 
         // With baseline=-1, RMU = read_bytes * MU_SCALE
         double expectedRMU = 500_000.0 * MU_SCALE;
@@ -239,7 +239,7 @@ public class CoordinatorMUTest
         sensors.incrementSensor(context, Type.WRITE_BYTES, 200_000);
         sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 0.2 * NANOS_PER_SECOND);
 
-        SensorsCustomParams.computeWMU(sensors);
+        CostCalculator.computeWriteCost(sensors);
 
         // With baseline=-1, WMU = write_bytes * MU_SCALE
         double expectedWMU = 200_000.0 * MU_SCALE;
@@ -263,8 +263,8 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000);
 
-        SensorsCustomParams.computeRMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeReadCost(sensors);
+        CostCalculator.computeTMU(sensors);
 
         double expectedRMU = 500_000.0 * MU_SCALE; // no baseline → bytes * MU_SCALE
         assertThat(sensors.getSensor(context, Type.RMU).get().getValue()).isEqualTo(expectedRMU);
@@ -287,8 +287,8 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000);
 
-        SensorsCustomParams.computeWMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeWriteCost(sensors);
+        CostCalculator.computeTMU(sensors);
 
         double expectedWMU = 300_000.0 * MU_SCALE;
         assertThat(sensors.getSensor(context, Type.WMU).get().getValue()).isEqualTo(expectedWMU);
@@ -316,9 +316,9 @@ public class CoordinatorMUTest
         sensors.incrementSensor(context, Type.READ_BYTES, 400_000);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 200_000);
 
-        SensorsCustomParams.computeRMU(sensors);
-        SensorsCustomParams.computeWMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeReadCost(sensors);
+        CostCalculator.computeWriteCost(sensors);
+        CostCalculator.computeTMU(sensors);
 
         double expectedRMU = 400_000.0 * MU_SCALE;
         double expectedWMU = 200_000.0 * MU_SCALE;
@@ -339,10 +339,10 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 100_000);
-        SensorsCustomParams.computeRMU(sensors);
+        CostCalculator.computeReadCost(sensors);
 
         // no exception, no TMU sensor created
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeTMU(sensors);
 
         assertThat(sensors.getSensor(context, Type.TMU)).isEmpty();
     }
@@ -352,7 +352,7 @@ public class CoordinatorMUTest
     @Test
     public void testTMUSyncsToGlobalRegistry_readPath()
     {
-        // After computeRMU + computeTMU + syncAllSensors the global registry must hold TMU = RMU
+        // After computeReadCost + computeTMU + syncAllSensors the global registry must hold TMU = RMU
         String ks = "ks_tmu_reg_r";
         String table = "t_reg_r";
         String tableId = UUID.randomUUID().toString();
@@ -366,8 +366,8 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 600_000);
 
-        SensorsCustomParams.computeRMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeReadCost(sensors);
+        CostCalculator.computeTMU(sensors);
         sensors.syncAllSensors();
 
         double expectedTMU = 600_000.0 * MU_SCALE;
@@ -379,7 +379,7 @@ public class CoordinatorMUTest
     @Test
     public void testTMUSyncsToGlobalRegistry_writePath()
     {
-        // After computeWMU + computeTMU + syncAllSensors the global registry must hold TMU = WMU
+        // After computeWriteCost + computeTMU + syncAllSensors the global registry must hold TMU = WMU
         String ks = "ks_tmu_reg_w";
         String table = "t_reg_w";
         String tableId = UUID.randomUUID().toString();
@@ -393,8 +393,8 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000);
 
-        SensorsCustomParams.computeWMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeWriteCost(sensors);
+        CostCalculator.computeTMU(sensors);
         sensors.syncAllSensors();
 
         double expectedTMU = 250_000.0 * MU_SCALE;
@@ -406,7 +406,7 @@ public class CoordinatorMUTest
     @Test
     public void testTMUSyncsToGlobalRegistry_casPath()
     {
-        // After computeRMU + computeWMU + computeTMU + syncAllSensors: global TMU = WMU + RMU
+        // After computeReadCost + computeWriteCost + computeTMU + syncAllSensors: global TMU = WMU + RMU
         String ks = "ks_tmu_reg_cas";
         String table = "t_reg_cas";
         String tableId = UUID.randomUUID().toString();
@@ -425,9 +425,9 @@ public class CoordinatorMUTest
         sensors.incrementSensor(context, Type.READ_BYTES, 200_000);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 100_000);
 
-        SensorsCustomParams.computeRMU(sensors);
-        SensorsCustomParams.computeWMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeReadCost(sensors);
+        CostCalculator.computeWriteCost(sensors);
+        CostCalculator.computeTMU(sensors);
         sensors.syncAllSensors();
 
         double expectedTMU = (200_000.0 + 100_000.0) * MU_SCALE;
@@ -454,8 +454,8 @@ public class CoordinatorMUTest
             sensors.registerSensor(context, Type.RMU);
             sensors.registerSensor(context, Type.TMU);
             sensors.incrementSensor(context, Type.READ_BYTES, 100_000);
-            SensorsCustomParams.computeRMU(sensors);
-            SensorsCustomParams.computeTMU(sensors);
+            CostCalculator.computeReadCost(sensors);
+            CostCalculator.computeTMU(sensors);
             sensors.syncAllSensors();
         }
 
@@ -482,8 +482,8 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.TMU);
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND);
-        SensorsCustomParams.computeRMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeReadCost(sensors);
+        CostCalculator.computeTMU(sensors);
 
         ResultMessage result = new ResultMessage.Void();
         // Only RMU is added — TMU is intentionally never passed to addSensorToCQLResponse

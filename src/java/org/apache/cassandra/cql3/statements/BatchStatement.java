@@ -469,9 +469,8 @@ public class BatchStatement implements CQLStatement
                 SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WMU);
                 if (hasConditions)
                 {
-                    // Conditional batches always perform a Paxos read, so READ_BYTES and RMU are always tracked
+                    // Conditional batches always perform a Paxos read, so READ_BYTES is always tracked
                     SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.READ_BYTES);
-                    SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.RMU);
                 }
             }
         }

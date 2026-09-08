@@ -495,7 +495,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         {
             msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset);
         }
-        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's computeRMU)
+        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's computeReadCost)
         // have fired and sensor values are fully populated before we read them below.
         RequestSensors sensors = RequestTracker.instance.get();
         if (sensors != null)
@@ -650,7 +650,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         {
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset);
         }
-        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's computeRMU)
+        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's computeReadCost)
         // have fired and sensor values are fully populated before we read them below.
         RequestSensors sensors = RequestTracker.instance.get();
         if (sensors != null)

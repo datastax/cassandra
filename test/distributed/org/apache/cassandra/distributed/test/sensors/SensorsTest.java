@@ -49,7 +49,7 @@ import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.sensors.ActiveSensorsFactory;
+import org.apache.cassandra.sensors.TestSensorsFactory;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.tracing.TraceStateImpl;
@@ -153,7 +153,7 @@ public class SensorsTest extends TestBaseImpl
     @BeforeClass
     public static void setupCluster() throws IOException
     {
-        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(TestSensorsFactory.class.getName());
 
         cluster = init(Cluster.build(NODES_COUNT).start());
 
@@ -223,8 +223,8 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ "tbl_counter: counter update", noPrep, counter, new String[]{ WRITE_COUNTER, WRITE_EXECUTION_TIME_COUNTER, WMU_COUNTER }, true });
         result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, RMU_TBL }, true });
         result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, RMU_TBL }, false });
-        // CAS is a write operation; READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_TBL, WMU_TBL, RMU_TBL }, true });
+        // CAS is a write operation; READ_EXECUTION_TIME and RMU are not recorded (see StorageProxy.cas()).
+        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_TBL, WMU_TBL }, true });
         result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WMU_TBL }, true });
         result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WMU_TBL }, true });
         result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, RMU_TBL }, true });
@@ -282,9 +282,9 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ "2i: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WMU_2I }, true });
         result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WMU_2I }, true });
         result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WMU_2I }, true });
-        // CAS is a write operation; READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I, RMU_2I}, true });
-        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I, RMU_2I }, true });
+        // CAS is a write operation; READ_EXECUTION_TIME and RMU are not recorded (see StorageProxy.cas()).
+        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I }, true });
+        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I }, true });
         result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WMU_2I, WMU_SAI }, true });
         result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WMU_2I, WMU_SAI }, true });
         return result;
@@ -326,9 +326,9 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ "sai: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WMU_SAI }, true });
         result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WMU_SAI }, true });
         result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WMU_SAI }, true });
-        // CAS is a write operation; READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI, RMU_SAI }, true });
-        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI, RMU_SAI }, true });
+        // CAS is a write operation; READ_EXECUTION_TIME and RMU are not recorded (see StorageProxy.cas()).
+        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI }, true });
+        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI }, true });
         return result;
     }
 
@@ -393,13 +393,13 @@ public class SensorsTest extends TestBaseImpl
                                                             "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        // Conditional batches route through StorageProxy.cas(); READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I, RMU_2I }, true });
-        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I, RMU_2I}, true });
-        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I, RMU_2I }, true });
-        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI, RMU_SAI }, true });
-        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI, RMU_SAI }, true });
-        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI, RMU_SAI }, true });
+        // Conditional batches route through StorageProxy.cas(); READ_EXECUTION_TIME and RMU are not recorded (see StorageProxy.cas()).
+        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I }, true });
+        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I }, true });
+        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WMU_2I }, true });
+        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI }, true });
+        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI }, true });
+        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WMU_SAI }, true });
         return result;
     }
 

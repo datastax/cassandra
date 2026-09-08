@@ -51,7 +51,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @BeforeClass
     public static void setUpClass() throws Exception
     {
-        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(TestSensorsFactory.class.getName());
         CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
 
         // enables constructing Messages with custom parameters
@@ -107,7 +107,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000.0);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
         // With default baseline=-1, RMU = read_bytes * 4000
-        SensorsCustomParams.computeRMU(sensors);
+        CostCalculator.computeReadCost(sensors);
 
         Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_1, noPayload).withId(1);
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);
@@ -139,8 +139,8 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.READ_BYTES, 400_000.0);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
 
-        SensorsCustomParams.computeRMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeReadCost(sensors);
+        CostCalculator.computeTMU(sensors);
 
         double expectedRMU = 400_000.0 * 4000.0;
         assertEquals(expectedRMU, sensors.getSensor(context, Type.TMU).get().getValue(), 0.0);
@@ -161,8 +161,8 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000.0);
         sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
 
-        SensorsCustomParams.computeWMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeWriteCost(sensors);
+        CostCalculator.computeTMU(sensors);
 
         double expectedWMU = 250_000.0 * 4000.0;
         assertEquals(expectedWMU, sensors.getSensor(context, Type.TMU).get().getValue(), 0.0);
@@ -187,9 +187,9 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.READ_BYTES, 300_000.0);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 150_000.0);
 
-        SensorsCustomParams.computeRMU(sensors);
-        SensorsCustomParams.computeWMU(sensors);
-        SensorsCustomParams.computeTMU(sensors);
+        CostCalculator.computeReadCost(sensors);
+        CostCalculator.computeWriteCost(sensors);
+        CostCalculator.computeTMU(sensors);
 
         double expectedTMU = (300_000.0 + 150_000.0) * 4000.0;
         assertEquals(expectedTMU, sensors.getSensor(context, Type.TMU).get().getValue(), 0.0);
@@ -209,7 +209,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000.0);
         sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
         // With default baseline=-1, WMU = write_bytes * 4000
-        SensorsCustomParams.computeWMU(sensors);
+        CostCalculator.computeWriteCost(sensors);
 
         Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_2, noPayload).withId(2);
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);

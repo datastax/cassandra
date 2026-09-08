@@ -26,10 +26,11 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SENSORS_FACTORY;
 
 /**
- * Provides a factory to customize the behaviour of sensors tracking in CNDB by providing two factory methods:
+ * Provides a factory to customize the behaviour of sensors tracking in CNDB by providing factory methods:
  * <ul>
  *   <li>{@link SensorsFactory#createRequestSensors} provides a {@link RequestSensors} implementation to track sensors per keyspace.</li>
  *   <li>{@link SensorsFactory#createSensorEncoder} provides a {@link SensorEncoder} implementation to control how sensors are encoded as string on the wire.</li>
+ *   <li>{@link SensorsFactory#createCostCalculator} provides a {@link CostCalculator} implementation to compute read and write costs.</li>
  * </ul>
  * The concrete implementation of this factory is configured by the {@link CassandraRelevantProperties#SENSORS_FACTORY} system property.
  */
@@ -76,10 +77,11 @@ public interface SensorsFactory
     }
 
     /**
-     * Returns the {@link MUCalculator} used to compute RMU and WMU scalar values.
+     * Creates the {@link CostCalculator} used to compute read and write costs.
+     * The default implementation returns the no-op calculator which always returns {@code 0}.
      */
-    default MUCalculator getMUCalculator()
+    default CostCalculator createCostCalculator()
     {
-        return DefaultMUCalculator.instance;
+        return NoopCostCalculator.instance;
     }
 }

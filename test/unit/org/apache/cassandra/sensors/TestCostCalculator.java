@@ -18,47 +18,44 @@
 
 package org.apache.cassandra.sensors;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
- * Default implementation of {@link MUCalculator}.
+ * Test-only {@link CostCalculator} implementing a byte+execution-time cost formula.
+ * Kept in test sources so that the production tree ships only the {@link NoopCostCalculator},
+ * while unit tests can still assert non-zero cost values.
  *
- * <p>RMU and WMU are each computed as:
  * <pre>
- *   RMU = max(read_latency_ns / 1_000_000_000, read_bytes / (baseline_read_bytes_sec / num_cores)) * 4000
- *   WMU = max(write_latency_ns / 1_000_000_000, (write_bytes + index_write_bytes) / (baseline_write_bytes_sec / num_cores)) * 4000
+ *   readCost  = max(read_latency_ns / 1e9, read_bytes / (baseline_read / cores)) * 4000
+ *   writeCost = max(write_latency_ns / 1e9, (write_bytes + index_write_bytes) / (baseline_write / cores)) * 4000
  * </pre>
- *
- * <p>The baseline values are read from the
- * {@link CassandraRelevantProperties#BASELINE_READ_BYTES} and
- * {@link CassandraRelevantProperties#BASELINE_WRITE_BYTES} system properties at construction time
- * and divided by the number of available CPU cores (via {@link FBUtilities#getAvailableProcessors()})
- * to obtain a per-core baseline.
- * If a baseline value is &lt;= 0 the latency term is dropped and the formula simplifies to
- * {@code bytes * 4000}.
  */
-public class DefaultMUCalculator implements MUCalculator
+public class TestCostCalculator implements CostCalculator
 {
     private static final double MU_SCALE = 4000.0;
     private static final double NANOS_PER_SECOND = 1_000_000_000.0;
 
-    public static final DefaultMUCalculator instance = new DefaultMUCalculator();
+    /** Singleton used by {@link TestSensorsFactory} so that {@link CostCalculator#INSTANCE} is non-noop in tests. */
+    public static final TestCostCalculator instance = new TestCostCalculator();
 
     private final double baselineReadBytesPerCore;
     private final double baselineWriteBytesPerCore;
 
-    private DefaultMUCalculator()
+    /** Default constructor reads baselines from system properties (same as production). */
+    public TestCostCalculator()
     {
         this(CassandraRelevantProperties.BASELINE_READ_BYTES.getLong(),
              CassandraRelevantProperties.BASELINE_WRITE_BYTES.getLong(),
              FBUtilities.getAvailableProcessors());
     }
 
-    @VisibleForTesting
-    public DefaultMUCalculator(double baselineReadBytes, double baselineWriteBytes, int numCores)
+    public TestCostCalculator(double baselineReadBytes, double baselineWriteBytes)
+    {
+        this(baselineReadBytes, baselineWriteBytes, FBUtilities.getAvailableProcessors());
+    }
+
+    public TestCostCalculator(double baselineReadBytes, double baselineWriteBytes, int numCores)
     {
         int cores = numCores > 0 ? numCores : 1;
         this.baselineReadBytesPerCore = baselineReadBytes > 0 ? baselineReadBytes / cores : baselineReadBytes;
@@ -66,7 +63,7 @@ public class DefaultMUCalculator implements MUCalculator
     }
 
     @Override
-    public double computeRMU(RequestSensors sensors, Context context)
+    public double computeReadCost(RequestSensors sensors, Context context)
     {
         if (sensors == null || context == null)
             return 0.0;
@@ -81,7 +78,7 @@ public class DefaultMUCalculator implements MUCalculator
     }
 
     @Override
-    public double computeWMU(RequestSensors sensors, Context context)
+    public double computeWriteCost(RequestSensors sensors, Context context)
     {
         if (sensors == null || context == null)
             return 0.0;

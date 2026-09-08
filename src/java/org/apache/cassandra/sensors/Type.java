@@ -48,17 +48,22 @@ public enum Type
      * one recording the whole span of a request.
      */
     WRITE_EXECUTION_TIME,
+
     /**
-     * Read Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeRMU(RequestSensors)}
+     * Read Measure Units: a weighted combination of {@link #READ_BYTES} and {@link #READ_EXECUTION_TIME}
+     * representing the overall cost of a read operation on a replica.
      */
     RMU,
 
     /**
-     * Write Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeWMU(RequestSensors)}
+     * Write Measure Units: a weighted combination of {@link #WRITE_BYTES} and {@link #WRITE_EXECUTION_TIME}
+     * representing the overall cost of a write operation on a replica.
      */
     WMU,
+
     /**
-     * Total Measure Units: computed in {@link org.apache.cassandra.sensors.SensorsCustomParams#computeTMU(RequestSensors)}
+     * Total Measure Units: the sum of {@link #RMU} and {@link #WMU} for the same request context,
+     * representing the combined read and write cost of a request.
      */
     TMU;
 }
