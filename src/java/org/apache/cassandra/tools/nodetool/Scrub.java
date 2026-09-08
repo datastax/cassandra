@@ -24,6 +24,7 @@ import io.airlift.airline.Option;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.cassandra.db.compaction.Scrubber;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 import org.apache.cassandra.tools.StandaloneScrubber;
@@ -54,6 +55,14 @@ public class Scrub extends NodeToolCmd
     description = StandaloneScrubber.REINSERT_OVERFLOWED_TTL_OPTION_DESCRIPTION)
     private boolean reinsertOverflowedTTL = false;
 
+    @Option(title = "overwrite-ttl",
+            name = {"-o", "--overwrite-ttl"},
+            description = "Overwrite TTL info. Possible argument values:\n" +
+                          "- NONE: does nothing\n" +
+                          "- NO_TTL: removes TTL\n" +
+                          "- REINSERT_OVERFLOWED_TTL: same as reinsert_overflowed_ttl option ")
+    private Scrubber.OverwriteTTLMode overwriteTTLMode = Scrubber.OverwriteTTLMode.NONE;
+
     @Option(title = "jobs",
             name = {"-j", "--jobs"},
             description = "Number of sstables to scrub simultanously, set to 0 to use all available compaction threads")
@@ -65,11 +74,16 @@ public class Scrub extends NodeToolCmd
         List<String> keyspaces = parseOptionalKeyspace(args, probe);
         String[] tableNames = parseOptionalTables(args);
 
+        if (reinsertOverflowedTTL && overwriteTTLMode != Scrubber.OverwriteTTLMode.NONE)
+            throw new IllegalArgumentException("Only one of 'reinsertOverflowedTTL' or 'overwrite-ttl' is permitted'.");
+
         for (String keyspace : keyspaces)
         {
             try
             {
-                probe.scrub(probe.output().out, disableSnapshot, skipCorrupted, !noValidation, reinsertOverflowedTTL, jobs, keyspace, tableNames);
+                probe.scrub(probe.output().out, disableSnapshot, skipCorrupted, !noValidation,
+                            reinsertOverflowedTTL ? Scrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : overwriteTTLMode,
+                            jobs, keyspace, tableNames);
             }
             catch (IllegalArgumentException e)
             {
