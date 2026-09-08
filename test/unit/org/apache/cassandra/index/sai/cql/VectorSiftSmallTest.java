@@ -308,7 +308,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
         return vectors;
     }
 
-    private static ArrayList<List<Integer>> readIvecs(String filename)
+    static ArrayList<List<Integer>> readIvecs(String filename)
     {
         var groundTruthTopK = new ArrayList<List<Integer>>();
 
