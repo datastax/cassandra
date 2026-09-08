@@ -293,17 +293,17 @@ public class CompressionMetadata implements AutoCloseable
      */
     public long offHeapSize()
     {
-        return hasOffsets() ? chunkOffsets.offHeapMemoryUsed() : 0;
+        return chunkOffsets != null ? chunkOffsets.offHeapMemoryUsed() : 0;
     }
 
     public boolean hasOffsets()
     {
-        return chunkOffsets != null;
+        return chunkOffsets != null && chunkOffsets.size() > 0;
     }
 
     public void addTo(Ref.IdentityCollection identities)
     {
-        if (hasOffsets())
+        if (chunkOffsets != null)
             chunkOffsets.addTo(identities);
     }
 
@@ -408,7 +408,7 @@ public class CompressionMetadata implements AutoCloseable
 
     public void close()
     {
-        if (hasOffsets())
+        if (chunkOffsets != null)
         {
             chunkOffsets.close();
         }

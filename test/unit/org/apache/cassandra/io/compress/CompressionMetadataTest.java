@@ -41,6 +41,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.CompressionMetadata.Chunk;
 import org.apache.cassandra.io.sstable.format.SSTableReader.PartitionPositionBounds;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.Memory;
+import org.apache.cassandra.io.util.SafeMemory;
 import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.units.SizeUnit;
@@ -493,5 +495,68 @@ public class CompressionMetadataTest
 
         assertThatThrownBy(() -> new CompressionMetadata(f, 64, true)).isInstanceOf(RuntimeException.class);
         assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
+    }
+
+    /**
+     * A compression info file for an empty data file holds zero chunks and therefore no chunk offsets at all.
+     */
+    @Test
+    public void testZeroChunkMetadataHasNoOffsetsInMemory() throws IOException
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("in_memory");
+        testZeroChunkMetadataHasNoOffsets();
+    }
+
+    @Test
+    public void testZeroChunkMetadataHasNoOffsetsBlockCache() throws IOException
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("block_cache");
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("100MiB");
+        testZeroChunkMetadataHasNoOffsets();
+    }
+
+    @Test
+    public void testZeroChunkMetadataHasNoOffsetsMmap() throws IOException
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("mmap");
+        testZeroChunkMetadataHasNoOffsets();
+    }
+
+    private void testZeroChunkMetadataHasNoOffsets() throws IOException
+    {
+        File f = generateMetaDataFile(0);
+
+        try (CompressionMetadata metadata = new CompressionMetadata(f, 0, true))
+        {
+            assertThat(metadata.compressedFileLength).isEqualTo(0);
+            assertThat(metadata.offHeapSize()).isEqualTo(0);
+            assertThat(metadata.hasOffsets()).isFalse();
+        }
+    }
+
+    @Test
+    public void testWriterCompleteReleasesOffsetsWhenThereAreNoChunks() throws IOException
+    {
+        File f = generateMetaDataFile(64, 0, 16, 32, 48);
+
+        SafeMemory offsets = new SafeMemory(4 * 8L);
+        try
+        {
+            SafeMemory sharedCopy = offsets.sharedCopy();
+            CompressionChunkOffsets chunkOffsets = CompressionChunkOffsetsFactory.instance.getInstanceOnWriterComplete(f,
+                                    new Memory.LongArray(sharedCopy, 0), 0, 0, 0, 0, 0, true);
+
+            assertThat(chunkOffsets).isInstanceOf(CompressionChunkOffsets.Empty.class);
+            assertThat(chunkOffsets.size()).isEqualTo(0);
+
+            // sharedCopy() rejects an already-closed SafeMemory, so we know that it was released
+            assertThatThrownBy(sharedCopy::sharedCopy).isInstanceOf(IllegalStateException.class);
+
+            chunkOffsets.close();
+        }
+        finally
+        {
+            offsets.close();
+        }
     }
 }

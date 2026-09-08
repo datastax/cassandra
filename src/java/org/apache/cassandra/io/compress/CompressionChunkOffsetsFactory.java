@@ -24,7 +24,6 @@ import java.util.Locale;
 
 import com.google.common.base.Preconditions;
 
-import io.netty.util.internal.PlatformDependent;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
@@ -129,7 +128,7 @@ public interface CompressionChunkOffsetsFactory
      * the writer's in-memory offsets may be released if on-disk offsets are selected.
      * </p>
      * @param indexFilePath path to the compression info file
-     * @param memoryChunkOffsets in-memory offsets buffer built by the writer
+     * @param memoryChunkOffsets in-memory offsets buffer built by the writer, owned by this method
      * @param offsetsStart position of the offsets table in the compression info file
      * @param startIndex first chunk index to include (inclusive)
      * @param endIndex last chunk index to include (exclusive)
@@ -143,7 +142,11 @@ public interface CompressionChunkOffsetsFactory
                                                                 long compressedFileLength, boolean isCompressionInfoWritten) throws IOException
     {
         if (chunkCount == 0)
+        {
+            // release the writer's shared copy here
+            memoryChunkOffsets.close();
             return new CompressionChunkOffsets.Empty();
+        }
 
         // When CompressionMetadata.Writer completes, the opened CompressionMetadata is used into the final SSTableReader.
         // This is considered READ_TIME as sstable has completed writing and the file will be used during READ_TIME
