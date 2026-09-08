@@ -209,7 +209,7 @@ public class QueryContextTest extends SAITester.Versioned
         assertEquals(3, snapshot.rowsFetched);
         assertEquals(2, snapshot.rowsReturned);
         assertEquals(0, snapshot.rowTombstonesFetched);
-        assertEquals(1 + 2 + 2, snapshot.cellsFetched);
+        assertEquals(6, snapshot.cellsFetched);
         assertEquals(4, snapshot.cellsReturned);
 
         // compact to rebuild the index, and verify that tombstones are gone
