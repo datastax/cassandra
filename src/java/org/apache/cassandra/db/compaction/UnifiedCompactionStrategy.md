@@ -446,6 +446,12 @@ segments:
 3. **Plain/unqualified scaling parameters**: The final segment in the list can also be plain
    scaling parameters, which act as the catch-all for all remaining (older) SSTables.
 
+The durations in `until` segments are absolute ages measured from the current time, not consecutive spans: in
+`T4 until 30m; T2 until 1h; L1000000` the first segment covers data younger than 30 minutes, the second data
+between 30 minutes and 1 hour old, and the last everything older. This is also why the durations must strictly
+increase — repeating a duration would leave the later segment unreachable, and is rejected when the option is
+validated.
+
 ### Configuration Examples
 
 - **`T4 until 1d; L1000000 every 1d`**:
@@ -506,6 +512,9 @@ size, the younger maximum density, and the older minimum density:
 
 $$\text{baseSSTableSize}_B = \max(\text{baseSSTableSize}, \text{youngerMaxDensity}, \text{olderMinDensity})$$
 
+All three quantities are compared in density units, i.e. the configured base sstable size is divided by the
+shard's local token coverage before the maximum is taken.
+
 This ensures that:
 - Any SSTable entering an older bucket that is smaller than or equal to the size of data produced
   by younger buckets starts at Level 0, allowing it to compact properly.
@@ -513,6 +522,14 @@ This ensures that:
   bucket does not drop suddenly (which would otherwise strand the graduated SSTables on higher
   levels), since `olderMinDensity` holds the base size steady at the size of the graduated
   SSTables.
+
+### Applicability
+
+An sstable's age comes from its minimum timestamp, which compaction recomputes over the data that survives it:
+superseded cells are dropped, so the output of a compaction can be younger than its inputs. On an append-only,
+time-series-shaped table this is exactly what is wanted. On an overwrite-heavy table it means sstables can keep
+re-entering the youngest bucket and data may never reach the oldest one, so a tombstone-clearing tier such as
+`L1000000` may never fire.
 
 ## Differences with STCS and LCS
 

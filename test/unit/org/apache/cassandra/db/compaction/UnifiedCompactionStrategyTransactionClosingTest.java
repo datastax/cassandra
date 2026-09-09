@@ -63,7 +63,6 @@ public class UnifiedCompactionStrategyTransactionClosingTest extends BaseCompact
         when(controller.getFanout(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
         when(controller.getThreshold(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
         when(controller.getMaxLevelDensity(Mockito.anyInt(), Mockito.anyDouble(), Mockito.any())).thenCallRealMethod();
-        when(controller.getBaseSstableSize(Mockito.anyInt(), Mockito.anyDouble())).thenCallRealMethod();
         return controller;
     }
 

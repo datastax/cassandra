@@ -1585,11 +1585,6 @@ public abstract class Controller
         return Math.max(1 << 20, getFlushSizeBytes()) * (1.0 - 0.9 / F);
     }
 
-    public double getBaseSstableSize(int F, double youngerMaxSSTableSize)
-    {
-        return Math.max(getBaseSstableSize(F), youngerMaxSSTableSize);
-    }
-
     public double getMaxLevelDensity(int index, double minSize)
     {
         return Math.floor(minSize * getFanout(index) * getSurvivalFactor(index));

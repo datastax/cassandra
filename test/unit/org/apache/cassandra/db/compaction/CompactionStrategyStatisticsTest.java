@@ -85,7 +85,6 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.getFanout(anyInt(), Mockito.any())).thenCallRealMethod();
         when(controller.getThreshold(anyInt(), Mockito.any())).thenCallRealMethod();
         when(controller.getMaxLevelDensity(anyInt(), anyDouble(), Mockito.any())).thenCallRealMethod();
-        when(controller.getBaseSstableSize(anyInt(), anyDouble())).thenCallRealMethod();
         return controller;
     }
 

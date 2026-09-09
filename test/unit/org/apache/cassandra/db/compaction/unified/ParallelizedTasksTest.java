@@ -99,7 +99,6 @@ public class ParallelizedTasksTest extends ShardingTestBase
         Mockito.when(mockController.getFanout(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
         Mockito.when(mockController.getThreshold(Mockito.anyInt(), Mockito.any())).thenCallRealMethod();
         Mockito.when(mockController.getMaxLevelDensity(Mockito.anyInt(), Mockito.anyDouble(), Mockito.any())).thenCallRealMethod();
-        Mockito.when(mockController.getBaseSstableSize(Mockito.anyInt(), Mockito.anyDouble())).thenCallRealMethod();
 
         Collection<SSTableReader> sstables = transaction.originals();
         CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);

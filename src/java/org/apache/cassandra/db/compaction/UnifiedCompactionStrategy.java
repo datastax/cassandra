@@ -1408,19 +1408,21 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 }
             }
 
+            // All three quantities are compared in density units: the configured base sstable size is a size in
+            // bytes and must be converted before it is compared against the densities collected above.
             double adjustedDensity = Math.max(youngerMaxDensity, olderMinDensity);
-            double defaultBaseSize = controller.getBaseSstableSize(controller.getFanout(0));
-            double baseSize = controller.getBaseSstableSize(controller.getFanout(0, bucket), adjustedDensity);
+            double defaultBaseDensity = controller.getBaseSstableSize(controller.getFanout(0, bucket)) / currentShardManager.localSpaceCoverage();
+            double baseDensity = Math.max(defaultBaseDensity, adjustedDensity);
 
             // Guard needed to avoid prettyPrintMemory calls when debug is off or no adjustment occurs
-            if (baseSize > defaultBaseSize && logger.isDebugEnabled())
-                logger.debug("Dynamic base size adjustment for arena {}: default={}, adjusted={}, youngerMaxDensity={}, olderMinDensity={}",
-                             arena, FBUtilities.prettyPrintMemory((long) defaultBaseSize),
-                             FBUtilities.prettyPrintMemory((long) baseSize),
+            if (baseDensity > defaultBaseDensity && logger.isDebugEnabled())
+                logger.debug("Dynamic base density adjustment for arena {}: default={}, adjusted={}, youngerMaxDensity={}, olderMinDensity={}",
+                             arena, FBUtilities.prettyPrintMemory((long) defaultBaseDensity),
+                             FBUtilities.prettyPrintMemory((long) baseDensity),
                              FBUtilities.prettyPrintMemory((long) youngerMaxDensity),
                              FBUtilities.prettyPrintMemory((long) olderMinDensity));
 
-            double maxSize = controller.getMaxLevelDensity(0, baseSize / currentShardManager.localSpaceCoverage(), bucket);
+            double maxSize = controller.getMaxLevelDensity(0, baseDensity, bucket);
             int index = 0;
             Level level = new Level(controller, bucket, index, 0, maxSize);
             for (SSTableWithDensity candidateWithDensity : ssTableWithDensityList)

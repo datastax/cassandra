@@ -126,7 +126,6 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getFanout(anyInt(), any())).thenCallRealMethod();
         when(controller.getThreshold(anyInt(), any())).thenCallRealMethod();
         when(controller.getMaxLevelDensity(anyInt(), anyDouble(), any())).thenCallRealMethod();
-        when(controller.getBaseSstableSize(anyInt(), anyDouble())).thenCallRealMethod();
         return controller;
     }
 

@@ -48,6 +48,11 @@ import org.apache.cassandra.exceptions.ConfigurationException;
  *       SSTables whose age (current time minus the SSTable's minimum timestamp) is less than the duration are
  *       placed in a separate compaction arena with the scaling parameters that precede the {@code until} clause.
  *       This is useful for applying different compaction behaviors (such as tiered compaction) to young, hot data.
+ *       <p>The duration is an absolute age measured from the current time, not a span that continues where the
+ *       previous bucket ended: {@code T4 until 30m; T2 until 1h; L1000000} places data younger than 30 minutes in
+ *       the first arena, data between 30 minutes and 1 hour old in the second, and everything older in the base
+ *       arena. This is also why the durations must strictly increase — repeating a duration would leave the later
+ *       bucket unreachable, and is rejected.
  *       <p>Example: {@code T4 until 1d; L4} — use {@code T4} (tiered compaction) for data younger than 1 day,
  *       and {@code L4} (leveled compaction) for older data.
  *   <li><b>{@code every <duration>} — Repeating time-window mode (TWCS-like).</b>
@@ -82,6 +87,11 @@ import org.apache.cassandra.exceptions.ConfigurationException;
  * <ul>
  *   <li>Months and years are not supported as duration units since they are not of fixed length.</li>
  *   <li>Only the last segment can define the repeating {@code every} window or be unqualified.</li>
+ *   <li>An sstable's age comes from its minimum timestamp, which compaction recomputes over the data that survives
+ *       it: superseded cells are dropped, so a compaction's output can be younger than its inputs. On an
+ *       overwrite-heavy table sstables can therefore keep re-entering the youngest bucket and data may never reach
+ *       the oldest one, so a tombstone-clearing tier such as {@code L1000000} may never fire. Time-driven levels
+ *       target append-only, time-series-shaped tables.</li>
  * </ul>
  *
  * @see Controller#parseScalingParameterGroups(String)
