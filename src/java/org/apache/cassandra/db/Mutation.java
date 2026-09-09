@@ -82,6 +82,18 @@ public class Mutation implements IMutation, Supplier<Mutation>
     // keep track of when mutation has started waiting for a MV partition lock
     final AtomicLong viewLockAcquireStart = new AtomicLong(0);
 
+    // Where this mutation came from, when it arrived over the wire. Set by the verb handler before the
+    // apply -- and, in MutationVerbHandler, before the payload can be handed to the forwarding path -- then
+    // read by the keyspace write handler, which passes it to secondary indexes through the write context.
+    // Never serialized, and never part of the mutation's identity.
+    //
+    // The handler thread that writes it is also the one that reads it back through Keyspace.apply, and the
+    // one re-dispatch that changes threads (Keyspace.applyInternal deferring on MV lock contention) goes
+    // through an executor, which already publishes safely. Volatile anyway: this is one field written once
+    // per inbound message on a path that is otherwise easy to get subtly wrong, and it costs nothing next
+    // to the commit log append that follows.
+    private volatile WriteOrigin origin = WriteOrigin.LOCAL;
+
     private final boolean cdcEnabled;
     private final RequestTracker requestTracker;
 
@@ -136,12 +148,30 @@ public class Mutation implements IMutation, Supplier<Mutation>
             }
         }
 
-        return new Mutation(keyspaceName, key, builder.build(), approxCreatedAtNanos);
+        Mutation filtered = new Mutation(keyspaceName, key, builder.build(), approxCreatedAtNanos);
+        filtered.origin = origin;
+        return filtered;
     }
 
     public Mutation without(TableId tableId)
     {
         return without(Collections.singleton(tableId));
+    }
+
+    /**
+     * Records where this mutation came from, for the benefit of the replica-side apply path. Called by the
+     * verb handlers before the apply; {@link WriteOrigin#LOCAL} otherwise.
+     */
+    public Mutation withOrigin(WriteOrigin origin)
+    {
+        this.origin = origin == null ? WriteOrigin.LOCAL : origin;
+        return this;
+    }
+
+    /** Never null; {@link WriteOrigin#LOCAL} for a mutation that did not arrive over the wire. */
+    public WriteOrigin origin()
+    {
+        return origin;
     }
 
     public String getKeyspaceName()
@@ -255,7 +285,12 @@ public class Mutation implements IMutation, Supplier<Mutation>
             modifications.put(table, PartitionUpdate.merge(updates));
             updates.clear();
         }
-        return new Mutation(ks, key, modifications.build(), approxTime.now());
+
+        Mutation merged = new Mutation(ks, key, modifications.build(), approxTime.now());
+        // All inputs were checked to share a keyspace and a key above, so they came from one inbound
+        // message and share an origin; keep it rather than silently reverting the merged result to LOCAL.
+        merged.origin = mutations.get(0).origin;
+        return merged;
     }
 
     public Future<?> applyFuture(WriteOptions writeOptions)

@@ -19,12 +19,15 @@
 package org.apache.cassandra.db;
 
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -42,9 +45,16 @@ public class CassandraKeyspaceWriteHandler implements KeyspaceWriteHandler
     public WriteContext beginWrite(Mutation mutation, WriteOptions writeOptions) throws RequestExecutionException
     {
         OpOrder.Group group = null;
+        Map<Index, Index.PreparedWrite> prepared = null;
         try
         {
             group = Keyspace.writeOrder.start();
+
+            // Let the indexes see the write BEFORE anything is persisted (Index#prepareWrite). This must
+            // precede the commit log append: it is the ordering that lets an index treat a replayed
+            // mutation as one it has already been told about.
+            if (writeOptions.updateIndexes)
+                prepared = prepareIndexWrites(mutation, writeOptions);
 
             // write the mutation to the commitlog and memtables
             CommitLogPosition position = null;
@@ -52,16 +62,41 @@ public class CassandraKeyspaceWriteHandler implements KeyspaceWriteHandler
             {
                 position = addToCommitLog(mutation);
             }
-            return new CassandraWriteContext(group, position);
+            return new CassandraWriteContext(group, position, writeOptions, mutation.origin(), prepared);
         }
         catch (Throwable t)
         {
+            // The write is failing before anything was persisted: whatever the indexes prepared for it
+            // is undone. (A failure inside prepareIndexWrites itself has already aborted and emptied it.)
+            if (prepared != null && !prepared.isEmpty())
+                SecondaryIndexManager.abortPreparedWrites(prepared);
             if (group != null)
             {
                 group.close();
             }
             throw t;
         }
+    }
+
+    /**
+     * Offers each partition update to its table's indexes, mirroring the per-update loop of
+     * {@code Keyspace.applyInternal}: an update whose table has been dropped is skipped there, so it is skipped
+     * here too. Costs a volatile read per update for a table whose indexes do not prepare writes, which is
+     * the common case; the handle map is only created when an index actually returns a handle.
+     *
+     * @return the handles keyed by index, for the mutation's {@link CassandraWriteContext}; null if none
+     */
+    private Map<Index, Index.PreparedWrite> prepareIndexWrites(Mutation mutation, WriteOptions writeOptions)
+    {
+        Map<Index, Index.PreparedWrite> prepared = null;
+        for (PartitionUpdate update : mutation.getPartitionUpdates())
+        {
+            ColumnFamilyStore cfs = keyspace.getIfExists(update.metadata().id);
+            if (cfs == null || !cfs.indexManager.preparesWrites())
+                continue;
+            prepared = cfs.indexManager.prepareWrite(update, writeOptions, mutation.origin(), prepared);
+        }
+        return prepared;
     }
 
     private CommitLogPosition addToCommitLog(Mutation mutation)
