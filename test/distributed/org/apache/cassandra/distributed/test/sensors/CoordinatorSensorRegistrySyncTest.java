@@ -100,19 +100,18 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
             ResultMessage<?> result = executeWithResult(withKeyspace("INSERT INTO %s." + tbl + " (pk, v1) VALUES (1, 'hello')"));
             if (!(result instanceof ResultMessage.Void))
                 throw new AssertionError("INSERT expected ResultMessage.Void but got: " + result);
-            r.set(new double[]{ registrySumOnNode(tbl, Type.WRITE_BYTES),
-                                registrySumOnNode(tbl, Type.WMU) });
+            r.set(new double[]{ registryValueOnNode(tbl, Type.WRITE_BYTES),
+                                registryValueOnNode(tbl, Type.WMU) });
         }).accept(coordinatorRef);
 
         AtomicReference<double[]> replicaRef = new AtomicReference<>();
         cluster.get(2).acceptsOnInstance(
-        (IIsolatedExecutor.SerializableConsumer<AtomicReference<double[]>>) r -> r.set(new double[]{ registrySumOnNode(tbl, Type.WRITE_BYTES),
-                                                                                                     registrySumOnNode(tbl, Type.WMU) })).accept(replicaRef);
+        (IIsolatedExecutor.SerializableConsumer<AtomicReference<double[]>>) r -> r.set(new double[]{ registryValueOnNode(tbl, Type.WRITE_BYTES),
+                                                                                                     registryValueOnNode(tbl, Type.WMU) })).accept(replicaRef);
 
         double[] coordinator = coordinatorRef.get();
         double[] replica = replicaRef.get();
         double perReplicaWb = replica[0];
-        int remoteReplicas = NODES_COUNT - 1;
 
         Assertions.assertThat(perReplicaWb)
                   .describedAs("per-replica WRITE_BYTES on node 2 must be positive")
@@ -123,6 +122,9 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
         Assertions.assertThat(coordinator[0] % perReplicaWb)
                   .describedAs("coordinator WRITE_BYTES must divide evenly by per-replica value")
                   .isEqualTo(0D);
+        Assertions.assertThat((long) (coordinator[0] / perReplicaWb))
+                  .describedAs("coordinator WRITE_BYTES must equal per-replica value * NODES_COUNT")
+                  .isEqualTo(NODES_COUNT);
         // WMU is only computed on the coordinator — replicas have no WMU in their registry
         Assertions.assertThat(replica[1])
                   .describedAs("WMU must be zero on replicas (only computed at coordinator)")
@@ -157,19 +159,18 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
             int rowCount = ((ResultMessage.Rows) result).result.size();
             if (rowCount != 1)
                 throw new AssertionError("SELECT expected 1 row but got: " + rowCount);
-            r.set(new double[]{ registrySumOnNode(tbl, Type.READ_BYTES),
-                                registrySumOnNode(tbl, Type.RMU) });
+            r.set(new double[]{ registryValueOnNode(tbl, Type.READ_BYTES),
+                                registryValueOnNode(tbl, Type.RMU) });
         }).accept(coordinatorRef);
 
         AtomicReference<double[]> replicaRef = new AtomicReference<>();
         cluster.get(2).acceptsOnInstance(
-        (IIsolatedExecutor.SerializableConsumer<AtomicReference<double[]>>) r -> r.set(new double[]{ registrySumOnNode(tbl, Type.READ_BYTES),
-                                                                                                     registrySumOnNode(tbl, Type.RMU) })).accept(replicaRef);
+        (IIsolatedExecutor.SerializableConsumer<AtomicReference<double[]>>) r -> r.set(new double[]{ registryValueOnNode(tbl, Type.READ_BYTES),
+                                                                                                     registryValueOnNode(tbl, Type.RMU) })).accept(replicaRef);
 
         double[] coordinator = coordinatorRef.get();
         double[] replica = replicaRef.get();
         double perReplicaRb = replica[0];
-        int remoteReplicas = NODES_COUNT - 1;
 
         Assertions.assertThat(perReplicaRb)
                   .describedAs("per-replica READ_BYTES on node 2 must be positive")
@@ -180,6 +181,9 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
         Assertions.assertThat(coordinator[0] % perReplicaRb)
                   .describedAs("coordinator READ_BYTES must divide evenly by per-replica value")
                   .isEqualTo(0D);
+        Assertions.assertThat((long) (coordinator[0] / perReplicaRb))
+                  .describedAs("coordinator READ_BYTES must equal per-replica value * NODES_COUNT")
+                  .isEqualTo(NODES_COUNT);
         // RMU is only computed on the coordinator — replicas have no RMU in their registry
         Assertions.assertThat(replica[1])
                   .describedAs("RMU must be zero on replicas (only computed at coordinator)")
@@ -210,14 +214,14 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
             int rowCount = ((ResultMessage.Rows) result).result.size();
             if (rowCount != 1)
                 throw new AssertionError("SELECT expected 1 row but got: " + rowCount);
-            r.set(new double[]{ registrySumOnNode(tbl, Type.READ_BYTES),
-                                registrySumOnNode(tbl, Type.RMU) });
+            r.set(new double[]{ registryValueOnNode(tbl, Type.READ_BYTES),
+                                registryValueOnNode(tbl, Type.RMU) });
         }).accept(coordinatorRef);
 
         AtomicReference<double[]> replicaRef = new AtomicReference<>();
         cluster.get(2).acceptsOnInstance(
-        (IIsolatedExecutor.SerializableConsumer<AtomicReference<double[]>>) r -> r.set(new double[]{ registrySumOnNode(tbl, Type.READ_BYTES),
-                                                                                                     registrySumOnNode(tbl, Type.RMU) })).accept(replicaRef);
+        (IIsolatedExecutor.SerializableConsumer<AtomicReference<double[]>>) r -> r.set(new double[]{ registryValueOnNode(tbl, Type.READ_BYTES),
+                                                                                                     registryValueOnNode(tbl, Type.RMU) })).accept(replicaRef);
 
         double[] coordinator = coordinatorRef.get();
         double[] replica = replicaRef.get();
@@ -232,6 +236,9 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
         Assertions.assertThat(coordinator[0] % perReplicaRb)
                   .describedAs("coordinator READ_BYTES must divide evenly by per-replica value")
                   .isEqualTo(0D);
+        Assertions.assertThat((long) (coordinator[0] / perReplicaRb))
+                  .describedAs("coordinator READ_BYTES must equal per-replica value * NODES_COUNT")
+                  .isEqualTo(NODES_COUNT);
         Assertions.assertThat(replica[1])
                   .describedAs("RMU must be zero on replicas (only computed at coordinator)")
                   .isEqualTo(0D);
@@ -268,10 +275,10 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
             boolean wasApplied = BooleanType.instance.compose(firstRow.get(0));
             if (!wasApplied)
                 throw new AssertionError("CAS UPDATE expected [applied]=true but got false");
-            r.set(new double[]{ registrySumOnNode(tbl, Type.WRITE_BYTES),
-                                registrySumOnNode(tbl, Type.READ_BYTES),
-                                registrySumOnNode(tbl, Type.WMU),
-                                registrySumOnNode(tbl, Type.RMU) });
+            r.set(new double[]{ registryValueOnNode(tbl, Type.WRITE_BYTES),
+                                registryValueOnNode(tbl, Type.READ_BYTES),
+                                registryValueOnNode(tbl, Type.WMU),
+                                registryValueOnNode(tbl, Type.RMU) });
         }).accept(coordinatorRef);
 
         double[] coordinator = coordinatorRef.get();
@@ -295,17 +302,20 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
     // -------------------------------------------------------------------------
 
     /**
-     * Sums registry values of the given {@code type} for {@code table} on the calling node.
+     * Returns the registry value of the given {@code type} for {@code table} on the calling node,
+     * or {@code 0.0} if no sensor is registered. Each test uses a dedicated table with a single
+     * keyspace, so there is at most one sensor per (table, type) pair.
      * Must be {@code static} to be serializable across the in-process classloader boundary.
      */
-    private static double registrySumOnNode(String table, Type type)
+    private static double registryValueOnNode(String table, Type type)
     {
         return SensorsRegistry.instance
                .getSensorsByType(type)
                .stream()
                .filter(s -> s.getContext().getTable().equals(table))
                .mapToDouble(org.apache.cassandra.sensors.Sensor::getValue)
-               .sum();
+               .findFirst()
+               .orElse(0.0);
     }
 
     /**
