@@ -224,6 +224,12 @@ public class TableQueryMetrics
         /** Total number of deleted individual rows or ranges of rows that are fetched. */
         public final Counter totalRowTombstonesFetched;
 
+        /** Total number of cells fetched from the storage engine, regardless of liveness, before post-filtering. */
+        public final Counter totalCellsFetched;
+
+        /** Total number of cells returned to the coordinator, regardless of liveness, after post-filtering. */
+        public final Counter totalCellsReturned;
+
         /** Total number of completed queries. */
         public final Counter totalQueriesCompleted;
 
@@ -250,6 +256,8 @@ public class TableQueryMetrics
             totalRowsFetched = Metrics.counter(createMetricName("TotalRowsFetched"));
             totalRowsReturned = Metrics.counter(createMetricName("TotalRowsReturned"));
             totalRowTombstonesFetched = Metrics.counter(createMetricName("TotalRowTombstonesFetched"));
+            totalCellsFetched = Metrics.counter(createMetricName("TotalCellsFetched"));
+            totalCellsReturned = Metrics.counter(createMetricName("TotalCellsReturned"));
             totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
             totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
             queryPlanMetrics = (CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean())
@@ -273,6 +281,8 @@ public class TableQueryMetrics
             totalRowsFetched.inc(snapshot.rowsFetched);
             totalRowsReturned.inc(snapshot.rowsReturned);
             totalRowTombstonesFetched.inc(snapshot.rowTombstonesFetched);
+            totalCellsFetched.inc(snapshot.cellsFetched);
+            totalCellsReturned.inc(snapshot.cellsReturned);
 
             QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
             if (queryPlanInfo != null && queryPlanMetrics != null)
