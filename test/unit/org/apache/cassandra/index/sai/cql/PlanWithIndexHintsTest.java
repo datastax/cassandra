@@ -18,9 +18,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Arrays;
 
-import org.apache.cassandra.net.MessagingService;
 import org.junit.Assume;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -52,13 +50,6 @@ import static java.lang.String.format;
  */
 public class PlanWithIndexHintsTest extends SAITester.Versioned
 {
-    @BeforeClass
-    public static void setUpClass()
-    {
-        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
-        SAITester.setUpClass();
-    }
-
     @Test
     public void testQueryPlanning() throws Throwable
     {

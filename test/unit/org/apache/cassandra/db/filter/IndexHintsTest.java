@@ -33,7 +33,6 @@ import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -74,8 +73,6 @@ public class IndexHintsTest extends CQLTester
     @BeforeClass
     public static void setUpClass()
     {
-        // Set the messaging version that adds support for the new index hints before starting the server
-        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
         CQLTester.setUpClass();
         CQLTester.enableCoordinatorExecution();
     }
