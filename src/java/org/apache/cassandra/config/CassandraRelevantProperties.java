@@ -844,11 +844,13 @@ public enum CassandraRelevantProperties
 
     TEST_INTERVAL_TREE_EXPENSIVE_CHECKS("cassandra.test.interval_tree_expensive_checks"),
     /**
-     * Cache size for compression chunk offsets if BLOCK_CACHE is configured. By default, it uses 25% of max direct memory.
+     * Cache size for compression chunk offsets if BLOCK_CACHE is configured. By default, it uses 15% of max direct
+     * memory.
      *
      * Alternatively, an absolute cache size can be configured, e.g. "10GiB".
      */
-    COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE("cassandra.compression_chunk_offsets_block_cache_size", "auto@0.25"),
+    COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE("cassandra.compression_chunk_offsets_block_cache_size",
+                                               "auto@0.15"),
     /**
      * Number of bytes per compression chunk offsets cache block. The value divided by {@link Long#BYTES} determines
      * how many chunk offsets are loaded from the compression info file on each cache miss. Values that are not
