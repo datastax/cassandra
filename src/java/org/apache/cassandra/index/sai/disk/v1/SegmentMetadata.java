@@ -152,10 +152,6 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     @SuppressWarnings("resource")
     private SegmentMetadata(IndexInput input, IndexContext context, Version version, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
     {
-        if (!loadFullResolutionBounds)
-            logger.warn("Loading segment metadata without full primary key boundary resolution. Some ORDER BY queries" +
-                        " may not work correctly.");
-
         AbstractType<?> termsType = context.getValidator();
 
         this.version = version;
@@ -189,7 +185,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         else
         {
             assert sstableContext == null;
-            // Only valid in some very specific tests.
+            // Only valid when the caller does not use the boundaries for query processing.
             PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
             this.minKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
             this.maxKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
@@ -224,9 +220,21 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     }
 
     /**
-     * This is only visible for testing because the SegmentFlushTest creates fake boundary scenarios that break
-     * normal assumptions about the min/max row ids mapping to specific positions in the per-sstable index components.
-     * Only set loadFullResolutionBounds to false in tests when you are sure that is the only possible solution.
+     * Loads segment metadata without fully resolving its primary key boundaries. This avoids opening the primary key
+     * map and is intended for callers that only need metadata unrelated to those boundaries, such as compactors.
+     * The returned primary key boundaries must not be used for query processing.
+     */
+    @SuppressWarnings("resource")
+    public static List<SegmentMetadata> loadWithoutFullResolutionBounds(MetadataSource source,
+                                                                         IndexContext context) throws IOException
+    {
+        return load(source, context, null, false);
+    }
+
+    /**
+     * Test-only variant that warns about unresolved primary key boundaries. SegmentFlushTest uses this because it
+     * creates fake boundary scenarios that break normal assumptions about the min/max row ids mapping to specific
+     * positions in the per-sstable index components.
      */
     @VisibleForTesting
     @SuppressWarnings("resource")
@@ -234,7 +242,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     {
         logger.warn("Loading segment metadata without full primary key boundary resolution. Some ORDER BY queries" +
                     " may not work correctly.");
-        return load(source, context, null, false);
+        return loadWithoutFullResolutionBounds(source, context);
     }
 
     /**
@@ -249,13 +257,15 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     public static long totalRowCount(IndexComponents.ForRead perIndexComponents, IndexContext context) throws IOException
     {
         long rows = 0;
-        for (SegmentMetadata metadata : load(MetadataSource.loadMetadata(perIndexComponents), context, null, false))
+        MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
+        for (SegmentMetadata metadata : loadWithoutFullResolutionBounds(source, context))
             rows += metadata.numRows;
         return rows;
     }
 
     /**
-     * Only set loadFullResolutionBounds to false in tests when you are sure that is exactly what you want.
+     * Internal implementation for the public loading modes above. Callers should select the overload that matches
+     * whether fully resolved primary key boundaries are required.
      */
     private static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
     {
