@@ -106,7 +106,7 @@ public abstract class SortedTableWriter extends SSTableWriter
         isInternalKeyspace = SchemaConstants.isInternalKeyspace(metadata.keyspace);
     }
 
-    protected static Component getDigestComponent()
+    private static Component getDigestComponent()
     {
         String ssTableDigestType = CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE.getString();
         switch (ssTableDigestType)

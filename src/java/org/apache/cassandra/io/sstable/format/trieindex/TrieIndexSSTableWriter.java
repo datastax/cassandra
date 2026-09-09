@@ -124,7 +124,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
                                                     Component.ROW_INDEX,
                                                     Component.STATS,
                                                     Component.TOC,
-                                                    getDigestComponent());
+                                                    digestComponent);
 
         if (metadata.params.bloomFilterFpChance < 1.0)
             components.add(Component.FILTER);
