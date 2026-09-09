@@ -125,7 +125,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     }
 
     @Test
-    public void testComputeTOTAL_COST_viaCustomParams_readPath()
+    public void testComputeTotalCost_viaCustomParams_readPath()
     {
         // Pure read: TOTAL_COST = RMU (WMU absent); baseline=-1 → RMU = read_bytes * MU_SCALE
         String ks = "ks_tmu1";
@@ -147,7 +147,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     }
 
     @Test
-    public void testComputeTOTAL_COST_viaCustomParams_writePath()
+    public void testComputeTotalCost_viaCustomParams_writePath()
     {
         // Pure write: TOTAL_COST = WMU (RMU absent); baseline=-1 → WMU = write_bytes * MU_SCALE
         String ks = "ks_tmu2";
@@ -169,7 +169,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     }
 
     @Test
-    public void testComputeTOTAL_COST_viaCustomParams_casPath()
+    public void testComputeTotalCost_viaCustomParams_casPath()
     {
         // CAS: TOTAL_COST = WMU + RMU; baseline=-1 → each = bytes * MU_SCALE
         String ks = "ks_tmu3";

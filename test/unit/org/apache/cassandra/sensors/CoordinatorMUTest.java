@@ -249,7 +249,7 @@ public class CoordinatorMUTest
     // ── TOTAL_COST ──────────────────────────────────────────────────────────────────
 
     @Test
-    public void testComputeTOTAL_COST_readRequest_equalToRMU()
+    public void testCompute_readRequest_equalToRMU()
     {
         // Pure read path: WMU sensor is not registered → TOTAL_COST = RMU
         // read_bytes = 500 000, no baseline → RMU = 500_000 * 4000; TOTAL_COST must equal RMU
@@ -273,7 +273,7 @@ public class CoordinatorMUTest
     }
 
     @Test
-    public void testComputeTOTAL_COST_writeRequest_equalToWMU()
+    public void testComputeTotalCost_writeRequest_equalToWMU()
     {
         // Pure write path: RMU sensor is not registered → TOTAL_COST = WMU
         // write_bytes = 300 000, no baseline → WMU = 300_000 * 4000; TOTAL_COST must equal WMU
@@ -297,7 +297,7 @@ public class CoordinatorMUTest
     }
 
     @Test
-    public void testComputeTOTAL_COST_casRequest_equalToWMUplusRMU()
+    public void testComputeTotalCost_casRequest_equalToWmuPlusRmu()
     {
         // CAS path: both RMU and WMU computed → TOTAL_COST = WMU + RMU
         // read_bytes = 400 000, write_bytes = 200 000, no baseline
@@ -328,7 +328,7 @@ public class CoordinatorMUTest
     }
 
     @Test
-    public void testComputeTOTAL_COST_noopWhenTOTAL_COSTNotRegistered()
+    public void testComputeTotalCost_noopWhenNotRegistered()
     {
         // computeTotalCost must silently do nothing when no TOTAL_COST sensor is registered
         String ks = "ks_tmu_noreg";
@@ -437,7 +437,7 @@ public class CoordinatorMUTest
     }
 
     @Test
-    public void testGlobalTOTAL_COSTAccumulatesAcrossRequests()
+    public void testGlobalTotalCostAccumulatesAcrossRequests()
     {
         // Two back-to-back requests each contribute; the global sensor accumulates both
         String ks = "ks_tmu_accum";
@@ -459,10 +459,10 @@ public class CoordinatorMUTest
             sensors.syncAllSensors();
         }
 
-        double expectedGlobalTOTAL_COST = 2 * 100_000.0 * MU_SCALE;
+        double expectedGlobalTotalCost = 2 * 100_000.0 * MU_SCALE;
         assertThat(SensorsRegistry.instance.getSensor(context, Type.TOTAL_COST))
                 .isPresent()
-                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedGlobalTOTAL_COST));
+                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedGlobalTotalCost));
     }
 
     // ── TOTAL_COST absent from CQL response ──────────────────────────────────────────
@@ -495,7 +495,7 @@ public class CoordinatorMUTest
     }
 
     @Test
-    public void testAddSensorToCQLResponse_TOTAL_COST_returnsWithoutAddingPayload()
+    public void testAddSensorToCQLResponse_totalCost_returnsWithoutAddingPayload()
     {
         // Even if someone explicitly calls addSensorToCQLResponse for TOTAL_COST (which production code
         // never does), the default SensorEncoder returns an empty Optional for TOTAL_COST (same keyspace
