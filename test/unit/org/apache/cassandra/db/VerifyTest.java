@@ -408,7 +408,9 @@ public class VerifyTest
             verifier.verify();
             fail("Expected a CorruptSSTableException to be thrown");
         }
-        catch (CorruptSSTableException err) {}
+        catch (CorruptSSTableException expected)
+        {
+        }
 
     }
 

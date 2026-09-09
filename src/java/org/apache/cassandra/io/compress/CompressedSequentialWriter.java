@@ -29,7 +29,6 @@ import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 import java.util.zip.Checksum;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -121,16 +120,6 @@ public class CompressedSequentialWriter extends SequentialWriter
         this.sstableMetadataCollector = sstableMetadataCollector;
         this.checksumType = checksumType;
         crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)), checksumType);
-    }
-
-    public CompressedSequentialWriter(File file,
-                                      File offsetsPath,
-                                      File digestFile,
-                                      SequentialWriterOption option,
-                                      CompressionParams parameters,
-                                      MetadataCollector sstableMetadataCollector)
-    {
-        this(file, offsetsPath, digestFile, ChecksumType.CRC32, option, parameters, sstableMetadataCollector);
     }
 
     @Override

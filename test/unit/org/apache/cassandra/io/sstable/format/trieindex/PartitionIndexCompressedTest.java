@@ -26,6 +26,7 @@ import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ChecksumType;
 
 /**
  * Verify the index/page-aware infrastructure also works with compression. This is not used anywhere
@@ -41,7 +42,7 @@ public class PartitionIndexCompressedTest extends PartitionIndexTest
 
         JumpingCompressedFile(File file, SequentialWriterOption option, long... cutoffsAndOffsets)
         {
-            super(file, new File(file.toPath() + ".offsets"), null,
+            super(file, new File(file.toPath() + ".offsets"), null, ChecksumType.CRC32,
                   option, CompressionParams.lz4(4096, 4096),
                   new MetadataCollector(TableMetadata.minimal("k", "s").comparator));
             assert (cutoffsAndOffsets.length & 1) == 0;
@@ -69,6 +70,7 @@ public class PartitionIndexCompressedTest extends PartitionIndexTest
         return new CompressedSequentialWriter(file,
                 new File(file.toPath() + ".offsets"),
                 null,
+                ChecksumType.CRC32,
                 SequentialWriterOption
                         .newBuilder()
                         .finishOnClose(false)
