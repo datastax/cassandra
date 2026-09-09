@@ -17,97 +17,61 @@
  */
 package org.apache.cassandra.metrics;
 
-import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
-import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import com.github.benmanes.caffeine.cache.RemovalCause;
+import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import com.github.benmanes.caffeine.cache.stats.StatsCounter;
 import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
-import org.apache.cassandra.cache.CacheSize;
 import org.apache.cassandra.io.compress.CompressionChunkOffsetCache;
-import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
- * Micrometer implementation for compression chunk offsets cache metrics.
+ * Micrometer implementation for compression chunk offsets cache metrics: the standard cache metrics extended with
+ * the load and eviction meters required by caffeine's {@link StatsCounter}.
  */
-public class MicrometerCompressionChunkOffsetCacheMetrics extends MicrometerMetrics implements StatsCounter, CacheMetrics
+public class MicrometerCompressionChunkOffsetCacheMetrics extends MicrometerCacheMetrics implements StatsCounter
 {
-    private final CacheSize cache;
     private final String metricsPrefix;
+    private final ConcurrentHashMap<RemovalCause, Counter> evictionByRemovalCause = new ConcurrentHashMap<>();
 
-    // CNDB calls register() after construction to replace the registry and tags. register() removes the old meters
-    // before replacing these delegates, so a live previous registry does not keep exporting stale cache metrics.
-    private volatile MicrometerCacheMetrics metrics;
     private volatile Timer missLatency;
     private volatile Counter evictions;
-    private final ConcurrentHashMap<RemovalCause, Counter> evictionByRemovalCause = new ConcurrentHashMap<>();
 
     public MicrometerCompressionChunkOffsetCacheMetrics(CompressionChunkOffsetCache cache, String metricsPrefix)
     {
-        this.cache = cache;
+        super(metricsPrefix, cache);
         this.metricsPrefix = metricsPrefix;
-        registerMetrics(registryWithTags().left, registryWithTags().right);
+        registerStatsMeters();
     }
 
-    private void registerMetrics(MeterRegistry registry, Tags tags)
+    private void registerStatsMeters()
     {
-        this.metrics = new MicrometerCacheMetrics(metricsPrefix, cache);
-        this.metrics.register(registry, tags);
-
         this.missLatency = timer(metricsPrefix + "_miss_latency_seconds");
         this.evictions = counter(metricsPrefix + "_evictions");
 
-        evictionByRemovalCause.clear();
         for (RemovalCause cause : RemovalCause.values())
-        {
-            evictionByRemovalCause.put(cause, counter(metricsPrefix + "_evictions_" + cause.toString().toLowerCase()));
-        }
+            evictionByRemovalCause.put(cause, counter(evictionMeterName(cause)));
     }
 
-    private void unregisterMetrics(MeterRegistry registry, Tags tags)
+    private String evictionMeterName(RemovalCause cause)
     {
-        unregisterMeter(registry, tags, metricsPrefix + "_capacity");
-        unregisterMeter(registry, tags, metricsPrefix + "_size");
-        unregisterMeter(registry, tags, metricsPrefix + "_num_entries");
-        unregisterMeter(registry, tags, metricsPrefix + "_hit_rate");
-        unregisterMeter(registry, tags, metricsPrefix + "_misses");
-        unregisterMeter(registry, tags, metricsPrefix + "_hits");
-        unregisterMeter(registry, tags, metricsPrefix + "_requests");
-        unregisterMeter(registry, tags, metricsPrefix + "_miss_latency_seconds");
-        unregisterMeter(registry, tags, metricsPrefix + "_evictions");
-
-        for (RemovalCause cause : RemovalCause.values())
-            unregisterMeter(registry, tags, metricsPrefix + "_evictions_" + cause.toString().toLowerCase());
+        return metricsPrefix + "_evictions_" + cause.toString().toLowerCase();
     }
 
-    private static void unregisterMeter(MeterRegistry registry, Tags tags, String name)
-    {
-        for (Meter meter : new ArrayList<>(registry.find(name).tags(tags).meters()))
-            registry.remove(meter);
-    }
-
+    /**
+     * CNDB calls this after construction to replace the registry and tags, so the stats meters have to be recreated
+     * on the new registry, like the cache meters of the parent class.
+     */
     @Override
     public synchronized void register(MeterRegistry newRegistry, Tags newTags)
     {
-        Pair<MeterRegistry, Tags> current = registryWithTags();
-        if (current.left.equals(newRegistry))
-            throw new IllegalArgumentException("Cannot set the same registry twice!");
-
-        unregisterMetrics(current.left, current.right);
         super.register(newRegistry, newTags);
-        registerMetrics(newRegistry, newTags);
-    }
-
-    @Override
-    public void recordMisses(int count)
-    {
-        metrics.recordMisses(count);
+        registerStatsMeters();
     }
 
     @Override
@@ -132,78 +96,6 @@ public class MicrometerCompressionChunkOffsetCacheMetrics extends MicrometerMetr
             counter.increment(1);
     }
 
-    @Override
-    public void recordHits(int count)
-    {
-        metrics.recordHits(count);
-    }
-
-    @Override
-    public double hitRate()
-    {
-        return metrics.hitRate();
-    }
-
-    @Override
-    public double hitOneMinuteRate()
-    {
-        return metrics.hitOneMinuteRate();
-    }
-
-    @Override
-    public double hitFiveMinuteRate()
-    {
-        return metrics.hitFiveMinuteRate();
-    }
-
-    @Override
-    public double hitFifteenMinuteRate()
-    {
-        return metrics.hitFifteenMinuteRate();
-    }
-
-    @Override
-    public double requestsFifteenMinuteRate()
-    {
-        return metrics.requestsFifteenMinuteRate();
-    }
-
-    @Override
-    public long requests()
-    {
-        return metrics.requests();
-    }
-
-    @Override
-    public long capacity()
-    {
-        return metrics.capacity();
-    }
-
-    @Override
-    public long size()
-    {
-        return metrics.size();
-    }
-
-    @Override
-    public long entries()
-    {
-        return metrics.entries();
-    }
-
-    @Override
-    public long hits()
-    {
-        return metrics.hits();
-    }
-
-    @Override
-    public long misses()
-    {
-        return metrics.misses();
-    }
-
     public double missLatency()
     {
         return missLatency.mean(TimeUnit.NANOSECONDS);
@@ -212,13 +104,21 @@ public class MicrometerCompressionChunkOffsetCacheMetrics extends MicrometerMetr
     @Override
     public CacheStats snapshot()
     {
-        return CacheStats.of(metrics.hits(), metrics.misses(), missLatency.count(),
-                0L, (long) missLatency.totalTime(TimeUnit.NANOSECONDS), (long) evictions.count(), 0L);
+        return CacheStats.of(hits(), misses(), missLatency.count(),
+                             0L, (long) missLatency.totalTime(TimeUnit.NANOSECONDS), (long) evictions.count(), 0L);
     }
 
     @Override
     public String toString()
     {
-        return metrics.toString();
+        return "Compression chunk offsets cache metrics: " + System.lineSeparator() +
+               "Miss latency in seconds: " + missLatency() + System.lineSeparator() +
+               "Misses count: " + misses() + System.lineSeparator() +
+               "Hits count: " + hits() + System.lineSeparator() +
+               "Cache requests count: " + requests() + System.lineSeparator() +
+               "Moving hit rate: " + hitRate() + System.lineSeparator() +
+               "Num entries: " + entries() + System.lineSeparator() +
+               "Size in memory: " + FBUtilities.prettyPrintMemory(size()) + System.lineSeparator() +
+               "Capacity: " + FBUtilities.prettyPrintMemory(capacity());
     }
 }
