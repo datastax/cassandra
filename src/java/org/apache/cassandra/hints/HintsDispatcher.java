@@ -45,7 +45,10 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 /**
  * Dispatches a single hints file to a specified node in a batched manner.
  *
- * Decodes hints before dispatch so endpoint writability can be checked against the hint's keyspace.
+ * For hints stored at the current messaging version, endpoint writability is checked by peeking at the
+ * first few bytes of the buffer to extract the keyspace (via {@link Hint.Serializer#getKeyspaceFromBuffer})
+ * rather than fully deserializing the hint. Full deserialization is only performed when the file's messaging
+ * version differs from the current one and re-encoding is required.
  */
 final class HintsDispatcher implements AutoCloseable
 {
@@ -170,6 +173,7 @@ final class HintsDispatcher implements AutoCloseable
         List<ByteBuffer> buffersToSend = new ArrayList<>();
         List<Hint> hintsToSend = new ArrayList<>();
         int fileVersion = reader.descriptor().messagingVersion();
+        boolean sameVersion = fileVersion == messagingVersion;
 
         while (encodedHints.hasNext())
         {
@@ -180,29 +184,41 @@ final class HintsDispatcher implements AutoCloseable
             }
 
             ByteBuffer buffer = encodedHints.next();
-            Hint hint;
-            try (DataInputBuffer in = new DataInputBuffer(buffer, true))
+
+            if (sameVersion)
             {
-                hint = Hint.serializer.deserialize(in, fileVersion);
+                // Peek at the buffer to get the keyspace without deserializing the hint.
+                String keyspace = Hint.serializer.getKeyspaceFromBuffer(buffer, fileVersion);
+                if (keyspace != null && !isWritable(keyspace))
+                    return Action.ABORT;
+
+                buffersToSend.add(buffer);
+                hintsToSend.add(null);
             }
-            catch (UnknownTableException e)
+            else
             {
-                // A dropped table has no keyspace affinity left to enforce. Preserve the encoded hint so the
-                // receiver can discard it without turning an expected schema race into a dispatch failure.
-                if (fileVersion != messagingVersion)
+                // Cross-version path: must deserialize to re-encode for the target messaging version.
+                Hint hint;
+                try (DataInputBuffer in = new DataInputBuffer(buffer, true))
+                {
+                    hint = Hint.serializer.deserialize(in, fileVersion);
+                }
+                catch (UnknownTableException e)
+                {
+                    // Dropped table — skip; no affinity to enforce.
                     continue;
-                hint = null;
-            }
-            catch (IOException e)
-            {
-                throw new FSReadError(e, reader.descriptor().fileName());
-            }
+                }
+                catch (IOException e)
+                {
+                    throw new FSReadError(e, reader.descriptor().fileName());
+                }
 
-            if (hint != null && !isWritable(hint))
-                return Action.ABORT;
+                if (!isWritable(hint.mutation().getKeyspaceName()))
+                    return Action.ABORT;
 
-            buffersToSend.add(buffer);
-            hintsToSend.add(hint);
+                buffersToSend.add(buffer);
+                hintsToSend.add(hint);
+            }
         }
 
         for (int i = 0; i < buffersToSend.size(); i++)
@@ -213,16 +229,15 @@ final class HintsDispatcher implements AutoCloseable
                 return Action.ABORT;
             }
 
-            callbacks.add(fileVersion == messagingVersion
+            callbacks.add(sameVersion
                           ? sendEncodedHint(buffersToSend.get(i))
                           : sendHint(hintsToSend.get(i)));
         }
         return Action.CONTINUE;
     }
 
-    private boolean isWritable(Hint hint)
+    private boolean isWritable(String keyspace)
     {
-        String keyspace = hint.mutation().getKeyspaceName();
         return DatabaseDescriptor.getEndpointSnitch().filterByAffinityForWrites(keyspace).test(address);
     }
 

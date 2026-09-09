@@ -19,6 +19,7 @@ package org.apache.cassandra.hints;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
@@ -34,7 +35,9 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.db.TypeSizes.sizeof;
@@ -179,6 +182,33 @@ public final class Hint
         public long getHintCreationTime(ByteBuffer hintBuffer, int version)
         {
             return hintBuffer.getLong(0);
+        }
+
+        @Nullable
+        public String getKeyspaceFromBuffer(ByteBuffer hintBuffer, int version)
+        {
+            // skip creationTime (8 bytes)
+            int offset = sizeof(Long.MAX_VALUE);
+
+            // skip gcgs (unsigned vint)
+            int gcgsSize = VIntCoding.computeUnsignedVIntSize(hintBuffer, offset, hintBuffer.limit());
+            if (gcgsSize < 0)
+                return null;
+            offset += gcgsSize;
+
+            // skip modification count (unsigned vint) — first field of the serialized Mutation
+            int modCountSize = VIntCoding.computeUnsignedVIntSize(hintBuffer, offset, hintBuffer.limit());
+            if (modCountSize < 0)
+                return null;
+            offset += modCountSize;
+
+            // read the first TableId (16 bytes) using absolute get to leave position untouched
+            long msb = hintBuffer.getLong(offset);
+            long lsb = hintBuffer.getLong(offset + Long.BYTES);
+            TableId tableId = TableId.fromUUID(new UUID(msb, lsb));
+
+            TableMetadata metadata = Schema.instance.getTableMetadata(tableId);
+            return metadata == null ? null : metadata.keyspace;
         }
 
         /**
