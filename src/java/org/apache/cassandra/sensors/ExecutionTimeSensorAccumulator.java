@@ -16,9 +16,8 @@
 package org.apache.cassandra.sensors;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.DoubleAccumulator;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import com.google.common.util.concurrent.AtomicDouble;
 
 /**
  * Per-request accumulator for execution-time sensors.
@@ -45,7 +44,7 @@ public class ExecutionTimeSensorAccumulator
     private final AtomicInteger responseCount = new AtomicInteger(0);
 
     /** Running max per (context, type) pair — populated by accumulate(). */
-    private final ConcurrentHashMap<ContextTypePair, AtomicDouble> maxByContextType = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ContextTypePair, DoubleAccumulator> maxByContextType = new ConcurrentHashMap<>();
 
     /**
      * @param threshold number of {@link #onResponse} calls after which the accumulated maxes are
@@ -67,8 +66,8 @@ public class ExecutionTimeSensorAccumulator
      */
     public void accumulate(Context context, Type type, double value)
     {
-        maxByContextType.computeIfAbsent(new ContextTypePair(context, type), k -> new AtomicDouble(0))
-                        .updateAndGet(current -> Math.max(value, current));
+        maxByContextType.computeIfAbsent(new ContextTypePair(context, type), k -> new DoubleAccumulator(Math::max, 0))
+                        .accumulate(value);
     }
 
     /**
@@ -85,7 +84,7 @@ public class ExecutionTimeSensorAccumulator
 
         if (responseCount.incrementAndGet() == threshold)
         {
-            for (ConcurrentHashMap.Entry<ContextTypePair, AtomicDouble> entry : maxByContextType.entrySet())
+            for (ConcurrentHashMap.Entry<ContextTypePair, DoubleAccumulator> entry : maxByContextType.entrySet())
                 sensors.incrementSensor(entry.getKey().context, entry.getKey().type, entry.getValue().get());
         }
     }
