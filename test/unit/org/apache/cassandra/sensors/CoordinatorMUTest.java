@@ -43,9 +43,9 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Tests that the coordinator correctly computes RMU, WMU, and TMU from replica byte-sensors and
+ * Tests that the coordinator correctly computes RMU, WMU, and TOTAL_COST from replica byte-sensors and
  * coordinator-measured latency, then exposes RMU/WMU in the CQL custom payload while keeping
- * TMU registry-only (never sent in CQL responses).
+ * TOTAL_COST registry-only (never sent in CQL responses).
  */
 public class CoordinatorMUTest
 {
@@ -246,13 +246,13 @@ public class CoordinatorMUTest
         assertThat(sensors.getSensor(context, Type.WMU).get().getValue()).isEqualTo(expectedWMU);
     }
 
-    // ── TMU ──────────────────────────────────────────────────────────────────
+    // ── TOTAL_COST ──────────────────────────────────────────────────────────────────
 
     @Test
-    public void testComputeTMU_readRequest_equalToRMU()
+    public void testComputeTOTAL_COST_readRequest_equalToRMU()
     {
-        // Pure read path: WMU sensor is not registered → TMU = RMU
-        // read_bytes = 500 000, no baseline → RMU = 500_000 * 4000; TMU must equal RMU
+        // Pure read path: WMU sensor is not registered → TOTAL_COST = RMU
+        // read_bytes = 500 000, no baseline → RMU = 500_000 * 4000; TOTAL_COST must equal RMU
         String ks = "ks_tmu_read";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -260,23 +260,23 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000);
 
         CostCalculator.computeReadCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
 
         double expectedRMU = 500_000.0 * MU_SCALE; // no baseline → bytes * MU_SCALE
         assertThat(sensors.getSensor(context, Type.RMU).get().getValue()).isEqualTo(expectedRMU);
         assertThat(sensors.getSensor(context, Type.WMU)).isEmpty();
-        assertThat(sensors.getSensor(context, Type.TMU).get().getValue()).isEqualTo(expectedRMU);
+        assertThat(sensors.getSensor(context, Type.TOTAL_COST).get().getValue()).isEqualTo(expectedRMU);
     }
 
     @Test
-    public void testComputeTMU_writeRequest_equalToWMU()
+    public void testComputeTOTAL_COST_writeRequest_equalToWMU()
     {
-        // Pure write path: RMU sensor is not registered → TMU = WMU
-        // write_bytes = 300 000, no baseline → WMU = 300_000 * 4000; TMU must equal WMU
+        // Pure write path: RMU sensor is not registered → TOTAL_COST = WMU
+        // write_bytes = 300 000, no baseline → WMU = 300_000 * 4000; TOTAL_COST must equal WMU
         String ks = "ks_tmu_write";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -284,22 +284,22 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000);
 
         CostCalculator.computeWriteCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
 
         double expectedWMU = 300_000.0 * MU_SCALE;
         assertThat(sensors.getSensor(context, Type.WMU).get().getValue()).isEqualTo(expectedWMU);
         assertThat(sensors.getSensor(context, Type.RMU)).isEmpty();
-        assertThat(sensors.getSensor(context, Type.TMU).get().getValue()).isEqualTo(expectedWMU);
+        assertThat(sensors.getSensor(context, Type.TOTAL_COST).get().getValue()).isEqualTo(expectedWMU);
     }
 
     @Test
-    public void testComputeTMU_casRequest_equalToWMUplusRMU()
+    public void testComputeTOTAL_COST_casRequest_equalToWMUplusRMU()
     {
-        // CAS path: both RMU and WMU computed → TMU = WMU + RMU
+        // CAS path: both RMU and WMU computed → TOTAL_COST = WMU + RMU
         // read_bytes = 400 000, write_bytes = 200 000, no baseline
         String ks = "ks_tmu_cas";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
@@ -312,25 +312,25 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.WMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 400_000);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 200_000);
 
         CostCalculator.computeReadCost(sensors);
         CostCalculator.computeWriteCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
 
         double expectedRMU = 400_000.0 * MU_SCALE;
         double expectedWMU = 200_000.0 * MU_SCALE;
         assertThat(sensors.getSensor(context, Type.RMU).get().getValue()).isEqualTo(expectedRMU);
         assertThat(sensors.getSensor(context, Type.WMU).get().getValue()).isEqualTo(expectedWMU);
-        assertThat(sensors.getSensor(context, Type.TMU).get().getValue()).isEqualTo(expectedWMU + expectedRMU);
+        assertThat(sensors.getSensor(context, Type.TOTAL_COST).get().getValue()).isEqualTo(expectedWMU + expectedRMU);
     }
 
     @Test
-    public void testComputeTMU_noopWhenTMUNotRegistered()
+    public void testComputeTOTAL_COST_noopWhenTOTAL_COSTNotRegistered()
     {
-        // computeTMU must silently do nothing when no TMU sensor is registered
+        // computeTotalCost must silently do nothing when no TOTAL_COST sensor is registered
         String ks = "ks_tmu_noreg";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -341,18 +341,18 @@ public class CoordinatorMUTest
         sensors.incrementSensor(context, Type.READ_BYTES, 100_000);
         CostCalculator.computeReadCost(sensors);
 
-        // no exception, no TMU sensor created
-        CostCalculator.computeTMU(sensors);
+        // no exception, no TOTAL_COST sensor created
+        CostCalculator.computeTotalCost(sensors);
 
-        assertThat(sensors.getSensor(context, Type.TMU)).isEmpty();
+        assertThat(sensors.getSensor(context, Type.TOTAL_COST)).isEmpty();
     }
 
-    // ── TMU → global registry ─────────────────────────────────────────────────
+    // ── TOTAL_COST → global registry ─────────────────────────────────────────────────
 
     @Test
-    public void testTMUSyncsToGlobalRegistry_readPath()
+    public void testTotalCostSyncsToGlobalRegistry_readPath()
     {
-        // After computeReadCost + computeTMU + syncAllSensors the global registry must hold TMU = RMU
+        // After computeReadCost + computeTotalCost + syncAllSensors the global registry must hold TOTAL_COST = RMU
         String ks = "ks_tmu_reg_r";
         String table = "t_reg_r";
         String tableId = UUID.randomUUID().toString();
@@ -363,23 +363,23 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 600_000);
 
         CostCalculator.computeReadCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
         sensors.syncAllSensors();
 
-        double expectedTMU = 600_000.0 * MU_SCALE;
-        assertThat(SensorsRegistry.instance.getSensor(context, Type.TMU))
+        double expectedTotalCost = 600_000.0 * MU_SCALE;
+        assertThat(SensorsRegistry.instance.getSensor(context, Type.TOTAL_COST))
                 .isPresent()
-                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedTMU));
+                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedTotalCost));
     }
 
     @Test
-    public void testTMUSyncsToGlobalRegistry_writePath()
+    public void testTotalCostSyncsToGlobalRegistry_writePath()
     {
-        // After computeWriteCost + computeTMU + syncAllSensors the global registry must hold TMU = WMU
+        // After computeWriteCost + computeTotalCost + syncAllSensors the global registry must hold TOTAL_COST = WMU
         String ks = "ks_tmu_reg_w";
         String table = "t_reg_w";
         String tableId = UUID.randomUUID().toString();
@@ -390,23 +390,23 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000);
 
         CostCalculator.computeWriteCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
         sensors.syncAllSensors();
 
-        double expectedTMU = 250_000.0 * MU_SCALE;
-        assertThat(SensorsRegistry.instance.getSensor(context, Type.TMU))
+        double expectedTotalCost = 250_000.0 * MU_SCALE;
+        assertThat(SensorsRegistry.instance.getSensor(context, Type.TOTAL_COST))
                 .isPresent()
-                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedTMU));
+                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedTotalCost));
     }
 
     @Test
-    public void testTMUSyncsToGlobalRegistry_casPath()
+    public void testTotalCostSyncsToGlobalRegistry_casPath()
     {
-        // After computeReadCost + computeWriteCost + computeTMU + syncAllSensors: global TMU = WMU + RMU
+        // After computeReadCost + computeWriteCost + computeTotalCost + syncAllSensors: global TOTAL_COST = WMU + RMU
         String ks = "ks_tmu_reg_cas";
         String table = "t_reg_cas";
         String tableId = UUID.randomUUID().toString();
@@ -421,23 +421,23 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.WMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 200_000);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 100_000);
 
         CostCalculator.computeReadCost(sensors);
         CostCalculator.computeWriteCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
         sensors.syncAllSensors();
 
-        double expectedTMU = (200_000.0 + 100_000.0) * MU_SCALE;
-        assertThat(SensorsRegistry.instance.getSensor(context, Type.TMU))
+        double expectedTotalCost = (200_000.0 + 100_000.0) * MU_SCALE;
+        assertThat(SensorsRegistry.instance.getSensor(context, Type.TOTAL_COST))
                 .isPresent()
-                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedTMU));
+                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedTotalCost));
     }
 
     @Test
-    public void testGlobalTMUAccumulatesAcrossRequests()
+    public void testGlobalTOTAL_COSTAccumulatesAcrossRequests()
     {
         // Two back-to-back requests each contribute; the global sensor accumulates both
         String ks = "ks_tmu_accum";
@@ -452,26 +452,26 @@ public class CoordinatorMUTest
             sensors.registerSensor(context, Type.READ_BYTES);
             sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
             sensors.registerSensor(context, Type.RMU);
-            sensors.registerSensor(context, Type.TMU);
+            sensors.registerSensor(context, Type.TOTAL_COST);
             sensors.incrementSensor(context, Type.READ_BYTES, 100_000);
             CostCalculator.computeReadCost(sensors);
-            CostCalculator.computeTMU(sensors);
+            CostCalculator.computeTotalCost(sensors);
             sensors.syncAllSensors();
         }
 
-        double expectedGlobalTMU = 2 * 100_000.0 * MU_SCALE;
-        assertThat(SensorsRegistry.instance.getSensor(context, Type.TMU))
+        double expectedGlobalTOTAL_COST = 2 * 100_000.0 * MU_SCALE;
+        assertThat(SensorsRegistry.instance.getSensor(context, Type.TOTAL_COST))
                 .isPresent()
-                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedGlobalTMU));
+                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedGlobalTOTAL_COST));
     }
 
-    // ── TMU absent from CQL response ──────────────────────────────────────────
+    // ── TOTAL_COST absent from CQL response ──────────────────────────────────────────
 
     @Test
-    public void testTMUIsNeverAddedToCQLResponse()
+    public void testTotalCostIsNeverAddedToCQLResponse()
     {
-        // The production code never calls addSensorToCQLResponse for TMU.
-        // Verify that a response populated with RMU contains no TMU key at all.
+        // The production code never calls addSensorToCQLResponse for TOTAL_COST.
+        // Verify that a response populated with RMU contains no TOTAL_COST key at all.
         String ks = "ks_tmu_cql";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -479,39 +479,39 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND);
         CostCalculator.computeReadCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
 
         ResultMessage result = new ResultMessage.Void();
-        // Only RMU is added — TMU is intentionally never passed to addSensorToCQLResponse
+        // Only RMU is added — TOTAL_COST is intentionally never passed to addSensorToCQLResponse
         SensorsCustomParams.addSensorToCQLResponse(result, ProtocolVersion.V4, sensors, context, Type.RMU);
 
         assertNotNull(result.getCustomPayload());
         result.getCustomPayload().keySet().forEach(k ->
-                assertThat(k).as("CQL payload must not contain any TMU key").doesNotStartWith("TMU_"));
+                assertThat(k).as("CQL payload must not contain any TOTAL_COST key").doesNotStartWith("TOTAL_COST_"));
     }
 
     @Test
-    public void testAddSensorToCQLResponse_TMU_returnsWithoutAddingPayload()
+    public void testAddSensorToCQLResponse_TOTAL_COST_returnsWithoutAddingPayload()
     {
-        // Even if someone explicitly calls addSensorToCQLResponse for TMU (which production code
-        // never does), the default SensorEncoder returns an empty Optional for TMU (same keyspace
+        // Even if someone explicitly calls addSensorToCQLResponse for TOTAL_COST (which production code
+        // never does), the default SensorEncoder returns an empty Optional for TOTAL_COST (same keyspace
         // format used for all types), so no entry is added when the sensor cannot be encoded.
         // Here we exercise a plain ks/table context where the encoder CAN produce a name,
-        // confirming TMU value reaches the payload only if explicitly requested — but the real
+        // confirming TOTAL_COST value reaches the payload only if explicitly requested — but the real
         // guarantee is that production code never makes this call.
         String ks = "ks_tmu_explicit";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
-        sensors.registerSensor(context, Type.TMU);
-        sensors.incrementSensor(context, Type.TMU, 999.0);
+        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.incrementSensor(context, Type.TOTAL_COST, 999.0);
 
         ResultMessage result = new ResultMessage.Void();
-        // Confirm no TMU key is written by the production flow (no call is made):
+        // Confirm no TOTAL_COST key is written by the production flow (no call is made):
         assertNull(result.getCustomPayload());
     }
 

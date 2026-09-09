@@ -125,9 +125,9 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     }
 
     @Test
-    public void testComputeTMU_viaCustomParams_readPath()
+    public void testComputeTOTAL_COST_viaCustomParams_readPath()
     {
-        // Pure read: TMU = RMU (WMU absent); baseline=-1 → RMU = read_bytes * MU_SCALE
+        // Pure read: TOTAL_COST = RMU (WMU absent); baseline=-1 → RMU = read_bytes * MU_SCALE
         String ks = "ks_tmu1";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -135,21 +135,21 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 400_000.0);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
 
         CostCalculator.computeReadCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
 
         double expectedRMU = 400_000.0 * 4000.0;
-        assertEquals(expectedRMU, sensors.getSensor(context, Type.TMU).get().getValue(), 0.0);
+        assertEquals(expectedRMU, sensors.getSensor(context, Type.TOTAL_COST).get().getValue(), 0.0);
     }
 
     @Test
-    public void testComputeTMU_viaCustomParams_writePath()
+    public void testComputeTOTAL_COST_viaCustomParams_writePath()
     {
-        // Pure write: TMU = WMU (RMU absent); baseline=-1 → WMU = write_bytes * MU_SCALE
+        // Pure write: TOTAL_COST = WMU (RMU absent); baseline=-1 → WMU = write_bytes * MU_SCALE
         String ks = "ks_tmu2";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -157,21 +157,21 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000.0);
         sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
 
         CostCalculator.computeWriteCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
 
         double expectedWMU = 250_000.0 * 4000.0;
-        assertEquals(expectedWMU, sensors.getSensor(context, Type.TMU).get().getValue(), 0.0);
+        assertEquals(expectedWMU, sensors.getSensor(context, Type.TOTAL_COST).get().getValue(), 0.0);
     }
 
     @Test
-    public void testComputeTMU_viaCustomParams_casPath()
+    public void testComputeTOTAL_COST_viaCustomParams_casPath()
     {
-        // CAS: TMU = WMU + RMU; baseline=-1 → each = bytes * MU_SCALE
+        // CAS: TOTAL_COST = WMU + RMU; baseline=-1 → each = bytes * MU_SCALE
         String ks = "ks_tmu3";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -183,16 +183,16 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.WMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 300_000.0);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 150_000.0);
 
         CostCalculator.computeReadCost(sensors);
         CostCalculator.computeWriteCost(sensors);
-        CostCalculator.computeTMU(sensors);
+        CostCalculator.computeTotalCost(sensors);
 
-        double expectedTMU = (300_000.0 + 150_000.0) * 4000.0;
-        assertEquals(expectedTMU, sensors.getSensor(context, Type.TMU).get().getValue(), 0.0);
+        double expectedTotalCost = (300_000.0 + 150_000.0) * 4000.0;
+        assertEquals(expectedTotalCost, sensors.getSensor(context, Type.TOTAL_COST).get().getValue(), 0.0);
     }
 
     @Test

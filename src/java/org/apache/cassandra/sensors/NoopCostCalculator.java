@@ -41,4 +41,10 @@ public class NoopCostCalculator implements CostCalculator
     {
         return 0;
     }
+
+    @Override
+    public double computeTotalCost(RequestSensors sensors, Context context)
+    {
+        return 0;
+    }
 }

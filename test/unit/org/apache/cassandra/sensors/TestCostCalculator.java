@@ -92,4 +92,15 @@ public class TestCostCalculator implements CostCalculator
 
         return Math.max(normalizedExecutionTime, normalizedBytes) * MU_SCALE;
     }
+
+    @Override
+    public double computeTotalCost(RequestSensors sensors, Context context)
+    {
+        if (sensors == null || context == null)
+            return 0.0;
+
+        double rmu = sensors.getSensor(context, Type.RMU).map(Sensor::getValue).orElse(0.0);
+        double wmu = sensors.getSensor(context, Type.WMU).map(Sensor::getValue).orElse(0.0);
+        return rmu + wmu;
+    }
 }

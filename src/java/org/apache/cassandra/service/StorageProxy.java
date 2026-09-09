@@ -519,7 +519,7 @@ public class StorageProxy implements StorageProxyMBean
         // times would be confusing
         sensors.registerSensor(context, Type.RMU);
         sensors.registerSensor(context, Type.WMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         try
@@ -573,7 +573,7 @@ public class StorageProxy implements StorageProxyMBean
             // Compute RMU and WMU from sensors before syncing into SensorsRegistry
             CostCalculator.computeReadCost(sensors);
             CostCalculator.computeWriteCost(sensors);
-            CostCalculator.computeTMU(sensors);
+            CostCalculator.computeTotalCost(sensors);
             sensors.syncAllSensors();
         }
     }
@@ -1159,7 +1159,7 @@ public class StorageProxy implements StorageProxyMBean
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
                     sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WMU);
-                    sensors.registerSensor(Context.from(pu.metadata()), Type.TMU);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.TOTAL_COST);
                 }
 
                 if (mutation instanceof CounterMutation)
@@ -1235,7 +1235,7 @@ public class StorageProxy implements StorageProxyMBean
             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
             // Compute WMU from sensors before syncing into SensorsRegistry
             CostCalculator.computeWriteCost(sensors);
-            CostCalculator.computeTMU(sensors);
+            CostCalculator.computeTotalCost(sensors);
             sensors.syncAllSensors();
         }
     }
@@ -1472,7 +1472,7 @@ public class StorageProxy implements StorageProxyMBean
                 sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
                 sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
                 sensors.registerSensor(Context.from(pu.metadata()), Type.WMU);
-                sensors.registerSensor(Context.from(pu.metadata()), Type.TMU);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.TOTAL_COST);
             }
         }
 
@@ -1484,7 +1484,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             // Compute WMU from sensors before syncing into SensorsRegistry
             CostCalculator.computeWriteCost(sensors);
-            CostCalculator.computeTMU(sensors);
+            CostCalculator.computeTotalCost(sensors);
             sensors.syncAllSensors();
         }
     }
@@ -2140,14 +2140,14 @@ public class StorageProxy implements StorageProxyMBean
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         requestSensors.registerSensor(context, Type.RMU);
-        requestSensors.registerSensor(context, Type.TMU);
+        requestSensors.registerSensor(context, Type.TOTAL_COST);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
         // All replica responses have been received by the time read() returns.
         // Compute RMU from sensors before syncing into SensorsRegistry.
         CostCalculator.computeReadCost(requestSensors);
-        CostCalculator.computeTMU(requestSensors);
+        CostCalculator.computeTotalCost(requestSensors);
         requestSensors.syncAllSensors();
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
@@ -2532,7 +2532,7 @@ public class StorageProxy implements StorageProxyMBean
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.RMU);
-        sensors.registerSensor(context, Type.TMU);
+        sensors.registerSensor(context, Type.TOTAL_COST);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
@@ -2542,7 +2542,7 @@ public class StorageProxy implements StorageProxyMBean
         // Range reads are lazy: compute RMU and sync sensor values once the iterator is fully consumed.
         return PartitionIterators.doOnClose(partitions, () -> {
             CostCalculator.computeReadCost(sensors);
-            CostCalculator.computeTMU(sensors);
+            CostCalculator.computeTotalCost(sensors);
             sensors.syncAllSensors();
             readTracker.onDone();
         });

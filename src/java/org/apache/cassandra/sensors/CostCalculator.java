@@ -50,6 +50,17 @@ public interface CostCalculator
     double computeWriteCost(RequestSensors sensors, Context context);
 
     /**
+     * Computes the total cost for the given context. The total cost represents the combined cost
+     * of all read and write operations within the request and may incorporate additional weighting
+     * beyond a simple sum of read and write costs.
+     *
+     * @param sensors the request sensors holding accumulated byte counts and execution time for this request
+     * @param context the keyspace/table context
+     * @return the total cost for this request
+     */
+    double computeTotalCost(RequestSensors sensors, Context context);
+
+    /**
      * Computes the read cost for every RMU sensor registered in {@code sensors} and increments each sensor by the
      * computed value. Must be called <em>after</em> all other sensor increments for the request are complete and
      * <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
@@ -96,25 +107,23 @@ public interface CostCalculator
     }
 
     /**
-     * Computes the TMU value for every TMU sensor registered in {@code sensors} and increments each sensor by the
-     * computed value. TMU is defined as the sum of WMU and RMU for the same context.
-     * Must be called <em>after</em> both {@link #computeReadCost(RequestSensors)} and
-     * {@link #computeWriteCost(RequestSensors)} so that WMU and RMU values are already populated.
-     * TMU is synced to the global {@link SensorsRegistry} via the normal
+     * Computes the total cost for every {@link Type#TOTAL_COST} sensor registered in {@code sensors}
+     * and increments each sensor by the computed value. Must be called <em>after</em> both
+     * {@link #computeReadCost(RequestSensors)} and {@link #computeWriteCost(RequestSensors)} so that
+     * RMU and WMU values are already populated.
+     * {@link Type#TOTAL_COST} is synced to the global {@link SensorsRegistry} via the normal
      * {@link RequestSensors#syncAllSensors()} call but is <em>never</em> included in CQL responses.
      *
      * @param sensors the request sensors for the current request
      */
-    static void computeTMU(RequestSensors sensors)
+    static void computeTotalCost(RequestSensors sensors)
     {
         Preconditions.checkNotNull(sensors);
 
-        for (Sensor tmuSensor : sensors.getSensors(s -> s.getType() == Type.TMU))
+        for (Sensor totalCostSensor : sensors.getSensors(s -> s.getType() == Type.TOTAL_COST))
         {
-            Context context = tmuSensor.getContext();
-            double wmu = sensors.getSensor(context, Type.WMU).map(Sensor::getValue).orElse(0.0);
-            double rmu = sensors.getSensor(context, Type.RMU).map(Sensor::getValue).orElse(0.0);
-            sensors.incrementSensor(context, Type.TMU, wmu + rmu);
+            Context context = totalCostSensor.getContext();
+            sensors.incrementSensor(context, Type.TOTAL_COST, INSTANCE.computeTotalCost(sensors, context));
         }
     }
 }

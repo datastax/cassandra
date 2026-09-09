@@ -62,8 +62,11 @@ public enum Type
     WMU,
 
     /**
-     * Total Measure Units: the sum of {@link #RMU} and {@link #WMU} for the same request context,
-     * representing the combined read and write cost of a request.
+     * Total cost of a request: a value computed by the {@link CostCalculator} that represents
+     * the combined cost of all read and write operations within a single request context.
+     * Unlike {@link #RMU} and {@link #WMU}, the total cost is not necessarily the arithmetic
+     * sum of the two — the calculator may apply additional weighting or tuning.
+     * This sensor is registry-only and is never included in CQL or internode responses.
      */
-    TMU;
+    TOTAL_COST;
 }
