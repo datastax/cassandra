@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.sensors;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -30,24 +29,31 @@ import org.apache.cassandra.utils.FBUtilities;
  *   readCost  = max(read_latency_ns / 1e9, read_bytes / (baseline_read / cores)) * 4000
  *   writeCost = max(write_latency_ns / 1e9, (write_bytes + index_write_bytes) / (baseline_write / cores)) * 4000
  * </pre>
+ *
+ * <p>When constructed with the no-arg constructor (used by {@link TestSensorsFactory}), baseline
+ * values default to {@code -1} (not configured) and cost reduces to {@code bytes * 4000}.
+ * Tests that need exact normalized values should use the explicit 2- or 3-arg constructor.
  */
 public class TestCostCalculator implements CostCalculator
 {
-    private static final double MU_SCALE = 4000.0;
     private static final double NANOS_PER_SECOND = 1_000_000_000.0;
+    private static final double DEFAULT_COST_SCALE = 4000.0;
+    private static final long DEFAULT_BASELINE = -1L;
 
     /** Singleton used by {@link TestSensorsFactory} so that {@link CostCalculator#INSTANCE} is non-noop in tests. */
     public static final TestCostCalculator instance = new TestCostCalculator();
 
+    private final double costScale;
     private final double baselineReadBytesPerCore;
     private final double baselineWriteBytesPerCore;
 
-    /** Default constructor reads baselines from system properties (same as production). */
+    /**
+     * Default constructor uses baseline=-1 (not configured) and cost_scale=4000.
+     * Cost reduces to {@code bytes * 4000} — suitable for tests that only assert positivity.
+     */
     public TestCostCalculator()
     {
-        this(CassandraRelevantProperties.BASELINE_READ_BYTES.getLong(),
-             CassandraRelevantProperties.BASELINE_WRITE_BYTES.getLong(),
-             FBUtilities.getAvailableProcessors());
+        this(DEFAULT_BASELINE, DEFAULT_BASELINE, FBUtilities.getAvailableProcessors());
     }
 
     public TestCostCalculator(double baselineReadBytes, double baselineWriteBytes)
@@ -57,6 +63,7 @@ public class TestCostCalculator implements CostCalculator
 
     public TestCostCalculator(double baselineReadBytes, double baselineWriteBytes, int numCores)
     {
+        this.costScale = DEFAULT_COST_SCALE;
         int cores = numCores > 0 ? numCores : 1;
         this.baselineReadBytesPerCore = baselineReadBytes > 0 ? baselineReadBytes / cores : baselineReadBytes;
         this.baselineWriteBytesPerCore = baselineWriteBytes > 0 ? baselineWriteBytes / cores : baselineWriteBytes;
@@ -74,7 +81,7 @@ public class TestCostCalculator implements CostCalculator
         double normalizedBytes = baselineReadBytesPerCore > 0 ? readBytes / baselineReadBytesPerCore : readBytes;
         double normalizedExecutionTime = baselineReadBytesPerCore > 0 ? readExecutionTimeNanos / NANOS_PER_SECOND : 0.0;
 
-        return Math.max(normalizedExecutionTime, normalizedBytes) * MU_SCALE;
+        return Math.max(normalizedExecutionTime, normalizedBytes) * costScale;
     }
 
     @Override
@@ -90,7 +97,7 @@ public class TestCostCalculator implements CostCalculator
         double normalizedBytes = baselineWriteBytesPerCore > 0 ? writeBytes / baselineWriteBytesPerCore : writeBytes;
         double normalizedExecutionTime = baselineWriteBytesPerCore > 0 ? writeExecutionTimeNanos / NANOS_PER_SECOND : 0.0;
 
-        return Math.max(normalizedExecutionTime, normalizedBytes) * MU_SCALE;
+        return Math.max(normalizedExecutionTime, normalizedBytes) * costScale;
     }
 
     @Override
