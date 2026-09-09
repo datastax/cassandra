@@ -192,13 +192,11 @@ public final class HintsService implements HintsServiceMBean
         Token token = hint.mutation().key().getToken();
 
         EndpointsForToken replicas = ReplicaLayout.forTokenWriteLiveAndDown(Keyspace.open(keyspaceName), token).all();
-        Predicate<InetAddressAndPort> writeEndpointFilter = DatabaseDescriptor.getEndpointSnitch().filterByAffinityForWrites(keyspaceName);
 
         // judicious use of streams: eagerly materializing probably cheaper
         // than performing filters / translations 2x extra via Iterables.filter/transform
         List<UUID> hostIds = replicas.stream()
-                .filter(replica -> StorageProxy.shouldHint(replica, false))
-                .filter(replica -> writeEndpointFilter.test(replica.endpoint()))
+                .filter(StorageProxy::shouldHint)
                 .map(replica -> HintsEndpointProvider.instance.hostForEndpoint(replica.endpoint()))
                 .collect(Collectors.toList());
 
@@ -457,7 +455,7 @@ public final class HintsService implements HintsServiceMBean
     {
         return catalog.get(hostId).findOldestHintTimestamp();
     }
-    
+
     /**
      * Get the total size in bytes of all the hints files on disk.
      * @return total file size, in bytes
