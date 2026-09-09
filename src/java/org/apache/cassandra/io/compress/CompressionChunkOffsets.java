@@ -115,6 +115,7 @@ public interface CompressionChunkOffsets extends AutoCloseable
 
         public void addTo(Ref.IdentityCollection identities)
         {
+            // Empty offsets have no backing memory identity to report.
         }
 
         @Override
@@ -125,6 +126,7 @@ public interface CompressionChunkOffsets extends AutoCloseable
 
         public void close()
         {
+            // Empty offsets own no resources that need to be released.
         }
     }
 
@@ -178,6 +180,7 @@ public interface CompressionChunkOffsets extends AutoCloseable
     {
         private static final Logger logger = LoggerFactory.getLogger(BlockCache.class);
         private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+        private static final String CHUNK_OUT_OF_BOUNDS_FORMAT = "Chunk %d out of bounds: %d";
 
         // Used to retry fetching cache from disk when cache referencing races with concurrent cache eviction. This should be rare and 10 should be sufficient.
         private static final int MAX_RETRIES = 10;
@@ -234,7 +237,10 @@ public interface CompressionChunkOffsets extends AutoCloseable
             int offsetInBlock = absoluteIndex % offsetsPerBlock;
 
             if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
-                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", absoluteIndex, chunkCount)), file);
+                throw new CorruptSSTableException(new EOFException(String.format(CHUNK_OUT_OF_BOUNDS_FORMAT,
+                                                                                 absoluteIndex,
+                                                                                 chunkCount)),
+                                                  file);
 
             int retries = MAX_RETRIES;
             while (retries-- > 0)
@@ -246,7 +252,10 @@ public interface CompressionChunkOffsets extends AutoCloseable
                     {
                         int count = block.count();
                         if (offsetInBlock >= count)
-                            throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", offsetInBlock, count)), file);
+                            throw new CorruptSSTableException(new EOFException(String.format(CHUNK_OUT_OF_BOUNDS_FORMAT,
+                                                                                             offsetInBlock,
+                                                                                             count)),
+                                                              file);
                         return block.getLongAtIndex(offsetInBlock);
                     }
                     finally
@@ -266,7 +275,10 @@ public interface CompressionChunkOffsets extends AutoCloseable
         {
             int absoluteIndex = baseChunkIndex + index;
             if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
-                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", absoluteIndex, chunkCount)), file);
+                throw new CorruptSSTableException(new EOFException(String.format(CHUNK_OUT_OF_BOUNDS_FORMAT,
+                                                                                 absoluteIndex,
+                                                                                 chunkCount)),
+                                                  file);
 
             ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
             try
@@ -452,7 +464,10 @@ public interface CompressionChunkOffsets extends AutoCloseable
         {
             int absoluteIndex = baseChunkIndex + index;
             if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
-                throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", absoluteIndex, chunkCount)), file);
+                throw new CorruptSSTableException(new EOFException(String.format(BlockCache.CHUNK_OUT_OF_BOUNDS_FORMAT,
+                                                                                 absoluteIndex,
+                                                                                 chunkCount)),
+                                                  file);
 
             return getAbsolute(absoluteIndex);
         }

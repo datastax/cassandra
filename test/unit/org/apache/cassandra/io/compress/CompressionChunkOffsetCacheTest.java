@@ -19,14 +19,19 @@
 package org.apache.cassandra.io.compress;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import com.dynatrace.hash4j.hashing.Hashing;
+import com.github.benmanes.caffeine.cache.RemovalCause;
+import com.github.benmanes.caffeine.cache.stats.CacheStats;
+
 import org.junit.Test;
 
 import org.awaitility.Awaitility;
 
 import org.apache.cassandra.metrics.MicrometerCompressionChunkOffsetCacheMetrics;
+import org.apache.cassandra.utils.concurrent.Ref;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -56,10 +61,37 @@ public class CompressionChunkOffsetCacheTest
         CompressionChunkOffsetCache.BlockKey key = new CompressionChunkOffsetCache.BlockKey(11L, 7);
 
         assertThat(key.hashCode()).isEqualTo(Hashing.metroHash64().hashLongLongToInt(11L, 7));
+        assertThat(key.equals(key)).isTrue();
         assertThat(key).isEqualTo(new CompressionChunkOffsetCache.BlockKey(11L, 7));
         assertThat(key).isNotEqualTo(new CompressionChunkOffsetCache.BlockKey(12L, 7));
         assertThat(key).isNotEqualTo(new CompressionChunkOffsetCache.BlockKey(11L, 8));
         assertThatThrownBy(() -> key.equals(new Object())).isInstanceOf(ClassCastException.class);
+    }
+
+    @Test
+    public void testUnsupportedCapacityChange()
+    {
+        CompressionChunkOffsetCache cache = new CompressionChunkOffsetCache(1024);
+
+        assertThatThrownBy(() -> cache.setCapacity(2048))
+            .isInstanceOf(UnsupportedOperationException.class)
+            .hasMessage("Compression chunk offsets cache size cannot be changed.");
+    }
+
+    @Test
+    public void testEmptyOffsets()
+    {
+        CompressionChunkOffsets offsets = new CompressionChunkOffsets.Empty();
+
+        assertThat(offsets.size()).isZero();
+        assertThat(offsets.offHeapMemoryUsed()).isZero();
+        assertThat(offsets.compressedFileLength()).isZero();
+        assertThatThrownBy(() -> offsets.get(0))
+            .isInstanceOf(IndexOutOfBoundsException.class)
+            .hasMessageContaining("Chunk index 0 out of bounds");
+
+        offsets.addTo(new Ref.IdentityCollection(Collections.emptySet()));
+        offsets.close();
     }
 
     @Test
@@ -143,5 +175,24 @@ public class CompressionChunkOffsetCacheTest
                       assertThat(metrics.capacity()).isEqualTo(1024);
                       assertThat(metrics.size()).isEqualTo(1024);
                   });
+
+        assertThat(metrics.requests()).isEqualTo(3);
+        assertThat(metrics.hitOneMinuteRate()).isNaN();
+        assertThat(metrics.hitFiveMinuteRate()).isNaN();
+        assertThat(metrics.hitFifteenMinuteRate()).isNaN();
+        assertThat(metrics.requestsFifteenMinuteRate()).isNaN();
+
+        CacheStats snapshot = metrics.snapshot();
+        assertThat(snapshot.hitCount()).isEqualTo(1);
+        assertThat(snapshot.missCount()).isEqualTo(2);
+        assertThat(snapshot.loadSuccessCount()).isEqualTo(2);
+        assertThat(metrics.toString()).isNotEmpty();
+
+        long evictionCount = snapshot.evictionCount();
+        metrics.recordEviction(1, RemovalCause.EXPIRED);
+        assertThat(metrics.snapshot().evictionCount()).isEqualTo(evictionCount + 1);
+        metrics.recordEviction(1, RemovalCause.REPLACED);
+        assertThat(metrics.snapshot().evictionCount()).isEqualTo(evictionCount + 1);
+        metrics.recordLoadFailure(1L);
     }
 }
