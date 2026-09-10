@@ -512,7 +512,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
-            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.RMU);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_COST);
         }
         return msg;
     }
@@ -667,7 +667,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
-            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.RMU);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_COST);
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this

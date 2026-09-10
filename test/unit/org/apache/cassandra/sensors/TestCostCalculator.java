@@ -106,8 +106,8 @@ public class TestCostCalculator implements CostCalculator
         if (sensors == null || context == null)
             return 0.0;
 
-        double rmu = sensors.getSensor(context, Type.RMU).map(Sensor::getValue).orElse(0.0);
-        double wmu = sensors.getSensor(context, Type.WMU).map(Sensor::getValue).orElse(0.0);
-        return rmu + wmu;
+        double readCost = sensors.getSensor(context, Type.READ_COST).map(Sensor::getValue).orElse(0.0);
+        double writeCost = sensors.getSensor(context, Type.WRITE_COST).map(Sensor::getValue).orElse(0.0);
+        return readCost + writeCost;
     }
 }

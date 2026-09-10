@@ -83,8 +83,8 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
     /**
      * Verifies write sensor propagation via {@code StorageProxy.mutate()}.
      *
-     * <p>WMU is computed at the coordinator using the measured write latency and the aggregated
-     * WRITE_BYTES collected from replicas. Replicas do not compute WMU themselves.
+     * <p>WRITE_COST is computed at the coordinator using the measured write latency and the aggregated
+     * WRITE_BYTES collected from replicas. Replicas do not compute WRITE_COST themselves.
      * {@code WRITE_BYTES} from all remote replicas is identical (same row), so the coordinator
      * total must divide evenly by the per-replica value.
      */
@@ -101,13 +101,13 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
             if (!(result instanceof ResultMessage.Void))
                 throw new AssertionError("INSERT expected ResultMessage.Void but got: " + result);
             r.set(new double[]{ registryValueOnNode(tbl, Type.WRITE_BYTES),
-                                registryValueOnNode(tbl, Type.WMU) });
+                                registryValueOnNode(tbl, Type.WRITE_COST) });
         }).accept(coordinatorRef);
 
         AtomicReference<double[]> replicaRef = new AtomicReference<>();
         cluster.get(2).acceptsOnInstance(
         (IIsolatedExecutor.SerializableConsumer<AtomicReference<double[]>>) r -> r.set(new double[]{ registryValueOnNode(tbl, Type.WRITE_BYTES),
-                                                                                                     registryValueOnNode(tbl, Type.WMU) })).accept(replicaRef);
+                                                                                                     registryValueOnNode(tbl, Type.WRITE_COST) })).accept(replicaRef);
 
         double[] coordinator = coordinatorRef.get();
         double[] replica = replicaRef.get();
@@ -125,20 +125,20 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
         Assertions.assertThat((long) (coordinator[0] / perReplicaWb))
                   .describedAs("coordinator WRITE_BYTES must equal per-replica value * NODES_COUNT")
                   .isEqualTo(NODES_COUNT);
-        // WMU is only computed on the coordinator — replicas have no WMU in their registry
+        // WRITE_COST is only computed on the coordinator — replicas have no WRITE_COST in their registry
         Assertions.assertThat(replica[1])
-                  .describedAs("WMU must be zero on replicas (only computed at coordinator)")
+                  .describedAs("WRITE_COST must be zero on replicas (only computed at coordinator)")
                   .isEqualTo(0D);
         Assertions.assertThat(coordinator[1])
-                  .describedAs("coordinator WMU must be positive")
+                  .describedAs("coordinator WRITE_COST must be positive")
                   .isGreaterThan(0D);
     }
 
     /**
      * Verifies read sensor propagation via {@code StorageProxy.read()} — non-paging path.
      *
-     * <p>RMU is computed at the coordinator using the measured read latency and the aggregated
-     * READ_BYTES collected from replicas. Replicas do not compute RMU themselves.
+     * <p>READ_COST is computed at the coordinator using the measured read latency and the aggregated
+     * READ_BYTES collected from replicas. Replicas do not compute READ_COST themselves.
      * {@code READ_BYTES} from all remote replicas is identical (same row), so the coordinator
      * total must divide evenly by the per-replica value.
      */
@@ -160,13 +160,13 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
             if (rowCount != 1)
                 throw new AssertionError("SELECT expected 1 row but got: " + rowCount);
             r.set(new double[]{ registryValueOnNode(tbl, Type.READ_BYTES),
-                                registryValueOnNode(tbl, Type.RMU) });
+                                registryValueOnNode(tbl, Type.READ_COST) });
         }).accept(coordinatorRef);
 
         AtomicReference<double[]> replicaRef = new AtomicReference<>();
         cluster.get(2).acceptsOnInstance(
         (IIsolatedExecutor.SerializableConsumer<AtomicReference<double[]>>) r -> r.set(new double[]{ registryValueOnNode(tbl, Type.READ_BYTES),
-                                                                                                     registryValueOnNode(tbl, Type.RMU) })).accept(replicaRef);
+                                                                                                     registryValueOnNode(tbl, Type.READ_COST) })).accept(replicaRef);
 
         double[] coordinator = coordinatorRef.get();
         double[] replica = replicaRef.get();
@@ -184,12 +184,12 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
         Assertions.assertThat((long) (coordinator[0] / perReplicaRb))
                   .describedAs("coordinator READ_BYTES must equal per-replica value * NODES_COUNT")
                   .isEqualTo(NODES_COUNT);
-        // RMU is only computed on the coordinator — replicas have no RMU in their registry
+        // READ_COST is only computed on the coordinator — replicas have no READ_COST in their registry
         Assertions.assertThat(replica[1])
-                  .describedAs("RMU must be zero on replicas (only computed at coordinator)")
+                  .describedAs("READ_COST must be zero on replicas (only computed at coordinator)")
                   .isEqualTo(0D);
         Assertions.assertThat(coordinator[1])
-                  .describedAs("coordinator RMU must be positive")
+                  .describedAs("coordinator READ_COST must be positive")
                   .isGreaterThan(0D);
     }
 
@@ -215,13 +215,13 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
             if (rowCount != 1)
                 throw new AssertionError("SELECT expected 1 row but got: " + rowCount);
             r.set(new double[]{ registryValueOnNode(tbl, Type.READ_BYTES),
-                                registryValueOnNode(tbl, Type.RMU) });
+                                registryValueOnNode(tbl, Type.READ_COST) });
         }).accept(coordinatorRef);
 
         AtomicReference<double[]> replicaRef = new AtomicReference<>();
         cluster.get(2).acceptsOnInstance(
         (IIsolatedExecutor.SerializableConsumer<AtomicReference<double[]>>) r -> r.set(new double[]{ registryValueOnNode(tbl, Type.READ_BYTES),
-                                                                                                     registryValueOnNode(tbl, Type.RMU) })).accept(replicaRef);
+                                                                                                     registryValueOnNode(tbl, Type.READ_COST) })).accept(replicaRef);
 
         double[] coordinator = coordinatorRef.get();
         double[] replica = replicaRef.get();
@@ -240,19 +240,19 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
                   .describedAs("coordinator READ_BYTES must equal per-replica value * NODES_COUNT")
                   .isEqualTo(NODES_COUNT);
         Assertions.assertThat(replica[1])
-                  .describedAs("RMU must be zero on replicas (only computed at coordinator)")
+                  .describedAs("READ_COST must be zero on replicas (only computed at coordinator)")
                   .isEqualTo(0D);
         Assertions.assertThat(coordinator[1])
-                  .describedAs("coordinator RMU must be positive")
+                  .describedAs("coordinator READ_COST must be positive")
                   .isGreaterThan(0D);
     }
 
     /**
      * Verifies CAS sensor propagation via {@code StorageProxy.cas()}.
      *
-     * <p>WMU and RMU are computed at the coordinator from the aggregated WRITE_BYTES and
+     * <p>WRITE_COST and READ_COST are computed at the coordinator from the aggregated WRITE_BYTES and
      * READ_BYTES (gathered from replicas via internode response headers) and the coordinator-measured
-     * latency. Replicas do not compute WMU or RMU.
+     * latency. Replicas do not compute WRITE_COST or READ_COST.
      * The assertions verify positivity for all three sensor types — confirming that sensors
      * were synced for each.
      */
@@ -277,8 +277,8 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
                 throw new AssertionError("CAS UPDATE expected [applied]=true but got false");
             r.set(new double[]{ registryValueOnNode(tbl, Type.WRITE_BYTES),
                                 registryValueOnNode(tbl, Type.READ_BYTES),
-                                registryValueOnNode(tbl, Type.WMU),
-                                registryValueOnNode(tbl, Type.RMU) });
+                                registryValueOnNode(tbl, Type.WRITE_COST),
+                                registryValueOnNode(tbl, Type.READ_COST) });
         }).accept(coordinatorRef);
 
         double[] coordinator = coordinatorRef.get();
@@ -290,10 +290,10 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
                   .describedAs("coordinator READ_BYTES must be positive")
                   .isGreaterThan(0D);
         Assertions.assertThat(coordinator[2])
-                  .describedAs("coordinator WMU must be positive")
+                  .describedAs("coordinator WRITE_COST must be positive")
                   .isGreaterThan(0D);
         Assertions.assertThat(coordinator[3])
-                  .describedAs("coordinator RMU must be positive")
+                  .describedAs("coordinator READ_COST must be positive")
                   .isGreaterThan(0D);
     }
 

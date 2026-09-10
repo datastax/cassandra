@@ -50,23 +50,19 @@ public enum Type
     WRITE_EXECUTION_TIME,
 
     /**
-     * Read Measure Units: a weighted combination of {@link #READ_BYTES} and {@link #READ_EXECUTION_TIME}
-     * representing the overall cost of a read operation on a replica.
+     * Cost of a read operation as computed by the coordinator, based on registered sensors on replica and coordinator.
      */
-    RMU,
+    READ_COST,
 
     /**
-     * Write Measure Units: a weighted combination of {@link #WRITE_BYTES} and {@link #WRITE_EXECUTION_TIME}
-     * representing the overall cost of a write operation on a replica.
+     * Cost of a write operation as computed by the coordinator, based on registered sensors on replica and coordinator.
      */
-    WMU,
+    WRITE_COST,
 
     /**
-     * Total cost of a request: a value computed by the {@link CostCalculator} that represents
-     * the combined cost of all read and write operations within a single request context.
-     * Unlike {@link #RMU} and {@link #WMU}, the total cost is not necessarily the arithmetic
-     * sum of the two — the calculator may apply additional weighting or tuning.
-     * This sensor is registry-only and is never included in CQL or internode responses.
+     * Total cost of a request as computed on the coordinator: represents
+     * the combined cost of all read and write operations within a single request (as a request might have multiple
+     * "cost sensors", i.e. a batch across different tables, each with their own "cost sensor").
      */
     TOTAL_COST;
 }
