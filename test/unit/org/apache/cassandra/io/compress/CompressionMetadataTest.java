@@ -173,6 +173,31 @@ public class CompressionMetadataTest
         }
     }
 
+    @Test
+    public void testReadCompressionParamsRoundTrip() throws IOException
+    {
+        // CompressionMetadata.Writer always writes maxCompressedLength, so a reader must pass hasMaxCompressedSize=true
+        // - i.e. descriptor.version.hasMaxCompressedLength(). Passing false misaligns everything after the parameters.
+        File f = generateMetaDataFile(90, 0, 7, 16, 27, 42, 53);
+
+        CompressionParams params = CompressionMetadata.readCompressionParams(f, true, CompressionMetadataReaderType.READ_TIME);
+        assertThat(params.getSstableCompressor().getClass()).isEqualTo(SnappyCompressor.class);
+        assertThat(params.chunkLength()).isEqualTo(16);
+
+        // the params-only read must agree with the full read
+        try (CompressionMetadata metadata = CompressionMetadata.open(f, 62, true))
+        {
+            assertThat(params.chunkLength()).isEqualTo(metadata.chunkLength());
+            assertThat(params.maxCompressedLength()).isEqualTo(metadata.parameters.maxCompressedLength());
+            assertThat(params.getSstableCompressor().getClass()).isEqualTo(metadata.parameters.getSstableCompressor().getClass());
+        }
+
+        // reading with the wrong flag still yields the parameters - they precede the misaligned region - but the rest
+        // of the header is then garbage, which is what makes a full open() fail
+        assertThat(CompressionMetadata.readCompressionParams(f, false, CompressionMetadataReaderType.READ_TIME).chunkLength()).isEqualTo(16);
+        assertThatThrownBy(() -> CompressionMetadata.open(f, 62, false)).isInstanceOf(RuntimeException.class);
+    }
+
     private CompressionMetadata createMetadata(long dataLength, long compressedFileLength, long... offsets) throws IOException
     {
         File f = generateMetaDataFile(dataLength, offsets);

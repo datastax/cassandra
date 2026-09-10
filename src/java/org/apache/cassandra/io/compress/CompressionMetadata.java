@@ -214,6 +214,67 @@ public class CompressionMetadata extends WrappedSharedCloseable
                 true); // useActualFileSize = true for encryption-only files
     }
 
+    /**
+     * Reads only the header of a compression info file and returns the compression parameters, without loading any
+     * chunk offsets.
+     * <p>
+     * Callers that need nothing but {@link CompressionParams} should use this rather than
+     * {@link #open(File, long, boolean)}: it allocates no off-heap memory, opens no channel for the offsets, creates
+     * no ref-counted resource to release, and reads only the first few bytes of the file.
+     *
+     * @param chunksIndexFile      the compression info file
+     * @param hasMaxCompressedSize whether the file stores the max compressed length, i.e.
+     *                             {@code descriptor.version.hasMaxCompressedLength()}. Passing the wrong value
+     *                             misaligns the stream for everything that follows the parameters.
+     * @param readerType           {@link CompressionMetadataReaderType#WRITE_TIME} when the file is read while the
+     *                             sstable is still being written and may not have been uploaded to remote storage yet
+     */
+    public static CompressionParams readCompressionParams(File chunksIndexFile, boolean hasMaxCompressedSize,
+                                                          CompressionMetadataReaderType readerType)
+    {
+        try (FileInputStreamPlus inputStream = openInputStream(chunksIndexFile, readerType))
+        {
+            return readParams(new TrackedDataInputPlus(inputStream), hasMaxCompressedSize);
+        }
+        catch (FileNotFoundException | NoSuchFileException e)
+        {
+            throw new RuntimeException(e);
+        }
+        catch (IOException e)
+        {
+            throw new CorruptSSTableException(e, chunksIndexFile);
+        }
+    }
+
+    /**
+     * Reads the parameters section of a compression info file, leaving the stream positioned just after it.
+     */
+    private static CompressionParams readParams(TrackedDataInputPlus stream, boolean hasMaxCompressedSize) throws IOException
+    {
+        String compressorName = stream.readUTF();
+        int optionCount = stream.readInt();
+        Map<String, String> options = new HashMap<>(optionCount);
+        for (int i = 0; i < optionCount; ++i)
+        {
+            String key = stream.readUTF();
+            String value = stream.readUTF();
+            options.put(key, value);
+        }
+        int chunkLength = stream.readInt();
+        int maxCompressedSize = Integer.MAX_VALUE;
+        if (hasMaxCompressedSize)
+            maxCompressedSize = stream.readInt();
+
+        try
+        {
+            return new CompressionParams(compressorName, chunkLength, maxCompressedSize, options);
+        }
+        catch (ConfigurationException e)
+        {
+            throw new RuntimeException("Cannot create CompressionParams for stored parameters", e);
+        }
+    }
+
     @VisibleForTesting
     public static CompressionMetadata open(File chunksIndexFile, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor)
     {
@@ -240,27 +301,8 @@ public class CompressionMetadata extends WrappedSharedCloseable
         try (FileInputStreamPlus inputStream = openInputStream(chunksIndexFile, readerType))
         {
             TrackedDataInputPlus stream = new TrackedDataInputPlus(inputStream);
-            String compressorName = stream.readUTF();
-            int optionCount = stream.readInt();
-            Map<String, String> options = new HashMap<>(optionCount);
-            for (int i = 0; i < optionCount; ++i)
-            {
-                String key = stream.readUTF();
-                String value = stream.readUTF();
-                options.put(key, value);
-            }
-            int chunkLength = stream.readInt();
-            int maxCompressedSize = Integer.MAX_VALUE;
-            if (hasMaxCompressedSize)
-                maxCompressedSize = stream.readInt();
-            try
-            {
-                parameters = new CompressionParams(compressorName, chunkLength, maxCompressedSize, options);
-            }
-            catch (ConfigurationException e)
-            {
-                throw new RuntimeException("Cannot create CompressionParams for stored parameters", e);
-            }
+            parameters = readParams(stream, hasMaxCompressedSize);
+            int chunkLength = parameters.chunkLength();
 
             assert Integer.bitCount(chunkLength) == 1;
             int chunkLengthBits = Integer.numberOfTrailingZeros(chunkLength);
