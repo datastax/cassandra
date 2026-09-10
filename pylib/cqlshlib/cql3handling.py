@@ -779,6 +779,8 @@ syntax_rules += r'''
 <groupByFunctionArgument> ::= [groupcol]=<cident>
                             | <term>
                             ;
+<identifiers> ::= "{" <identifier> ( "," <identifier> )* "}"
+                  ;
 <identifiersOrStars> ::= "{" ( <identifier> | <star> ) ( "," ( <identifier> | <star> ) )* "}"
                   ;
 <options> ::= <option> ( "AND" <option> )*
