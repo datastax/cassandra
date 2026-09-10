@@ -129,8 +129,13 @@ public class CompressionMetadataTest
 
     private File generateMetaDataFile(long dataLength, long... offsets) throws IOException
     {
+        return generateMetaDataFileWithChunkLength(16, dataLength, offsets);
+    }
+
+    private File generateMetaDataFileWithChunkLength(int chunkLength, long dataLength, long[] offsets) throws IOException
+    {
         Path path = Files.createTempFile("compression_metadata", ".db");
-        CompressionParams params = CompressionParams.snappy(16);
+        CompressionParams params = CompressionParams.snappy(chunkLength);
         try (CompressionMetadata.Writer writer = CompressionMetadata.Writer.open(params, new File(path)))
         {
             for (long offset : offsets)
@@ -143,6 +148,29 @@ public class CompressionMetadataTest
                 throw new IOException(t);
         }
         return new File(path);
+    }
+
+    @Test
+    public void testGetDataOffsetForChunkOffsetBeyondTwoGiB() throws IOException
+    {
+        // chunk index 32768 with a 64KiB chunk length maps to an uncompressed offset of exactly 2^31, which overflows
+        // if the index is shifted as an int
+        int chunkLength = 1 << 16;
+        int chunkCount = 32770;
+        long[] offsets = new long[chunkCount];
+        for (int i = 0; i < chunkCount; i++)
+            offsets[i] = (long) i * chunkLength;
+
+        long compressedFileLength = (long) chunkCount * chunkLength;
+        File f = generateMetaDataFileWithChunkLength(chunkLength, (long) chunkCount * chunkLength, offsets);
+
+        try (CompressionMetadata metadata = CompressionMetadata.open(f, compressedFileLength, true))
+        {
+            for (int idx : new int[]{ 0, 1, 32767, 32768, 32769 })
+                assertThat(metadata.getDataOffsetForChunkOffset(offsets[idx]))
+                .describedAs("data offset for chunk %s", idx)
+                .isEqualTo((long) idx * chunkLength);
+        }
     }
 
     private CompressionMetadata createMetadata(long dataLength, long compressedFileLength, long... offsets) throws IOException

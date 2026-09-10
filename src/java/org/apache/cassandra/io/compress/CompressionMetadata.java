@@ -503,7 +503,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
             else if (offset > chunkOffset)
                 h = idx - 1;
             else
-                return (idx + startChunkIndex) << chunkLengthBits;
+                return ((long) idx + startChunkIndex) << chunkLengthBits;
         }
 
         throw new IllegalArgumentException("No chunk with offset " + chunkOffset);
