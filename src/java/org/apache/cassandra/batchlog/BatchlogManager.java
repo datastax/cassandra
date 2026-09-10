@@ -102,6 +102,7 @@ public class BatchlogManager implements BatchlogManagerMBean
     public static final long BATCHLOG_REPLAY_TIMEOUT = BATCHLOG_REPLAY_TIMEOUT_IN_MS.getLong(DatabaseDescriptor.getWriteRpcTimeout(MILLISECONDS) * 2);
 
     private volatile long totalBatchesReplayed = 0; // no concurrency protection necessary as only written by replay thread.
+    private volatile long hintedBatchesReplayed = 0;
     private volatile TimeUUID lastReplayedUuid = TimeUUID.minAtUnixMillis(0);
 
     // Batches whose mutations have completed (applied locally, acknowledged by remote replicas, or
@@ -204,6 +205,11 @@ public class BatchlogManager implements BatchlogManagerMBean
     public long getTotalBatchesReplayed()
     {
         return totalBatchesReplayed;
+    }
+
+    public long getHintedBatchesReplayed()
+    {
+        return hintedBatchesReplayed;
     }
 
     @VisibleForTesting
@@ -463,7 +469,10 @@ public class BatchlogManager implements BatchlogManagerMBean
         for (ReplayingBatch batch : batches)
         {
             batch.finish();
-            hintedNodes.addAll(batch.hintedNodes());
+            Set<UUID> batchHintedNodes = batch.hintedNodes();
+            if (!batchHintedNodes.isEmpty())
+                ++hintedBatchesReplayed;
+            hintedNodes.addAll(batchHintedNodes);
             if (tryNotifyInterceptor(batch))
             {
                 replayedBatches.add(batch.id);
@@ -475,7 +484,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 // completed though, so remember that (along with the hosts hinted for it) and let
                 // later cycles retry the callback alone instead of replaying the whole batch
                 // (and writing another round of hints).
-                batchesAwaitingInterceptor.put(batch.id, batch.hintedNodes());
+                batchesAwaitingInterceptor.put(batch.id, batchHintedNodes);
             }
         }
 
@@ -563,7 +572,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 {
                     handler.get();
                 }
-                catch (WriteTimeoutException|WriteFailureException e)
+                catch (WriteTimeoutException | WriteFailureException e)
                 {
                     logger.trace("Failed replaying a batched mutation to a node, will write a hint");
                     logger.trace("Failure was : {}", e.getMessage());

@@ -28,7 +28,10 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
 import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.gms.IFailureDetector;
+import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -101,6 +104,7 @@ public class BatchlogManagerTest
         metadata.updateNormalToken(Util.token("A"), localhost);
         metadata.updateHostId(UUID.randomUUID(), localhost);
         Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).truncateBlocking();
+        BatchlogManager.instance.resetLastReplayedUuid();
     }
 
     @Test
@@ -207,69 +211,77 @@ public class BatchlogManagerTest
     {
         TableMetadata cf2 = Schema.instance.getTableMetadata(KEYSPACE1, CF_STANDARD2);
         TableMetadata cf3 = Schema.instance.getTableMetadata(KEYSPACE1, CF_STANDARD3);
-        // Generate 2000 mutations (1000 batchlog entries) and put them all into the batchlog.
-        // Each batchlog entry with a mutation for Standard2 and Standard3.
-        // In the middle of the process, 'truncate' Standard2.
-        for (int i = 0; i < 1000; i++)
+
+        try
         {
-            Mutation mutation1 = new RowUpdateBuilder(cf2, FBUtilities.timestampMicros(), ByteBufferUtil.bytes(i))
-                .clustering("name" + i)
-                .add("val", "val" + i)
-                .build();
-            Mutation mutation2 = new RowUpdateBuilder(cf3, FBUtilities.timestampMicros(), ByteBufferUtil.bytes(i))
-                .clustering("name" + i)
-                .add("val", "val" + i)
-                .build();
-
-            List<Mutation> mutations = Lists.newArrayList(mutation1, mutation2);
-
-            // Make sure it's ready to be replayed, so adjust the timestamp.
-            long timestamp = currentTimeMillis() - BatchlogManager.getBatchlogTimeout();
-
-            if (i == 500)
-                SystemKeyspace.saveTruncationRecord(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata.id,
-                                                    timestamp,
-                                                    CommitLogPosition.NONE);
-
-            // Adjust the timestamp (slightly) to make the test deterministic.
-            if (i >= 500)
-                timestamp++;
-            else
-                timestamp--;
-
-            BatchlogManager.store(Batch.createLocal(atUnixMillis(timestamp, i), FBUtilities.timestampMicros(), mutations));
-        }
-
-        // Flush the batchlog to disk (see CASSANDRA-6822).
-        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
-
-        // Force batchlog replay and wait for it to complete.
-        BatchlogManager.instance.startBatchlogReplay().get();
-
-        // We should see half of Standard2-targeted mutations written after the replay and all of Standard3 mutations applied.
-        for (int i = 0; i < 1000; i++)
-        {
-            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = int_as_blob(%d)", KEYSPACE1, CF_STANDARD2,i));
-            assertNotNull(result);
-            if (i >= 500)
+            // Generate 2000 mutations (1000 batchlog entries) and put them all into the batchlog.
+            // Each batchlog entry with a mutation for Standard2 and Standard3.
+            // In the middle of the process, 'truncate' Standard2.
+            for (int i = 0; i < 1000; i++)
             {
+                Mutation mutation1 = new RowUpdateBuilder(cf2, FBUtilities.timestampMicros(), ByteBufferUtil.bytes(i))
+                                     .clustering("name" + i)
+                                     .add("val", "val" + i)
+                                     .build();
+                Mutation mutation2 = new RowUpdateBuilder(cf3, FBUtilities.timestampMicros(), ByteBufferUtil.bytes(i))
+                                     .clustering("name" + i)
+                                     .add("val", "val" + i)
+                                     .build();
+
+                List<Mutation> mutations = Lists.newArrayList(mutation1, mutation2);
+
+                // Make sure it's ready to be replayed, so adjust the timestamp.
+                long timestamp = currentTimeMillis() - BatchlogManager.getBatchlogTimeout();
+
+                if (i == 500)
+                    SystemKeyspace.saveTruncationRecord(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata.id,
+                                                        timestamp,
+                                                        CommitLogPosition.NONE);
+
+                // Adjust the timestamp (slightly) to make the test deterministic.
+                if (i >= 500)
+                    timestamp++;
+                else
+                    timestamp--;
+
+                BatchlogManager.store(Batch.createLocal(atUnixMillis(timestamp, i), FBUtilities.timestampMicros(), mutations));
+            }
+
+            // Flush the batchlog to disk (see CASSANDRA-6822).
+            Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+            // Force batchlog replay and wait for it to complete.
+            BatchlogManager.instance.startBatchlogReplay().get();
+
+            // We should see half of Standard2-targeted mutations written after the replay and all of Standard3 mutations applied.
+            for (int i = 0; i < 1000; i++)
+            {
+                UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = int_as_blob(%d)", KEYSPACE1, CF_STANDARD2,i));
+                assertNotNull(result);
+                if (i >= 500)
+                {
+                    assertEquals(ByteBufferUtil.bytes(i), result.one().getBytes("key"));
+                    assertEquals("name" + i, result.one().getString("name"));
+                    assertEquals("val" + i, result.one().getString("val"));
+                }
+                else
+                {
+                    assertTrue(result.isEmpty());
+                }
+            }
+
+            for (int i = 0; i < 1000; i++)
+            {
+                UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = int_as_blob(%d)", KEYSPACE1, CF_STANDARD3, i));
+                assertNotNull(result);
                 assertEquals(ByteBufferUtil.bytes(i), result.one().getBytes("key"));
                 assertEquals("name" + i, result.one().getString("name"));
                 assertEquals("val" + i, result.one().getString("val"));
             }
-            else
-            {
-                assertTrue(result.isEmpty());
-            }
         }
-
-        for (int i = 0; i < 1000; i++)
+        finally
         {
-            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = int_as_blob(%d)", KEYSPACE1, CF_STANDARD3, i));
-            assertNotNull(result);
-            assertEquals(ByteBufferUtil.bytes(i), result.one().getBytes("key"));
-            assertEquals("name" + i, result.one().getString("name"));
-            assertEquals("val" + i, result.one().getString("val"));
+            SystemKeyspace.removeTruncationRecord(cf2.id);
         }
     }
 
@@ -411,5 +423,105 @@ public class BatchlogManagerTest
 
         // Clean up
         BatchlogManager.remove(uuid);
+    }
+
+    @Test
+    public void testReplayWithDownPeer() throws Exception
+    {
+        TokenMetadata metadata = StorageService.instance.getTokenMetadata();
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.2");
+        UUID peerHostId = UUID.randomUUID();
+
+        long initialReplayedBatches = BatchlogManager.instance.getTotalBatchesReplayed();
+        long initialHintedBatches = BatchlogManager.instance.getHintedBatchesReplayed();
+        long initialHints = StorageMetrics.totalHints.getCount();
+
+        TableMetadata cfm = Keyspace.open(KEYSPACE1)
+                                    .getColumnFamilyStore(CF_STANDARD1)
+                                    .metadata();
+
+        Mutation mutation = new RowUpdateBuilder(cfm,
+                                                 FBUtilities.timestampMicros(),
+                                                 ByteBufferUtil.bytes("down-peer"))
+                            .clustering("name")
+                            .add("val", "value")
+                            .build();
+
+        try
+        {
+            metadata.updateNormalToken(mutation.key().getToken(), peer);
+            metadata.updateHostId(peerHostId, peer);
+
+            // The peer has no live gossip state, so batchlog replay considers it down.
+            assertFalse(IFailureDetector.instance.isAlive(peer));
+
+            long timestamp = currentTimeMillis() - BatchlogManager.getBatchlogTimeout();
+
+            BatchlogManager.store(Batch.createLocal(atUnixMillis(timestamp, 0),
+                                                    timestamp * 1000,
+                                                    Collections.singletonList(mutation)));
+
+            BatchlogManager.instance.startBatchlogReplay().get();
+
+            assertEquals(initialReplayedBatches + 1,
+                         BatchlogManager.instance.getTotalBatchesReplayed());
+
+            // Verify that a real hint was generated.
+            assertEquals(initialHints + 1,
+                         StorageMetrics.totalHints.getCount());
+
+            // And verify that the replay is accounted as a hinted replay.
+            assertEquals(initialHintedBatches + 1,
+                         BatchlogManager.instance.getHintedBatchesReplayed());
+        }
+        finally
+        {
+            HintsService.instance.deleteAllHintsForEndpoint(peer);
+            metadata.removeEndpoint(peer);
+        }
+    }
+
+    @Test
+    public void testExpiredBatch() throws Exception
+    {
+        long initialAllBatches = BatchlogManager.instance.countAllBatches();
+        long initialReplayedBatches = BatchlogManager.instance.getTotalBatchesReplayed();
+        long initialHintedBatches = BatchlogManager.instance.getHintedBatchesReplayed();
+
+        TableMetadata cfm = Keyspace.open(KEYSPACE1)
+                                    .getColumnFamilyStore(CF_STANDARD1)
+                                    .metadata();
+
+        // Make the batch old enough to be both replay-eligible and expired.
+        long age = Math.max(BatchlogManager.getBatchlogTimeout(),
+                            cfm.params.gcGraceSeconds * 1000L) + 1000L;
+        long timestamp = currentTimeMillis() - age;
+
+        Mutation mutation = new RowUpdateBuilder(cfm,
+                                                 timestamp * 1000,
+                                                 ByteBufferUtil.bytes("expired"))
+                            .clustering("name")
+                            .add("val", "value")
+                            .build();
+
+        BatchlogManager.store(Batch.createLocal(atUnixMillis(timestamp, 0),
+                                                timestamp * 1000,
+                                                Collections.singletonList(mutation)));
+
+        assertEquals(initialAllBatches + 1,
+                     BatchlogManager.instance.countAllBatches());
+
+        // Force batchlog replay and wait for it to complete.
+        BatchlogManager.instance.startBatchlogReplay().get();
+
+        // The expired batch is processed and removed...
+        assertEquals(initialAllBatches,
+                     BatchlogManager.instance.countAllBatches());
+        assertEquals(initialReplayedBatches + 1,
+                     BatchlogManager.instance.getTotalBatchesReplayed());
+
+        // ... but no replay was sent, therefore no hint was generated.
+        assertEquals(initialHintedBatches,
+                     BatchlogManager.instance.getHintedBatchesReplayed());
     }
 }
