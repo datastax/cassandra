@@ -25,6 +25,8 @@ import java.util.stream.Collectors;
 
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.assertj.core.api.Assertions;
 
 import org.junit.Before;
@@ -1124,6 +1126,110 @@ public class BM25Test extends SAITester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, m frozen<map<text, text>>)");
         assertInvalidMessage("Cannot use an analyzer on full(m) because it's a frozen collection.",
                              "CREATE CUSTOM INDEX ON %s(FULL(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+    }
+
+    /**
+     * Verify that the selectivity of the filtering effects of BM25 ordering is considered at query planning,
+     * so BM25's index scan can be preferred to other filters depending on that selectivity.
+     * Also verify that index hints are considered when selecting between filter-then-sort and sort-then-filter.
+     */
+    @Test
+    public void testPlaningOnHybridQueries()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        String literalIndex = createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        String numericIndex = createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 0, 'apple', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 1, 'apple', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 2, 'apple', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 3, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 4, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 5, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 6, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 7, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 8, 'orange', 0)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 9, 'orange', 0)");
+
+        // Verify BM25-only queries
+
+        assertQueryHasSubplan("SELECT c FROM %s ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.Bm25IndexScan.class,
+                              row(0), row(1), row(2));
+        assertQueryHasSubplan("SELECT c FROM %s ORDER BY s BM25 OF 'orange' LIMIT 5",
+                              Plan.Bm25IndexScan.class,
+                              row(3), row(4), row(5), row(6), row(7));
+        assertQueryHasSubplan("SELECT c FROM %s ORDER BY s BM25 OF 'banana' LIMIT 5",
+                              Plan.Bm25IndexScan.class);
+
+        // Verify numeric-only queries
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(0), row(1), row(2), row(3), row(4));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(8), row(9));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 LIMIT 5",
+                              Plan.NumericIndexScan.class);
+
+        // Verify hybrid queries
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.NumericIndexScan.class, // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              row(0), row(1), row(2));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'orange' LIMIT 5",
+                              Plan.NumericIndexScan.class, // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              row(3), row(4), row(5), row(6), row(7));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'banana' LIMIT 5",
+                              Plan.NumericIndexScan.class); // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.NumericIndexScan.class);
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(8), row(9));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'banana' LIMIT 5",
+                              Plan.NumericIndexScan.class); // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.NumericIndexScan.class);
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'orange' LIMIT 5",
+                              Plan.NumericIndexScan.class);
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'banana' LIMIT 5",
+                              Plan.NumericIndexScan.class);
+
+        // Verify index hints with a hybrid query that would use the sort-then-filter index without hints
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH included_indexes = {" + numericIndex + '}',
+                              Plan.NumericIndexScan.class,
+                              row(0), row(1), row(2));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH included_indexes = {" + literalIndex + '}',
+                              Plan.Bm25IndexScan.class,
+                              row(0), row(1), row(2));
+        assertInvalidMessage(IndexContext.MULTIPLE_HINTS_WITH_ORDER_BY_ERRROR_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH included_indexes = {" + numericIndex + ',' + literalIndex + '}');
+        assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH excluded_indexes = {" + numericIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH excluded_indexes = {" + literalIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
+
+        // Verify index hints with a hybrid query that would use filter-then-sort without hints
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH included_indexes = {" + numericIndex + '}',
+                              Plan.NumericIndexScan.class,
+                              row(8), row(9));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH included_indexes = {" + literalIndex + '}',
+                              Plan.Bm25IndexScan.class,
+                              row(8), row(9));
+        assertInvalidMessage(IndexContext.MULTIPLE_HINTS_WITH_ORDER_BY_ERRROR_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH included_indexes = {" + numericIndex + ',' + literalIndex + '}');
+        assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH excluded_indexes = {" + numericIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH excluded_indexes = {" + literalIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
     }
 
     private void assertCannotBeRestrictedByClustering(String query, String column)
