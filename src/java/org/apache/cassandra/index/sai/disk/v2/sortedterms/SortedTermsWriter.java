@@ -25,7 +25,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Preconditions;
 
-import io.micrometer.core.lang.NonNull;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
@@ -101,8 +100,8 @@ public class SortedTermsWriter implements Closeable
      * @param termsDataBlockOffsets  where to write the offsets of each block of terms data
      * @param trieComponent component where to write the trie that maps the terms to point ids
      */
-    public SortedTermsWriter(@NonNull IndexComponent.ForWrite termsDataComponent,
-                             @NonNull MetadataWriter metadataWriter,
+    public SortedTermsWriter(@Nonnull IndexComponent.ForWrite termsDataComponent,
+                             @Nonnull MetadataWriter metadataWriter,
                              @Nonnull NumericValuesWriter termsDataBlockOffsets,
                              @Nonnull IndexComponent.ForWrite trieComponent) throws IOException
     {
