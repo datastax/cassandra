@@ -42,7 +42,7 @@ CASSANDRA_HOME=/usr/share/cassandra
 CASSANDRA_CONF=$CONFDIR
 FD_LIMIT=100000
 
-[ -e /usr/share/cassandra/apache-cassandra.jar ] || exit 0
+[ -e /usr/share/cassandra/cassandra.jar ] || exit 0
 [ -e /etc/cassandra/cassandra.yaml ] || exit 0
 [ -e /etc/cassandra/cassandra-env.sh ] || exit 0
 

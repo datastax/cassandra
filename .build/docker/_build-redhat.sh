@@ -109,8 +109,9 @@ else
 fi
 
 # Artifact will only be used internally for build process and won't be found with snapshot suffix
+PROJECT_NAME="$(sed -n 's/.*<project[^>]*name="\([^"]*\)".*/\1/p' build.xml | head -1)"
 ant artifacts -Drelease=true -Dant.gen-doc.skip=true -Djavadoc.skip=true -Dcheck.skip=true
-cp ${DIST_DIR}/apache-cassandra-*-src.tar.gz ${RPM_BUILD_DIR}/SOURCES/
+cp ${DIST_DIR}/${PROJECT_NAME}-*-src.tar.gz ${RPM_BUILD_DIR}/SOURCES/
 
 # if CASSANDRA_VERSION is -alphaN, -betaN, -rcN, then rpmbuild fails on the '-' char; replace with '~'
 CASSANDRA_VERSION=${CASSANDRA_VERSION/-/\~}
