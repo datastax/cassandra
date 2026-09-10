@@ -19,16 +19,32 @@
 package org.apache.cassandra.sensors;
 
 /**
- * Test-only {@link SensorsFactory} that extends {@link ActiveSensorsFactory} and overrides
- * {@link #createCostCalculator()} to return a {@link TestCostCalculator}, so that
- * {@link CostCalculator#INSTANCE} is non-noop in unit tests and assertions on non-zero
- * cost values work without modifying production code.
+ * No-op implementation of {@link CostCalculator} that always returns {@code 0}.
+ * Used as the default when no concrete cost calculation is configured.
  */
-public class TestSensorsFactory extends ActiveSensorsFactory
+public class NoOpCostCalculator implements CostCalculator
 {
-    @Override
-    public CostCalculator createCostCalculator()
+    public static final NoOpCostCalculator instance = new NoOpCostCalculator();
+
+    private NoOpCostCalculator()
     {
-        return TestCostCalculator.instance;
+    }
+
+    @Override
+    public double computeReadCost(RequestSensors sensors, Context context)
+    {
+        return 0;
+    }
+
+    @Override
+    public double computeWriteCost(RequestSensors sensors, Context context)
+    {
+        return 0;
+    }
+
+    @Override
+    public double computeTotalCost(RequestSensors sensors)
+    {
+        return 0;
     }
 }

@@ -20,16 +20,29 @@ package org.apache.cassandra.sensors;
 
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.utils.FBUtilities;
+
 /**
- * Abstraction for computing a coordinator-level cost for read and write operations.
+ * Abstraction for computing a coordinator-level cost for read and write operations using {@link Sensor}s.
  *
- * <p>The C* layer ships with a {@link NoopCostCalculator} that always returns {@code 0}.
- * Concrete implementations that derive cost from byte counts and execution time should live
- * outside this module and be registered via {@link SensorsFactory#createCostCalculator()}.
+ * <p>Three cost types are supported, computed in order by {@link #computeCost(RequestSensors)}:
+ * <ol>
+ *   <li>{@link Type#READ_COST} — per keyspace/table, derived from read bytes and execution time.</li>
+ *   <li>{@link Type#WRITE_COST} — per keyspace/table, derived from write bytes (including index writes) and execution time.</li>
+ *   <li>{@link Type#TOTAL_COST} — a single request-level aggregate across all contexts.</li>
+ * </ol>
+ *
+ * <p>The default implementation is {@link NoOpCostCalculator}, which always returns {@code 0}.
+ * A custom implementation can be plugged in by setting the
+ * {@link CassandraRelevantProperties#COST_CALCULATOR} system property to a fully-qualified class
+ * name; the class must have a no-arg constructor and implement this interface.
  */
 public interface CostCalculator
 {
-    CostCalculator INSTANCE = SensorsFactory.instance.createCostCalculator();
+    CostCalculator INSTANCE = CassandraRelevantProperties.COST_CALCULATOR.isPresent()
+                              ? FBUtilities.construct(CassandraRelevantProperties.COST_CALCULATOR.getString(), "cost calculator")
+                              : NoOpCostCalculator.instance;
 
     /**
      * Computes the read cost for the given context, based on the given request sensors.

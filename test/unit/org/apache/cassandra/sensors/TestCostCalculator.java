@@ -22,7 +22,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Test-only {@link CostCalculator} implementing a byte+execution-time cost formula.
- * Kept in test sources so that the production tree ships only the {@link NoopCostCalculator},
+ * Kept in test sources so that the production tree ships only the {@link NoOpCostCalculator},
  * while unit tests can still assert non-zero cost values.
  *
  * <pre>
@@ -30,8 +30,8 @@ import org.apache.cassandra.utils.FBUtilities;
  *   writeCost = max(write_latency_ns / 1e9, (write_bytes + index_write_bytes) / (baseline_write / cores)) * 4000
  * </pre>
  *
- * <p>When constructed with the no-arg constructor (used by {@link TestSensorsFactory}), baseline
- * values default to {@code -1} (not configured) and cost reduces to {@code bytes * 4000}.
+ * <p>When constructed with the no-arg constructor, baseline values default to {@code -1}
+ * (not configured) and cost reduces to {@code bytes * 4000}.
  * Tests that need exact normalized values should use the explicit 2- or 3-arg constructor.
  */
 public class TestCostCalculator implements CostCalculator
@@ -39,9 +39,6 @@ public class TestCostCalculator implements CostCalculator
     private static final double NANOS_PER_SECOND = 1_000_000_000.0;
     private static final double DEFAULT_COST_SCALE = 4000.0;
     private static final long DEFAULT_BASELINE = -1L;
-
-    /** Singleton used by {@link TestSensorsFactory} so that {@link CostCalculator#INSTANCE} is non-noop in tests. */
-    public static final TestCostCalculator instance = new TestCostCalculator();
 
     private final double costScale;
     private final double baselineReadBytesPerCore;
@@ -54,11 +51,6 @@ public class TestCostCalculator implements CostCalculator
     public TestCostCalculator()
     {
         this(DEFAULT_BASELINE, DEFAULT_BASELINE, FBUtilities.getAvailableProcessors());
-    }
-
-    public TestCostCalculator(double baselineReadBytes, double baselineWriteBytes)
-    {
-        this(baselineReadBytes, baselineWriteBytes, FBUtilities.getAvailableProcessors());
     }
 
     public TestCostCalculator(double baselineReadBytes, double baselineWriteBytes, int numCores)

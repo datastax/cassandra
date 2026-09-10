@@ -57,7 +57,8 @@ public class CoordinatorMUTest
     @BeforeClass
     public static void setUpClass()
     {
-        CassandraRelevantProperties.SENSORS_FACTORY.setString(TestSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
+        CassandraRelevantProperties.COST_CALCULATOR.setString(TestCostCalculator.class.getName());
         CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
 
         DatabaseDescriptor.daemonInitialization();

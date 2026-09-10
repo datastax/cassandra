@@ -76,12 +76,4 @@ public interface SensorsFactory
         return NOOP_SENSOR_ENCODER;
     }
 
-    /**
-     * Creates the {@link CostCalculator} used to compute read and write costs.
-     * The default implementation returns the no-op calculator which always returns {@code 0}.
-     */
-    default CostCalculator createCostCalculator()
-    {
-        return NoopCostCalculator.instance;
-    }
 }
