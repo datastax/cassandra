@@ -152,6 +152,7 @@ public class UpdateStatement extends ModificationStatement
             SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.WRITE_COST);
             // CAS updates incorporate a Paxos read, so READ_BYTES is always tracked
             SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, Context.request(), Type.TOTAL_COST);
         }
         return result;
     }

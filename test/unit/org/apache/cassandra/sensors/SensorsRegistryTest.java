@@ -106,10 +106,10 @@ public class SensorsRegistryTest
         assertThat(SensorsRegistry.instance.getSensorsByKeyspace(KEYSPACE)).containsAll(
         ImmutableSet.of(context1Type1Sensor, context1Type2Sensor, context2Type1Sensor, context2Type2Sensor));
 
-        assertThat(SensorsRegistry.instance.getSensorsByTableId(context1.getTableId())).containsAll(
+        assertThat(SensorsRegistry.instance.getSensorsByTableId(context1.getTableId().orElseThrow())).containsAll(
         ImmutableSet.of(context1Type1Sensor, context1Type2Sensor));
 
-        assertThat(SensorsRegistry.instance.getSensorsByTableId(context2.getTableId())).containsAll(
+        assertThat(SensorsRegistry.instance.getSensorsByTableId(context2.getTableId().orElseThrow())).containsAll(
         ImmutableSet.of(context2Type1Sensor, context2Type2Sensor));
 
         assertThat(SensorsRegistry.instance.getSensorsByType(type1)).containsAll(
@@ -247,7 +247,7 @@ public class SensorsRegistryTest
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
         assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
 
-        SensorsRegistry.instance.removeSensorsByKeyspace(context1.getKeyspace());
+        SensorsRegistry.instance.removeSensorsByKeyspace(context1.getKeyspace().orElseThrow());
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isEmpty();
         assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isEmpty();
 
@@ -269,11 +269,49 @@ public class SensorsRegistryTest
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
         assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
 
-        SensorsRegistry.instance.removeSensorsByTableId(context1.getKeyspace(), context1.getTableId());
+        SensorsRegistry.instance.removeSensorsByTableId(context1.getKeyspace().orElseThrow(), context1.getTableId().orElseThrow());
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isEmpty();
         assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
 
         SensorsRegistry.instance.getOrCreateSensor(context1, type1);
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
+    }
+
+    @Test
+    public void testRequestContextSensorCreatedWithoutSchemaRegistration()
+    {
+        // No onCreateKeyspace / onCreateTable called — request-context sensors bypass the schema gate.
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(Context.request(), Type.TOTAL_COST)).isPresent();
+    }
+
+    @Test
+    public void testRequestContextSensorNotIndexedByKeyspaceOrTableId()
+    {
+        SensorsRegistry.instance.getOrCreateSensor(Context.request(), Type.TOTAL_COST);
+
+        // The singleton request context has no keyspace or table-id, so it must not appear in
+        // any keyspace- or table-scoped index.
+        assertThat(SensorsRegistry.instance.getSensorsByKeyspace(KEYSPACE)).isEmpty();
+        assertThat(SensorsRegistry.instance.getSensorsByTableId(
+                Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata().id.toString())).isEmpty();
+
+        // But it is reachable by type.
+        assertThat(SensorsRegistry.instance.getSensorsByType(Type.TOTAL_COST)).isNotEmpty();
+    }
+
+    @Test
+    public void testRequestContextSensorSurvivesSchemaDrops()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+
+        Sensor totalCostSensor = SensorsRegistry.instance.getOrCreateSensor(Context.request(), Type.TOTAL_COST).get();
+
+        // Dropping the table and then the keyspace must not evict the request-level sensor.
+        SensorsRegistry.instance.onDropTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata(), false);
+        assertThat(SensorsRegistry.instance.getSensor(Context.request(), Type.TOTAL_COST)).hasValue(totalCostSensor);
+
+        SensorsRegistry.instance.onDropKeyspace(Keyspace.open(KEYSPACE).getMetadata(), false);
+        assertThat(SensorsRegistry.instance.getSensor(Context.request(), Type.TOTAL_COST)).hasValue(totalCostSensor);
     }
 }

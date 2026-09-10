@@ -23,8 +23,16 @@ import java.util.Optional;
 /**
  * Implementation of the {@link SensorsFactory} that creates:
  * <ul>
- *   <li> a new {@link ActiveRequestSensors} instance for all keyspaces.</li>
- *   <li> a singleton {@link SensorEncoder} implementation that encodes the sensor name as "<SENSOR_TYPE>_REQUEST.<TABLE_NAME>" for request sensors and "<SENSOR_TYPE>_GLOBAL.<TABLE_NAME>" for global sensors.</li>
+ *   <li>a new {@link ActiveRequestSensors} instance for all keyspaces.</li>
+ *   <li>a singleton {@link SensorEncoder} that encodes sensor names on the wire as follows:
+ *     <ul>
+ *       <li><b>Table-context sensors</b> — {@code <TYPE>_REQUEST.<keyspace>.<table>} for request sensors
+ *           and {@code <TYPE>_GLOBAL.<keyspace>.<table>} for global sensors.</li>
+ *       <li><b>Request-context sensors</b> (i.e. {@link Type#TOTAL_COST} keyed on {@link Context#request()}) —
+ *           {@code <TYPE>_REQUEST} and {@code <TYPE>_GLOBAL}, with no keyspace or table suffix, because
+ *           the sensor aggregates cost across the whole request rather than a single table.</li>
+ *     </ul>
+ *   </li>
  * </ul>
  */
 public class ActiveSensorsFactory implements SensorsFactory
@@ -34,13 +42,19 @@ public class ActiveSensorsFactory implements SensorsFactory
         @Override
         public Optional<String> encodeRequestSensorName(Sensor sensor)
         {
-            return Optional.of(sensor.getType() + "_REQUEST." + sensor.getContext().getKeyspace() + '.' + sensor.getContext().getTable());
+            Context ctx = sensor.getContext();
+            if (ctx.isRequestContext())
+                return Optional.of(sensor.getType() + "_REQUEST");
+            return Optional.of(sensor.getType() + "_REQUEST." + ctx.getKeyspace().get() + '.' + ctx.getTable().get());
         }
 
         @Override
         public Optional<String> encodeGlobalSensorName(Sensor sensor)
         {
-            return Optional.of(sensor.getType() + "_GLOBAL." + sensor.getContext().getKeyspace() + '.' + sensor.getContext().getTable());
+            Context ctx = sensor.getContext();
+            if (ctx.isRequestContext())
+                return Optional.of(sensor.getType() + "_GLOBAL");
+            return Optional.of(sensor.getType() + "_GLOBAL." + ctx.getKeyspace().get() + '.' + ctx.getTable().get());
         }
     };
 

@@ -135,14 +135,14 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.READ_COST);
-        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 400_000.0);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
 
         CostCalculator.computeCost(sensors);
 
         double expectedReadCost = 400_000.0 * 4000.0;
-        assertEquals(expectedReadCost, sensors.getSensor(context, Type.TOTAL_COST).get().getValue(), 0.0);
+        assertEquals(expectedReadCost, sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue(), 0.0);
     }
 
     @Test
@@ -156,14 +156,14 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WRITE_COST);
-        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000.0);
         sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
 
         CostCalculator.computeCost(sensors);
 
         double expectedWriteCost = 250_000.0 * 4000.0;
-        assertEquals(expectedWriteCost, sensors.getSensor(context, Type.TOTAL_COST).get().getValue(), 0.0);
+        assertEquals(expectedWriteCost, sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue(), 0.0);
     }
 
     @Test
@@ -181,14 +181,14 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.READ_COST);
         sensors.registerSensor(context, Type.WRITE_COST);
-        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 300_000.0);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 150_000.0);
 
         CostCalculator.computeCost(sensors);
 
         double expectedTotalCost = (300_000.0 + 150_000.0) * 4000.0;
-        assertEquals(expectedTotalCost, sensors.getSensor(context, Type.TOTAL_COST).get().getValue(), 0.0);
+        assertEquals(expectedTotalCost, sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue(), 0.0);
     }
 
     @Test

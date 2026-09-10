@@ -39,13 +39,13 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
  * Tests that the coordinator correctly computes READ_COST, WRITE_COST, and TOTAL_COST from replica byte-sensors and
- * coordinator-measured latency, then exposes READ_COST/WRITE_COST in the CQL custom payload while keeping
- * TOTAL_COST registry-only (never sent in CQL responses).
+ * coordinator-measured latency, then exposes all three in the CQL custom payload.
+ * READ_COST and WRITE_COST are keyed per-table; TOTAL_COST is keyed on {@link Context#request()} and
+ * aggregates cost across all tables touched by the request.
  */
 public class CoordinatorMUTest
 {
@@ -260,7 +260,7 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.READ_COST);
-        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000);
 
         CostCalculator.computeCost(sensors);
@@ -268,7 +268,7 @@ public class CoordinatorMUTest
         double expectedReadCost = 500_000.0 * MU_SCALE; // no baseline → bytes * MU_SCALE
         assertThat(sensors.getSensor(context, Type.READ_COST).get().getValue()).isEqualTo(expectedReadCost);
         assertThat(sensors.getSensor(context, Type.WRITE_COST)).isEmpty();
-        assertThat(sensors.getSensor(context, Type.TOTAL_COST).get().getValue()).isEqualTo(expectedReadCost);
+        assertThat(sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue()).isEqualTo(expectedReadCost);
     }
 
     @Test
@@ -283,7 +283,7 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WRITE_COST);
-        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000);
 
         CostCalculator.computeCost(sensors);
@@ -291,7 +291,7 @@ public class CoordinatorMUTest
         double expectedWriteCost = 300_000.0 * MU_SCALE;
         assertThat(sensors.getSensor(context, Type.WRITE_COST).get().getValue()).isEqualTo(expectedWriteCost);
         assertThat(sensors.getSensor(context, Type.READ_COST)).isEmpty();
-        assertThat(sensors.getSensor(context, Type.TOTAL_COST).get().getValue()).isEqualTo(expectedWriteCost);
+        assertThat(sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue()).isEqualTo(expectedWriteCost);
     }
 
     @Test
@@ -310,7 +310,7 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         sensors.registerSensor(context, Type.READ_COST);
         sensors.registerSensor(context, Type.WRITE_COST);
-        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 400_000);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 200_000);
 
@@ -320,7 +320,41 @@ public class CoordinatorMUTest
         double expectedWriteCost = 200_000.0 * MU_SCALE;
         assertThat(sensors.getSensor(context, Type.READ_COST).get().getValue()).isEqualTo(expectedReadCost);
         assertThat(sensors.getSensor(context, Type.WRITE_COST).get().getValue()).isEqualTo(expectedWriteCost);
-        assertThat(sensors.getSensor(context, Type.TOTAL_COST).get().getValue()).isEqualTo(expectedWriteCost + expectedReadCost);
+        assertThat(sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue()).isEqualTo(expectedWriteCost + expectedReadCost);
+    }
+
+    @Test
+    public void testComputeTotalCost_multipleTableContexts_sumsAcrossAllContexts()
+    {
+        // Multi-table batch write: two different table contexts in one RequestSensors.
+        // TOTAL_COST on Context.request() must equal the sum of both tables' WRITE_COST values.
+        String ks = "ks_tmu_multi";
+        Context ctx1 = new Context(ks, "t1", UUID.randomUUID().toString());
+        Context ctx2 = new Context(ks, "t2", UUID.randomUUID().toString());
+
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
+        // table 1: 300 000 write bytes
+        sensors.registerSensor(ctx1, Type.WRITE_BYTES);
+        sensors.registerSensor(ctx1, Type.WRITE_EXECUTION_TIME);
+        sensors.registerSensor(ctx1, Type.WRITE_COST);
+        sensors.incrementSensor(ctx1, Type.WRITE_BYTES, 300_000);
+        // table 2: 100 000 write bytes
+        sensors.registerSensor(ctx2, Type.WRITE_BYTES);
+        sensors.registerSensor(ctx2, Type.WRITE_EXECUTION_TIME);
+        sensors.registerSensor(ctx2, Type.WRITE_COST);
+        sensors.incrementSensor(ctx2, Type.WRITE_BYTES, 100_000);
+        // single request-level TOTAL_COST sensor
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
+
+        CostCalculator.computeCost(sensors);
+
+        double expectedWriteCostTable1 = 300_000.0 * MU_SCALE;
+        double expectedWriteCostTable2 = 100_000.0 * MU_SCALE;
+        assertThat(sensors.getSensor(ctx1, Type.WRITE_COST).get().getValue()).isEqualTo(expectedWriteCostTable1);
+        assertThat(sensors.getSensor(ctx2, Type.WRITE_COST).get().getValue()).isEqualTo(expectedWriteCostTable2);
+        // TOTAL_COST is a single sensor on Context.request(), aggregating both tables
+        assertThat(sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue())
+                .isEqualTo(expectedWriteCostTable1 + expectedWriteCostTable2);
     }
 
     @Test
@@ -329,7 +363,7 @@ public class CoordinatorMUTest
         // computeCost uses registered sensors as gates: it only increments cost sensor types
         // that were explicitly registered, leaving unregistered ones absent.
 
-        // ── read-only: only READ_COST registered ──────────────────────────────────────────
+        // ── read-only: READ_COST registered, TOTAL_COST not registered → request-level TOTAL_COST absent ──
         String ks1 = "ks_gate_r";
         Context ctx1 = new Context(ks1, "t", UUID.randomUUID().toString());
         RequestSensors readSensors = SensorsFactory.instance.createRequestSensors(ks1);
@@ -341,9 +375,9 @@ public class CoordinatorMUTest
 
         assertThat(readSensors.getSensor(ctx1, Type.READ_COST)).isPresent();
         assertThat(readSensors.getSensor(ctx1, Type.WRITE_COST)).isEmpty();
-        assertThat(readSensors.getSensor(ctx1, Type.TOTAL_COST)).isEmpty();
+        assertThat(readSensors.getSensor(Context.request(), Type.TOTAL_COST)).isEmpty();
 
-        // ── write-only: only WRITE_COST registered ────────────────────────────────────────
+        // ── write-only: WRITE_COST registered, TOTAL_COST not registered → request-level TOTAL_COST absent ──
         String ks2 = "ks_gate_w";
         Context ctx2 = new Context(ks2, "t", UUID.randomUUID().toString());
         RequestSensors writeSensors = SensorsFactory.instance.createRequestSensors(ks2);
@@ -355,7 +389,7 @@ public class CoordinatorMUTest
 
         assertThat(writeSensors.getSensor(ctx2, Type.READ_COST)).isEmpty();
         assertThat(writeSensors.getSensor(ctx2, Type.WRITE_COST)).isPresent();
-        assertThat(writeSensors.getSensor(ctx2, Type.TOTAL_COST)).isEmpty();
+        assertThat(writeSensors.getSensor(Context.request(), Type.TOTAL_COST)).isEmpty();
 
         // ── all three registered: all three populated ────────────────────────────────────
         String ks3 = "ks_gate_all";
@@ -367,88 +401,93 @@ public class CoordinatorMUTest
         allSensors.registerSensor(ctx3, Type.WRITE_EXECUTION_TIME);
         allSensors.registerSensor(ctx3, Type.READ_COST);
         allSensors.registerSensor(ctx3, Type.WRITE_COST);
-        allSensors.registerSensor(ctx3, Type.TOTAL_COST);
+        allSensors.registerSensor(Context.request(), Type.TOTAL_COST);
         allSensors.incrementSensor(ctx3, Type.READ_BYTES, 100_000);
         allSensors.incrementSensor(ctx3, Type.WRITE_BYTES, 50_000);
         CostCalculator.computeCost(allSensors);
 
         assertThat(allSensors.getSensor(ctx3, Type.READ_COST).get().getValue()).isGreaterThan(0);
         assertThat(allSensors.getSensor(ctx3, Type.WRITE_COST).get().getValue()).isGreaterThan(0);
-        assertThat(allSensors.getSensor(ctx3, Type.TOTAL_COST).get().getValue()).isGreaterThan(0);
+        assertThat(allSensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue()).isGreaterThan(0);
     }
 
     // ── computeCost syncs to global registry ─────────────────────────────────────────────────
 
     @Test
-    public void testComputeCost_syncsToGlobalRegistry()
+    public void testComputeCost_syncsReadCostToGlobalRegistry()
     {
-        // computeCost must sync cost sensors into the global registry by itself —
-        // callers do not need an additional syncAllSensors() call for cost sensors.
+        // computeCost must sync READ_COST into the global registry by itself.
+        String ks = "ks_sync_r";
+        String table = "t_sync_r";
+        String tableId = UUID.randomUUID().toString();
+        registerSchemaInRegistry(ks, table, tableId);
+        Context ctx = new Context(ks, table, tableId);
 
-        // ── read path ──────────────────────────────────────────────────────────────────────
-        String ks1 = "ks_sync_r";
-        String table1 = "t_sync_r";
-        String tableId1 = UUID.randomUUID().toString();
-        registerSchemaInRegistry(ks1, table1, tableId1);
-        Context ctx1 = new Context(ks1, table1, tableId1);
-
-        RequestSensors readSensors = SensorsFactory.instance.createRequestSensors(ks1);
-        readSensors.registerSensor(ctx1, Type.READ_BYTES);
-        readSensors.registerSensor(ctx1, Type.READ_EXECUTION_TIME);
-        readSensors.registerSensor(ctx1, Type.READ_COST);
-        readSensors.registerSensor(ctx1, Type.TOTAL_COST);
-        readSensors.incrementSensor(ctx1, Type.READ_BYTES, 600_000);
-        CostCalculator.computeCost(readSensors); // no syncAllSensors() call after this
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
+        sensors.registerSensor(ctx, Type.READ_BYTES);
+        sensors.registerSensor(ctx, Type.READ_EXECUTION_TIME);
+        sensors.registerSensor(ctx, Type.READ_COST);
+        sensors.incrementSensor(ctx, Type.READ_BYTES, 600_000);
+        CostCalculator.computeCost(sensors); // no syncAllSensors() call after this
 
         double expectedRead = 600_000.0 * MU_SCALE;
-        assertThat(SensorsRegistry.instance.getSensor(ctx1, Type.TOTAL_COST))
+        assertThat(SensorsRegistry.instance.getSensor(ctx, Type.READ_COST))
                 .isPresent()
                 .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedRead));
+    }
 
-        // ── write path ─────────────────────────────────────────────────────────────────────
-        String ks2 = "ks_sync_w";
-        String table2 = "t_sync_w";
-        String tableId2 = UUID.randomUUID().toString();
-        registerSchemaInRegistry(ks2, table2, tableId2);
-        Context ctx2 = new Context(ks2, table2, tableId2);
+    @Test
+    public void testComputeCost_syncsWriteCostToGlobalRegistry()
+    {
+        // computeCost must sync WRITE_COST into the global registry by itself.
+        String ks = "ks_sync_w";
+        String table = "t_sync_w";
+        String tableId = UUID.randomUUID().toString();
+        registerSchemaInRegistry(ks, table, tableId);
+        Context ctx = new Context(ks, table, tableId);
 
-        RequestSensors writeSensors = SensorsFactory.instance.createRequestSensors(ks2);
-        writeSensors.registerSensor(ctx2, Type.WRITE_BYTES);
-        writeSensors.registerSensor(ctx2, Type.WRITE_EXECUTION_TIME);
-        writeSensors.registerSensor(ctx2, Type.WRITE_COST);
-        writeSensors.registerSensor(ctx2, Type.TOTAL_COST);
-        writeSensors.incrementSensor(ctx2, Type.WRITE_BYTES, 250_000);
-        CostCalculator.computeCost(writeSensors); // no syncAllSensors() call after this
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
+        sensors.registerSensor(ctx, Type.WRITE_BYTES);
+        sensors.registerSensor(ctx, Type.WRITE_EXECUTION_TIME);
+        sensors.registerSensor(ctx, Type.WRITE_COST);
+        sensors.incrementSensor(ctx, Type.WRITE_BYTES, 250_000);
+        CostCalculator.computeCost(sensors); // no syncAllSensors() call after this
 
         double expectedWrite = 250_000.0 * MU_SCALE;
-        assertThat(SensorsRegistry.instance.getSensor(ctx2, Type.TOTAL_COST))
+        assertThat(SensorsRegistry.instance.getSensor(ctx, Type.WRITE_COST))
                 .isPresent()
                 .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedWrite));
+    }
 
-        // ── CAS path (read + write) ────────────────────────────────────────────────────────
-        String ks3 = "ks_sync_cas";
-        String table3 = "t_sync_cas";
-        String tableId3 = UUID.randomUUID().toString();
-        registerSchemaInRegistry(ks3, table3, tableId3);
-        Context ctx3 = new Context(ks3, table3, tableId3);
+    @Test
+    public void testComputeCost_syncsTotalCostToGlobalRegistry()
+    {
+        // computeCost must sync TOTAL_COST into the global registry by itself.
+        // TOTAL_COST is keyed on the singleton Context.request() — independent of which table
+        // was queried — so the registry assertion also uses Context.request().
+        String ks = "ks_sync_cas";
+        String table = "t_sync_cas";
+        String tableId = UUID.randomUUID().toString();
+        registerSchemaInRegistry(ks, table, tableId);
+        Context ctx = new Context(ks, table, tableId);
 
-        RequestSensors casSensors = SensorsFactory.instance.createRequestSensors(ks3);
-        casSensors.registerSensor(ctx3, Type.READ_BYTES);
-        casSensors.registerSensor(ctx3, Type.READ_EXECUTION_TIME);
-        casSensors.registerSensor(ctx3, Type.WRITE_BYTES);
-        casSensors.registerSensor(ctx3, Type.WRITE_EXECUTION_TIME);
-        casSensors.registerSensor(ctx3, Type.INDEX_WRITE_BYTES);
-        casSensors.registerSensor(ctx3, Type.READ_COST);
-        casSensors.registerSensor(ctx3, Type.WRITE_COST);
-        casSensors.registerSensor(ctx3, Type.TOTAL_COST);
-        casSensors.incrementSensor(ctx3, Type.READ_BYTES, 200_000);
-        casSensors.incrementSensor(ctx3, Type.WRITE_BYTES, 100_000);
-        CostCalculator.computeCost(casSensors); // no syncAllSensors() call after this
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
+        sensors.registerSensor(ctx, Type.READ_BYTES);
+        sensors.registerSensor(ctx, Type.READ_EXECUTION_TIME);
+        sensors.registerSensor(ctx, Type.WRITE_BYTES);
+        sensors.registerSensor(ctx, Type.WRITE_EXECUTION_TIME);
+        sensors.registerSensor(ctx, Type.INDEX_WRITE_BYTES);
+        sensors.registerSensor(ctx, Type.READ_COST);
+        sensors.registerSensor(ctx, Type.WRITE_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
+        sensors.incrementSensor(ctx, Type.READ_BYTES, 200_000);
+        sensors.incrementSensor(ctx, Type.WRITE_BYTES, 100_000);
+        CostCalculator.computeCost(sensors); // no syncAllSensors() call after this
 
-        double expectedCas = (200_000.0 + 100_000.0) * MU_SCALE;
-        assertThat(SensorsRegistry.instance.getSensor(ctx3, Type.TOTAL_COST))
+        double expectedTotal = (200_000.0 + 100_000.0) * MU_SCALE;
+        assertThat(SensorsRegistry.instance.getSensor(Context.request(), Type.TOTAL_COST))
                 .isPresent()
-                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedCas));
+                .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedTotal));
     }
 
     @Test
@@ -470,7 +509,7 @@ public class CoordinatorMUTest
 
         assertThat(SensorsRegistry.instance.getSensor(context, Type.READ_COST)).isEmpty();
         assertThat(SensorsRegistry.instance.getSensor(context, Type.WRITE_COST)).isEmpty();
-        assertThat(SensorsRegistry.instance.getSensor(context, Type.TOTAL_COST)).isEmpty();
+        assertThat(SensorsRegistry.instance.getSensor(Context.request(), Type.TOTAL_COST)).isEmpty();
     }
 
     @Test
@@ -490,24 +529,24 @@ public class CoordinatorMUTest
             sensors.registerSensor(context, Type.READ_BYTES);
             sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
             sensors.registerSensor(context, Type.READ_COST);
-            sensors.registerSensor(context, Type.TOTAL_COST);
+            sensors.registerSensor(Context.request(), Type.TOTAL_COST);
             sensors.incrementSensor(context, Type.READ_BYTES, 100_000);
             CostCalculator.computeCost(sensors); // no syncAllSensors() call after this
         }
 
         double expectedGlobalTotalCost = 2 * 100_000.0 * MU_SCALE;
-        assertThat(SensorsRegistry.instance.getSensor(context, Type.TOTAL_COST))
+        assertThat(SensorsRegistry.instance.getSensor(Context.request(), Type.TOTAL_COST))
                 .isPresent()
                 .hasValueSatisfying(s -> assertThat(s.getValue()).isEqualTo(expectedGlobalTotalCost));
     }
 
-    // ── TOTAL_COST absent from CQL response ──────────────────────────────────────────
+    // ── TOTAL_COST in CQL response ──────────────────────────────────────────────────
 
     @Test
-    public void testTotalCostIsNeverAddedToCQLResponse()
+    public void testTotalCostIsAddedToCQLResponse()
     {
-        // The production code never calls addSensorToCQLResponse for TOTAL_COST.
-        // Verify that a response populated with READ_COST contains no TOTAL_COST key at all.
+        // TOTAL_COST is sent in the CQL response as a single request-level entry keyed on Context.request().
+        // The wire key is TOTAL_COST_REQUEST (no table suffix).
         String ks = "ks_tmu_cql";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -515,40 +554,25 @@ public class CoordinatorMUTest
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.READ_COST);
-        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 0.1 * NANOS_PER_SECOND);
         CostCalculator.computeCost(sensors);
 
         ResultMessage result = new ResultMessage.Void();
-        // Only READ_COST is added — TOTAL_COST is intentionally never passed to addSensorToCQLResponse
         SensorsCustomParams.addSensorToCQLResponse(result, ProtocolVersion.V4, sensors, context, Type.READ_COST);
+        SensorsCustomParams.addSensorToCQLResponse(result, ProtocolVersion.V4, sensors, Context.request(), Type.TOTAL_COST);
 
         assertNotNull(result.getCustomPayload());
-        result.getCustomPayload().keySet().forEach(k ->
-                assertThat(k).as("CQL payload must not contain any TOTAL_COST key").doesNotStartWith("TOTAL_COST_"));
+
+        Sensor totalCostSensor = sensors.getSensor(Context.request(), Type.TOTAL_COST).get();
+        String totalCostKey = SensorsCustomParams.paramForRequestSensor(totalCostSensor).get();
+        assertThat(totalCostKey).isEqualTo("TOTAL_COST_REQUEST");
+        assertThat(result.getCustomPayload()).containsKey(totalCostKey);
+        double expectedTotalCost = 500_000.0 * MU_SCALE;
+        assertThat(result.getCustomPayload().get(totalCostKey).getDouble()).isEqualTo(expectedTotalCost);
     }
 
-    @Test
-    public void testAddSensorToCQLResponse_totalCost_returnsWithoutAddingPayload()
-    {
-        // Even if someone explicitly calls addSensorToCQLResponse for TOTAL_COST (which production code
-        // never does), the default SensorEncoder returns an empty Optional for TOTAL_COST (same keyspace
-        // format used for all types), so no entry is added when the sensor cannot be encoded.
-        // Here we exercise a plain ks/table context where the encoder CAN produce a name,
-        // confirming TOTAL_COST value reaches the payload only if explicitly requested — but the real
-        // guarantee is that production code never makes this call.
-        String ks = "ks_tmu_explicit";
-        Context context = new Context(ks, "t", UUID.randomUUID().toString());
-
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
-        sensors.registerSensor(context, Type.TOTAL_COST);
-        sensors.incrementSensor(context, Type.TOTAL_COST, 999.0);
-
-        ResultMessage result = new ResultMessage.Void();
-        // Confirm no TOTAL_COST key is written by the production flow (no call is made):
-        assertNull(result.getCustomPayload());
-    }
 
     // ── helpers ──────────────────────────────────────────────────────────────
 

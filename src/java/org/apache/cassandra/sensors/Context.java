@@ -19,21 +19,30 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Objects;
+import java.util.Optional;
 
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
- * Represents the context for a (group of) {@link Sensor}(s), made up of:
+ * Represents the context for a (group of) {@link Sensor}(s).
+ *
+ * <p>Two kinds of context exist:
  * <ul>
- *     <li>The keyspace the sensor refers to.</li>
- *     <li>The table the sensor refers to.</li>
- *     <li>The related table id.</li>
+ *   <li><b>Table context</b> — identifies a specific keyspace, table, and table-id. Created via
+ *       {@link #Context(String, String, String)}, {@link #from(TableMetadata)}, etc. All sensors
+ *       that track per-table measurements (bytes, execution time, per-table costs) use this.</li>
+ *   <li><b>Request context</b> — carries no keyspace or table identity. Created via
+ *       {@link #request()}. Used i.e. for the {@link Type#TOTAL_COST} sensor that
+ *       aggregates cost across all tables touched by one coordinator request.</li>
  * </ul>
  */
 public class Context
 {
+    /** Singleton request-level context. */
+    private static final Context REQUEST_CONTEXT = new Context(null, null, null);
+
     private final String keyspace;
     private final String table;
     private final String tableId;
@@ -48,19 +57,45 @@ public class Context
         this.hashCode = Objects.hash(keyspace, table, tableId);
     }
 
-    public String getKeyspace()
+    /**
+     * Returns the singleton request-level context, used for sensors that spans an entire coordinator request rather
+     * than a specific table.
+     */
+    public static Context request()
     {
-        return keyspace;
+        return REQUEST_CONTEXT;
     }
 
-    public String getTable()
+    /**
+     * Returns {@code true} if this is the request-level context (no keyspace/table identity).
+     */
+    public boolean isRequestContext()
     {
-        return table;
+        return keyspace == null;
     }
 
-    public String getTableId()
+    /**
+     * Returns the keyspace name, or {@link Optional#empty()} for a {@link #request()} context.
+     */
+    public Optional<String> getKeyspace()
     {
-        return tableId;
+        return Optional.ofNullable(keyspace);
+    }
+
+    /**
+     * Returns the table name, or {@link Optional#empty()} for a {@link #request()} context.
+     */
+    public Optional<String> getTable()
+    {
+        return Optional.ofNullable(table);
+    }
+
+    /**
+     * Returns the table id, or {@link Optional#empty()} for a {@link #request()} context.
+     */
+    public Optional<String> getTableId()
+    {
+        return Optional.ofNullable(tableId);
     }
 
     @Override
@@ -81,6 +116,8 @@ public class Context
     @Override
     public String toString()
     {
+        if (isRequestContext())
+            return "Context{request}";
         return "Context{" +
                "keyspace='" + keyspace + '\'' +
                ", table='" + table + '\'' +

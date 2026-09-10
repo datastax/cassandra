@@ -312,7 +312,7 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
         return SensorsRegistry.instance
                .getSensorsByType(type)
                .stream()
-               .filter(s -> s.getContext().getTable().equals(table))
+               .filter(s -> s.getContext().getTable().map(table::equals).orElse(false))
                .mapToDouble(org.apache.cassandra.sensors.Sensor::getValue)
                .findFirst()
                .orElse(0.0);

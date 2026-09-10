@@ -102,6 +102,8 @@ public class SensorsTest extends TestBaseImpl
     private static final String READ_COST_SAI = "READ_COST_REQUEST." + KEYSPACE + "." + TBL_SAI;
     private static final String WRITE_COST_SAI = "WRITE_COST_REQUEST." + KEYSPACE + "." + TBL_SAI;
     private static final String WRITE_COST_COL = "WRITE_COST_REQUEST." + KEYSPACE + "." + TBL_COL;
+    /** Request-level total cost — no table suffix, keyed on {@link org.apache.cassandra.sensors.Context#request()}. */
+    private static final String TOTAL_COST = "TOTAL_COST_REQUEST";
 
     /**
      * Using a combination of 2 nodes with ALL consistency level to ensure internode communication code paths are exercised in the test
@@ -219,16 +221,16 @@ public class SensorsTest extends TestBaseImpl
                                              "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "tbl: insert", noPrep, write, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST_TBL }, true });
-        result.add(new Object[]{ "tbl_counter: counter update", noPrep, counter, new String[]{ WRITE_COUNTER, WRITE_EXECUTION_TIME_COUNTER, WRITE_COST_COUNTER }, true });
-        result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL }, true });
-        result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL }, false });
+        result.add(new Object[]{ "tbl: insert", noPrep, write, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl_counter: counter update", noPrep, counter, new String[]{ WRITE_COUNTER, WRITE_EXECUTION_TIME_COUNTER, WRITE_COST_COUNTER, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL, TOTAL_COST }, false });
         // CAS is a write operation; READ_EXECUTION_TIME and READ_COST are not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_TBL, WRITE_COST_TBL }, true });
-        result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST_TBL }, true });
-        result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST_TBL }, true });
-        result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL }, true });
-        result.add(new Object[]{ "tbl: range read (no paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL }, false });
+        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_TBL, WRITE_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: range read (no paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL, TOTAL_COST }, false });
         return result;
     }
 
@@ -276,17 +278,17 @@ public class SensorsTest extends TestBaseImpl
                                                        "APPLY BATCH;", KEYSPACE, KEYSPACE, KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "2i: insert (insertRow path)", noPrep, write, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
-        result.add(new Object[]{ "2i: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I}, true });
-        result.add(new Object[]{ "2i: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
-        result.add(new Object[]{ "2i: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
-        result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
-        result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
+        result.add(new Object[]{ "2i: insert (insertRow path)", noPrep, write, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
         // CAS is a write operation; READ_EXECUTION_TIME and READ_COST are not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
-        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
-        result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_2I, WRITE_COST_SAI }, true });
-        result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_2I, WRITE_COST_SAI }, true });
+        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_2I, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_2I, WRITE_COST_SAI, TOTAL_COST }, true });
         return result;
     }
 
@@ -320,15 +322,15 @@ public class SensorsTest extends TestBaseImpl
                                                    "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "sai: insert (insertRow path)", noPrep, write, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
-        result.add(new Object[]{ "sai: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
-        result.add(new Object[]{ "sai: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
-        result.add(new Object[]{ "sai: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
-        result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
-        result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
+        result.add(new Object[]{ "sai: insert (insertRow path)", noPrep, write, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
         // CAS is a write operation; READ_EXECUTION_TIME and READ_COST are not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
-        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
+        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
         return result;
     }
 
@@ -342,8 +344,8 @@ public class SensorsTest extends TestBaseImpl
         String collectionUpdate = withKeyspace("INSERT INTO %s." + TBL_COL + "(pk, tags) VALUES (1, {'c', 'd'})");
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "sai collection: insert",  new String[0],                   collectionWrite,  new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST_COL }, true  });
-        result.add(new Object[]{ "sai collection: update",  new String[]{ collectionWrite },  collectionUpdate, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST_COL }, true  });
+        result.add(new Object[]{ "sai collection: insert",  new String[0],                   collectionWrite,  new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST_COL, TOTAL_COST }, true  });
+        result.add(new Object[]{ "sai collection: update",  new String[]{ collectionWrite },  collectionUpdate, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST_COL, TOTAL_COST }, true  });
         return result;
     }
 
@@ -394,12 +396,12 @@ public class SensorsTest extends TestBaseImpl
 
         List<Object[]> result = new ArrayList<>();
         // Conditional batches route through StorageProxy.cas(); READ_EXECUTION_TIME and READ_COST are not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
-        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
-        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I }, true });
-        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
-        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
-        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI }, true });
+        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
         return result;
     }
 

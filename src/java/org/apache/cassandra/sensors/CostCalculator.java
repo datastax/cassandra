@@ -50,23 +50,31 @@ public interface CostCalculator
     double computeWriteCost(RequestSensors sensors, Context context);
 
     /**
-     * Computes the total cost for the given context, based on the given request sensors.
-     * <br/>
-     * The total cost represents the combined cost of all read and write operations within the request.
+     * Computes the total cost for the entire request, based on all sensors accumulated across all
+     * contexts. The returned value is stored in a single {@link Type#TOTAL_COST} sensor keyed on
+     * {@link Context#request()}, so there is exactly one total-cost sensor per request regardless
+     * of how many tables were touched.
      *
-     * @param sensors accumulated sensors for this request
-     * @param context the keyspace/table context
-     * @return the total cost
+     * <p>Implementations could sum the per-context {@link Type#READ_COST} and
+     * {@link Type#WRITE_COST} values already computed by {@link #computeReadCost} /
+     * {@link #computeWriteCost}, but are free to combine them in other ways.
+     *
+     * @param sensors accumulated sensors for this request (all contexts)
+     * @return the total cost for the request
      */
-    double computeTotalCost(RequestSensors sensors, Context context);
+    double computeTotalCost(RequestSensors sensors);
 
     /**
-     * Computes all costs for the registered cost sensors in {@code sensors}: for each context that has a
-     * {@link Type#READ_COST}, {@link Type#WRITE_COST}, or {@link Type#TOTAL_COST} sensor registered,
-     * invokes the corresponding instance method and increments that sensor by the result.
-     *
-     * <p>The computation follows a fixed order — READ_COST, then WRITE_COST, then TOTAL_COST — so that
-     * TOTAL_COST (which aggregates the other two) always sees fully populated values.
+     * Computes all costs for the registered cost sensors in {@code sensors}:
+     * <ol>
+     *   <li>For each context that has a {@link Type#READ_COST} sensor, invokes
+     *       {@link #computeReadCost(RequestSensors, Context)} and increments that sensor.</li>
+     *   <li>For each context that has a {@link Type#WRITE_COST} sensor, invokes
+     *       {@link #computeWriteCost(RequestSensors, Context)} and increments that sensor.</li>
+     *   <li>If a {@link Type#TOTAL_COST} sensor is registered on {@link Context#request()},
+     *       invokes {@link #computeTotalCost(RequestSensors)} once and increments that single
+     *       request-level sensor. READ_COST and WRITE_COST are fully populated before this step.</li>
+     * </ol>
      * Cost sensors for types not registered in {@code sensors} are silently skipped.
      *
      * @param sensors the request sensors for the current request
@@ -88,10 +96,9 @@ public interface CostCalculator
             sensors.incrementSensor(context, Type.WRITE_COST, INSTANCE.computeWriteCost(sensors, context));
             hasCost = true;
         }
-        for (Sensor sensor : sensors.getSensors(s -> s.getType() == Type.TOTAL_COST))
+        if (sensors.getSensor(Context.request(), Type.TOTAL_COST).isPresent())
         {
-            Context context = sensor.getContext();
-            sensors.incrementSensor(context, Type.TOTAL_COST, INSTANCE.computeTotalCost(sensors, context));
+            sensors.incrementSensor(Context.request(), Type.TOTAL_COST, INSTANCE.computeTotalCost(sensors));
             hasCost = true;
         }
         if (hasCost)

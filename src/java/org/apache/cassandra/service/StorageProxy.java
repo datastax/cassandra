@@ -519,7 +519,7 @@ public class StorageProxy implements StorageProxyMBean
         // times would be confusing
         sensors.registerSensor(context, Type.READ_COST);
         sensors.registerSensor(context, Type.WRITE_COST);
-        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         try
@@ -1144,6 +1144,8 @@ public class StorageProxy implements StorageProxyMBean
 
         try
         {
+            // TOTAL_COST is request-scoped (one per request, not per table) — register once here.
+            sensors.registerSensor(Context.request(), Type.TOTAL_COST);
             for (IMutation mutation : mutations)
             {
                 // register the sensors for the mutation before the actual write is performed
@@ -1155,7 +1157,6 @@ public class StorageProxy implements StorageProxyMBean
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
                     sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_COST);
-                    sensors.registerSensor(Context.from(pu.metadata()), Type.TOTAL_COST);
                 }
 
                 if (mutation instanceof CounterMutation)
@@ -1455,6 +1456,8 @@ public class StorageProxy implements StorageProxyMBean
         // Register sensors for each mutation partition before the mutator constructs WriteResponseHandlers.
         // AbstractWriteResponseHandler captures the sensors reference at construction time, so both
         // sensor creation (above) and registration (here) must precede any call to getWriteResponseHandler().
+        // TOTAL_COST is request-scoped (one per request, not per table) — register once here.
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         for (Mutation mutation : mutations)
         {
             for (PartitionUpdate pu : mutation.getPartitionUpdates())
@@ -1465,7 +1468,6 @@ public class StorageProxy implements StorageProxyMBean
                 sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
                 sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
                 sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_COST);
-                sensors.registerSensor(Context.from(pu.metadata()), Type.TOTAL_COST);
             }
         }
 
@@ -2130,7 +2132,7 @@ public class StorageProxy implements StorageProxyMBean
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         requestSensors.registerSensor(context, Type.READ_COST);
-        requestSensors.registerSensor(context, Type.TOTAL_COST);
+        requestSensors.registerSensor(Context.request(), Type.TOTAL_COST);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
@@ -2521,7 +2523,7 @@ public class StorageProxy implements StorageProxyMBean
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.READ_COST);
-        sensors.registerSensor(context, Type.TOTAL_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 

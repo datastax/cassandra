@@ -101,13 +101,19 @@ public class TestCostCalculator implements CostCalculator
     }
 
     @Override
-    public double computeTotalCost(RequestSensors sensors, Context context)
+    public double computeTotalCost(RequestSensors sensors)
     {
-        if (sensors == null || context == null)
+        if (sensors == null)
             return 0.0;
 
-        double readCost = sensors.getSensor(context, Type.READ_COST).map(Sensor::getValue).orElse(0.0);
-        double writeCost = sensors.getSensor(context, Type.WRITE_COST).map(Sensor::getValue).orElse(0.0);
+        double readCost = sensors.getSensors(s -> s.getType() == Type.READ_COST)
+                                 .stream()
+                                 .mapToDouble(Sensor::getValue)
+                                 .sum();
+        double writeCost = sensors.getSensors(s -> s.getType() == Type.WRITE_COST)
+                                  .stream()
+                                  .mapToDouble(Sensor::getValue)
+                                  .sum();
         return readCost + writeCost;
     }
 }
