@@ -26,6 +26,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -33,9 +34,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import org.junit.Test;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
@@ -47,6 +50,15 @@ import static org.junit.Assert.assertTrue;
 public class VectorSiftSmallTest extends VectorTester.Versioned
 {
     private static final String DATASET = "siftsmall"; // change to "sift" for larger dataset. requires manual download
+
+    // The full version matrix takes longer than the test fork timeout on slow CI hosts, so the
+    // suite is sharded by version: this class covers ED and later, older versions are covered by
+    // VectorSiftSmallEbEcTest and VectorSiftSmallLegacyTest.
+    @Parameterized.Parameters(name = "{0} {1}")
+    public static Collection<Object[]> data()
+    {
+        return data(v -> v.onOrAfter(Version.ED));
+    }
 
     @Override
     public void setup() throws Throwable
@@ -214,8 +226,10 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
             assertTrue("Pre-compaction recall is " + recall, recall > 0.975);
         }
 
-        // When NVQ is enabled, we expect worse recall
-        float postCompactionRecall = JVectorVersionUtil.ENABLE_NVQ ? 0.9499f : 0.975f;
+        // When quantized scoring is used (NVQ, or the fused PQ that is always enabled for version
+        // FA and later), we expect worse recall
+        float postCompactionRecall = JVectorVersionUtil.ENABLE_NVQ || JVectorVersionUtil.shouldWriteFused(version)
+                                     ? 0.9499f : 0.975f;
 
         // Take the CassandraOnHeapGraph code path.
         compact();
