@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.CompressionMetadataReaderType;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
@@ -48,6 +49,7 @@ import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.io.util.SliceDescriptor;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
@@ -356,7 +358,11 @@ public class MetadataSerializer implements IMetadataSerializer
             // We pass a small compressedLength as we only need the parameters, not the actual chunk offsets.
             // CompressionMetadata is ref-counted and holds the chunk offsets in off-heap Memory, so it must be
             // closed once the parameters have been extracted.
-            try (CompressionMetadata cm = CompressionMetadata.open(compressionFile, 1024, false))
+            // During flush the compression info file may not have been uploaded to remote storage yet, so it has to
+            // be read through the write-time channel.
+            CompressionMetadataReaderType readerType = writeTime ? CompressionMetadataReaderType.WRITE_TIME
+                                                                 : CompressionMetadataReaderType.READ_TIME;
+            try (CompressionMetadata cm = CompressionMetadata.open(compressionFile, 1024, false, SliceDescriptor.NONE, readerType))
             {
                 // Note: we use only the encryption component, without any compression. The reason for doing this is to
                 // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
