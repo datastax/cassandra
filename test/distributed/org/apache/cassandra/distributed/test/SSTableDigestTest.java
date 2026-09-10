@@ -27,54 +27,60 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.ChecksumType;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class SSTableDigestTest extends TestBaseImpl
 {
     public void testDigestFile(ChecksumType checksumType, Component digestComponent) throws IOException
     {
-        Cluster.Builder builder = Cluster.build(1)
-                                         .withDataDirCount(1);
-        if (checksumType != null)
-            builder.withConfig(c -> c.set("sstable_digest_type", checksumType.name()));
-        try (Cluster cluster = init(builder.start()))
+        try (WithProperties properties = new WithProperties())
         {
-            cluster.disableAutoCompaction(KEYSPACE);
-            cluster.schemaChange(createTableStmt(KEYSPACE));
-            cluster.get(1).executeInternal(format("INSERT INTO %s.%s (pk, ck, v) VALUES (?, ?, ?)", KEYSPACE, "tbl"), 1, 1, 1);
-            cluster.get(1).flush(KEYSPACE);
+            if (checksumType != null)
+                properties.set(SSTABLE_CHECKSUM_TYPE, checksumType.toString());
 
-            String digestFileName = digestComponent.type.repr;
+            try (Cluster cluster = init(Cluster.build(1)
+                                               .withDataDirCount(1)
+                                               .start()))
+            {
+                cluster.disableAutoCompaction(KEYSPACE);
+                cluster.schemaChange(createTableStmt(KEYSPACE));
+                cluster.get(1).executeInternal(format("INSERT INTO %s.%s (pk, ck, v) VALUES (?, ?, ?)", KEYSPACE, "tbl"), 1, 1, 1);
+                cluster.get(1).flush(KEYSPACE);
 
-            cluster.get(1).runOnInstance(() -> {
-                try
-                {
-                    SSTableReader ssTable = new ArrayList<>(Keyspace.open(KEYSPACE).getColumnFamilyStore("tbl").getLiveSSTables()).get(0);
+                String digestFileName = digestComponent.type.repr;
 
-                    Path digestPath = ssTable.descriptor.pathFor(Component.parse(digestFileName));
+                cluster.get(1).runOnInstance(() -> {
+                    try
+                    {
+                        SSTableReader ssTable = new ArrayList<>(Keyspace.open(KEYSPACE).getColumnFamilyStore("tbl").getLiveSSTables()).get(0);
 
-                    assertThat(digestPath).exists();
+                        Path digestPath = ssTable.descriptor.pathFor(Component.parse(digestFileName));
 
-                    long digest = Long.parseLong(Files.readString(digestPath));
+                        assertThat(digestPath).exists();
 
-                    Path data = ssTable.descriptor.pathFor(Component.DATA);
-                    byte[] bytes = Files.readAllBytes(data);
+                        long digest = Long.parseLong(Files.readString(digestPath));
 
-                    ChecksumType effectiveChecksumType = checksumType == null ? ChecksumType.CRC32 : checksumType;
-                    long checksum = effectiveChecksumType.of(bytes, 0, bytes.length);
+                        Path data = ssTable.descriptor.pathFor(Component.DATA);
+                        byte[] bytes = Files.readAllBytes(data);
 
-                    assertThat(checksum).isEqualTo(digest);
-                }
-                catch (IOException e)
-                {
-                    throw new RuntimeException(e);
-                }
-            });
+                        ChecksumType effectiveChecksumType = checksumType == null ? ChecksumType.CRC32 : checksumType;
+                        long checksum = effectiveChecksumType.of(bytes, 0, bytes.length);
+
+                        assertThat(checksum).isEqualTo(digest);
+                    }
+                    catch (IOException e)
+                    {
+                        throw new RuntimeException(e);
+                    }
+                });
+            }
         }
     }
 
