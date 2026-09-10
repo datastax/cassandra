@@ -29,6 +29,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.ReflectionUtils;
@@ -134,6 +135,11 @@ public class SAIUtil
         {
             throw new RuntimeException(e);
         }
+    }
+
+    public static void setParallelEncodingWriting(boolean enabled)
+    {
+        CompactionGraph.PARALLEL_ENCODING_WRITING = enabled;
     }
 
     public static class CustomVersionSelector implements Version.Selector
