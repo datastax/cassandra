@@ -293,9 +293,6 @@ final class HintsDispatchExecutor
                 return false;
             }
 
-            // Use the minimum of peer's messaging version and storage compatibility mode's version.
-            // This ensures hints written with the storage-compatible version can be dispatched using the
-            // encoded path without deserialization, as long as the peer supports that version.
             int dispatchVersion = Math.min(optVersion.get(), StorageCompatibilityMode.current().storageMessagingVersion());
 
             try (HintsDispatcher dispatcher = HintsDispatcher.create(file, rateLimiter, address, descriptor.hostId, dispatchVersion, shouldAbort))
