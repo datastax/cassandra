@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.LongIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.assertj.core.api.Assertions;
 import org.mockito.Mockito;
 
 import static java.lang.Math.ceil;
@@ -56,7 +57,8 @@ import static org.junit.Assert.*;
 public class PlanTest
 {
     private static final String KEYSPACE = "ks";
-    private static final Orderer ordering = orderer();
+    private static final Orderer annOrderer = annOrderer();
+    private static final Orderer bm25Orderer = bm25Orderer();
 
     @BeforeClass
     public static void setupDD()
@@ -64,12 +66,22 @@ public class PlanTest
         Plan.hitRateSupplier = () -> 1.0;
     }
 
-    private static Orderer orderer()
+    private static Orderer annOrderer()
     {
         Orderer orderer = Mockito.mock(Orderer.class);
         Mockito.when(orderer.isANN()).thenReturn(true);
         Mockito.when(orderer.toString(Redaction.REDACT)).thenReturn("ORDER BY v ANN OF ?");
         Mockito.when(orderer.toString(Redaction.NONE)).thenReturn("ORDER BY v ANN OF X");
+        return orderer;
+    }
+
+    private static Orderer bm25Orderer()
+    {
+        Orderer orderer = Mockito.mock(Orderer.class);
+        Mockito.when(orderer.isBM25()).thenReturn(true);
+        Mockito.when(orderer.toString(Redaction.REDACT)).thenReturn("ORDER BY v BM25 OF ?");
+        Mockito.when(orderer.toString(Redaction.NONE)).thenReturn("ORDER BY v BM25 OF 'test'");
+        Mockito.when(orderer.getQueryTerms()).thenReturn(List.of());
         return orderer;
     }
 
@@ -343,7 +355,7 @@ public class PlanTest
     public void annSort()
     {
         Plan.KeysIteration i = factory.indexScan(saiPred1, (long) (0.5 * factory.tableMetrics.rows));
-        Plan.KeysIteration s = factory.sort(i, ordering);
+        Plan.KeysIteration s = factory.sort(i, annOrderer);
 
         assertEquals(0.5 * factory.tableMetrics.rows, s.expectedKeys(), 0.01);
         assertEquals(0.5 * factory.tableMetrics.rows, s.estimatedKeysToIterate(), 0.01);
@@ -357,7 +369,7 @@ public class PlanTest
         double selectivity = 0.2;
 
         Plan.KeysIteration i = factory.indexScan(saiPred1, (long) (selectivity * factory.tableMetrics.rows));
-        Plan.KeysIteration s = factory.sort(i, ordering);
+        Plan.KeysIteration s = factory.sort(i, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(s);
         Plan.RowsIteration f = factory.filter(rowFilter1, fetch, selectivity);
         Plan.RowsIteration plan = factory.limit(f, limit);
@@ -372,10 +384,10 @@ public class PlanTest
     @Test
     public void annScan()
     {
-        Plan.KeysIteration i = factory.sort(factory.everything, ordering);
+        Plan.KeysIteration i = factory.sort(factory.everything, annOrderer);
         assertEquals(factory.tableMetrics.rows, i.expectedKeys(), 0.01);
         assertEquals(factory.tableMetrics.rows, i.estimatedKeysToIterate(), 0.01);
-        assertEquals(i.initCost() + factory.costEstimator.estimateAnnSearchCost(ordering, (int) ceil(i.expectedKeys()), factory.tableMetrics.rows), i.fullCost(), 0.01);
+        assertEquals(i.initCost() + factory.costEstimator.estimateAnnSearchCost(annOrderer, (int) ceil(i.expectedKeys()), factory.tableMetrics.rows), i.fullCost(), 0.01);
     }
 
     @Test
@@ -384,7 +396,7 @@ public class PlanTest
         int limit = 10;
         double selectivity = 0.2;
 
-        Plan.KeysIteration s = factory.sort(factory.everything, ordering);
+        Plan.KeysIteration s = factory.sort(factory.everything, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(s);
         Plan.RowsIteration f = factory.filter(rowFilter1, fetch, selectivity);
         Plan.RowsIteration plan = factory.limit(f, limit);
@@ -401,9 +413,63 @@ public class PlanTest
     {
         Plan.TableMetrics emptyTable = new Plan.TableMetrics(0, 0, 0, 0);
         Plan.Factory factory = new Plan.Factory(KEYSPACE, emptyTable, new CostEstimator(table1M), IndexHints.NONE);
-        Plan.KeysIteration plan = factory.sort(factory.everything, ordering);
+        Plan.KeysIteration plan = factory.sort(factory.everything, annOrderer);
         assertEquals(0.0, plan.expectedKeys(), 0.01);
         assertEquals(1.0, plan.selectivity(), 0.01);
+    }
+
+    @Test
+    public void bm25Scan()
+    {
+        double selectivity = 0.5;
+        Plan.Factory factory = bm25Factory(selectivity);
+
+        Plan.KeysIteration plan = factory.sort(factory.everything, bm25Orderer);
+
+        assertTrue(plan instanceof Plan.Bm25IndexScan);
+        Assertions.assertThat(selectivity).isEqualTo(plan.selectivity());
+        Assertions.assertThat(selectivity * table1M.rows).isEqualTo(plan.expectedKeys());
+    }
+
+    @Test
+    public void bm25ScanSelectivityLowerThanAnn()
+    {
+        // ANN has selectivity 1.0; BM25 with term filtering has selectivity < 1.0,
+        // so its expected keys and full cost must be smaller.
+        double selectivity = 0.5;
+        Plan.Factory bm25Factory = bm25Factory(selectivity);
+
+        Plan.KeysIteration bm25Plan = bm25Factory.sort(bm25Factory.everything, bm25Orderer);
+        Plan.KeysIteration annPlan = factory.sort(factory.everything, annOrderer);
+
+        Assertions.assertThat(bm25Plan.expectedKeys()).isLessThan(annPlan.expectedKeys());
+        Assertions.assertThat(bm25Plan.fullCost()).isLessThan(annPlan.fullCost());
+    }
+
+    @Test
+    public void bm25ScanHigherSelectivityHasHigherCost()
+    {
+        // A BM25 scan matching more rows must have a higher cost than one matching fewer rows.
+        Plan.Factory factoryLow = bm25Factory(0.1);
+        Plan.Factory factoryHigh = bm25Factory(0.5);
+
+        Plan.KeysIteration planLow = factoryLow.sort(factoryLow.everything, bm25Orderer);
+        Plan.KeysIteration planHigh = factoryHigh.sort(factoryHigh.everything, bm25Orderer);
+
+        Assertions.assertThat(planHigh.fullCost()).isGreaterThan(planLow.fullCost());
+    }
+
+    private Plan.Factory bm25Factory(double selectivity)
+    {
+        Plan.CostEstimator estimator = new CostEstimator(table1M)
+        {
+            @Override
+            public double estimateBM25Selectivity(Orderer ordering)
+            {
+                return selectivity;
+            }
+        };
+        return new Plan.Factory(KEYSPACE, table1M, estimator, IndexHints.NONE);
     }
 
     @Test
@@ -415,7 +481,7 @@ public class PlanTest
         RowFilter rowFilter = RowFilter.builder().add(pred1).add(pred2).add(pred3).build();
 
         Plan.KeysIteration union = factory.union(Lists.newArrayList(factory.intersection(Lists.newArrayList(s1, s2)), s3));
-        Plan.KeysIteration sort = factory.sort(union, ordering);
+        Plan.KeysIteration sort = factory.sort(union, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration filter = factory.recheckFilter(rowFilter, fetch);
         Plan.RowsIteration limit = factory.limit(filter, 3);
@@ -566,7 +632,7 @@ public class PlanTest
         Plan.KeysIteration s2 = factory.indexScan(saiPred2, (long) (0.002 * factory.tableMetrics.rows));
         Plan.KeysIteration s3 = factory.indexScan(saiPred4, (long) (0.001 * factory.tableMetrics.rows));
         Plan.KeysIteration union = factory.union(Lists.newArrayList(factory.intersection(Lists.newArrayList(s1, s2)), s3));
-        Plan.KeysIteration sort = factory.sort(union, ordering);
+        Plan.KeysIteration sort = factory.sort(union, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration filter = factory.recheckFilter(RowFilter.builder().add(pred1).add(pred2).add(pred4).build(), fetch);
         Plan.RowsIteration limit = factory.limit(filter, 3);
@@ -670,7 +736,7 @@ public class PlanTest
         // Important: this requires hight number of rows in the table, so that the cost of fetching all keys from the index
         // is significantly larger than the cost of fetching a few result rows from storage.
         Plan.KeysIteration indexScan = factory.indexScan(saiPred1, (long) (0.1 * factory.tableMetrics.rows));
-        Plan.KeysIteration sort = factory.sort(indexScan, ordering);
+        Plan.KeysIteration sort = factory.sort(indexScan, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter1, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -687,7 +753,7 @@ public class PlanTest
     {
         // Test for CNDB-9898
         Plan.KeysIteration indexScan = factory.indexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));
-        Plan.KeysIteration sort = factory.sort(indexScan, ordering);
+        Plan.KeysIteration sort = factory.sort(indexScan, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter1, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 1);
@@ -705,7 +771,7 @@ public class PlanTest
         Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.5 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.1 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2));
-        Plan.KeysIteration sort = factory.sort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter12, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -723,7 +789,7 @@ public class PlanTest
         Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.9 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2));
-        Plan.KeysIteration sort = factory.sort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter12, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -742,7 +808,7 @@ public class PlanTest
         Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.001 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan3 = factory.indexScan(saiPred3, (long) (0.5 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2, indexScan3));
-        Plan.KeysIteration sort = factory.sort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter123, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -761,7 +827,7 @@ public class PlanTest
         Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan3 = factory.indexScan(saiPred3, (long) (0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2, indexScan3));
-        Plan.KeysIteration sort = factory.sort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter123, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -778,7 +844,7 @@ public class PlanTest
         Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));
         Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.01 * factory.tableMetrics.rows));
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(indexScan1, indexScan2));
-        Plan.KeysIteration sort = factory.sort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter12, fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -1000,7 +1066,7 @@ public class PlanTest
         }
 
         Plan.KeysIteration intersection = factory.intersection(indexScans);
-        Plan.KeysIteration sort = factory.sort(intersection, ordering);
+        Plan.KeysIteration sort = factory.sort(intersection, annOrderer);
         Plan.RowsIteration fetch = factory.fetch(sort);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilterBuilder.build(), fetch);
         Plan.RowsIteration origPlan = factory.limit(postFilter, 3);
@@ -1020,10 +1086,10 @@ public class PlanTest
         Mockito.when(est2.estimateAnnSearchCost(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(100.0);
 
         Plan.Factory factory1 = new Plan.Factory(KEYSPACE, table1M, est1, IndexHints.NONE);
-        Plan scan1 = factory1.sort(factory1.everything, ordering);
+        Plan scan1 = factory1.sort(factory1.everything, annOrderer);
 
         Plan.Factory factory2 = new Plan.Factory(KEYSPACE, table1M, est2, IndexHints.NONE);
-        Plan scan2 = factory2.sort(factory2.everything, ordering);
+        Plan scan2 = factory2.sort(factory2.everything, annOrderer);
 
         assertTrue(scan2.fullCost() > scan1.fullCost());
     }
@@ -1066,7 +1132,7 @@ public class PlanTest
         Plan.KeysIteration indexScan1 = factory.indexScan(saiPred1, (long) (0.001 * factory.tableMetrics.rows));  // numeric
         Plan.KeysIteration indexScan2 = factory.indexScan(saiPred2, (long) (0.001 * factory.tableMetrics.rows));  // numeric
         Plan.KeysIteration indexScan3 = factory.indexScan(saiPred4, (long) (0.5 * factory.tableMetrics.rows));    // literal
-        Plan.KeysIteration sort = factory.sort(indexScan1, ordering); // will generate ordered scan
+        Plan.KeysIteration sort = factory.sort(indexScan1, annOrderer); // will generate ordered scan
         Plan.KeysIteration intersection = factory.intersection(Lists.newArrayList(sort, indexScan2, indexScan3));
         Plan.RowsIteration fetch = factory.fetch(intersection);
         Plan.RowsIteration postFilter = factory.recheckFilter(rowFilter123, fetch);
@@ -1106,6 +1172,13 @@ public class PlanTest
             int degree = 32;
             return metrics.sstables * (expectedNodes * (ANN_SIMILARITY_COST + Plan.hrs(ANN_EDGELIST_COST) / degree)
                                        + limit * Plan.hrs(Plan.CostCoefficients.ANN_SCORED_KEY_COST));
+        }
+
+        @Override
+        public double estimateBM25Selectivity(Orderer ordering)
+        {
+            // No index data available in tests; assume all rows match (no filtering effect).
+            return 1.0;
         }
     }
 

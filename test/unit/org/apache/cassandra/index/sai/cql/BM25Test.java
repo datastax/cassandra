@@ -1134,7 +1134,7 @@ public class BM25Test extends SAITester
      * Also verify that index hints are considered when selecting between filter-then-sort and sort-then-filter.
      */
     @Test
-    public void testPlaningOnHybridQueries()
+    public void testPlanningOnHybridQueries()
     {
         createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
         String literalIndex = createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
@@ -1176,20 +1176,20 @@ public class BM25Test extends SAITester
         // Verify hybrid queries
 
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5",
-                              Plan.NumericIndexScan.class, // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              Plan.Bm25IndexScan.class,
                               row(0), row(1), row(2));
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'orange' LIMIT 5",
-                              Plan.NumericIndexScan.class, // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              Plan.Bm25IndexScan.class,
                               row(3), row(4), row(5), row(6), row(7));
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.NumericIndexScan.class); // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              Plan.Bm25IndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5",
                               Plan.NumericIndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5",
                               Plan.NumericIndexScan.class,
                               row(8), row(9));
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.NumericIndexScan.class); // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              Plan.Bm25IndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'apple' LIMIT 5",
                               Plan.NumericIndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'orange' LIMIT 5",
