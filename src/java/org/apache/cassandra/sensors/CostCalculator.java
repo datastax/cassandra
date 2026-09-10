@@ -61,69 +61,40 @@ public interface CostCalculator
     double computeTotalCost(RequestSensors sensors, Context context);
 
     /**
-     * Computes the read cost for every READ_COST sensor registered in {@code sensors} and increments each sensor by the
-     * computed value. Must be called <em>after</em> all other sensor increments for the request are complete and
-     * <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
-     * {@code syncAllSensors()} calls earlier in the request path skip READ_COST (its value is 0 until this method runs,
-     * so the delta is 0 and the registry is not touched), the final sync after this call is the one that delivers
-     * the correct READ_COST value to the global {@link SensorsRegistry}.
-     * Must also be called before {@link SensorsCustomParams#addSensorsToInternodeResponse} so the response message
-     * carries the correct READ_COST value.
+     * Computes all costs for the registered cost sensors in {@code sensors}: for each context that has a
+     * {@link Type#READ_COST}, {@link Type#WRITE_COST}, or {@link Type#TOTAL_COST} sensor registered,
+     * invokes the corresponding instance method and increments that sensor by the result.
+     *
+     * <p>The computation follows a fixed order — READ_COST, then WRITE_COST, then TOTAL_COST — so that
+     * TOTAL_COST (which aggregates the other two) always sees fully populated values.
+     * Cost sensors for types not registered in {@code sensors} are silently skipped.
      *
      * @param sensors the request sensors for the current request
      */
-    static void computeReadCost(RequestSensors sensors)
+    static void computeCost(RequestSensors sensors)
     {
         Preconditions.checkNotNull(sensors);
 
-        for (Sensor readCostSensor : sensors.getSensors(s -> s.getType() == Type.READ_COST))
+        boolean hasCost = false;
+        for (Sensor sensor : sensors.getSensors(s -> s.getType() == Type.READ_COST))
         {
-            Context context = readCostSensor.getContext();
+            Context context = sensor.getContext();
             sensors.incrementSensor(context, Type.READ_COST, INSTANCE.computeReadCost(sensors, context));
+            hasCost = true;
         }
-    }
-
-    /**
-     * Computes the write cost for every WRITE_COST sensor registered in {@code sensors} and increments each sensor by the
-     * computed value. Must be called <em>after</em> all other sensor increments for the request are complete and
-     * <em>before</em> the final {@link RequestSensors#syncAllSensors()} call. Because intermediate
-     * {@code syncAllSensors()} calls earlier in the request path skip WRITE_COST (its value is 0 until this method runs,
-     * so the delta is 0 and the registry is not touched), the final sync after this call is the one that delivers
-     * the correct WRITE_COST value to the global {@link SensorsRegistry}.
-     * Must also be called before {@link SensorsCustomParams#addSensorsToInternodeResponse} so the response message
-     * carries the correct WRITE_COST value.
-     *
-     * @param sensors the request sensors for the current request
-     */
-    static void computeWriteCost(RequestSensors sensors)
-    {
-        Preconditions.checkNotNull(sensors);
-
-        for (Sensor writeCostSensor : sensors.getSensors(s -> s.getType() == Type.WRITE_COST))
+        for (Sensor sensor : sensors.getSensors(s -> s.getType() == Type.WRITE_COST))
         {
-            Context context = writeCostSensor.getContext();
+            Context context = sensor.getContext();
             sensors.incrementSensor(context, Type.WRITE_COST, INSTANCE.computeWriteCost(sensors, context));
+            hasCost = true;
         }
-    }
-
-    /**
-     * Computes the total cost for every {@link Type#TOTAL_COST} sensor registered in {@code sensors}
-     * and increments each sensor by the computed value. Must be called <em>after</em> both
-     * {@link #computeReadCost(RequestSensors)} and {@link #computeWriteCost(RequestSensors)} so that
-     * READ_COST and WRITE_COST values are already populated.
-     * {@link Type#TOTAL_COST} is synced to the global {@link SensorsRegistry} via the normal
-     * {@link RequestSensors#syncAllSensors()} call but is <em>never</em> included in CQL responses.
-     *
-     * @param sensors the request sensors for the current request
-     */
-    static void computeTotalCost(RequestSensors sensors)
-    {
-        Preconditions.checkNotNull(sensors);
-
-        for (Sensor totalCostSensor : sensors.getSensors(s -> s.getType() == Type.TOTAL_COST))
+        for (Sensor sensor : sensors.getSensors(s -> s.getType() == Type.TOTAL_COST))
         {
-            Context context = totalCostSensor.getContext();
+            Context context = sensor.getContext();
             sensors.incrementSensor(context, Type.TOTAL_COST, INSTANCE.computeTotalCost(sensors, context));
+            hasCost = true;
         }
+        if (hasCost)
+            sensors.syncAllSensors();
     }
 }

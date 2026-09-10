@@ -107,7 +107,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000.0);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
         // With default baseline=-1, READ_COST = read_bytes * 4000
-        CostCalculator.computeReadCost(sensors);
+        CostCalculator.computeCost(sensors);
 
         Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_1, noPayload).withId(1);
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);
@@ -139,8 +139,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.READ_BYTES, 400_000.0);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
 
-        CostCalculator.computeReadCost(sensors);
-        CostCalculator.computeTotalCost(sensors);
+        CostCalculator.computeCost(sensors);
 
         double expectedReadCost = 400_000.0 * 4000.0;
         assertEquals(expectedReadCost, sensors.getSensor(context, Type.TOTAL_COST).get().getValue(), 0.0);
@@ -161,8 +160,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000.0);
         sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
 
-        CostCalculator.computeWriteCost(sensors);
-        CostCalculator.computeTotalCost(sensors);
+        CostCalculator.computeCost(sensors);
 
         double expectedWriteCost = 250_000.0 * 4000.0;
         assertEquals(expectedWriteCost, sensors.getSensor(context, Type.TOTAL_COST).get().getValue(), 0.0);
@@ -187,9 +185,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.READ_BYTES, 300_000.0);
         sensors.incrementSensor(context, Type.WRITE_BYTES, 150_000.0);
 
-        CostCalculator.computeReadCost(sensors);
-        CostCalculator.computeWriteCost(sensors);
-        CostCalculator.computeTotalCost(sensors);
+        CostCalculator.computeCost(sensors);
 
         double expectedTotalCost = (300_000.0 + 150_000.0) * 4000.0;
         assertEquals(expectedTotalCost, sensors.getSensor(context, Type.TOTAL_COST).get().getValue(), 0.0);
@@ -209,7 +205,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000.0);
         sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
         // With default baseline=-1, WRITE_COST = write_bytes * 4000
-        CostCalculator.computeWriteCost(sensors);
+        CostCalculator.computeCost(sensors);
 
         Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_2, noPayload).withId(2);
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);

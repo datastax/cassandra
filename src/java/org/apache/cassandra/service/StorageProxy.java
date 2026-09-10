@@ -570,11 +570,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             Keyspace.openAndGetStore(metadata).metric.coordinatorCasWriteLatency.update(latency, NANOSECONDS);
-            // Compute READ_COST and WRITE_COST from sensors before syncing into SensorsRegistry
-            CostCalculator.computeReadCost(sensors);
-            CostCalculator.computeWriteCost(sensors);
-            CostCalculator.computeTotalCost(sensors);
-            sensors.syncAllSensors();
+            CostCalculator.computeCost(sensors);
         }
     }
 
@@ -1233,10 +1229,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
-            // Compute WRITE_COST from sensors before syncing into SensorsRegistry
-            CostCalculator.computeWriteCost(sensors);
-            CostCalculator.computeTotalCost(sensors);
-            sensors.syncAllSensors();
+            CostCalculator.computeCost(sensors);
         }
     }
 
@@ -1482,10 +1475,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
-            // Compute WRITE_COST from sensors before syncing into SensorsRegistry
-            CostCalculator.computeWriteCost(sensors);
-            CostCalculator.computeTotalCost(sensors);
-            sensors.syncAllSensors();
+            CostCalculator.computeCost(sensors);
         }
     }
 
@@ -2144,14 +2134,13 @@ public class StorageProxy implements StorageProxyMBean
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
-        // All replica responses have been received by the time read() returns.
-        // Compute READ_COST from sensors before syncing into SensorsRegistry.
-        CostCalculator.computeReadCost(requestSensors);
-        CostCalculator.computeTotalCost(requestSensors);
-        requestSensors.syncAllSensors();
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
-        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
+        // Partition iteration is lazy: compute cost sensors once the iterator is fully consumed.
+        return PartitionIterators.doOnClose(partitions, () -> {
+            CostCalculator.computeCost(requestSensors);
+            readTracker.onDone();
+        });
     }
 
     /**
@@ -2539,11 +2528,9 @@ public class StorageProxy implements StorageProxyMBean
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
-        // Range reads are lazy: compute READ_COST and sync sensor values once the iterator is fully consumed.
+        // Range reads are lazy: compute cost sensors once the iterator is fully consumed.
         return PartitionIterators.doOnClose(partitions, () -> {
-            CostCalculator.computeReadCost(sensors);
-            CostCalculator.computeTotalCost(sensors);
-            sensors.syncAllSensors();
+            CostCalculator.computeCost(sensors);
             readTracker.onDone();
         });
     }
