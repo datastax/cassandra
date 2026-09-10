@@ -209,7 +209,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         }
         result.setException(new RuntimeException(reason));
 
-        String completionMessage = String.format("Repair command #%d finished with error", cmd);
+        String completionMessage = String.format("Repair command #%d finished with error: %s", cmd, reason);
 
         // Note we rely on the first message being the reason for the failure
         // when inspecting this state from RepairRunner.queryForCompletedRepair

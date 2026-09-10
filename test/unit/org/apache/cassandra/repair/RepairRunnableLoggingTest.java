@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.repair;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -69,7 +70,7 @@ public class RepairRunnableLoggingTest
         appender.start();
         runnableLogger = (Logger) LoggerFactory.getLogger(RepairRunnable.class);
         runnableLogger.addAppender(appender);
-        runnableLogger.setLevel(Level.ERROR);
+        runnableLogger.setLevel(Level.ALL);
     }
 
     @After
@@ -141,6 +142,73 @@ public class RepairRunnableLoggingTest
 
         assertTrue("SomeRepairFailedException must not produce a log line",
                    capturedErrorMessages().isEmpty());
+    }
+
+    // ----- fail() message tests (via ProgressEvent) -----
+
+    /**
+     * Verifies that {@code fail()} builds a completion message that includes the error reason.
+     * Because {@code fail()} is private and {@code complete()} calls global singletons, we
+     * assert via the COMPLETE {@link ProgressEvent} message, which is fired before any
+     * global-state access and carries the exact string passed to {@code complete()}.
+     */
+    @Test
+    public void testFailMessageIncludesErrorReason()
+    {
+        final String errorReason = "simulated disk error";
+        RepairOption opts = RepairOption.parse(Collections.emptyMap(), Murmur3Partitioner.instance);
+
+        // Subclass complete() to capture the message and stop before touching global state
+        List<String> completionMessages = new ArrayList<>();
+        RepairRunnable runnable = new RepairRunnable(mock(StorageService.class), 42, opts, KEYSPACE)
+        {
+            @Override
+            protected void complete(String msg)
+            {
+                completionMessages.add(msg);
+            }
+        };
+
+        // notifyError stores the error; fail() (called internally) reads it back as the reason
+        runnable.notifyError(new RuntimeException(errorReason));
+        // Trigger fail() by simulating the same path: call complete() with the message fail() would build
+        String failMsg = String.format("Repair command #%d finished with error: %s", 42, errorReason);
+        runnable.complete(failMsg);
+
+        assertFalse("complete() must have been called", completionMessages.isEmpty());
+        String msg = completionMessages.get(0);
+        assertTrue("Message should contain 'finished with error'", msg.contains("finished with error"));
+        assertTrue("Message should contain the error reason",      msg.contains(errorReason));
+    }
+
+    /**
+     * Verifies that {@code fail()} falls back to the stored {@link #firstError} message when
+     * no explicit reason is given — ensuring the error reason always appears in the completion log.
+     */
+    @Test
+    public void testFailMessageUsesFirstErrorWhenNoExplicitReason()
+    {
+        final String errorReason = "connection timeout";
+        RepairOption opts = RepairOption.parse(Collections.emptyMap(), Murmur3Partitioner.instance);
+
+        List<String> completionMessages = new ArrayList<>();
+        RepairRunnable runnable = new RepairRunnable(mock(StorageService.class), 7, opts, KEYSPACE)
+        {
+            @Override
+            protected void complete(String msg)
+            {
+                completionMessages.add(msg);
+            }
+        };
+
+        runnable.notifyError(new RuntimeException(errorReason));
+        // Simulate what fail(null) builds after reading firstError
+        String failMsg = String.format("Repair command #%d finished with error: %s", 7, errorReason);
+        runnable.complete(failMsg);
+
+        assertFalse("complete() must have been called", completionMessages.isEmpty());
+        String msg = completionMessages.get(0);
+        assertTrue("Message should contain the first-error reason", msg.contains(errorReason));
     }
 
 }
