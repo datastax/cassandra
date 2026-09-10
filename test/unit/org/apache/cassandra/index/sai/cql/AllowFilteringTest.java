@@ -420,10 +420,17 @@ public class AllowFilteringTest extends SAITester
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s'", StorageAttachedIndex.class.getName()));
 
-        // LIKE restriction
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'b'), "SELECT * FROM %s WHERE b LIKE 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'c'), "SELECT * FROM %s WHERE c LIKE 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'd'), "SELECT * FROM %s WHERE d LIKE 'Test'");
+        // All LIKE variants are supported by the index and don't require ALLOW FILTERING (the non-prefix
+        // variants are served by automaton intersection, see AutomatonQueryTest)
+        assertNotNull(execute("SELECT * FROM %s WHERE b LIKE 'Test'"));
+        assertNotNull(execute("SELECT * FROM %s WHERE c LIKE 'Test'"));
+        assertNotNull(execute("SELECT * FROM %s WHERE d LIKE 'Test'"));
+        assertNotNull(execute("SELECT * FROM %s WHERE c LIKE '%%Test'"));
+        assertNotNull(execute("SELECT * FROM %s WHERE c LIKE '%%Test%%'"));
+        assertNotNull(execute("SELECT * FROM %s WHERE c LIKE 'Te%%st'"));
+        assertNotNull(execute("SELECT * FROM %s WHERE b LIKE 'Test%%'"));
+        assertNotNull(execute("SELECT * FROM %s WHERE c LIKE 'Test%%'"));
+        assertNotNull(execute("SELECT * FROM %s WHERE d LIKE 'Test%%'"));
     }
 
     @Test

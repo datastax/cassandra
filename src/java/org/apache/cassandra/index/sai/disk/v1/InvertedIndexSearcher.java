@@ -30,6 +30,9 @@ import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
 import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.index.sai.utils.AutomatonQueries;
+import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
+import org.apache.lucene.util.automaton.CompiledAutomaton;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,6 +67,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -161,7 +165,93 @@ public class InvertedIndexSearcher extends IndexSearcher
             var upper = exp.getEncodedUpperBoundByteComparable(version);
             return reader.rangeMatch(filterRangeResults ? exp : null, lower, upper, listener, context);
         }
+        else if (exp.getOp() == Expression.Op.PREFIX)
+        {
+            QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
+            // A prefix query is a bounded scan over the trie: [enc(prefix), nextOf(enc(prefix))), computed on the
+            // unterminated byte-comparable. Because the end bound of the trie scan is inclusive, a term exactly
+            // equal to nextOf(enc(prefix)) would be wrongly included.
+            var lower = version.onDiskFormat().encodeForTrie(exp.lower.value.encoded, indexContext.getValidator());
+            var upper = exp.getPrefixUpperBoundByteComparable(version);
+            // On order-preserving formats (DB and later) the scan bounds otherwise delimit exactly the terms
+            // starting with the prefix, so that single boundary term is the only possible over-match: exclude it
+            // at the reader level instead of collecting and post-filtering (re-analyzing) every matched term.
+            // Pre-DB segments may store terms in a non-order-preserving encoding, so they keep the unconditional
+            // per-term post-filter by the expression.
+            if (!filterRangeResults && version.onOrAfter(Version.DB))
+                return reader.rangeMatchExcludingUpperBoundTerm(lower, upper, listener, context);
+            return reader.rangeMatch(exp, lower, upper, listener, context);
+        }
+        else if (exp.getOp() == Expression.Op.AUTOMATON)
+        {
+            // Automaton-served pattern matching (non-prefix LIKE variants): intersect the segment's terms
+            // dictionary with the expression's compiled automaton and union the posting lists of the accepted
+            // terms. Only supported on non-composite literal indexes (guarded by IndexContext#supports at the
+            // CQL layer). The visited-terms budget is the query's shared one: the expansions cap is a per-query
+            // total across all segments and memtable shards, not a per-segment allowance.
+            try
+            {
+                return searchAutomatonPostings(exp.getAutomaton(), context.automatonExpansionsBudget(), context);
+            }
+            catch (AutomatonTermsExceededException e)
+            {
+                // re-throw with full query context; clients see the SAI_AUTOMATON_EXPANSIONS_EXCEEDED failure
+                // reason, this detailed message lands in the logs
+                throw new AutomatonTermsExceededException(String.format(AutomatonQueries.EXPANSIONS_EXCEEDED_MESSAGE,
+                                                                        exp.getPatternOperator(),
+                                                                        indexContext.getColumnName(),
+                                                                        e.maxVisitedTerms()),
+                                                          e.maxVisitedTerms());
+            }
+        }
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
+    }
+
+    /**
+     * Automaton-driven term matching entry point (see
+     * {@link org.apache.cassandra.index.sai.utils.AutomatonQueries}): intersects the segment's terms dictionary
+     * with the given byte-level automaton and returns the primary keys of the union of the posting lists of all
+     * matching terms, using a fresh per-call budget of {@link AutomatonQueries#DEFAULT_MAX_VISITED_TERMS} visited
+     * terms.
+     * <p>
+     * The CQL surface (the non-prefix LIKE variants) reaches this engine through the
+     * {@code Expression.Op.AUTOMATON} branch of {@code searchPosting}, which instead consumes the query's shared
+     * per-query budget ({@code QueryContext#automatonExpansionsBudget()}, initialized from the configurable
+     * {@link AutomatonQueries#maxAutomatonExpansions()} cap).
+     *
+     * @throws org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException if the dictionary scan visits
+     *         more terms than the cap
+     */
+    public KeyRangeIterator searchAutomaton(CompiledAutomaton automaton, QueryContext context) throws IOException
+    {
+        return searchAutomaton(automaton, AutomatonQueries.DEFAULT_MAX_VISITED_TERMS, context);
+    }
+
+    /**
+     * Same as {@link #searchAutomaton(CompiledAutomaton, QueryContext)} with an explicit per-call cap on the
+     * number of dictionary terms the intersection may visit.
+     */
+    public KeyRangeIterator searchAutomaton(CompiledAutomaton automaton, int maxVisitedTerms, QueryContext context) throws IOException
+    {
+        return toPrimaryKeyIterator(searchAutomatonPostings(automaton, new AutomatonQueries.ExpansionsBudget(maxVisitedTerms), context), context);
+    }
+
+    /**
+     * Posting-list-level variant of {@link #searchAutomaton(CompiledAutomaton, QueryContext)}, returning the union
+     * of the posting lists of all terms in this segment matching the automaton (consistent with what
+     * {@code searchPosting} returns for {@code Expression.Op.RANGE}). The scan consumes the given visited-terms
+     * budget; the CQL query path passes the query's shared budget ({@code QueryContext#automatonExpansionsBudget()}),
+     * so the configured expansions cap bounds the whole query, not each segment.
+     */
+    public PostingList searchAutomatonPostings(CompiledAutomaton automaton, AutomatonQueries.ExpansionsBudget budget, QueryContext context)
+    {
+        // Automaton intersection runs directly over the stored term bytes, which only line up with the raw value
+        // bytes for non-composite literal types (see OnDiskFormat#encodeForTrie).
+        if (!indexContext.isLiteral() || TypeUtil.isComposite(indexContext.getValidator()))
+            throw new IllegalStateException(indexContext.logMessage("Automaton matching is only supported on non-composite literal indexes"));
+
+        QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
+        return reader.intersect(automaton, budget, listener, context);
     }
 
     private Cell<?> readColumn(SSTableReader sstable, PrimaryKey primaryKey)

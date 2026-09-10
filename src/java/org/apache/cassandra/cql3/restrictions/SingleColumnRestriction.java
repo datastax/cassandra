@@ -39,6 +39,8 @@ import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.service.ClientWarn;
@@ -1018,9 +1020,28 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
             // there must be a suitable INDEX for LIKE_XXX expressions
             RowFilter.SimpleExpression expression = filter.add(columnDef, operation.left, operation.right);
+            Index index =
             indexRegistry.getBestIndexFor(expression, indexHints)
                          .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
                                                            expression));
+
+            // SAI serves the suffix/contains/matches LIKE variants through a compiled automaton (LIKE_PREFIX
+            // keeps its dedicated bounded range scan). Compile (and cache) the automaton eagerly, so a pattern
+            // that is too complex to determinize fails here, at the coordinator, with a clear
+            // InvalidRequestException instead of first compiling on the replicas and surfacing as a generic read
+            // failure. Gated on the selected index being SAI: a custom index implementation may serve LIKE with
+            // its own pattern semantics and must not be subjected to the automaton engine's determinization
+            // limit.
+            if (index instanceof StorageAttachedIndex && isAutomatonServedLike(operation.left))
+                AutomatonQueries.forPatternOperator(operation.left, operation.right, columnDef.name);
+        }
+
+        /** The LIKE variants the SAI automaton engine serves (see {@code Expression.Op#valueOf}). */
+        private static boolean isAutomatonServedLike(Operator operator)
+        {
+            return operator == Operator.LIKE_SUFFIX
+                   || operator == Operator.LIKE_CONTAINS
+                   || operator == Operator.LIKE_MATCHES;
         }
 
         @Override
