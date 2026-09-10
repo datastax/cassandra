@@ -40,6 +40,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
@@ -216,6 +217,19 @@ public class CompressionMetadata extends WrappedSharedCloseable
     @VisibleForTesting
     public static CompressionMetadata open(File chunksIndexFile, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor)
     {
+        return open(chunksIndexFile, compressedLength, hasMaxCompressedSize, sliceDescriptor, CompressionMetadataReaderType.READ_TIME);
+    }
+
+    /**
+     * Same as {@link #open(File, long, boolean, SliceDescriptor)} but with an explicit reader type. Pass
+     * {@link CompressionMetadataReaderType#WRITE_TIME} when the compression info file is read while the sstable is
+     * still being written: in CNDB the file may not have been uploaded to remote storage yet, so it has to be read
+     * through {@link org.apache.cassandra.io.storage.StorageProvider#writeTimeReadFileChannelFor(File)} rather than
+     * through a plain local channel.
+     */
+    public static CompressionMetadata open(File chunksIndexFile, long compressedLength, boolean hasMaxCompressedSize,
+                                           SliceDescriptor sliceDescriptor, CompressionMetadataReaderType readerType)
+    {
         long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
         long uncompressedLength = sliceDescriptor.exists() ? sliceDescriptor.dataEnd - sliceDescriptor.sliceStart : -1;
 
@@ -223,7 +237,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
         long dataLength;
         CompressionChunkOffsets chunkOffsets;
 
-        try (FileInputStreamPlus inputStream = chunksIndexFile.newInputStream())
+        try (FileInputStreamPlus inputStream = openInputStream(chunksIndexFile, readerType))
         {
             TrackedDataInputPlus stream = new TrackedDataInputPlus(inputStream);
             String compressorName = stream.readUTF();
@@ -278,7 +292,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
                                                                                 endChunkIndex,
                                                                                 chunkCount,
                                                                                 compressedLength,
-                                                                                CompressionMetadataReaderType.READ_TIME);
+                                                                                readerType);
             long compressedFileLength = chunkOffsets.compressedFileLength();
 
             return new CompressionMetadata(chunksIndexFile, parameters, chunkOffsets, dataLength, compressedFileLength, chunkLengthBits, startChunkIndex);
@@ -291,6 +305,13 @@ public class CompressionMetadata extends WrappedSharedCloseable
         {
             throw new CorruptSSTableException(e, chunksIndexFile);
         }
+    }
+
+    private static FileInputStreamPlus openInputStream(File chunksIndexFile, CompressionMetadataReaderType readerType) throws IOException
+    {
+        if (readerType == CompressionMetadataReaderType.WRITE_TIME)
+            return new FileInputStreamPlus(StorageProvider.instance.writeTimeReadFileChannelFor(chunksIndexFile), chunksIndexFile);
+        return chunksIndexFile.newInputStream();
     }
 
     // do not call this constructor directly, unless used in testing
