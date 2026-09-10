@@ -37,6 +37,19 @@ implements RangeCursor<Q>
 
     final C src;
     final D set;
+
+    @Override
+    public void close()
+    {
+        try
+        {
+            src.close();
+        }
+        finally
+        {
+            set.close();
+        }
+    }
     long currentPosition;
     Q currentState;
     State state;

@@ -26,7 +26,7 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
-public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie<S> implements RangeTrie<S>
+public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie<S, RangeCursor<S>, RangeTrie<S>> implements RangeTrie<S>
 {
     // constants for space calculations
     private static final long EMPTY_SIZE_ON_HEAP;
@@ -34,7 +34,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
     static
     {
         // Measuring the empty size of long-lived tries, because these are the ones for which we want to track size.
-        InMemoryBaseTrie<?> empty = new InMemoryRangeTrie<>(ByteComparable.Version.OSS50, BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
+        InMemoryRangeTrie<?> empty = new InMemoryRangeTrie<>(ByteComparable.Version.OSS50, BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
         EMPTY_SIZE_ON_HEAP = ObjectSizes.measureDeep(empty);
         empty = new InMemoryRangeTrie<>(ByteComparable.Version.OSS50, BufferType.OFF_HEAP, ExpectedLifetime.LONG, null);
         EMPTY_SIZE_OFF_HEAP = ObjectSizes.measureDeep(empty);
@@ -216,9 +216,6 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             // Deletion ranges active at entry and exit must be presented by the tail at its root. To do this, get
             // the closest content in both forward and reverse direction and adjust the content that the tail reports
             // for them.
-            if (content == null)
-                setActiveState(); // prepare and store activeRange if it is needed
-
             S rootDescentContent = getTailRootContent(this.direction, content, activeIsSet, activeRange);
             S rootAscentContent = getTailRootContent(this.direction.opposite(), getAscentPathContent(), false, null);
             if (this.direction != direction)
@@ -277,6 +274,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             long rootPos = encodedPosition();
             if (rootDescentContent != null)
                 setNodeState(rootPos | MAY_HAVE_CONTENT_BIT, rootDescentContent, root, root);
+            // The superclass constructor has already run updateActiveAndReturn, which may have left
+            // prevContent set from the root's own content. Clear it so the re-run below, which sees
+            // the branch content installed above, starts from the same state a fresh cursor would.
+            prevContent = null;
             updateActiveAndReturn(rootPos);
         }
 
@@ -342,7 +343,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
     static class ApplyState<S extends RangeState<S>> extends InMemoryBaseTrie.ApplyState<S>
     {
-        ApplyState(InMemoryBaseTrie<S> trie)
+        ApplyState(InMemoryBaseTrie<S, ?, ?> trie)
         {
             super(trie);
         }

@@ -94,12 +94,13 @@ public final class PageAware
      * Pad the given output stream with zeroes until the next page boundary.
      * If the destination position is already at a page boundary, do not do anything.
      */
-    public static void pad(DataOutputPlus dest) throws IOException
+    public static long pad(DataOutputPlus dest) throws IOException
     {
         long position = dest.position();
         long bytesLeft = padded(position) - position;
         // bytesLeft is provably within [0, pageSize - 1]
         dest.write(EmptyPage.EMPTY_PAGE, 0, (int) bytesLeft);
+        return position + bytesLeft;
     }
 
     static class EmptyPage

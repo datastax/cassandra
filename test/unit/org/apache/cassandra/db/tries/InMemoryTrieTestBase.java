@@ -53,6 +53,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
+import static org.apache.cassandra.db.tries.TrieUtil.asString;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -408,55 +409,11 @@ public abstract class InMemoryTrieTestBase
             assertEquals(test, trie.get(mapping.apply(test)));
 
         if (strategy == ReuseStrategy.SHORT_LIVED_ORDERED)
-            testSkipOverBranch(tests, mapping, trie);
+            TrieUtil.testSkipOverBranch(tests, mapping, trie);
 
         testDeletions(tests, mapping, trie);
 
         randomizedTestEntries(tests, mapping, trie);
-    }
-
-    private void testSkipOverBranch(String[] testsAsStrings, Function<String, Preencoded> mapping, InMemoryTrie<String> trie)
-    {
-        testsAsStrings = Arrays.copyOf(testsAsStrings, testsAsStrings.length);
-        Arrays.sort(testsAsStrings, (x, y) -> mapping.apply(x).compareTo(mapping.apply(y)));
-        Preencoded[] tests = Arrays.stream(testsAsStrings).map(mapping).toArray(Preencoded[]::new);
-        for (int testIndex = 0; testIndex < tests.length; ++testIndex)
-        {
-            Preencoded key = tests[testIndex];
-            for (Direction d : Direction.values())
-            {
-                Cursor<String> c = trie.cursor(d);
-                assertTrue(c.descendAlong(key.getPreencodedBytes()) || !d.isForward());
-
-                long skipBranch = Cursor.positionForSkippingBranch(c.encodedPosition());
-                long pos = c.skipTo(skipBranch);
-                boolean exhausted = Cursor.isExhausted(pos);
-
-                String next = exhausted ? null : c.content();
-                if (next == null && !exhausted)
-                    next = c.advanceToContent(null);
-                int nextIndex = testIndex + d.increase;
-                while (d.inLoop(nextIndex, 0, tests.length - 1) && isPrefix(key, tests[nextIndex]))
-                    nextIndex += d.increase;
-                String expected = d.inLoop(nextIndex, 0, tests.length - 1) ? testsAsStrings[nextIndex] : null;
-                assertEquals("Value after skipping branch at " + testsAsStrings[testIndex] + " " + d, expected, next);
-            }
-        }
-    }
-
-    static boolean isPrefix(Preencoded prefix, Preencoded value)
-    {
-        ByteSource ps = prefix.getPreencodedBytes();
-        ByteSource vs = value.getPreencodedBytes();
-        while (true)
-        {
-            int nextp = ps.next();
-            int nextv = vs.next();
-            if (nextp == ByteSource.END_OF_STREAM)
-                return true;
-            if (nextp != nextv)
-                return false;
-        }
     }
 
     private void testDeletions(String[] tests, Function<String, Preencoded> mapping, InMemoryTrie<String> trie)
@@ -723,7 +680,7 @@ public abstract class InMemoryTrieTestBase
         }
         if (!failedAt.isEmpty())
         {
-            String message = "Failed at " + Lists.transform(failedAt, InMemoryTrieTestBase::asString);
+            String message = "Failed at " + Lists.transform(failedAt, TrieUtil::asString);
             System.err.println(message);
             System.err.println(b);
             Assert.fail(message);
@@ -742,11 +699,6 @@ public abstract class InMemoryTrieTestBase
             Assert.fail("Remaing values in expected, starting with " + expected.next());
         else if (actual.hasNext())
             Assert.fail("Remaing values in actual, starting with " + actual.next());
-    }
-
-    static String asString(Preencoded bc)
-    {
-        return bc != null ? bc.byteComparableAsString(VERSION) : "null";
     }
 
     <T> void putSimpleResolve(InMemoryTrie<T> trie,

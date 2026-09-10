@@ -238,6 +238,12 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         Overriding overriding;
         long currentPosition;
 
+        @Override
+        public void close()
+        {
+            source.close();
+        }
+
         Negated(TrieSetCursor source)
         {
             this.source = source;

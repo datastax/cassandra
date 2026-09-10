@@ -49,6 +49,11 @@ public class TriePathReconstructor implements Cursor.ResettingTransitionsReceive
         keyPos = newLength;
     }
 
+    protected int getByteToReachDepth(int depth)
+    {
+        return keyBytes[depth - 1] & 0xFF;
+    }
+
     public byte[] getTrimmedPathBytes()
     {
         return Arrays.copyOf(keyBytes, keyPos);

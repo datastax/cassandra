@@ -139,6 +139,12 @@ public class RangesTrieSetTest
                     }
 
                     @Override
+                    public void close()
+                    {
+                        cursor.close();
+                    }
+
+                    @Override
                     public ByteComparable.Version byteComparableVersion()
                     {
                         return VERSION;
@@ -771,6 +777,12 @@ public class RangesTrieSetTest
         public TrieSetCursor tailCursor(Direction direction)
         {
             return new TrieSetOverRangeCursor(source.tailCursor(direction));
+        }
+
+        @Override
+        public void close()
+        {
+            source.close();
         }
 
         @Override

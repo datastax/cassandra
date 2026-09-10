@@ -24,6 +24,7 @@ import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import org.agrona.DirectBuffer;
+import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -56,7 +57,12 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// Since tries can have mappings for empty, `content()` can possibly be non-null. The cursor is exhausted when it
 /// returns a depth of -1 (the operations that advance a cursor return the depth, and `depth()` will also
 /// return -1 if queried afterwards). It is not allowed for a cursor to start in exhausted state; once a cursor is
-/// exhausted, calling any of the advance methods or `tailTrie` is an error.
+/// exhausted, calling any of the advance methods or `tailCursor` is an error. Exhaustion is a position, not a
+/// lifecycle state: an exhausted cursor still holds its resources and must still be [#close]d.
+///
+/// A cursor holds resources (see [#close]) and must be closed when the walk it serves is done. After it has been
+/// closed it is no longer positioned anywhere and only [#tailCursor] (and [RangeCursor#precedingStateCursor]) may
+/// still be called on it; see [#close] for why.
 ///
 /// For example, the following trie:
 /// <pre>
@@ -124,7 +130,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// prefixes will still be reported before their descendants.
 ///
 /// Also see [Trie.md](./Trie.md) for further documentation.
-interface Cursor<T>
+interface Cursor<T> extends Closeable
 {
     /// The depth is stored in the high-order 32-bits of the long.
     int DEPTH_SHIFT = 32;
@@ -318,7 +324,7 @@ interface Cursor<T>
     /// visited position at that depth.
     static long positionForSkippingBranch(long encodedBranchPosition)
     {
-        return (encodedBranchPosition & ~FLAGS_MASK) + (1L << TRANSITION_SHIFT);
+        return (encodedBranchPosition & ~(FLAGS_MASK | ON_RETURN_PATH_BIT)) + (1L << TRANSITION_SHIFT);
     }
 
     /// Returns true if the given `currPosition` as returned by `advance`, `advanceMultiple` or `skipTo` is the result
@@ -528,8 +534,30 @@ interface Cursor<T>
     ///
     /// It is an error to call `tailCursor` on an exhausted cursor or one positioned on the return path.
     ///
+    /// This is one of the two methods that remain callable after [#close]; the returned cursor is independent of this
+    /// one and must be closed in its turn.
+    ///
     /// Descendants that override this class should return their specific cursor type.
     Cursor<T> tailCursor(Direction direction);
+
+    /// Release whatever the cursor holds. A cursor over a trie in memory holds nothing; a cursor over a file holds a
+    /// buffer for as long as it lives, and only gives it back here. Cursors that wrap others must pass this on to all
+    /// of them. Closing twice must be harmless -- a cursor can be shared between two wrappers that each close it.
+    ///
+    /// After this call the cursor is no longer positioned anywhere and the only calls still allowed on it are
+    /// [#tailCursor] and, for a [RangeCursor], [RangeCursor#precedingStateCursor]. Everything else -- the advancing
+    /// methods, [#content], [#encodedPosition] -- is an error.
+    ///
+    /// The reason for that exception is [BaseTrie#tailTrie] and the other places that turn a positioned cursor into a
+    /// [BaseTrie]: the trie is a factory of cursors rooted at the position the cursor was left on, and a `BaseTrie` has
+    /// no `close` for its holder to reach the retained cursor with. Being allowed to close the cursor first and make
+    /// tails from it afterwards is what keeps those tries from holding a buffer for as long as they live.
+    ///
+    /// An implementation that reads the trie inside `tailCursor` -- as the on-disk range cursor does, to work out the
+    /// deletions active at the tail's root -- must therefore take whatever it needs from the file here, before it lets
+    /// go of the buffer. See [OnDiskCursor.Range#close].
+    @Override
+    void close();
 
     /// Used by [#advanceMultiple] to feed the transitions taken.
     interface TransitionsReceiver
@@ -659,6 +687,12 @@ interface Cursor<T>
         }
 
         @Override
+        public void close()
+        {
+            // nothing to release
+        }
+
+        @Override
         public long encodedPosition()
         {
             return position;
@@ -688,7 +722,10 @@ interface Cursor<T>
     /// Dump the current branch. To be used for debugging only.
     private String dumpBranch(Direction direction, Function<T, String> toStringFunction)
     {
-        return tailCursor(direction).process(new TrieDumper.Plain<>(toStringFunction));
+        try (Cursor<T> tail = tailCursor(direction))
+        {
+            return tail.process(new TrieDumper.Plain<>(toStringFunction));
+        }
     }
 
     default void assertFresh()

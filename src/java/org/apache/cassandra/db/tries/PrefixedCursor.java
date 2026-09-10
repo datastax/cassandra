@@ -262,6 +262,20 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> extends DepthAdjustedCurso
     {
         final RangeCursor<D> deletionBranch;
 
+        @Override
+        public void close()
+        {
+            try
+            {
+                super.close();
+            }
+            finally
+            {
+                if (deletionBranch != null)
+                    deletionBranch.close();
+            }
+        }
+
         DeletionAwareSeparately(ByteComparable prefix, Cursor<T> contentBranch, RangeCursor<D> deletionBranch)
         {
             super(prefix, contentBranch);

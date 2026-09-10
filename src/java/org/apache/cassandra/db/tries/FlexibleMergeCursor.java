@@ -77,6 +77,32 @@ abstract class FlexibleMergeCursor<C extends Cursor<?>, D extends Cursor<?>, T> 
     abstract long postAdvance(long depth);
 
     @Override
+    public void close()
+    {
+        try
+        {
+            c1.close();
+        }
+        finally
+        {
+            // Released, but not dropped: [Cursor#close] leaves `tailCursor` callable, and the descendants' versions
+            // of it read c2. Only leaving the branch drops it.
+            if (c2 != null)
+                c2.close();
+        }
+    }
+
+    /// Release the second source, which is only attached for the span of a branch and dropped when it is left.
+    void closeC2()
+    {
+        if (c2 != null)
+        {
+            c2.close();
+            c2 = null;
+        }
+    }
+
+    @Override
     public long advance()
     {
         switch (state)
@@ -183,7 +209,7 @@ abstract class FlexibleMergeCursor<C extends Cursor<?>, D extends Cursor<?>, T> 
     private long leaveC2(long c1pos)
     {
         state = State.C1_ONLY;
-        c2 = null;
+        closeC2();
         return postAdvance(currentPosition = c1pos);
     }
 

@@ -59,8 +59,9 @@ public class VIntCodingTest
     private static <T> void serdeSigned(long value, ValueAccessor<T> accessor)
     {
         T buffer = accessor.allocate(Long.BYTES + 1);
-        VIntCoding.writeVInt(value, buffer, 0, accessor);
+        int written = VIntCoding.writeVInt(value, buffer, 0, accessor);
         Assertions.assertThat(VIntCoding.getVInt(buffer, accessor, 0)).isEqualTo(value);
+        Assertions.assertThat(VIntCoding.computeUnsignedVIntSize(accessor.toBuffer(buffer), 0)).isEqualTo(written);
     }
 
     @Test
@@ -75,8 +76,9 @@ public class VIntCodingTest
     private static <T> void serdeUnsigned(long value, ValueAccessor<T> accessor)
     {
         T buffer = accessor.allocate(Long.BYTES + 1);
-        VIntCoding.writeUnsignedVInt(value, buffer, 0, accessor);
+        int written = VIntCoding.writeUnsignedVInt(value, buffer, 0, accessor);
         Assertions.assertThat(VIntCoding.getUnsignedVInt(buffer, accessor, 0)).isEqualTo(value);
+        Assertions.assertThat(VIntCoding.computeUnsignedVIntSize(accessor.toBuffer(buffer), 0)).isEqualTo(written);
     }
 
     @Test

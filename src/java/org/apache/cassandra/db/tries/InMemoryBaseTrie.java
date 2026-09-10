@@ -34,7 +34,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /// Base class for mutable in-memory tries, providing the common infrastructure for plain, range and deletion-aware
 /// in-memory tries.
-public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
+public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> extends InMemoryReadTrie<T> implements BaseTrie<T, C, Q>
 {
     // See the trie format description in InMemoryReadTrie.
 
@@ -971,9 +971,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             return data[stackDepth * STATE_SIZE + 4];
         }
 
-        protected final InMemoryBaseTrie<T> trie;
+        protected final InMemoryBaseTrie<T, ?, ?> trie;
 
-        ApplyState(InMemoryBaseTrie<T> trie)
+        ApplyState(InMemoryBaseTrie<T, ?, ?> trie)
         {
             this.trie = trie;
         }
@@ -1349,7 +1349,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             return sb.toString();
         }
 
-        public InMemoryBaseTrie<T> trie()
+        public InMemoryBaseTrie<T, ?, ?> trie()
         {
             return trie;
         }
@@ -1484,10 +1484,12 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
             // This is not very efficient, but we only currently use this option in tests.
             // If it's needed for production use, isBranching should be implemented in the cursor interface.
-            Cursor<U> dupe = mutationCursor.tailCursor(Direction.FORWARD);
-            long childPosition = dupe.advance();
-            return !Cursor.isExhausted(childPosition) &&
-                   !Cursor.isExhausted(dupe.skipTo(Cursor.positionForSkippingBranch(childPosition)));
+            try (Cursor<U> dupe = mutationCursor.tailCursor(Direction.FORWARD))
+            {
+                long childPosition = dupe.advance();
+                return !Cursor.isExhausted(childPosition) &&
+                       !Cursor.isExhausted(dupe.skipTo(Cursor.positionForSkippingBranch(childPosition)));
+            }
         }
 
         @Override

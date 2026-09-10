@@ -172,11 +172,12 @@ public interface DataOutputPlus extends DataOutput
      * is already at a page boundary, do not do anything.
      * @throws IOException
      */
-    default void padToPageBoundary() throws IOException
+    default long padToPageBoundary() throws IOException
     {
         long position = position();
         long bytesLeft = PageAware.padded(position) - position;
         write(PageAware.EmptyPage.EMPTY_PAGE, 0, Ints.checkedCast(bytesLeft));
+        return position + bytesLeft;
     }
 
     /**

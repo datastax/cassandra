@@ -237,7 +237,20 @@ public class VIntCoding
             return -1;
 
         int firstByte = input.get(readerIndex);
-        return 1 + ((firstByte >= 0) ? 0 : numberOfExtraBytesToRead(firstByte));
+        return 1 + Integer.numberOfLeadingZeros(~(firstByte << 24));
+    }
+
+    /**
+     * Computes size of an unsigned vint that starts at readerIndex of the provided ByteBuffer, without checking
+     * that the byte is there. The caller guarantees the position is readable; if it is not, the buffer throws
+     * {@link IndexOutOfBoundsException}.
+     *
+     * @return the vint unsigned value size in bytes.
+     */
+    public static int computeUnsignedVIntSizeUnchecked(ByteBuffer input, int readerIndex)
+    {
+        int firstByte = input.get(readerIndex);
+        return 1 + Integer.numberOfLeadingZeros(~(firstByte << 24));
     }
 
     public static long readVInt(DataInput input) throws IOException
