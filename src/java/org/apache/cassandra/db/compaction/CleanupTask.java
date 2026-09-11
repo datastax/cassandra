@@ -55,12 +55,11 @@ public class CleanupTask
             {
                 try
                 {
-                    task.run();
+                    task.execute();
                     successful.add(session);
                 }
                 catch (Throwable t)
                 {
-                    t = task.transaction.abort(t);
                     logger.error("Failed cleaning up " + session, t);
                     unsuccessful.add(session);
                 }

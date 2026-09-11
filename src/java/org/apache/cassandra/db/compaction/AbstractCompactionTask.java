@@ -36,14 +36,13 @@ import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.WrappedRunnable;
 
 import javax.annotation.Nullable;
 
 import static com.google.common.base.Throwables.propagate;
 
 
-public abstract class AbstractCompactionTask extends WrappedRunnable
+public abstract class AbstractCompactionTask
 {
     protected static final Logger logger = LoggerFactory.getLogger(AbstractCompactionTask.class);
 
@@ -143,6 +142,8 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
             }
         }
     }
+
+    abstract protected void runMayThrow() throws Exception;
 
     /**
      * Executes the task after setting a new observer, normally the observer is the
@@ -262,7 +263,14 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
 
     protected void executeInternal()
     {
-        run();
+        try
+        {
+            runMayThrow();
+        }
+        catch (Exception e)
+        {
+            throw propagate(e);
+        }
     }
 
     // TODO Eventually these three setters should be passed in to the constructor.

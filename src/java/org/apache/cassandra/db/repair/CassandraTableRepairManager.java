@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.RepairFinalizationOperation;
 import org.apache.cassandra.db.compaction.RepairFinishedCompactionTask;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Bounds;
@@ -93,12 +94,20 @@ public class CassandraTableRepairManager implements TableRepairManager
         }
 
         long repairedAt = sessions.getFinalSessionRepairedAt(sessionID);
-        RepairFinishedCompactionTask task = new RepairFinishedCompactionTask(cfs,
-                                                                             txn,
-                                                                             sessionID,
-                                                                             repairedAt,
-                                                                             isTransient);
-        task.run();
+        RepairFinalizationOperation operation = new RepairFinalizationOperation(cfs,
+                                                                                txn,
+                                                                                sessionID,
+                                                                                repairedAt,
+                                                                                isTransient);
+        try
+        {
+            operation.execute();
+        }
+        catch (Exception e)
+        {
+            logger.error("Failed to finalize repair session {}", sessionID, e);
+            throw new RuntimeException(String.format("Repair %s finalization failed", sessionID), e);
+        }
     }
 
     @Override
