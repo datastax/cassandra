@@ -26,18 +26,18 @@ import org.apache.cassandra.utils.FBUtilities;
  * while unit tests can still assert non-zero cost values.
  *
  * <pre>
- *   readCost  = max(read_latency_ns / 1e9, read_bytes / (baseline_read / cores)) * 4000
- *   writeCost = max(write_latency_ns / 1e9, (write_bytes + index_write_bytes) / (baseline_write / cores)) * 4000
+ *   readCost  = max(read_latency_ns / 1e9, read_bytes / (baseline_read / cores)) * COST_SCALE
+ *   writeCost = max(write_latency_ns / 1e9, (write_bytes + index_write_bytes) / (baseline_write / cores)) * COST_SCALE
  * </pre>
  *
  * <p>When constructed with the no-arg constructor, baseline values default to {@code -1}
- * (not configured) and cost reduces to {@code bytes * 4000}.
+ * (not configured) and cost reduces to {@code bytes * COST_SCALE}.
  * Tests that need exact normalized values should use the explicit 2- or 3-arg constructor.
  */
 public class TestCostCalculator implements CostCalculator
 {
     private static final double NANOS_PER_SECOND = 1_000_000_000.0;
-    private static final double DEFAULT_COST_SCALE = 4000.0;
+    private static final double COST_SCALE = 4000.0;
     private static final long DEFAULT_BASELINE = -1L;
 
     private final double costScale;
@@ -55,7 +55,7 @@ public class TestCostCalculator implements CostCalculator
 
     public TestCostCalculator(double baselineReadBytes, double baselineWriteBytes, int numCores)
     {
-        this.costScale = DEFAULT_COST_SCALE;
+        this.costScale = COST_SCALE;
         int cores = numCores > 0 ? numCores : 1;
         this.baselineReadBytesPerCore = baselineReadBytes > 0 ? baselineReadBytes / cores : baselineReadBytes;
         this.baselineWriteBytesPerCore = baselineWriteBytes > 0 ? baselineWriteBytes / cores : baselineWriteBytes;

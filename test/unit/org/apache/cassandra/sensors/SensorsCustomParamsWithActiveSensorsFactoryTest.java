@@ -107,7 +107,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
 
         sensors.incrementSensor(context, Type.READ_BYTES, 500_000.0);
         sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
-        // With default baseline=-1, READ_COST = read_bytes * 4000
+        // With default baseline=-1, READ_COST = read_bytes * COST_SCALE (4000)
         CostCalculator.computeCost(sensors);
 
         Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_1, noPayload).withId(1);
@@ -120,7 +120,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         String readCostRequestParam = SensorsCustomParams.paramForRequestSensor(readCostSensor).get();
         assertTrue(msg.header.customParams().containsKey(readCostRequestParam));
 
-        // baseline=-1 → READ_COST = read_bytes * MU_SCALE = 500_000 * 4000 = 2_000_000_000
+        // baseline=-1 → READ_COST = read_bytes * COST_SCALE = 500_000 * 4000 = 2_000_000_000
         double expectedReadCost = 500_000.0 * 4000.0;
         assertEquals(expectedReadCost, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(readCostRequestParam)), 0.0);
     }
@@ -128,7 +128,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testComputeTotalCost_viaCustomParams_readPath()
     {
-        // Pure read: TOTAL_COST = READ_COST (WRITE_COST absent); baseline=-1 → READ_COST = read_bytes * MU_SCALE
+        // Pure read: TOTAL_COST = READ_COST (WRITE_COST absent); baseline=-1 → READ_COST = read_bytes * COST_SCALE
         String ks = "ks_tmu1";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -149,7 +149,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testComputeTotalCost_viaCustomParams_writePath()
     {
-        // Pure write: TOTAL_COST = WRITE_COST (READ_COST absent); baseline=-1 → WRITE_COST = write_bytes * MU_SCALE
+        // Pure write: TOTAL_COST = WRITE_COST (READ_COST absent); baseline=-1 → WRITE_COST = write_bytes * COST_SCALE
         String ks = "ks_tmu2";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -170,7 +170,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testComputeTotalCost_viaCustomParams_casPath()
     {
-        // CAS: TOTAL_COST = WRITE_COST + READ_COST; baseline=-1 → each = bytes * MU_SCALE
+        // CAS: TOTAL_COST = WRITE_COST + READ_COST; baseline=-1 → each = bytes * COST_SCALE
         String ks = "ks_tmu3";
         Context context = new Context(ks, "t", UUID.randomUUID().toString());
 
@@ -205,7 +205,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
 
         sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000.0);
         sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
-        // With default baseline=-1, WRITE_COST = write_bytes * 4000
+        // With default baseline=-1, WRITE_COST = write_bytes * COST_SCALE (4000)
         CostCalculator.computeCost(sensors);
 
         Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_2, noPayload).withId(2);
