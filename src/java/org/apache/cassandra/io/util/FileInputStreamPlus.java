@@ -46,8 +46,18 @@ public class FileInputStreamPlus extends RebufferingInputStream
 
     public FileInputStreamPlus(File file, int bufferSize) throws NoSuchFileException
     {
+        this(file.newReadChannel(), file, bufferSize);
+    }
+
+    public FileInputStreamPlus(FileChannel channel, File file)
+    {
+        this(channel, file, 1 << 14);
+    }
+
+    private FileInputStreamPlus(FileChannel channel, File file, int bufferSize)
+    {
         super(ByteBuffer.allocateDirect(bufferSize));
-        this.channel = file.newReadChannel();
+        this.channel = channel;
         this.buffer.limit(0);
         this.file = file;
     }
