@@ -256,12 +256,12 @@ public abstract class Message
                 {
                     shouldTrace = true;
                     tracingSessionId = UUIDGen.getTimeUUID();
-                    Tracing.instance.newSession(queryState.getClientState(), tracingSessionId, getCustomPayload());
+                    Tracing.instance.newSession(queryState.getClientState(), tracingSessionId, false, getCustomPayload());
                 }
                 else if (StorageService.instance.shouldTraceProbablistically())
                 {
                     shouldTrace = true;
-                    Tracing.instance.newSession(queryState.getClientState(), getCustomPayload());
+                    Tracing.instance.newSession(queryState.getClientState(), true, getCustomPayload());
                 }
             }
 

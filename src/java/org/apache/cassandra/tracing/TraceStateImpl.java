@@ -17,7 +17,8 @@
  */
 package org.apache.cassandra.tracing;
 
-import java.util.Collections;
+import java.net.InetAddress;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -30,17 +31,9 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.metrics.ClientRequestsMetrics;
-import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
-import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.WrappedRunnable;
 
 /**
  * ThreadLocal state for a tracing session. The presence of an instance of this class as a ThreadLocal denotes that an
@@ -55,18 +48,46 @@ public class TraceStateImpl extends TraceState
       Integer.parseInt(System.getProperty("cassandra.wait_for_tracing_events_timeout_secs", "0"));
 
     private final Set<Future<?>> pendingFutures = ConcurrentHashMap.newKeySet();
+    private final TraceStorage storage;
 
-    public TraceStateImpl(ClientState state, InetAddressAndPort coordinator, UUID sessionId, Tracing.TraceType traceType)
+    public TraceStateImpl(ClientState state,
+                          InetAddressAndPort coordinator,
+                          UUID sessionId,
+                          Tracing.TraceType traceType,
+                          boolean isProbabilistic,
+                          TraceStorage storage)
     {
-        super(state, coordinator, sessionId, traceType);
+        super(state, coordinator, sessionId, traceType, isProbabilistic);
+        this.storage = storage;
+    }
+
+    @Override
+    public TraceStorage getStorage()
+    {
+        return storage;
+    }
+
+    @Override
+    public void stopSession()
+    {
+        if(!isStopped())
+            pendingFutures.add(storage.stopSession(this));
+    }
+
+    @Override
+    public void begin(InetAddress client, String request, Map<String, String> parameters)
+    {
+        Future<Void> e = storage.startSession(this, client, request, parameters, System.currentTimeMillis());
+        pendingFutures.add(e);
     }
 
     protected void traceImpl(String message)
     {
         final String threadName = Thread.currentThread().getName();
-        final int elapsed = elapsed();
 
-        executeMutation(TraceKeyspace.makeEventMutation(sessionIdBytes, message, elapsed, threadName, ttl));
+        if (!pendingFutures.add(storage.recordEvent(this, threadName, message)))
+            logger.warn("Failed to insert pending future, tracing synchronization may not work");
+
         if (logger.isTraceEnabled())
             logger.trace("Adding <{}> to trace events", message);
     }
@@ -100,34 +121,4 @@ public class TraceStateImpl extends TraceState
             logger.error("Got exception whilst waiting for tracing events to complete", t);
         }
     }
-
-
-    void executeMutation(final Mutation mutation)
-    {
-        CompletableFuture<Void> fut = Stage.TRACING.submit(new WrappedRunnable()
-        {
-            protected void runMayThrow()
-            {
-                mutateWithCatch(clientState, mutation);
-            }
-        });
-
-        boolean ret = pendingFutures.add(fut);
-        if (!ret)
-            logger.warn("Failed to insert pending future, tracing synchronization may not work");
-    }
-
-    static void mutateWithCatch(ClientState state, Mutation mutation)
-    {
-        try
-        {
-            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutation.getKeyspaceName());
-            StorageProxy.mutate(Collections.singletonList(mutation), ConsistencyLevel.ANY, System.nanoTime(), metrics, state);
-        }
-        catch (OverloadedException e)
-        {
-            Tracing.logger.warn("Too many nodes are overloaded to save trace events");
-        }
-    }
-
 }
