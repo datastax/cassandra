@@ -127,6 +127,43 @@ public class CompressionMetadataTest
         }
     }
 
+    @Test
+    public void testNativeMemoryIsNotDoubleDecrementedForChunkOffsetMemory() throws IOException
+    {
+        int chunkCount = 10;
+        CompressionMetadata.ChunkOffsetMemory memory = new CompressionMetadata.ChunkOffsetMemory(chunkCount);
+        long memoryUsed = memory.memoryUsed();
+        assertThat(memoryUsed).isEqualTo(chunkCount * 8L);
+
+        long before = CompressionMetadata.nativeMemoryAllocated();
+
+        // isCompressionInfoWritten=false takes the in-memory branch, which increments by memoryUsed() exactly once
+        CompressionChunkOffsets offsets = CompressionChunkOffsetsFactory.instance
+                                          .getInstanceOnWriterComplete(chunksIndexFile, memory, 0, 0, chunkCount,
+                                                                       chunkCount, 100, false);
+        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before + memoryUsed);
+
+        offsets.close();
+
+        // one increment must be matched by exactly one decrement
+        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
+    }
+
+    @Test
+    public void testEncryptedOnlyAccountsNativeMemory()
+    {
+        long before = CompressionMetadata.nativeMemoryAllocated();
+
+        CompressionMetadata metadata = CompressionMetadata.encryptedOnly(params);
+        long allocated = metadata.offHeapSize();
+        assertThat(allocated).isGreaterThan(0);
+        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before + allocated);
+
+        metadata.close();
+        assertThat(metadata.isCleanedUp()).isTrue();
+        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
+    }
+
     private File generateMetaDataFile(long dataLength, long... offsets) throws IOException
     {
         return generateMetaDataFileWithChunkLength(16, dataLength, offsets);
