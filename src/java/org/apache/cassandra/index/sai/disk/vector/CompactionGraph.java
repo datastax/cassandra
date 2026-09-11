@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
+import io.github.jbellis.jvector.graph.NodeArray;
 import io.github.jbellis.jvector.graph.OnHeapGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.OnDiskParallelGraphIndexWriter;
@@ -424,11 +425,14 @@ public class CompactionGraph implements Closeable, Accountable
 
     /**
      * {@link GraphIndexBuilder#rescore} copies the nodes and edges of the old graph into a new builder with
-     * {@code connectNode}, which never marks the copied nodes as complete. The concurrent view that the builder
-     * uses for every subsequent insertion hides neighbours that are not complete, so without this step every
-     * search performed while adding the remaining vectors would be blind to all the nodes inserted before the
-     * PQ refinement: the new nodes end up connected only among themselves and the segment is not navigable
-     * (recall drops to the fraction of vectors added after the refinement).
+     * {@link OnHeapGraphIndex#connectNode(int, int, NodeArray)}, a jvector method that installs a node and its
+     * neighbours directly in the graph without marking the node as complete; unlike
+     * {@link GraphIndexBuilder#addGraphNode} and {@link GraphIndexBuilder#load}, {@code rescore} never follows up
+     * with {@link OnHeapGraphIndex#markComplete}. The view returned by {@link OnHeapGraphIndex#getView()}, which
+     * the builder uses for every subsequent insertion, hides neighbours that are not complete, so without this
+     * step every search performed while adding the remaining vectors would be blind to all the nodes inserted
+     * before the PQ refinement: the new nodes end up connected only among themselves and the segment is not
+     * navigable (recall drops to the fraction of vectors added after the refinement).
      */
     private static void markCopiedNodesComplete(OnHeapGraphIndex graph)
     {
