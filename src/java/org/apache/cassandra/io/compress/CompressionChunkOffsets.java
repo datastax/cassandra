@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
@@ -295,9 +296,13 @@ public interface CompressionChunkOffsets extends AutoCloseable
                 buffer.flip();
                 return buffer.getLong();
             }
+            catch (EOFException e)
+            {
+                throw new CorruptSSTableException(e, file);
+            }
             catch (IOException e)
             {
-                throw new RuntimeException(e);
+                throw new FSReadError(e, file);
             }
         }
 
@@ -344,9 +349,13 @@ public interface CompressionChunkOffsets extends AutoCloseable
                         FileUtils.clean(buffer);
                 }
             }
+            catch (EOFException e)
+            {
+                throw new CorruptSSTableException(e, file);
+            }
             catch (IOException e)
             {
-                throw new RuntimeException(e);
+                throw new FSReadError(e, file);
             }
         }
 
