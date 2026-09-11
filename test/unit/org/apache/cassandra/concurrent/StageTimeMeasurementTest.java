@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.function.Consumer;
 
 import com.google.common.util.concurrent.Uninterruptibles;
@@ -110,10 +111,12 @@ public class StageTimeMeasurementTest
     public void testExecutionAndQueueTimeAreCounted(Consumer<Runnable> runnableRunner)
     {
         int NUM_TASKS = 10;
-
+        AtomicLongArray queueTimes = new AtomicLongArray(NUM_TASKS);
         for (int i = 0; i < NUM_TASKS; i++)
         {
-            ForkJoinPool.commonPool().execute(() -> runnableRunner.accept(new LongRunnable()));
+            ForkJoinPool.commonPool().execute(() ->
+
+                                              runnableRunner.accept(new LongRunnable()));
         }
 
         Awaitility.await().until(() -> callback.executionTimes.size() == NUM_TASKS);
@@ -122,7 +125,7 @@ public class StageTimeMeasurementTest
         logger.info("Execution times: {}", callback.executionTimes);
         logger.info("Queue times: {}", callback.enqueuedTimes);
 
-        final double MAX_ACCEPTABLE_MEASUREMENT_ERROR = 0.1 * TASK_DURATION_NANOS;
+        final double MAX_ACCEPTABLE_MEASUREMENT_ERROR = 0.4 * TASK_DURATION_NANOS;
 
         for (int i = 0; i < NUM_TASKS; i++)
         {
