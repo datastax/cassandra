@@ -307,15 +307,15 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         return PageAware.padded(position());
     }
 
-    public void updateFileHandle(FileHandle.Builder fhBuilder)
+    public FileHandle.Builder updateFileHandle(FileHandle.Builder fhBuilder)
     {
-        updateFileHandle(fhBuilder, -1);
+        return updateFileHandle(fhBuilder, -1);
     }
 
-    public void updateFileHandle(FileHandle.Builder fhBuilder, long dataLength)
+    public FileHandle.Builder updateFileHandle(FileHandle.Builder fhBuilder, long dataLength)
     {
         // Set actual length to avoid having to read it off the file system.
-        fhBuilder.withLength(dataLength > 0 ? dataLength : lastFlushOffset);
+        return fhBuilder.withLength(dataLength > 0 ? dataLength : lastFlushOffset);
     }
 
     /**
