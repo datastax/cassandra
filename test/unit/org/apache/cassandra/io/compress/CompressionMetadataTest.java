@@ -39,6 +39,7 @@ import org.junit.Test;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.compress.CompressionMetadata.Chunk;
 import org.apache.cassandra.io.sstable.format.SSTableReader.PartitionPositionBounds;
 import org.apache.cassandra.io.util.File;
@@ -629,24 +630,57 @@ public class CompressionMetadataTest
         assertThat(getCacheSizeInBytes(1000)).isEqualTo(100);
     }
 
-    @Test
-    public void testCompressionMetadataReadError() throws Exception
+    private File truncatedMetaDataFile() throws IOException
     {
-        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("0B");
-
         File f = generateMetaDataFile(64, 0, 16, 32, 48);
         long sizeBefore = f.length();
-        // corrupt the file to force error while opening
         try (FileChannel channel = FileChannel.open(f.toPath(), StandardOpenOption.WRITE))
         {
             // EOF
             channel.truncate(sizeBefore - Long.BYTES);
         }
+        return f;
+    }
+
+    @Test
+    public void testCompressionMetadataReadError() throws Exception
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("IN_MEMORY");
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("0B");
+
+        File f = truncatedMetaDataFile();
 
         long before = CompressionMetadata.nativeMemoryAllocated();
 
-        assertThatThrownBy(() -> CompressionMetadata.open(f, 64, true)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> CompressionMetadata.open(f, 64, true)).isInstanceOf(CorruptSSTableException.class);
         assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
+    }
+
+    @Test
+    public void testCompressionMetadataReadErrorMmap() throws Exception
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("mmap");
+
+        File f = truncatedMetaDataFile();
+
+        long before = CompressionMetadata.nativeMemoryAllocated();
+
+        assertThatThrownBy(() -> CompressionMetadata.open(f, 64, true)).isInstanceOf(CorruptSSTableException.class);
+        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
+    }
+
+    @Test
+    public void testCompressionMetadataReadErrorBlockCache() throws Exception
+    {
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_TYPE.setString("block_cache");
+        CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE.setString("100MiB");
+
+        File f = truncatedMetaDataFile();
+
+        try (CompressionMetadata metadata = CompressionMetadata.open(f, 64, true))
+        {
+            assertThatThrownBy(() -> metadata.chunkFor(0)).isInstanceOf(CorruptSSTableException.class);
+        }
     }
 
     /**
