@@ -25,6 +25,10 @@ import java.util.stream.Collectors;
 
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.index.sai.plan.Plan;
+import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
+import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.assertj.core.api.Assertions;
 
 import org.junit.Before;
@@ -1124,6 +1128,108 @@ public class BM25Test extends SAITester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, m frozen<map<text, text>>)");
         assertInvalidMessage("Cannot use an analyzer on full(m) because it's a frozen collection.",
                              "CREATE CUSTOM INDEX ON %s(FULL(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+    }
+
+    /**
+     * Verify that the selectivity of the filtering effects of BM25 ordering is considered at query planning,
+     * so BM25's index scan can be preferred to other filters depending on that selectivity.
+     */
+    @Test
+    public void testSelectivityOnHybridQueries()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 0, 'apple', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 1, 'apple', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 2, 'apple', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 3, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 4, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 5, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 6, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 7, 'orange', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 8, 'orange', 0)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 9, 'orange', 0)");
+
+        // Verify BM25-only queries
+
+        assertQueryHasSubplan("SELECT c FROM %s ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.Bm25IndexScan.class,
+                              row(0), row(1), row(2));
+
+        assertQueryHasSubplan("SELECT c FROM %s ORDER BY s BM25 OF 'orange' LIMIT 5",
+                              Plan.Bm25IndexScan.class,
+                              row(3), row(4), row(5), row(6), row(7));
+
+        assertQueryHasSubplan("SELECT c FROM %s ORDER BY s BM25 OF 'banana' LIMIT 5",
+                              Plan.Bm25IndexScan.class);
+
+        // Verify numeric-only queries
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(0), row(1), row(2), row(3), row(4));
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(8), row(9));
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 LIMIT 5",
+                              Plan.NumericIndexScan.class);
+
+        // Verify hybrid queries
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.Bm25IndexScan.class,
+                              row(0), row(1), row(2));
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'orange' LIMIT 5",
+                              Plan.Bm25IndexScan.class,
+                              row(3), row(4), row(5), row(6), row(7));
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'banana' LIMIT 5",
+                              Plan.Bm25IndexScan.class);
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.NumericIndexScan.class);
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(8), row(9));
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'banana' LIMIT 5",
+                              Plan.Bm25IndexScan.class);
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.NumericIndexScan.class);
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'orange' LIMIT 5",
+                              Plan.NumericIndexScan.class);
+
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'banana' LIMIT 5",
+                              Plan.NumericIndexScan.class);
+    }
+
+    private void assertQueryHasSubplan(String select, Class<? extends Plan> planClass, Object[]... rows)
+    {
+        assertRows(execute(select), rows);
+
+        ReadCommand command = parseReadCommand(select);
+
+        StorageAttachedIndexQueryPlan indexPlan = (StorageAttachedIndexQueryPlan) command.indexQueryPlan();
+        Assertions.assertThat(indexPlan).isNotNull();
+
+        StorageAttachedIndexSearcher searcher = indexPlan.searcherFor(command);
+        Plan.RowsIteration saiPlan = searcher.buildPlan();
+
+        Assertions.assertThat(containsPlan(saiPlan, planClass)).isTrue();
+    }
+
+    private boolean containsPlan(Plan plan, Class<? extends Plan> planClass)
+    {
+        return plan.getClass().isAssignableFrom(planClass) ||
+               plan.subplans().stream().anyMatch(subplan -> containsPlan(subplan, planClass));
     }
 
     private void assertCannotBeRestrictedByClustering(String query, String column)
