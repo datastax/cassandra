@@ -128,6 +128,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private final PrimaryKey.Factory keyFactory;
     private final PrimaryKey firstPrimaryKey;
+    private boolean bm25StatsInitialized;
 
     private final NavigableSet<Clustering<?>> nextClusterings;
 
@@ -627,14 +628,150 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source, int softLimit)
     {
+        MaterializedKeys materializedKeys;
         try
         {
-            var primaryKeys = materializeKeys(source);
-            if (primaryKeys.isEmpty())
-            {
-                FileUtils.closeQuietly(source);
-                return CloseableIterator.emptyIterator();
-            }
+            materializedKeys = materializeKeys(source, Long.MAX_VALUE);
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(source);
+            throw t;
+        }
+        return scoreMaterializedKeys(source, materializedKeys.primaryKeys, softLimit);
+    }
+
+    @Override
+    public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(KeyRangeIterator source,
+                                                                int softLimit,
+                                                                int fallbackSoftLimit)
+    {
+        QueryView orderingView;
+        try
+        {
+            orderingView = getQueryView(orderer.context);
+            initializeBm25Stats(orderingView);
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(source);
+            throw t;
+        }
+
+        if (orderer.bm25stats.getDocCount() == 0)
+        {
+            FileUtils.closeQuietly(source);
+            return CloseableIterator.emptyIterator();
+        }
+
+        // Filter-first reads every candidate from every ordering source; direct BM25 advances through term postings.
+        int sourceCount = max(1, orderingView.memtableIndexes.size() + orderingView.sstableIndexes.size());
+        long postingVisits = estimateBm25PostingVisits();
+        long candidateLimit = calculateBm25CandidateLimit(softLimit, postingVisits, sourceCount);
+
+        MaterializedKeys materializedKeys;
+        try
+        {
+            materializedKeys = materializeKeys(source, candidateLimit);
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(source);
+            throw t;
+        }
+
+        if (materializedKeys.limitExceeded)
+        {
+            FileUtils.closeQuietly(source);
+            Tracing.logAndTrace(logger,
+                                "Switching filtered BM25 query to ordered index scan after materializing {} candidates across {} ordering index sources (estimated {} BM25 posting visits, fallback soft limit {})",
+                                materializedKeys.primaryKeys.size(),
+                                sourceCount,
+                                postingVisits,
+                                fallbackSoftLimit);
+            queryContext.recordBm25SearchThenSortFallback();
+            return getTopKRows((Expression) null, fallbackSoftLimit);
+        }
+
+        return scoreMaterializedKeys(source, materializedKeys.primaryKeys, softLimit);
+    }
+
+    @VisibleForTesting
+    static long calculateBm25CandidateLimit(int softLimit, long postingVisits, int sourceCount)
+    {
+        long candidatesPerSource = postingVisits / sourceCount;
+        if (postingVisits % sourceCount != 0)
+            candidatesPerSource++;
+        return max(softLimit, candidatesPerSource);
+    }
+
+    private long estimateBm25PostingVisits()
+    {
+        long postingVisits = 0;
+        for (long frequency : orderer.bm25stats.getFrequencies().values())
+        {
+            if (Long.MAX_VALUE - postingVisits < frequency)
+                return Long.MAX_VALUE;
+            postingVisits += frequency;
+        }
+        return postingVisits;
+    }
+
+    /**
+     * Materialize the keys from the given source iterator. If there is a meaningful {@link #mergeRange}, the keys
+     * are filtered to only include those within the range. Note: does not close the source iterator.
+     * @param source The source iterator to materialize keys from.
+     * @param candidateLimit Maximum number of keys to materialize without marking the result as over limit.
+     * @return The materialized keys within the {@link #mergeRange} and whether the limit was exceeded.
+     */
+    private MaterializedKeys materializeKeys(KeyRangeIterator source, long candidateLimit)
+    {
+        // Skip to the first key (which is really just a token) in the range if it is not the minimum token
+        if (!mergeRange.left.isMinimum())
+            source.skipTo(firstPrimaryKey);
+
+        if (!source.hasNext())
+            return new MaterializedKeys(List.of(), false);
+
+        var maxToken = primaryKeyFactory().createTokenOnly(mergeRange.right.getToken());
+        var hasLimitingMaxToken = !maxToken.token().isMinimum() && maxToken.compareTo(source.getMaximum()) < 0;
+        List<PrimaryKey> primaryKeys = new ArrayList<>();
+        while (source.hasNext())
+        {
+            var next = source.next();
+            if (hasLimitingMaxToken && next.compareTo(maxToken) > 0)
+                break;
+            primaryKeys.add(next);
+            if (primaryKeys.size() > candidateLimit)
+                return new MaterializedKeys(primaryKeys, true);
+        }
+        return new MaterializedKeys(primaryKeys, false);
+    }
+
+    private static final class MaterializedKeys
+    {
+        private final List<PrimaryKey> primaryKeys;
+        private final boolean limitExceeded;
+
+        private MaterializedKeys(List<PrimaryKey> primaryKeys, boolean limitExceeded)
+        {
+            this.primaryKeys = primaryKeys;
+            this.limitExceeded = limitExceeded;
+        }
+    }
+
+    private CloseableIterator<PrimaryKeyWithSortKey> scoreMaterializedKeys(KeyRangeIterator source,
+                                                                           List<PrimaryKey> primaryKeys,
+                                                                           int softLimit)
+    {
+        if (primaryKeys.isEmpty())
+        {
+            FileUtils.closeQuietly(source);
+            return CloseableIterator.emptyIterator();
+        }
+
+        try
+        {
             var result = getTopKRows(primaryKeys, softLimit);
             // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
             // that might not be needed until a deeper search into the ordering index, which happens after
@@ -646,34 +783,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             FileUtils.closeQuietly(source);
             throw t;
         }
-    }
-
-    /**
-     * Materialize the keys from the given source iterator. If there is a meaningful {@link #mergeRange}, the keys
-     * are filtered to only include those within the range. Note: does not close the source iterator.
-     * @param source The source iterator to materialize keys from.
-     * @return The list of materialized keys within the {@link #mergeRange}.
-     */
-    private List<PrimaryKey> materializeKeys(KeyRangeIterator source)
-    {
-        // Skip to the first key (which is really just a token) in the range if it is not the minimum token
-        if (!mergeRange.left.isMinimum())
-            source.skipTo(firstPrimaryKey);
-
-        if (!source.hasNext())
-            return List.of();
-
-        var maxToken = primaryKeyFactory().createTokenOnly(mergeRange.right.getToken());
-        var hasLimitingMaxToken = !maxToken.token().isMinimum() && maxToken.compareTo(source.getMaximum()) < 0;
-        List<PrimaryKey> primaryKeys = new ArrayList<>();
-        while (source.hasNext())
-        {
-            var next = source.next();
-            if (hasLimitingMaxToken && next.compareTo(maxToken) > 0)
-                break;
-            primaryKeys.add(next);
-        }
-        return primaryKeys;
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
@@ -698,31 +807,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         try
         {
             QueryView view = getQueryView(orderer.context);
-            if (orderer.isBM25())
-            {
-                // Pre-calculate term expressions
-                List<Pair<ByteBuffer, Expression>> termAndExpressions = new ArrayList<>();
-                for (ByteBuffer term : orderer.getQueryTerms())
-                {
-                    Expression termExpression = new Expression(orderer.context)
-                                                .add(Operator.ANALYZER_MATCHES, term);
-                    termAndExpressions.add(Pair.create(term, termExpression));
-                }
-
-                for (MemtableIndex index : view.memtableIndexes)
-                    orderer.bm25stats.add(index.getRowCount(),
-                                          index.getApproximateTermCount(),
-                                          termAndExpressions,
-                                          termExpression -> index.estimateMatchingRowsCount(termExpression));
-                for (SSTableIndex index : view.sstableIndexes)
-                    orderer.bm25stats.add(index.getRowCount(),
-                                          index.getApproximateTermCount(),
-                                          termAndExpressions,
-                                          termExpression -> index.getMatchingRowsCount(termExpression, mergeRange, queryContext));
-                // No documents indexed, the iterator will be empty
-                if (orderer.bm25stats.getDocCount() == 0)
-                    return CloseableIterator.emptyIterator();
-            }
+            initializeBm25Stats(view);
+            if (orderer.isBM25() && orderer.bm25stats.getDocCount() == 0)
+                return CloseableIterator.emptyIterator();
 
             for (MemtableIndex index : view.memtableIndexes)
                 memtableResults.addAll(memtableSearcher.search(index));
@@ -743,6 +830,32 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 FileUtils.closeQuietly(memtableResults);
             throw t;
         }
+    }
+
+    private void initializeBm25Stats(QueryView view)
+    {
+        if (!orderer.isBM25() || bm25StatsInitialized)
+            return;
+
+        List<Pair<ByteBuffer, Expression>> termAndExpressions = new ArrayList<>();
+        for (ByteBuffer term : orderer.getQueryTerms())
+        {
+            Expression termExpression = new Expression(orderer.context)
+                                        .add(Operator.ANALYZER_MATCHES, term);
+            termAndExpressions.add(Pair.create(term, termExpression));
+        }
+
+        for (MemtableIndex index : view.memtableIndexes)
+            orderer.bm25stats.add(index.getRowCount(),
+                                  index.getApproximateTermCount(),
+                                  termAndExpressions,
+                                  termExpression -> index.estimateMatchingRowsCount(termExpression));
+        for (SSTableIndex index : view.sstableIndexes)
+            orderer.bm25stats.add(index.getRowCount(),
+                                  index.getApproximateTermCount(),
+                                  termAndExpressions,
+                                  termExpression -> index.getMatchingRowsCount(termExpression, mergeRange, queryContext));
+        bm25StatsInitialized = true;
     }
 
     /**
