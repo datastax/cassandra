@@ -114,7 +114,7 @@ public class V5VectorPostingsWriter<T>
      * vectors to disk as they are added to the graph, so there is no opportunity to reorder the way there is
      * in a Memtable index.
      */
-    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, int maxRowId, int maxOrdinal, ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
+    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, int maxRowId, int maxOrdinal, ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, Version version)
     {
         assert !postingsMap.isEmpty(); // flush+compact should skip writing an index component in this case
 
@@ -146,7 +146,7 @@ public class V5VectorPostingsWriter<T>
         }
 
         assert structure == Structure.ZERO_OR_ONE_TO_MANY : structure;
-        return createGenericIdentityMapping(postingsMap, maxRowId, maxOrdinal);
+        return remapForMemtable(postingsMap, version);
     }
 
     public long writePostings(SequentialWriter writer,
