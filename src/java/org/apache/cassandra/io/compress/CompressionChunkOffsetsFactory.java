@@ -102,6 +102,12 @@ public interface CompressionChunkOffsetsFactory
         if (chunkCount == 0)
             return new CompressionChunkOffsets.Empty();
 
+        // checked here rather than per implementation so that a malformed header fails the same way whichever type is
+        // configured; the on-disk implementations would otherwise only fail later, on a per-get() bounds check
+        Preconditions.checkState(startIndex < chunkCount, "The start index %s has to be < chunk count %s", startIndex, chunkCount);
+        Preconditions.checkState(endIndex <= chunkCount, "The end index %s has to be <= chunk count %s", endIndex, chunkCount);
+        Preconditions.checkState(startIndex <= endIndex, "The start index %s has to be < end index %s", startIndex, endIndex);
+
         switch (type())
         {
             case MMAP:
@@ -185,10 +191,6 @@ public interface CompressionChunkOffsetsFactory
                                                          int startIndex, int endIndex, int chunkCount,
                                                          long compressedFileLength)
     {
-        Preconditions.checkState(startIndex < chunkCount, "The start index %s has to be < chunk count %s", startIndex, chunkCount);
-        Preconditions.checkState(endIndex <= chunkCount, "The end index %s has to be <= chunk count %s", endIndex, chunkCount);
-        Preconditions.checkState(startIndex <= endIndex, "The start index %s has to be < end index %s", startIndex, endIndex);
-
         int chunksToRead = endIndex - startIndex;
         if (chunksToRead == 0)
             return new CompressionChunkOffsets.Empty();
