@@ -193,9 +193,8 @@ public interface CompressionChunkOffsets extends AutoCloseable
         private final long fileId;
         private final FileChannel fileChannel;
         private final long offsetsStart;
-        private final int baseChunkIndex;
         private final int size;
-        private final int chunkCount;
+        private final int remainingChunkCount;
         private final long compressedFileLength;
         private final int offsetsPerBlock;
         private final CompressionChunkOffsetCache cache;
@@ -216,15 +215,14 @@ public interface CompressionChunkOffsets extends AutoCloseable
             // id if offsets are spilled to disk before writer completion.
             this.fileId = nextFileId.incrementAndGet();
             this.fileChannel = CompressionChunkOffsets.openChannel(file, readerType);
-            this.offsetsStart = offsetsStart;
-            this.baseChunkIndex = baseChunkIndex;
+            this.offsetsStart = offsetsStart + (long) baseChunkIndex * Long.BYTES;
             this.size = endIndex - baseChunkIndex;
-            this.chunkCount = chunkCount;
+            this.remainingChunkCount = chunkCount - baseChunkIndex;
             // We adjust the compressed file length to store the position after the last chunk just to be able to
             // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
             // Obviously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
             // an empty chunk added to the end of the file thus we cannot rely on the file length.
-            long lastOffset = endIndex < chunkCount ? getFromDisk(endIndex - baseChunkIndex) - getFromDisk(0) : compressedFileLength;
+            long lastOffset = size < remainingChunkCount ? getFromDisk(size) - getFromDisk(0) : compressedFileLength;
             this.compressedFileLength = lastOffset;
             this.offsetsPerBlock = CompressionChunkOffsetCache.blockBufferSize() / Long.BYTES;
             this.cache = cache;
@@ -234,14 +232,13 @@ public interface CompressionChunkOffsets extends AutoCloseable
         @Override
         public long get(int index)
         {
-            int absoluteIndex = baseChunkIndex + index;
-            int blockIndex = absoluteIndex / offsetsPerBlock;
-            int offsetInBlock = absoluteIndex % offsetsPerBlock;
+            int blockIndex = index / offsetsPerBlock;
+            int offsetInBlock = index % offsetsPerBlock;
 
-            if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
+            if (index < 0 || index >= size)
                 throw new CorruptSSTableException(new EOFException(String.format(CHUNK_OUT_OF_BOUNDS_FORMAT,
-                                                                                 absoluteIndex,
-                                                                                 chunkCount)),
+                                                                                 index,
+                                                                                 size)),
                                                   file);
 
             int retries = MAX_RETRIES;
@@ -269,24 +266,23 @@ public interface CompressionChunkOffsets extends AutoCloseable
             }
             // fall to read from on-disk offset directly without caching
             noSpamLogger.warn("Failed to reference cached compression chunk offset block for {} block {} after {} retries; reading chunk {} directly from disk",
-                              file, blockIndex, MAX_RETRIES, absoluteIndex);
+                              file, blockIndex, MAX_RETRIES, index);
             return getFromDisk(index);
         }
 
         private long getFromDisk(int index)
         {
-            int absoluteIndex = baseChunkIndex + index;
-            if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
+            if (index < 0 || index >= remainingChunkCount)
                 throw new CorruptSSTableException(new EOFException(String.format(CHUNK_OUT_OF_BOUNDS_FORMAT,
-                                                                                 absoluteIndex,
-                                                                                 chunkCount)),
+                                                                                 index,
+                                                                                 remainingChunkCount)),
                                                   file);
 
             ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
             try
             {
                 int read = 0;
-                long position = offsetsStart + (long) absoluteIndex * Long.BYTES;
+                long position = offsetsStart + (long) index * Long.BYTES;
                 while (read < Long.BYTES)
                 {
                     int n = fileChannel.read(buffer, position + read);
@@ -317,7 +313,7 @@ public interface CompressionChunkOffsets extends AutoCloseable
             {
                 int blockIndex = key.blockIndex();
                 int blockStartIndex = blockIndex * offsetsPerBlock;
-                int remaining = chunkCount - blockStartIndex;
+                int remaining = remainingChunkCount - blockStartIndex;
                 if (remaining <= 0)
                     return new CompressionChunkOffsetCache.OffsetsBlock(ByteBuffer.allocate(0));
 
@@ -377,7 +373,7 @@ public interface CompressionChunkOffsets extends AutoCloseable
         public void close()
         {
             // Invalidate all blocks from cache because we don't track what blocks are cached
-            int blockCount = (int) Math.ceil(chunkCount * 1.0 / offsetsPerBlock);
+            int blockCount = (int) Math.ceil(remainingChunkCount * 1.0 / offsetsPerBlock);
             for (int i = 0; i < blockCount; i++)
                 cache.invalidate(new CompressionChunkOffsetCache.BlockKey(fileId, i));
 
